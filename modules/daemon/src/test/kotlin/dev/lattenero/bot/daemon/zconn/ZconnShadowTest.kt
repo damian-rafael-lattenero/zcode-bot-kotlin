@@ -56,6 +56,12 @@ class ZconnShadowTest {
     private fun shadowLines(): List<ShadowDecision> =
         File(shadowDir, "zconn.jsonl").readLines().map { Json.decodeFromString<ShadowDecision>(it) }
 
+    private fun pythonState(text: String): File =
+        File(File(File(base, "hooks"), "state"), "zconn.json").apply {
+            parentFile.mkdirs()
+            writeText(text)
+        }
+
     @Test
     fun firstRunArmsSilently_NoPastReplay() {
         logFile().writeText(downLine("2026-10-29T10:00:01.000Z", "old") + upLine("2026-10-29T10:00:02.000Z"))
@@ -163,6 +169,114 @@ class ZconnShadowTest {
         assertEquals(0, z2.pass().decisions.size)
         assertEquals(2, shadowLines().size)
         assertEquals(tUp + SINCE_ADVANCE_S, assertNotNull(state()).since)
+    }
+
+    @Test
+    fun firstArmAdoptsTheLivePythonTrack_TheSputterStaysSilent() {
+        // DIVERGENCE #2, 2026-10-29 12:51, replayed with the day's real
+        // numbers. The live Python's memory spans the morning's episode
+        // (first_down 10:12:19.261, never cleared); a down 16 s after an up
+        // is a SPUTTER for that memory — silent down, up anchored to the
+        // morning (the stale-anchor wart, replicated byte-exact).
+        pythonState(
+            """
+            {"down": false, "first_down": 1793279539.261, "last_up": 1793279568.77,
+             "reason": "Model request was cancelled.", "since": 1793279569.27}
+            """.trimIndent(),
+        )
+        val f = logFile()
+        f.writeText("")
+        var nowVal = ts("2026-10-29T15:37:20.000Z") // the daemon's birth (12:37:20 local)
+        val z = shadow { nowVal }
+        z.pass() // arm: ADOPT the live track, since at NOW
+        val armed = assertNotNull(state())
+        assertEquals(1793279539.261, armed.firstDown, "the arm adopts Python's anchor")
+        assertEquals(ts("2026-10-29T15:37:20.000Z"), armed.since)
+
+        // the real 11-second cut, exactly as the 15:51:22.650Z pass read
+        // it: an up at 15:51:01.374Z, the cancelled pair at 15:51:17.791Z
+        // (16.4 s later — a sputter for the adopted memory)
+        f.appendText(
+            upLine("2026-10-29T15:51:01.374Z") +
+                downLine("2026-10-29T15:51:17.791Z", "Model request was cancelled.", attempt = 1) +
+                downLine(
+                    "2026-10-29T15:51:17.791Z",
+                    "Model request was cancelled.",
+                    attempt = 1,
+                    event = "model.request.failed",
+                ),
+        )
+        nowVal = ts("2026-10-29T15:51:22.650Z") // the pass that decided "down" pre-fix
+        assertEquals(0, z.pass().decisions.size, "the sputter down stays silent — Python's own answer")
+
+        f.appendText(upLine("2026-10-29T15:51:29.136Z"))
+        nowVal = ts("2026-10-29T15:51:32.723Z")
+        val up = z.pass().decisions.single()
+        assertEquals("up", up.decision)
+        assertEquals(
+            "✅ <b>z.ai back</b> — the cut lasted 159m 09s",
+            up.text,
+            "anchored to the ADOPTED morning episode, like the live Python",
+        )
+        assertEquals(1793279539.261, assertNotNull(state()).firstDown)
+        assertEquals(listOf("up"), shadowLines().map { it.decision }, "no down was ever announced")
+    }
+
+    @Test
+    fun virginArmAnnouncesTheFirstCut_TheDivergence2Mechanism() {
+        // The counterfactual that CAUGHT the divergence: with no Python
+        // state to adopt, the arm is virgin (Python's own first-run degrade)
+        // and `anchor == null → fresh` announces the same cut the live
+        // Python sputtered away — the exact shadow behavior of 12:51:22.
+        // This is correct FOR A NEWBORN Python; it diverges from the LIVE
+        // one. Pinned so the adoption above never silently regresses.
+        val f = logFile()
+        f.writeText("")
+        var nowVal = ts("2026-10-29T15:37:20.000Z")
+        val z = shadow { nowVal }
+        z.pass() // virgin arm
+        assertEquals(null, assertNotNull(state()).firstDown)
+
+        f.appendText(
+            upLine("2026-10-29T15:51:01.374Z") +
+                downLine("2026-10-29T15:51:17.791Z", "Model request was cancelled.", attempt = 1) +
+                downLine(
+                    "2026-10-29T15:51:17.791Z",
+                    "Model request was cancelled.",
+                    attempt = 1,
+                    event = "model.request.failed",
+                ),
+        )
+        nowVal = ts("2026-10-29T15:51:22.650Z")
+        val down = z.pass().decisions.single()
+        assertEquals("down", down.decision)
+        assertEquals(
+            "⚠️ <b>z.ai connection lost</b>\nModel request was cancelled.\n(attempt 1/11, next retry 2s)",
+            down.text,
+        )
+        assertEquals(ts("2026-10-29T15:51:17.791Z"), down.eventTs)
+
+        f.appendText(upLine("2026-10-29T15:51:29.136Z"))
+        nowVal = ts("2026-10-29T15:51:32.723Z")
+        assertEquals(
+            "✅ <b>z.ai back</b> — the cut lasted 11s",
+            z.pass().decisions.single().text,
+            "the shadow's actual 12:51 announcements, byte for byte",
+        )
+    }
+
+    @Test
+    fun armTrackAdoptsTheTrackAndAlwaysArmsSinceAtNow() {
+        val py = ZconnState(
+            down = true,
+            firstDown = 1000.25,
+            lastUp = null,
+            reason = "ENOTFOUND",
+            since = 12345.0,
+        )
+        val adopted = armTrack(py, now = 2000.0)
+        assertEquals(ZconnState(true, 1000.25, null, "ENOTFOUND", 2000.0), adopted)
+        assertEquals(ZconnState(since = 3000.0), armTrack(null, now = 3000.0), "absent Python arms virgin")
     }
 
     private fun ts(iso: String): Double = java.time.Instant.parse(iso).toEpochMilli() / 1000.0
