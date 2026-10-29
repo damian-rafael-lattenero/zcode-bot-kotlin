@@ -22,6 +22,7 @@ dependencies {
     implementation(libs.kotlin.logging)
     implementation(libs.logback.classic)
     implementation(libs.logstash.logback.encoder)
+    implementation(libs.xerial.sqlite.jdbc)
     testImplementation(kotlin("test"))
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.kotest.property)

@@ -24,6 +24,10 @@ data class ShadowDecision(
     val text: String,
     /** The log event's timestamp the decision came from. */
     @SerialName("event_ts") val eventTs: Double? = null,
+    /** The spectator's may_push evaluation at send time (null for zconn). */
+    val gated: Boolean? = null,
+    /** The session the decision belongs to (spectator turns). */
+    val sid: String? = null,
 )
 
 /** UTC ISO with milliseconds — the bus `_now_iso` shape. */

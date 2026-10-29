@@ -8,6 +8,7 @@ kotest = "6.2.6"
 kotlin-logging = "7.0.7"
 logback = "1.5.18"
 logstash-encoder = "8.1"
+sqlite-jdbc = "3.50.3.0"
 
 [libraries]
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "serialization" }
@@ -18,6 +19,7 @@ kap-resilience = { module = "io.github.damian-rafael-lattenero:kap-resilience", 
 kotlin-logging = { module = "io.github.oshai:kotlin-logging-jvm", version.ref = "kotlin-logging" }
 logback-classic = { module = "ch.qos.logback:logback-classic", version.ref = "logback" }
 logstash-logback-encoder = { module = "net.logstash.logback:logstash-logback-encoder", version.ref = "logstash-encoder" }
+xerial-sqlite-jdbc = { module = "org.xerial:sqlite-jdbc", version.ref = "sqlite-jdbc" }
 kotest-property = { module = "io.kotest:kotest-property", version.ref = "kotest" }
 
 [plugins]
