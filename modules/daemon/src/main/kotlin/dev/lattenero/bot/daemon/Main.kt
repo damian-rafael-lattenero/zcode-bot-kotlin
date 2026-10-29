@@ -48,7 +48,7 @@ fun main(args: Array<String>) {
     val shadowLog = ShadowLog(File(cfg.homeDir, "shadow"))
     val pythonState = File(File(cfg.baseDir, "hooks"), "state")
     val clock = { System.currentTimeMillis() / MILLIS_PER_SECOND }
-    val zconnWatch = ZconnShadow(cfg.baseDir, stateDir, shadowLog, clock)
+    val zconnWatch = ZconnShadow(cfg.baseDir, stateDir, shadowLog, clock, pythonState)
     val hbZconn = File(stateDir, HB_ZCONN)
     val hbSpectator = File(stateDir, HB_SPECTATOR)
 

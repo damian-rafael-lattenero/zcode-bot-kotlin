@@ -58,8 +58,8 @@ fun ZconnNotice.toDecision(decisionTs: Double): ShadowDecision = when (this) {
  * IO): fold the cycle's events through the episode machine, advance `since`
  * only over real timestamps clamped to now, render every notice.
  */
-fun zconnPass(state: ZconnState?, events: List<CliEvent>, now: Double): PassResult {
-    if (state == null) return PassResult.Armed(ZconnState(since = now))
+fun zconnPass(state: ZconnState?, events: List<CliEvent>, now: Double, armSeed: ZconnState? = null): PassResult {
+    if (state == null) return PassResult.Armed(armSeed ?: ZconnState(since = now))
     val (track, notices) = events.fold(
         ConnTrack(state.down, state.firstDown, state.lastUp, state.reason) to emptyList<ZconnNotice>(),
     ) { (t, acc), e ->
@@ -78,6 +78,21 @@ fun zconnPass(state: ZconnState?, events: List<CliEvent>, now: Double): PassResu
 }
 
 /**
+ * The first arm's memory: the LIVE Python's episode track, adopted.
+ * `zconn.json` is `zconn.json` — the same schema this shadow already
+ * parses — so the shadow's memory starts where the Python it shadows IS,
+ * not at zero. Divergence #2 (29/10 12:51): a virgin anchor made the
+ * shadow's FIRST ever cut "fresh" (`anchor == null → fresh`, Python's own
+ * `first_down is None`) while the live Python — whose `first_down` spans
+ * the morning's episode and is never cleared — classified the same event
+ * as a 16 s sputter and stayed silent; the shadow announced a cut Python
+ * never reported. A missing Python state arms virgin: Python's exact
+ * degrade for its own first run. `since` always arms at NOW either way —
+ * the past's outages are not today's story (Python's own policy).
+ */
+fun armTrack(python: ZconnState?, now: Double): ZconnState = python?.copy(since = now) ?: ZconnState(since = now)
+
+/**
  * The IO shell around [zconnPass], one pass per cycle: tail the CLI log,
  * feed the machine, persist the state, append the shadow decisions. Every
  * environmental failure degrades to emptiness (Python's silent-by-design
@@ -89,6 +104,8 @@ class ZconnShadow(
     private val stateDir: File,
     private val shadowLog: ShadowLog,
     private val now: () -> Double,
+    /** Python's hooks/state — the live machine whose decisions this shadow must predict. */
+    private val pythonStateDir: File = File(File(baseDir, "hooks"), "state"),
 ) {
     private val logger = KotlinLogging.logger {}
     private val tailer = CliLogTailer(baseDir)
@@ -103,9 +120,13 @@ class ZconnShadow(
     fun pass(): CycleOutcome {
         val tNow = now()
         val state = loadState()
+        // first run ever: adopt the LIVE Python's episode track (divergence
+        // #2) — the arm still discards the events it reads, like Python's
+        // own `_save_track(...); return []`
+        val seed = if (state == null) armTrack(loadPythonState(), tNow) else null
         val read = tailer.read(cursor, ConnTrackMachine.NEEDLES, state?.since ?: NO_FILTER_SINCE)
         cursor = read.cursor
-        val result = zconnPass(state, read.events, tNow)
+        val result = zconnPass(state, read.events, tNow, seed)
         persist(result)
         return CycleOutcome(read.events.size, (result as? PassResult.Spoke)?.decisions.orEmpty())
     }
@@ -134,6 +155,16 @@ class ZconnShadow(
 
     private fun loadState(): ZconnState? =
         runCatching { stateFile.takeIf { it.exists() }?.readText() }.getOrNull()
+            ?.let(StateFiles::parseObject)
+            ?.let(ZconnState::fromJson)
+
+    /**
+     * The live Python's own zconn.json, read-only (the spectator reads
+     * Python's markers and session files the same way): the truth this
+     * shadow predicts. Same degrade as [loadState] — unreadable is absent.
+     */
+    private fun loadPythonState(): ZconnState? =
+        runCatching { File(pythonStateDir, STATE_FILE).takeIf { it.exists() }?.readText() }.getOrNull()
             ?.let(StateFiles::parseObject)
             ?.let(ZconnState::fromJson)
 

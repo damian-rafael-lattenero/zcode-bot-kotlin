@@ -66,6 +66,36 @@ class ParityTest {
         assertEquals(0, p.pythonOnly)
         assertEquals(0, p.shadowOnly)
         assertEquals(5.0, p.maxDriftS)
+        // down@50 sits in the boundary zone ([30, 90)) — it must NOT steal
+        // down@105 from the in-coverage down@100 (in-coverage always
+        // matches first), and staying unmatched there it is history.
+    }
+
+    @Test
+    fun theCoverageBoundaryNeverSeparatesTwins_zconnSide() {
+        // The shadow's first word of a window can land a hair AFTER the
+        // python twin of the very event that produced it: kb.log stamps
+        // Python's send, the decision stamps the shadow's poll.
+        val py = listOf(ZconnTruth(99.7, "up"))
+        val shadow = listOf(d("zconn", "up", 100.0))
+        val p = Parity.zconn(py, shadow, coverageStart = 100.0)
+        assertEquals(1, p.matched, "the python up 0.3s before coverage is the shadow's first word's twin")
+        assertEquals(0, p.shadowOnly)
+        assertEquals(0, p.pythonOnly)
+        assertEquals(0, p.beforeCoverage)
+    }
+
+    @Test
+    fun unmatchedBoundaryEventsAreHistoryNotDivergence() {
+        // A python event inside the boundary zone with NO shadow twin is
+        // history (the daemon had not spoken yet) — the protection the
+        // coverage clip always gave, kept for genuinely unmatched events.
+        val py = listOf(ZconnTruth(50.0, "down"), ZconnTruth(200.0, "down"))
+        val shadow = listOf(d("zconn", "up", 210.0))
+        val p = Parity.zconn(py, shadow, coverageStart = 100.0)
+        assertEquals(1, p.beforeCoverage, "the boundary-zone down with no twin is history")
+        assertEquals(1, p.pythonOnly, "the in-coverage down with no twin is divergence")
+        assertEquals(1, p.shadowOnly)
     }
 
     @Test
@@ -106,6 +136,33 @@ class ParityTest {
         assertEquals(1, p.matched)
         assertEquals(1, p.stepMismatches)
         assertEquals("DIVERGENT", Parity.verdict(ZconnParity(0, 0, 0, 0, 0, 0, null, null), p))
+    }
+
+    @Test
+    fun theCoverageBoundaryNeverSeparatesTwins_spectatorSide_divergence2Fixture() {
+        // 2026-10-29, the first daily run's spectator shadowOnly=1: the
+        // shadow's first word of the restarted window WAS the turn's own
+        // header (epoch ...838.468 — the coverage boundary), and Python
+        // pinned the SAME turn at ...838.0 — pwlog truncates to seconds.
+        // The exact clip dropped the pin as "history" while its shadow twin
+        // counted: a false shadowOnly=1, verdict DIVERGENT. Both sides
+        // spoke the identical turn (steps=4); only the boundary separated
+        // them.
+        val headerTs = 1793288838.468 // 12:47:18.468 local, the window's first decision
+        val py = listOf(SpectatorTurnTruth(1793288838.0, "turn_70f8cc23-7d45", 1793290512.0, 4))
+        val shadow = listOf(
+            ShadowTurn("session_4cf10574806bb295ad2b17b237358d65", headerTs, 1793290512.0, 4),
+        )
+        val p = Parity.spectator(py, shadow, coverageStart = headerTs)
+        assertEquals(1, p.pythonTurns)
+        assertEquals(1, p.matched, "the pin 0.468s before coverage is the header's own twin")
+        assertEquals(0, p.shadowOnly)
+        assertEquals(0, p.pythonOnly)
+        assertEquals(0, p.stepMismatches)
+        assertEquals(
+            "PARITY",
+            Parity.verdict(ZconnParity(0, 0, 0, 0, 0, 0, null, null), p),
+        )
     }
 
     @Test

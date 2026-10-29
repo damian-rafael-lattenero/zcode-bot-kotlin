@@ -48,6 +48,17 @@ data class SpectatorParity(
  * shadow turn starting within [TURN_TOLERANCE_S] with the SAME step count;
  * steps=0 turns sent nothing on either side and are skipped (the shadow
  * records no decisions for a silent turn, by design — both sides quiet).
+ *
+ * COVERAGE NEVER SEPARATES TWINS (divergence #2, 29/10 12:47): the
+ * shadow's first word of a window IS the coverage boundary, and the
+ * python twin of that very decision can land a hair BEFORE it — pwlog
+ * truncates to seconds (12:47:18.0 vs the header's 12:47:18.468), kb.log
+ * stamps the send while the shadow stamps its poll. Events in the
+ * boundary zone (`[coverageStart - tolerance, coverageStart)`) get a
+ * rescue match against the shadow the in-coverage pass left unmatched;
+ * what stays unmatched there is history, exactly as before. In-coverage
+ * events always match FIRST, so a boundary event can never steal the
+ * twin of one.
  */
 object Parity {
 
@@ -60,6 +71,7 @@ object Parity {
         val pending = shadow.filter { it.watcher == "zconn" }.sortedBy { it.ts }.toMutableList()
         val sorted = python.sortedBy { it.ts }
         val inCoverage = sorted.filter { it.ts >= coverageStart }
+        val boundary = sorted.filter { it.ts >= coverageStart - ZCONN_TOLERANCE_S && it.ts < coverageStart }
         val drifts = mutableListOf<Double>()
         var matched = 0
         var pythonOnly = 0
@@ -72,11 +84,19 @@ object Parity {
                 pythonOnly++
             }
         }
+        var rescued = 0
+        for (event in boundary) {
+            val idx = pending.indexOfFirst { it.decision == event.kind && abs(it.ts - event.ts) <= ZCONN_TOLERANCE_S }
+            if (idx >= 0) {
+                drifts.add(abs(pending.removeAt(idx).ts - event.ts))
+                rescued++
+            }
+        }
         return ZconnParity(
-            pythonEvents = inCoverage.size,
+            pythonEvents = inCoverage.size + rescued,
             shadowEvents = total,
-            matched = matched,
-            beforeCoverage = sorted.size - inCoverage.size,
+            matched = matched + rescued,
+            beforeCoverage = sorted.size - inCoverage.size - rescued,
             pythonOnly = pythonOnly,
             shadowOnly = pending.size,
             maxDriftS = drifts.maxOrNull(),
@@ -114,13 +134,17 @@ object Parity {
         shadow: List<ShadowTurn>,
         coverageStart: Double,
     ): SpectatorParity {
-        val py = python.filter { (it.steps ?: 0) > 0 && it.startTs >= coverageStart }
+        val spoken = python.filter { (it.steps ?: 0) > 0 }
+        val inCoverage = spoken.filter { it.startTs >= coverageStart }
+        val boundary = spoken.filter {
+            it.startTs >= coverageStart - TURN_TOLERANCE_S && it.startTs < coverageStart
+        }
         val skipped = python.count { (it.steps ?: 0) == 0 && it.startTs >= coverageStart }
         val pending = shadow.toMutableList()
         var matched = 0
         var mismatches = 0
         var pythonOnly = 0
-        for (turn in py) {
+        for (turn in inCoverage) {
             val idx = pending.indexOfFirst { abs(it.startTs - turn.startTs) <= TURN_TOLERANCE_S }
             if (idx < 0) {
                 pythonOnly++
@@ -129,11 +153,19 @@ object Parity {
                 if (other.steps == turn.steps) matched++ else mismatches++
             }
         }
+        var rescued = 0
+        for (turn in boundary) {
+            val idx = pending.indexOfFirst { abs(it.startTs - turn.startTs) <= TURN_TOLERANCE_S }
+            if (idx >= 0) {
+                val other = pending.removeAt(idx)
+                if (other.steps == turn.steps) rescued++ else mismatches++
+            }
+        }
         return SpectatorParity(
-            pythonTurns = py.size,
+            pythonTurns = inCoverage.size + rescued,
             shadowTurns = shadow.size,
             zeroStepTurnsSkipped = skipped,
-            matched = matched,
+            matched = matched + rescued,
             stepMismatches = mismatches,
             pythonOnly = pythonOnly,
             shadowOnly = pending.size,
