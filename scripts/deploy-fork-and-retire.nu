@@ -293,18 +293,10 @@ def phase0-sanity [st: RunState]: nothing -> PhaseResult {
 }
 
 # ────────────────────────────── fase 1: quit ────────────────────────────────
-# Escalera medida contra ESTE app (dos incidentes reales): el quit de AppleScript
-# SOLO CIERRA LA VENTANA (queda de fondo, puntito gris), SIGTERM lo ignora, y un
-# SIGKILL al main FUNCIONA pero launchd RESUCITA el app ~8 s después (es un job
-# application.dev.zcode.*). La escalera: graceful → BOOTOUT del job (mata y
-# desregistra — sin resurrección) → SIGTERM → SIGKILL → vigilancia anti-resurrección.
-def phase1-quit [st: RunState]: nothing -> PhaseResult {
-    if $st.mode != "real" {
-        let viva = if (zcode-running) { "SÍ está corriendo (la cerraría)" } else { "no está corriendo (nada que cerrar)" }
-        log $st $"[dryrun] SKIP fase 1: osascript quit \(solo cierra ventana\) → ≤15 s → bootout del job de launchd \(muerte sin resurrección\) → SIGTERM → SIGKILL → 15 s de vigilancia anti-resurrección. Hoy ZCode ($viva)."
-        return {state: $st, outcome: {ok: true, note: ""}}
-    }
-    log $st "quit graceful (osascript) — en este app solo cierra la ventana..."
+# La escalera de muerte, reutilizable (fase 1 y el retry de fase 2 cuando el
+# app reaparece durante el build — medido: el humano lo reabre para mirar).
+def quit-ladder [st: RunState]: nothing -> record<ok: bool, note: string> {
+    log $st "quit graceful (osascript) — en este app suele solo cerrar la ventana..."
     let osa = (do { ^osascript -e 'tell application "ZCode" to quit' } | complete)
     if $osa.exit_code != 0 {
         log $st "WARN: osascript falló (¿ya estaba cerrada?)"
@@ -343,23 +335,53 @@ def phase1-quit [st: RunState]: nothing -> PhaseResult {
         while ($w < 65) and (zcode-running) { sleep 1sec; $w += 1 }
     }
     if (zcode-running) {
-        let note = $"ZCode sigue viva tras ($w)s, bootout, SIGTERM y SIGKILL — algo muy raro"
+        let note = $"ZCode sigue viva tras ($w)s, bootout, SIGTERM y SIGKILL"
         log $st $"✗ ($note)"
-        return {state: $st, outcome: {ok: false, note: $note}}
+        return {ok: false, note: $note}
+    }
+    log $st $"cero proceso ZCode vivo ✓ \(total ($w)s\)"
+    {ok: true, note: ""}
+}
+
+def phase1-quit [st: RunState]: nothing -> PhaseResult {
+    if $st.mode != "real" {
+        let viva = if (zcode-running) { "SÍ está corriendo (la cerraría)" } else { "no está corriendo (nada que cerrar)" }
+        log $st $"[dryrun] SKIP fase 1: osascript quit \(solo cierra ventana\) → ≤15 s → bootout del job de launchd \(muerte sin resurrección\) → SIGTERM → SIGKILL → 15 s de vigilancia anti-resurrección. Hoy ZCode ($viva)."
+        return {state: $st, outcome: {ok: true, note: ""}}
+    }
+    let r = (quit-ladder $st)
+    if not $r.ok {
+        return {state: $st, outcome: {ok: false, note: $r.note}}
     }
     let st = ($st | update quit_done true)
-    log $st $"cero proceso ZCode vivo ✓ \(total ($w)s\)"
     {state: $st, outcome: {ok: true, note: ""}}
 }
 
 # ──────────────────────────── fase 2: build + swap ──────────────────────────
 def phase2-build [st: RunState]: nothing -> PhaseResult {
     if $st.mode != "real" {
-        log $st $"[dryrun] SKIP fase 2: \(cd ($st.fork_dir) && scripts/build-install.sh --yes\) — bundle del tree actual + swap de /Applications/ZCode.app \(minutos\). Ese script REABRE el app y manda su propio anuncio «Fork instalado» — esperado."
+        log $st $"[dryrun] SKIP fase 2: \(cd ($st.fork_dir) && scripts/build-install.sh --yes\) — bundle del tree actual + swap de /Applications/ZCode.app \(minutos\). Ese script REABRE el app y manda su propio anuncio «Fork instalado» — esperado. Si el app reaparece durante el build \(medido: pasa\) → re-quit y retry del swap."
         return {state: $st, outcome: {ok: true, note: ""}}
     }
     log $st "build+swap: scripts/build-install.sh --yes (esto toma minutos)..."
     let rc = (run-script $st $st.fork_dir "./scripts/build-install.sh" -- --yes)
+    if ($rc != 0) and (zcode-running) {
+        log $st "el app REAPARECIÓ durante el build (alguien lo abrió para mirar 😉 — incidente 17:48) — re-quit y retry del swap \(build cacheado\)"
+        let q = (quit-ladder $st)
+        if not $q.ok {
+            let note = $"reapareció durante el build y el re-quit falló: ($q.note)"
+            log $st $"✗ ($note)"
+            return {state: $st, outcome: {ok: false, note: $note}}
+        }
+        let rc2 = (run-script $st $st.fork_dir "./scripts/build-install.sh" -- --yes)
+        if $rc2 != 0 {
+            let note = $"build-install.sh exit ($rc2) en el retry \(el app viejo queda en /Applications — lo reabro\)"
+            log $st $"✗ ($note)"
+            return {state: $st, outcome: {ok: false, note: $note}}
+        }
+        log $st "build+swap OK ✓ en el retry (el propio build-install ya reabrió el app y anunció el swap)"
+        return {state: $st, outcome: {ok: true, note: "retry tras reaparición"}}
+    }
     if $rc != 0 {
         let note = $"build-install.sh exit ($rc) \(el app viejo queda en /Applications — lo reabro\)"
         log $st $"✗ ($note)"
@@ -505,7 +527,7 @@ def cutover [st0: RunState]: nothing -> RunState {
     let r1 = (phase1-quit $st)
     if not $r1.outcome.ok { return (fail $r1.state "fase 1 (quit)" (note-or-log $r1.outcome.note)) }
     let st = (rpt $r1.state $"f1 quit OK($st.drytag)")
-    announce $st "✅ ZCode cerrada. Fase 2/6: build+swap del fork (minutos, la próxima noticia es el swap o el fallo)."
+    announce $st "✅ ZCode cerrada. Fase 2/6: build+swap del fork (minutos — NO abras ZCode hasta el próximo aviso; si lo abrís, lo cierro y reintento solo)."
 
     let r2 = (phase2-build $st)
     if not $r2.outcome.ok { return (fail $r2.state "fase 2 (build+swap)" (note-or-log $r2.outcome.note)) }

@@ -231,7 +231,15 @@ phase1_quit() {
     log "[dryrun] SKIP fase 1: osascript quit (solo cierra ventana) → ≤30 s → bootout del job de launchd (muerte sin resurrección) → SIGTERM → SIGKILL → 15 s de vigilancia anti-resurrección. Hoy ZCode $viva."
     return 0
   fi
-  log "quit graceful (osascript) — en este app solo cierra la ventana..."
+  quit_ladder
+  QUIT_DONE=1
+  return 0
+}
+
+# La escalera de muerte, reutilizable (fase 1 y retry de fase 2 cuando el app
+# reaparece durante el build — medido: el humano lo reabre para mirar).
+quit_ladder() {
+  log "quit graceful (osascript) — en este app suele solo cerrar la ventana..."
   osascript -e 'tell application "ZCode" to quit' 2>/dev/null || log "WARN: osascript falló (¿ya estaba cerrada?)"
   local w=0
   while [ "$w" -lt 30 ] && zcode_running; do sleep 1; w=$((w+1)); done
@@ -259,9 +267,8 @@ phase1_quit() {
     while [ "$w" -lt 80 ] && zcode_running; do sleep 1; w=$((w+1)); done
   fi
   while [ "$w" -lt 120 ] && zcode_running; do sleep 2; w=$((w+2)); done
-  if zcode_running; then ERRNOTE="ZCode sigue viva tras ${w}s, bootout, SIGTERM y SIGKILL — algo muy raro"; log "✗ $ERRNOTE"; return 1; fi
-  QUIT_DONE=1
-  log "cero proceso ZCode ✓ (total ${w}s)"
+  if zcode_running; then ERRNOTE="ZCode sigue viva tras ${w}s, bootout, SIGTERM y SIGKILL"; log "✗ $ERRNOTE"; return 1; fi
+  log "cero proceso ZCode vivo ✓ (total ${w}s)"
   return 0
 }
 
@@ -274,6 +281,14 @@ phase2_build() {
   log "build+swap: scripts/build-install.sh --yes (esto toma minutos)..."
   local rc=0
   (cd "$FORK_DIR" && scripts/build-install.sh --yes) || rc=$?
+  if [ "$rc" != 0 ] && zcode_running; then
+    log "el app REAPARECIÓ durante el build (alguien lo abrió para mirar) — re-quit y retry del swap (build cacheado)"
+    if ! quit_ladder; then ERRNOTE="reapareció durante el build y el re-quit falló"; log "✗ $ERRNOTE"; return 1; fi
+    (cd "$FORK_DIR" && scripts/build-install.sh --yes) || rc=$?
+    if [ "$rc" != 0 ]; then ERRNOTE="build-install.sh exit $rc en el retry (el app viejo queda en /Applications — lo reabro)"; log "✗ $ERRNOTE"; return 1; fi
+    log "build+swap OK ✓ en el retry (el propio build-install ya reabrió el app y anunció el swap)"
+    return 0
+  fi
   if [ "$rc" != 0 ]; then ERRNOTE="build-install.sh exit $rc (el app viejo queda en /Applications — lo reabro)"; log "✗ $ERRNOTE"; return 1; fi
   log "build+swap OK ✓ (el propio build-install ya reabrió el app y anunció el swap)"
   return 0
