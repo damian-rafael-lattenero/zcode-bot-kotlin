@@ -22,3 +22,5 @@ jobs:
         run: ./gradlew :modules:recorder:installDist
       - name: Daemon installDist smoke
         run: ./gradlew :modules:daemon:installDist
+      - name: Comparator installDist smoke
+        run: ./gradlew :modules:comparator:installDist

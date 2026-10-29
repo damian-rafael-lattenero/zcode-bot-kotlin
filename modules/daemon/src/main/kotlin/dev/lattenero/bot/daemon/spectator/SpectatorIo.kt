@@ -130,6 +130,7 @@ internal object SpectatorIo {
             toolsStream = pickBool(o, "tools_stream") ?: true,
             toolsBoxFilter = filter.ifEmpty { "action" },
             onlyActiveTask = pickBool(o, "only_active_task") ?: true,
+            macSpectator = pickBool(o, "mac_spectator", "mac_espectador") ?: true,
         )
     }
 

@@ -11,6 +11,7 @@ internal data class SpectatorCfg(
     val toolsStream: Boolean = true,
     val toolsBoxFilter: String = "action",
     val onlyActiveTask: Boolean = true,
+    val macSpectator: Boolean = true,
 )
 
 internal data class SpectatorMessage(val text: String, val eventTs: Double?)

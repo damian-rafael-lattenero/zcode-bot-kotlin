@@ -20,7 +20,8 @@ features, mutability only as a visible escape hatch. See
 |---|---|
 | `modules/contract-types` | Read-side contracts of every persisted format (`schemas.py` is the spec): the bus event (mirror of agent-brain's `BusEvent`) plus bot-session, workers registry, queue, active turn, outbox, zconn, audit, CoT boxes and the nuclear report — **bilingual forever** (readers accept the legacy Spanish keys; writers emit English). |
 | `modules/recorder` | The golden replay recorder: a one-shot pass that snapshots `~/.zcode/hooks/state/` (content + mtime + sha256) into a daily JSONL trace. Later phases replay these traces to prove byte-level parity before every cutover. |
-| `modules/daemon` | The B1 shadow daemon: the watchers reborn on KAP. B1a zconn (the episode machine pure, the CLI-log tailer, byte-exact notice texts) and B1b the spectator (marker-driven per-turn `Process`es, the push gates read live, and the RENDERER's first proof: `_tool_box` + a faithful `difflib.SequenceMatcher` port pinned by 21 golden vectors generated from the real Python) — all under `Process` (cadence is `repeat(spaced)`, bugs restart under the convergence law, the heartbeat beats at its own pace) with the E1 logging stack (JSONL + MDC, async neverBlock). Shadow mode: decisions land in `~/.zcode/bot-kotlin/shadow/`, the Python bot keeps sending. |
+| `modules/daemon` | The B1 shadow daemon: the watchers reborn on KAP. B1a zconn (the episode machine pure, the CLI-log tailer, byte-exact notice texts) and B1b the spectator (marker-driven per-turn `Process`es with the hook's exact spawn gates, the push gates read live, and the RENDERER's first proof: `_tool_box` + a faithful `difflib.SequenceMatcher` port pinned by 21 golden vectors generated from the real Python) — all under `Process` (cadence is `repeat(spaced)`, bugs restart under the convergence law, the heartbeat beats at its own pace) with the E1 logging stack (JSONL + MDC, async neverBlock). Shadow mode: decisions land in `~/.zcode/bot-kotlin/shadow/`, the Python bot keeps sending. |
+| `modules/comparator` | B1c — the parity gate: diffs the shadow decisions against what the Python bot actually did (kb.log for zconn's sends, prompt-worker.log for the spectator's turns), writes a daily report with a PARITY/DIVERGENT/INSUFFICIENT verdict, and `--week` aggregates: seven consecutive PARITY days earn the cutover knob. Its first real run caught a genuine divergence (the hook's F15 spawn gate was missing) within hours. |
 
 Later: `transport` (B2, Ktor + the same tg-offset/cooldown/outbox
 contracts), and the render core (B4, on KapStream — the SPEC-5.0
@@ -66,7 +67,7 @@ logs the Python bot also reads, and every write stays under
 |---|---|
 | K0 — kap 4.2 `Process` (restart policies, heartbeat, laws) | done ([kap](https://github.com/damian-rafael-lattenero/kap) 4.2.0) |
 | B0 — this repo: contracts + recorder | recording since 2026-10-29 (gates B1's cutover on >= 2 weeks of traces) |
-| B1 — zconn + spectator watchers (shadow, then cutover) | B1a + B1b deployed 2026-10-29 (zconn and spectator in shadow, difflib ported with golden vectors); B1c comparator next |
+| B1 — zconn + spectator watchers (shadow, then cutover) | B1a + B1b + B1c deployed 2026-10-29: both watchers in shadow (golden-vector renderer) and the comparator; parity window accumulating — the week gate unlocks the cutover |
 | B2 — transport (Ktor, same state files) | |
 | B3 — workers under `Process` | |
 | B4 — render core on KapStream | |

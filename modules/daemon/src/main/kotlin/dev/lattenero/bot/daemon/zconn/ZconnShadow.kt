@@ -1,11 +1,11 @@
 package dev.lattenero.bot.daemon.zconn
 
+import dev.lattenero.bot.contracts.ShadowDecision
 import dev.lattenero.bot.contracts.StateFiles
 import dev.lattenero.bot.contracts.ZconnState
 import dev.lattenero.bot.daemon.clilogs.CliEvent
 import dev.lattenero.bot.daemon.clilogs.CliLogTailer
 import dev.lattenero.bot.daemon.clilogs.LogCursor
-import dev.lattenero.bot.daemon.shadow.ShadowDecision
 import dev.lattenero.bot.daemon.shadow.ShadowLog
 import dev.lattenero.bot.daemon.shadow.TimeIso
 import io.github.oshai.kotlinlogging.KotlinLogging

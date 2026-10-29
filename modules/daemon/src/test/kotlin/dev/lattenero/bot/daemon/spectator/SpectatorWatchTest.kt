@@ -1,6 +1,6 @@
 package dev.lattenero.bot.daemon.spectator
 
-import dev.lattenero.bot.daemon.shadow.ShadowDecision
+import dev.lattenero.bot.contracts.ShadowDecision
 import dev.lattenero.bot.daemon.shadow.ShadowLog
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.advanceTimeBy
@@ -111,6 +111,9 @@ class SpectatorWatchTest {
         stateDir.resolve("bot-workers.json").writeText(
             """{"$owned": {"t0": 1.0, "prompt": "p", "ws": "/w", "title": "t", "pid": 7}}""",
         )
+        // the F15 gate at spawn: ONLY the current task gets a spectator
+        // (the comparator's first real catch was this gate missing)
+        stateDir.resolve("bot-session.json").writeText("""{"sid": "$unowned", "title": "t"}""")
         val m1 = SpectatorIo.markerPath(stateDir, unowned)
         m1.writeText("""{"token": "t1", "prompt": "p"}""")
         SpectatorIo.markerPath(stateDir, owned).writeText("""{"token": "t2", "prompt": "p"}""")
@@ -123,5 +126,16 @@ class SpectatorWatchTest {
         advanceTimeBy(2_000)
         orch.scan()
         assertEquals(0, orch.liveTurns(), "a completed turn's handle is reaped")
+    }
+
+    @Test
+    fun aMarkerOutsideTheStreamFocusGetsNoSpectator() = runTest {
+        val sid = "session_x"
+        File(rollouts, "model-io-$sid.jsonl").writeText("")
+        stateDir.resolve("bot-session.json").writeText("""{"sid": "session_otra", "title": "t"}""")
+        SpectatorIo.markerPath(stateDir, sid).writeText("""{"token": "t", "prompt": "p"}""")
+
+        val orch = SpectatorOrchestrator(base, stateDir, ShadowLog(shadowDir), { 1000.0 }, backgroundScope)
+        assertEquals(0, orch.scan(), "Python spawns only for the focused task (hook F15 gate)")
     }
 }
