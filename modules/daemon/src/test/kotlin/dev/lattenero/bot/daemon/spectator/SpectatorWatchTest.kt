@@ -103,6 +103,27 @@ class SpectatorWatchTest {
     }
 
     @Test
+    fun theThirtyFiveMinuteCapEndsTheTurnOnItsOwn() = runTest {
+        // the marker never dies and nothing new arrives: the ONLY way out
+        // is the cap — 2100 ticks at 1 s, the `now() < deadline` check as
+        // schedule algebra (repeat runs the body once before deciding,
+        // so the last delay lands at 34:59)
+        SpectatorIo.markerPath(stateDir, sid).writeText("""{"token": "t1", "prompt": "p"}""")
+        File(rollouts, "model-io-$sid.jsonl").writeText("")
+        stateDir.resolve("bot-session.json").writeText("""{"sid": "$sid", "title": "t"}""")
+
+        val turn = SpectatorTurn(base, stateDir, ShadowLog(shadowDir)) { 1000.0 }
+        val job = launch { turn.run(sid) }
+        runCurrent() // the turn is armed and watching
+
+        advanceTimeBy(35 * 60_000)
+        runCurrent() // advanceTimeBy does not run tasks at the exact boundary
+        kotlinx.coroutines.withTimeoutOrNull(1_000) { job.join() }
+        assertEquals(true, job.isCompleted, "the cap ends the turn without the marker dying")
+        assertTrue(testScheduler.currentTime >= (35 * 60 - 1) * 1_000L, "a full 35-minute window of ticks ran")
+    }
+
+    @Test
     fun theOrchestratorStartsUnownedTurnsAndReapsThem() = runTest {
         val unowned = "session_m"
         val owned = "session_w"

@@ -7,9 +7,11 @@ import io.github.oshai.kotlinlogging.KotlinLogging
 import kap.Kap
 import kap.ProcessHandle
 import kap.RestartPolicy
+import kap.Schedule
+import kap.evalGraph
 import kap.process
+import kap.repeat
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.slf4j.MDCContext
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -22,7 +24,10 @@ import kotlin.time.Duration.Companion.seconds
  * of a per-turn `Process`: reactive in spirit (poll cadence), pins the
  * turn by marker token, steps down when a NEW prompt takes over, ends
  * when F32 consumes the marker, hard cap 35 min. Normal completion ends
- * the process: the turn is simply over.
+ * the process: the turn is simply over. The poll loop is schedule
+ * algebra (U0's no-manual-concurrency sweep): one tick is a Kap that
+ * answers with a [Tick] signal, and `repeat` owns the cadence, the stop
+ * conditions and the cap — no hand-rolled while.
  */
 internal class SpectatorTurn(
     private val baseDir: File,
@@ -31,6 +36,13 @@ internal class SpectatorTurn(
     private val now: () -> Double,
 ) {
     private val logger = KotlinLogging.logger {}
+
+    /** One poll's answer: keep going, the turn ended, or a NEW turn owns the marker. */
+    private sealed interface Tick {
+        data object Keep : Tick
+        data object MarkerGone : Tick // F32 delivered the real thing
+        data object Takeover : Tick // a NEW turn took the marker over
+    }
 
     suspend fun run(sid: String) = withContext(MDCContext(mapOf(COMPONENT to "spectator"))) {
         val cfg = SpectatorIo.cfg(baseDir)
@@ -42,15 +54,11 @@ internal class SpectatorTurn(
         val reader = RolloutReader(rollout)
         var pos = reader.sizeAtStart()
         var token0 = SpectatorIo.markerToken(stateDir, sid)
-        val deadline = now() + CAP_S
         logger.info { "spectator: watching sid=...${sid.takeLast(SID_TAIL)} title=«${state.title}»" }
-        // the two breaks are the two orchestration signals: the turn is over,
-        // or a NEW turn took the marker over (its own spectator owns it)
-        @Suppress("LoopWithTooManyJumpStatements")
-        while (now() < deadline) {
-            if (!SpectatorIo.markerPath(stateDir, sid).exists()) break // F32 delivered the real thing
+        Kap {
+            if (!SpectatorIo.markerPath(stateDir, sid).exists()) return@Kap Tick.MarkerGone
             val tok = SpectatorIo.markerToken(stateDir, sid)
-            if (token0.isNotEmpty() && tok.isNotEmpty() && tok != token0) break // a NEW turn owns it now
+            if (token0.isNotEmpty() && tok.isNotEmpty() && tok != token0) return@Kap Tick.Takeover
             if (token0.isEmpty() && tok.isNotEmpty()) token0 = tok
             val read = reader.read(pos)
             pos = read.first
@@ -63,8 +71,16 @@ internal class SpectatorTurn(
                     shadowLog.append(m.toDecision(sid, now(), mayPush))
                 }
             }
-            delay(POLL.inWholeMilliseconds)
-        }
+            Tick.Keep
+        }.repeat(
+            // the two orchestration signals stop the loop; the cadence is
+            // Python's 1 s poll; the cap is 35 min OF TICKS (2100 at 1 s —
+            // the count is the `now() < deadline` check made denotational;
+            // times(n-1) because repeat runs the body once BEFORE deciding)
+            Schedule.doUntil<Tick> { it != Tick.Keep } and
+                Schedule.spaced<Tick>(POLL) and
+                Schedule.times<Tick>(CAP_TICKS - 1),
+        ).evalGraph()
         logger.info { "spectator: turn over (steps=${state.step}) sid=...${sid.takeLast(SID_TAIL)}" }
     }
 
@@ -85,6 +101,7 @@ internal class SpectatorTurn(
         const val SID_TAIL = 8
         const val SPAWN_GRACE_S = 1.0
         const val CAP_S = 35 * 60.0
+        const val CAP_TICKS = (CAP_S).toInt() // 2100 ticks at 1 s == the 35 min cap
         val POLL: Duration = 1000.milliseconds
     }
 }
