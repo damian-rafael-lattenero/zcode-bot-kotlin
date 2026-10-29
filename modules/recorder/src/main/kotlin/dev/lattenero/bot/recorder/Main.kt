@@ -3,6 +3,8 @@ package dev.lattenero.bot.recorder
 import java.io.File
 import kotlin.system.exitProcess
 
+private const val MILLIS_PER_SECOND = 1_000L
+
 /**
  * One-shot entry point:
  *
@@ -36,6 +38,9 @@ fun main(args: Array<String>) {
 
     val recorder = Recorder(stateDir, outDir, capBytes)
     do {
+        // The one-shot entry degrades with a stderr line and a non-zero exit;
+        // no exception class is worth distinguishing here (launchd logs it).
+        @Suppress("TooGenericExceptionCaught")
         val lines = try {
             recorder.runPass()
         } catch (e: Exception) {
@@ -43,7 +48,7 @@ fun main(args: Array<String>) {
             exitProcess(1)
         }
         println("recorded $lines lines -> $outDir")
-        if (intervalSeconds > 0) Thread.sleep(intervalSeconds * 1_000)
+        if (intervalSeconds > 0) Thread.sleep(intervalSeconds * MILLIS_PER_SECOND)
     } while (intervalSeconds > 0)
 }
 

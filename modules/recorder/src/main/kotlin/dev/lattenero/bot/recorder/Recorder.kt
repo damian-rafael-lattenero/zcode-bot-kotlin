@@ -58,9 +58,7 @@ class Recorder(
 
     private fun scan(): Map<String, FileSample> {
         val root = stateDir.toPath()
-        if (!Files.isDirectory(root)) {
-            throw IllegalStateException("state dir does not exist: $stateDir")
-        }
+        check(Files.isDirectory(root)) { "state dir does not exist: $stateDir" }
         val result = LinkedHashMap<String, FileSample>()
         Files.walk(root).use { stream ->
             stream.filter { Files.isRegularFile(it) && !Files.isSymbolicLink(it) }
@@ -98,9 +96,10 @@ class Recorder(
     }
 
     private fun readPrevious(): Map<String, FileFact> {
-        val text = runCatching { prevState.readText() }.getOrNull() ?: return emptyMap()
+        // Absent or unreadable state (first pass, or a corrupt file): record
+        // everything again — the trace tolerates the duplicate by sha256.
         val state = runCatching {
-            Json { ignoreUnknownKeys = true }.decodeFromString<PrevState>(text)
+            prevState.readText().let { Json { ignoreUnknownKeys = true }.decodeFromString<PrevState>(it) }
         }.getOrNull() ?: return emptyMap()
         return state.files.mapValues { (_, f) -> FileFact("", f.size, f.mtimeMs, f.sha256) }
     }
