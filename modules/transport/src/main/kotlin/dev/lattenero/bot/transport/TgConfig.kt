@@ -19,6 +19,8 @@ data class TgConfig(
     val token: String = "",
     val chatId: JsonElement = JsonNull,
     val loudAll: Boolean = true,
+    /** from_owner's fail-closed gate (F48): without an owner NOBODY gets through. */
+    val ownerUserId: Long? = null,
     val apiBase: String = System.getenv("ZT_API_BASE") ?: DEFAULT_API,
 ) {
     /** config.configured(): enabled AND token AND chat_id (Python truthiness). */
@@ -47,6 +49,7 @@ data class TgConfig(
                 token = (root?.get("token") as? JsonPrimitive)?.takeIf { it.isString }?.content ?: "",
                 chatId = root?.get("chat_id") ?: JsonNull,
                 loudAll = root?.get("loud_all")?.let(PyText::truthy) ?: true,
+                ownerUserId = (root?.get("owner_user_id") as? JsonPrimitive)?.content?.toLongOrNull(),
             )
         }
     }

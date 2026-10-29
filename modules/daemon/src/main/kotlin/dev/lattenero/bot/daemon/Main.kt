@@ -61,6 +61,15 @@ fun main(args: Array<String>) {
     if (knob.warning != null) logger.warn { "send knob $knobFile: ${knob.warning}" }
     logger.info { "send knob: mode=${knob.mode} (file=$knobFile)" }
 
+    // B3b's poll knob: SHIPPED OFF — Python owns getUpdates until the
+    // retirement (ADR-001's single reader; retire-python.sh flips this).
+    val pollKnob = PollKnob.load(knobFile)
+    if (pollKnob.warning != null) logger.warn { "poll knob $knobFile: ${pollKnob.warning}" }
+    logger.info {
+        val who = if (pollKnob.on) "this daemon OWNS getUpdates" else "Python keeps the phone's reads"
+        "poll knob: on=${pollKnob.on} ($who)"
+    }
+
     val stateDir = File(cfg.homeDir, "state")
     val shadowLog = ShadowLog(File(cfg.homeDir, "shadow"))
     val pythonState = File(File(cfg.baseDir, "hooks"), "state")
@@ -73,6 +82,10 @@ fun main(args: Array<String>) {
                 "— the strangler's handover files (Python still polls getUpdates; this daemon NEVER does)"
         }
     }
+
+    // B3b: the channel stack (client always; live view when the daemon owns
+    // the send; poller only at the retirement knob)
+    val stack = wireChannel(cfg, send, api, pythonState, pollKnob.on)
 
     val clock = { System.currentTimeMillis() / MILLIS_PER_SECOND }
     val zconnWatch = ZconnShadow(cfg.baseDir, stateDir, shadowLog, clock, pythonState, send.leg)
@@ -111,26 +124,67 @@ fun main(args: Array<String>) {
 
         val zconnHandle = zconn.startIn(this)
         val spectatorHandle = spectator.startIn(this)
+
+        // B3b: the channel client (degraded LOUD without the fork's host),
+        // its keepalive, the live view (never-silence; LIVE sends only),
+        // and — only when retire-python.sh flipped the knob — the poller
+        val hbChannel = File(stateDir, HB_CHANNEL)
+        val channelHandle = stack.client.asProcess(onHeartbeat = { touch(hbChannel) }).startIn(this)
+        val pingHandle = stack.client.pingProcess().startIn(this)
+        val liveHandle = stack.liveView?.asProcess(onHeartbeat = { touch(File(stateDir, HB_LIVE_VIEW)) })?.startIn(this)
+        val pollerHandle = stack.poller
+            ?.asProcess(
+                config = { dev.lattenero.bot.transport.TgConfig.load(File(cfg.baseDir, "telegram-remote.json")) },
+                onHeartbeat = { touch(File(stateDir, HB_POLLER)) },
+            )
+            ?.startIn(this)
+        logger.info {
+            val view = if (liveHandle != null) "on" else "off"
+            val poll = if (pollerHandle != null) "ON" else "off"
+            "channel wired: client=on socket=${File(cfg.baseDir, "daemon-local.sock").path} " +
+                "liveView=$view poller=$poll"
+        }
+
         val root = coroutineContext[Job]
         Runtime.getRuntime().addShutdownHook(
             Thread {
                 zconnHandle.stop()
                 spectatorHandle.stop()
+                pollerHandle?.stop()
+                liveHandle?.stop()
+                pingHandle.stop()
+                channelHandle.stop()
+                stack.client.close() // unblocks the session's read so the process can end
                 api?.close() // the live leg's client — no sends outlive the daemon
                 root?.cancel() // the per-turn spectators must not hang the exit
             },
         )
         try {
             coroutineScope {
-                listOf(zconnHandle to WATCHER, spectatorHandle to "spectator-orchestrator").forEach { (h, name) ->
+                listOf(
+                    zconnHandle to WATCHER,
+                    spectatorHandle to "spectator-orchestrator",
+                    channelHandle to "channel",
+                ).forEach { (h, name) ->
                     launch {
                         try {
                             h.await()
                         } catch (e: ProcessStoppedException) {
                             logger.info(e) { "$name stopped — shutting down" }
                         } catch (e: ProcessExhaustedException) {
-                            logger.error(e) { "$name exhausted — exiting 1 so launchd restarts the ring" }
-                            exitProcess(1)
+                            when (name) {
+                                // the channel is DEGRADED-BY-DESIGN when the fork's
+                                // host is down: exhaustion is a loud log line, never
+                                // the death of the daemon that still owns the SENDS
+                                "channel" -> logger.error(e) {
+                                    "channel exhausted — degraded (sends/watchers keep flowing)"
+                                }
+
+                                else -> {
+                                    logger.error(e) { "$name exhausted — exiting 1 so launchd restarts the ring" }
+                                    exitProcess(1)
+                                }
+                            }
                         }
                     }
                 }
@@ -216,6 +270,9 @@ private fun touch(file: File) {
 
 private const val HB_ZCONN = "hb-zconn-shadow"
 private const val HB_SPECTATOR = "hb-spectator"
+private const val HB_CHANNEL = "hb-channel"
+private const val HB_LIVE_VIEW = "hb-live-view"
+private const val HB_POLLER = "hb-poller"
 private const val COMPONENT_KEY = "component"
 private val DEFAULT_HEARTBEAT_EVERY = 30.seconds
 private val SPECTATOR_SCAN = 2.seconds

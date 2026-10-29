@@ -232,6 +232,8 @@ data class ZconnState(
     @SerialName("last_up") val lastUp: Double? = null,
     val reason: String = "",
     val since: Double = 0.0,
+    /** B3b: the retry attempt whose long wait was last announced (one notice per attempt). */
+    @SerialName("announced_retry") val announcedRetry: Double? = null,
 ) {
     companion object {
         fun fromJson(o: JsonObject) = ZconnState(
@@ -240,6 +242,7 @@ data class ZconnState(
             lastUp = o.pickDouble("last_up"),
             reason = o.pickString("reason") ?: "",
             since = o.pickDouble("since") ?: 0.0,
+            announcedRetry = o.pickDouble("announced_retry"),
         )
     }
 }

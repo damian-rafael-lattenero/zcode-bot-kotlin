@@ -58,6 +58,11 @@ class ConnTrackLawsTest {
                         lastUpTs = n.ts
                         lastKind = "Up"
                     }
+
+                    // the honest-countdown notice: orthogonal to the alternation
+                    // law (the generator never feeds retry needles, but the
+                    // union must stay exhaustive)
+                    is ZconnNotice.RetryWait -> lastKind = "RetryWait"
                 }
             }
         }

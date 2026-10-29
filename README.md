@@ -22,9 +22,9 @@ features, mutability only as a visible escape hatch. See
 | `modules/recorder` | The golden replay recorder: a one-shot pass that snapshots `~/.zcode/hooks/state/` (content + mtime + sha256) into a daily JSONL trace. Later phases replay these traces to prove byte-level parity before every cutover. |
 | `modules/daemon` | The B1 shadow daemon: the watchers reborn on KAP. B1a zconn (the episode machine pure, the CLI-log tailer, byte-exact notice texts) and B1b the spectator (marker-driven per-turn `Process`es with the hook's exact spawn gates, the push gates read live, and the RENDERER's first proof: `_tool_box` + a faithful `difflib.SequenceMatcher` port pinned by 21 golden vectors generated from the real Python) — all under `Process` (cadence is `repeat(spaced)`, bugs restart under the convergence law, the heartbeat beats at its own pace) with the E1 logging stack (JSONL + MDC, async neverBlock). The **B2 send knob** (`~/.zcode/bot-kotlin/daemon.json`, read at boot): `shadow` (decisions land in `~/.zcode/bot-kotlin/shadow/`, the Python bot keeps sending) → `dry-run` (compose the byte-exact sendMessage request and log it, token redacted, WITHOUT posting) → `live` (the daemon owns the send through the transport, sharing Python's `tg-cooldown`/`outbox.json`/`tg-last-ph`; Python keeps polling getUpdates — the daemon NEVER polls). Rollback is the knob back to `shadow` + Python's send on. |
 | `modules/comparator` | B1c — the parity gate: diffs the shadow decisions against what the Python bot actually did (kb.log for zconn's sends, prompt-worker.log for the spectator's turns), writes a daily report with a PARITY/DIVERGENT/INSUFFICIENT verdict, and `--week` aggregates: seven consecutive PARITY days earn the cutover knob. Its first real run caught a genuine divergence (the hook's F15 spawn gate was missing) within hours. Post-cutover (owner's decision 30/10) it runs as the daily audit: a DIVERGENT after the flip is evidence, not a blocker. |
+| `modules/channel` | B3b — the daemon-local channel client (the fork's ADR-022/B3a unix socket, spec in `~/Projects/ZCode/docs/fork/DAEMON-CHANNEL.md`): the protocol as PURE values pinned against the spec's own fixtures (hello/auth with the 0600 token, inbound to the REAL conversation, `bot-channel-continuous` stream, the §3.4 service queries), reconnection as Kap policy (`retry(exponential and whileInput{ChannelDown})` — a missing socket is the DEGRADED state, a periodic loud warning, never a crash: the channel exists only while the fork's host is deployed), the LIVE VIEW (the never-radio-silence contract: one status message edited in place — spinner, thinking chars, writing LINES from `tool_call_update` streaming, timers, the fork's own apiRetry pill with the honest countdown, visible heartbeat; sealed at `task_complete` with the spectator's renderer + the snapshot's answer), the eight commands of the owner's MVP (`/tasks` `/all_tasks` `/status` `/stop` `/nuclear` `/quota` `/help` `/subagents`, free text routed to the real conversation), and the getUpdates POLLER (Python's cycle in values, SHIPPED OFF behind the `poll` knob of daemon.json — the single-reader rule until `retire-python.sh` flips it). Also the error inventory's fixes: the zconn honest retry countdown (`model.network.retry_scheduled`, the 1308 lesson) and the ⌘-stop (cancelled) that is not an outage. |
 
-Later: `transport` (B2, Ktor + the same tg-offset/cooldown/outbox
-contracts), and the render core (B4, on KapStream — the SPEC-5.0
+Later: the render core (B4, on KapStream — the SPEC-5.0
 dogfooding contract).
 
 ## The trace contract
@@ -50,7 +50,7 @@ as shared clocks (the 429 cooldown's expiry epoch is a mtime).
 # The command-line override beats gradle.properties; CI runs plain (Corretto 21).
 ./gradlew -Dorg.gradle.java.home="$(/usr/libexec/java_home -v 21)" test detekt
 scripts/deploy-recorder.sh       # B0: ~/.zcode/bot-recorder + LaunchAgent
-scripts/deploy-daemon.sh         # B1a: ~/.zcode/bot-daemon + LaunchAgent (shadow)
+scripts/deploy-daemon.sh         # the daemon: ~/.zcode/bot-daemon + LaunchAgent (zconn/spectator + B3b channel/live view; poller only with the knob)
 ```
 
 The recorder is a fresh JVM per pass (LaunchAgent `StartInterval`, 60 s) —
@@ -63,11 +63,11 @@ logs the Python bot also reads, and every write stays under
 shares Python's own `tg-cooldown`/`outbox.json`/`tg-last-ph` by design
 (the strangler's handover files).
 
-### The B2 cutover knob and its rollback
+### The B2 cutover knob, the B3b poll knob, and the Python retirement
 
-`~/.zcode/bot-kotlin/daemon.json` (`{"send": "shadow|dry-run|live"}`),
-read once at boot — a mode change is `launchctl kickstart -k
-gui/$(id -u)/com.zcode.bot-daemon`. The flip order is the owner's rule:
+`~/.zcode/bot-kotlin/daemon.json` (`{"send": "shadow|dry-run|live", "poll": false}`),
+read once at boot — a change is `launchctl kickstart -k
+gui/$(id -u)/com.zcode.bot-daemon`. The send flip order is the owner's rule:
 **daemon `live` FIRST, silence Python's send AFTER** (a duplicate
 notification annoys; a silent phone is an incident) — never the reverse
 and never a long gap. Python is silenced by config only:
@@ -79,11 +79,41 @@ on), and for zconn there is no config key in Python — its state file
 `since` never advances without events); back up the file before
 overwriting it.
 
-One-line rollback (knob back + Python's send on):
+The `poll` knob (B3b) is **shipped OFF**: the getUpdates poller exists
+and is wired but does not run, because Python still owns the phone's
+reads (ADR-001's single reader — two pollers on one token fight
+Telegram's 409). It turns on ONLY at the retirement.
+
+One-line rollback of the send flip (knob back + Python's send on):
 
 ```bash
 printf '{"send": "shadow"}' > ~/.zcode/bot-kotlin/daemon.json && launchctl kickstart -k gui/$(id -u)/com.zcode.bot-daemon && python3 -c "import json,os; p=os.path.expanduser('~/.zcode/telegram-remote.json'); c=json.load(open(p)); c['mac_spectator']=True; json.dump(c,open(p,'w'),indent=2); os.chmod(p,0o600)" && cp ~/.zcode/hooks/state/zconn.json.pre-cutover ~/.zcode/hooks/state/zconn.json
 ```
+
+### The abrupt Python retirement (B3b's last step — `scripts/retire-python.sh`)
+
+Prepared, **never run by the agent**: it executes only when Damian has
+restarted the app with the fork's daemon-local channel deployed (⌘Q →
+`scripts/build-install.sh --yes` in `~/Projects/ZCode` → `scripts/verify-deploy.sh`),
+because retiring Python's poller before the channel exists leaves the
+phone with no way to start turns. The script verifies every step:
+
+1. **pre-check** — the unix socket answers a `hello` (refuses to retire
+   onto a dead phone);
+2. **unload** Python's three LaunchAgents (`com.zcode.telegram-cmds`,
+   `com.zcode.telegram-watch`, `com.zcode.bot-healer`) — FIRST, so the
+   single getUpdates reader is free the moment the daemon takes it;
+3. **flip** `poll: true` in daemon.json + `launchctl kickstart -k` (the
+   file is the deploy, the restart is the apply);
+4. **verify** — the daemon's boot line says poll on, the channel is UP
+   (not degraded), `/status` answers from the phone, sends stay LIVE.
+
+Rollback: relaunch the Python agents (`launchctl bootstrap gui/$(id -u)
+~/Library/LaunchAgents/com.zcode.telegram-cmds.plist`, same for watch and
+healer) and flip `poll` back to false + kickstart. After the retirement
+the daemon survives by its `Process` restart policies + launchd's
+KeepAlive; every failure is fixed and committed hot (the owner's
+hot-fix loop, U2.5).
 
 ## Status
 
@@ -92,7 +122,7 @@ printf '{"send": "shadow"}' > ~/.zcode/bot-kotlin/daemon.json && launchctl kicks
 | K0 — kap 4.2 `Process` (restart policies, heartbeat, laws) | done ([kap](https://github.com/damian-rafael-lattenero/kap) 4.2.0) |
 | B0 — this repo: contracts + recorder | recording since 2026-10-29 (gates B1's cutover on >= 2 weeks of traces) |
 | B1 — zconn + spectator watchers (shadow, then cutover) | B1a + B1b + B1c deployed 2026-10-29: both watchers in shadow (golden-vector renderer) and the comparator; the week gate was waived by the system owner 30/10 (aggressive cutover) — the comparator continues as the daily post-cutover audit |
-| B2 — transport (Ktor, same state files) | B2a transport complete (TgApi/Sender/Outbox/Cooldown/LastPh/TgBreaker, 79 tests); B2b the send knob `shadow|dry-run|live` (`~/.zcode/bot-kotlin/daemon.json`, read at boot) + the dry-run composer + the owner-side mac_spectator override; polling stays in Python (ADR-001) — the daemon never calls getUpdates |
-| B3 — workers under `Process` | |
+| B2 — transport (Ktor, same state files) | B2a transport complete (TgApi/Sender/Outbox/Cooldown/LastPh/TgBreaker, 79 tests); B2b the send knob `shadow\|dry-run\|live` (`~/.zcode/bot-kotlin/daemon.json`, read at boot) + the dry-run composer + the owner-side mac_spectator override; polling stays in Python (ADR-001) — the daemon never calls getUpdates |
+| B3 — the channel + workers under `Process` | B3a landed in the fork (commit `9b814dcb`: the daemon-local unix socket — spec `docs/fork/DAEMON-CHANNEL.md`); B3b this repo: `modules/channel` (client + live view + the eight + the off-by-default poller) deployed 2026-10-29, degraded-LOUD until the fork's host is deployed; the retirement script ready (`scripts/retire-python.sh`), waiting on Damian's ⌘Q |
 | B4 — render core on KapStream | |
-| B5 — thin hooks, Python retirement | |
+| B5 — thin hooks, full Python retirement | the abrupt retirement is prepared (U2.5); thin hooks remain |
