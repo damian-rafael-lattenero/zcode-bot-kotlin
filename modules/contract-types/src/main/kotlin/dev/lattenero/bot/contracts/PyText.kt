@@ -1,4 +1,4 @@
-package dev.lattenero.bot.daemon.spectator
+package dev.lattenero.bot.contracts
 
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -7,13 +7,15 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
 /**
- * The Python text primitives the renderer is built on, ported exactly —
+ * The Python text primitives the renderers are built on, ported exactly —
  * the parity gate diffs these strings byte for byte against what the
- * Python bot sends (utils/formatting.py, messages.py).
+ * Python bot sends (utils/formatting.py, messages.py). Shared by the
+ * spectator renderer and the transport (html_truncate, json.dumps of
+ * markup params).
  */
 // One function per Python primitive — the count is the port's shape.
 @Suppress("TooManyFunctions")
-internal object PyText {
+object PyText {
 
     /** esc(): HTML for Telegram's parse_mode. Single source, verbatim. */
     fun esc(s: String?): String =

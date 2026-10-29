@@ -13,13 +13,11 @@ PLIST_LABEL="com.zcode.bot-daemon"
 PLIST_DST="$HOME/Library/LaunchAgents/$PLIST_LABEL.plist"
 UID_N="$(id -u)"
 
-# detekt 1.23 cannot run on a Gradle daemon >= 24. The Mac's global
-# ~/.gradle/gradle.properties pins the daemon JVM to Corretto 25, so the
-# command-line override (not JAVA_HOME) is what actually enforces 21 here.
-JDK21="$(/usr/libexec/java_home -v 21)"
-
-echo "==> building (Gradle daemon on 21)"
-(cd "$REPO" && ./gradlew -q -Dorg.gradle.java.home="$JDK21" :modules:daemon:installDist detekt test)
+# Java 25 across the build (toolchain 25, detekt 2.0 on isolated workers):
+# the Mac's global ~/.gradle/gradle.properties daemon pin to Corretto 25 is
+# now the intent, not a fight — no -Dorg.gradle.java.home override anymore.
+echo "==> building (Gradle daemon on 25)"
+(cd "$REPO" && ./gradlew -q :modules:daemon:installDist detekt test)
 
 echo "==> installing to $DEST"
 mkdir -p "$DEST" "$DATA/state" "$DATA/shadow" "$DATA/logs"

@@ -43,6 +43,7 @@ fun main(args: Array<String>) {
     val cfg = DaemonConfig.parse(args.toList())
     val logger = KotlinLogging.logger("daemon")
     logger.info { "daemon starting: home=${cfg.homeDir} base=${cfg.baseDir} interval=${cfg.interval}" }
+    runBlocking { transportSelftest(cfg.baseDir, logger) }
     val stateDir = File(cfg.homeDir, "state")
     val shadowLog = ShadowLog(File(cfg.homeDir, "shadow"))
     val pythonState = File(File(cfg.baseDir, "hooks"), "state")
@@ -105,6 +106,29 @@ fun main(args: Array<String>) {
             logger.info { "watchers finished — shutting down" }
         } finally {
             root?.cancel()
+        }
+    }
+}
+
+/**
+ * B2a's boot proof: one read-only getMe through the REAL transport —
+ * token, Ktor client, API path — with zero side effects. The daemon
+ * never FAILS to start on a Telegram hiccup (the watchers are readers,
+ * not senders); the line in daemon.jsonl is the artifact. The token
+ * never reaches a log (TgApi redacts every message).
+ */
+private suspend fun transportSelftest(baseDir: File, logger: io.github.oshai.kotlinlogging.KLogger) {
+    val cfg = dev.lattenero.bot.transport.TgConfig.load(File(baseDir, "telegram-remote.json"))
+    if (!cfg.configured) {
+        logger.warn { "transport selftest skipped: not configured (enabled/token/chat_id)" }
+        return
+    }
+    dev.lattenero.bot.transport.TgApi({ cfg }).use { api ->
+        val r = dev.lattenero.bot.transport.Selftest(api).run()
+        if (r.ok) {
+            logger.info { "transport selftest OK: bot=@${r.username} id=${r.botId}" }
+        } else {
+            logger.warn { "transport selftest FAILED: ${r.error}" }
         }
     }
 }

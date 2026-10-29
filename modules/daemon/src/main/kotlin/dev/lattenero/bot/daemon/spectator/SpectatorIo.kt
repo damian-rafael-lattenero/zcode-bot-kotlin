@@ -1,4 +1,5 @@
 package dev.lattenero.bot.daemon.spectator
+import dev.lattenero.bot.contracts.PyText
 
 import dev.lattenero.bot.contracts.BotSession
 import dev.lattenero.bot.contracts.StateFiles

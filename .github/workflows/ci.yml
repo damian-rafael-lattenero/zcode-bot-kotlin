@@ -7,17 +7,29 @@ on:
 
 jobs:
   build:
-    name: Tests + detekt (Corretto 21)
+    name: Tests + detekt (Corretto 25)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
         with:
           distribution: corretto
-          java-version: "21" # daemon AND toolchain: detekt 1.23 cannot run on JDK >= 24
+          java-version: "25" # daemon AND toolchain: detekt 2.0 runs its workers on any JDK >= 17
       - uses: gradle/actions/setup-gradle@v6
       - name: Tests + detekt
         run: ./gradlew test detekt
+      - name: No manual concurrency in main sources (while(true)/do{} sweep)
+        run: |
+          # U0's binding rule: no hand-rolled loops/sleeps in production code —
+          # cadence and waiting are kap operators. The DEFINITIVE gate will be
+          # the detekt rule from kap (in the works); until then this sweep
+          # catches the literals. Classified exception: recorder Main.kt's
+          # bounded do{} CLI loop (--interval-seconds mode; the deployed agent
+          # runs one-shot, launchd owns the cadence) — pending its own Kap
+          # repeat refactor, tracked in U0's audit.
+          ! grep -rnE 'while[[:space:]]*\([[:space:]]*true|do[[:space:]]*\{' modules/*/src/main | grep -v 'recorder/Main.kt'
+      - name: Transport jar smoke
+        run: ./gradlew :modules:transport:jar
       - name: Recorder installDist smoke
         run: ./gradlew :modules:recorder:installDist
       - name: Daemon installDist smoke

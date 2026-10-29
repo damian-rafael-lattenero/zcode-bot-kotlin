@@ -15,7 +15,7 @@
     <key>EnvironmentVariables</key>
     <dict>
         <key>JAVA_HOME</key>
-        <string>/Library/Java/JavaVirtualMachines/amazon-corretto-21.jdk/Contents/Home</string>
+        <string>/Library/Java/JavaVirtualMachines/amazon-corretto-25.jdk/Contents/Home</string>
     </dict>
     <key>StartInterval</key>
     <integer>60</integer>
