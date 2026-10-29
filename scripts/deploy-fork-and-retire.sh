@@ -23,8 +23,9 @@
 #              si no aborta), daemon del bot cargado (launchctl), y
 #              retire-python.sh presente (si no: retire=skip — el run para
 #              tras la verificación avisando que falta).
-#   1 quit     osascript graceful (≤30 s) → ÚLTIMO RECURSO: pkill -x ZCode
-#              (logueado como tal) → hasta 120 s esperando cero proceso ZCode.
+#   1 quit     osascript graceful (≤30 s) → ÚLTIMO RECURSO: kill de los pids
+#              (ps comm exacto — POTHOLE: pgrep/pkill NO ven este app, ver
+#              zcode_running en el código) → hasta 120 s esperando cero proceso.
 #   2 build    cd ~/Projects/ZCode && scripts/build-install.sh --yes (swap de
 #              /Applications/ZCode.app; OJO: ese script REABRE el app y manda
 #              su propio anuncio «Fork instalado» — es esperado, no duplicado).
@@ -106,6 +107,15 @@ trap 'log "── exit rc=$? (log: $LOG)"' EXIT
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
 rpt() { REPORT="${REPORT:+$REPORT · }$*"; }
 
+# Detección del app — POTHOLE medido: pgrep/pkill NO ven el main process de
+# ZCode (app de LaunchServices que reescribe su argv: ARGS="ZCode", y pgrep
+# matchea pbi_name que acá difiere — probado fallando con -x, -i y -f con el
+# app corriendo, pid invisible para pgrep pero visible para ps). La fuente
+# confiable es ps comm exacto; System Events (osascript) también ve el app
+# pero es demasiado pesado para el poll de 2 s.
+zcode_running() { ps -axo comm= 2>/dev/null | grep -x "ZCode" >/dev/null; }
+zcode_pids()    { ps -axo pid=,comm= | awk '$2=="ZCode"{print $1}' | tr '\n' ' '; }
+
 announce() {
   # En --real: el patrón EXACTO de build-install.sh (token/chat_id de
   # ~/.zcode/telegram-remote.json, texto plano, un curl que nunca rompe el run).
@@ -135,7 +145,7 @@ fail() {
     announce "❌ Deploy auto FALLÓ en $1 — $2. Python sigue vivo, rollback no necesario."
   fi
   if [ "$MODE" = "real" ] && [ "$QUIT_DONE" = 1 ]; then
-    if pgrep -x ZCode >/dev/null 2>&1; then
+    if zcode_running; then
       log "el app ya está corriendo — nada que reabrir"
     else
       log "best-effort: reabro el app (el de /Applications, el que sea) para no dejar a Damian sin ZCode"
@@ -200,22 +210,22 @@ phase0_sanity() {
 # ────────────────────────────── fase 1: quit ────────────────────────────────
 phase1_quit() {
   if [ "$MODE" != "real" ]; then
-    if pgrep -x ZCode >/dev/null 2>&1; then local viva="SÍ está corriendo (la cerraría)"; else local viva="no está corriendo (nada que cerrar)"; fi
-    log "[dryrun] SKIP fase 1: osascript 'tell application \"ZCode\" to quit' → 30 s graceful → ÚLTIMO RECURSO pkill -x ZCode → esperar ≤120 s sin proceso (pgrep -x ZCode). Hoy ZCode $viva."
+    if zcode_running; then local viva="SÍ está corriendo (la cerraría)"; else local viva="no está corriendo (nada que cerrar)"; fi
+    log "[dryrun] SKIP fase 1: osascript 'tell application \"ZCode\" to quit' → 30 s graceful → ÚLTIMO RECURSO kill \$(zcode_pids) → esperar ≤120 s sin proceso (ps comm exacto — pgrep no ve este app). Hoy ZCode $viva."
     return 0
   fi
   log "quit graceful (osascript)..."
   osascript -e 'tell application "ZCode" to quit' 2>/dev/null || log "WARN: osascript falló (¿ya estaba cerrada?)"
   local w=0
-  while [ "$w" -lt 30 ] && pgrep -x ZCode >/dev/null 2>&1; do sleep 1; w=$((w+1)); done
-  if pgrep -x ZCode >/dev/null 2>&1; then
-    log "viva tras ${w}s graceful — ÚLTIMO RECURSO: pkill -x ZCode"
-    pkill -x ZCode || true
+  while [ "$w" -lt 30 ] && zcode_running; do sleep 1; w=$((w+1)); done
+  if zcode_running; then
+    log "viva tras ${w}s graceful — ÚLTIMO RECURSO: kill $(zcode_pids)"
+    kill $(zcode_pids) 2>/dev/null || true
   else
     log "ZCode cerró graceful (${w}s)"
   fi
-  while [ "$w" -lt 120 ] && pgrep -x ZCode >/dev/null 2>&1; do sleep 2; w=$((w+2)); done
-  if pgrep -x ZCode >/dev/null 2>&1; then ERRNOTE="ZCode sigue viva tras ${w}s"; log "✗ $ERRNOTE"; return 1; fi
+  while [ "$w" -lt 120 ] && zcode_running; do sleep 2; w=$((w+2)); done
+  if zcode_running; then ERRNOTE="ZCode sigue viva tras ${w}s"; log "✗ $ERRNOTE"; return 1; fi
   QUIT_DONE=1
   log "cero proceso ZCode ✓ (total ${w}s)"
   return 0
@@ -248,7 +258,7 @@ phase3_reopen() {
   # viven son restos de un host muerto (spec §1) — esperarlos sería esperar
   # archivos VIEJOS. El host nuevo crea los suyos al arrancar.
   rm -f "$SOCK" "$TOKEN_FILE"
-  if ! pgrep -x ZCode >/dev/null 2>&1; then
+  if ! zcode_running; then
     log "el app no quedó abierta (¿cambió build-install?) — open -a ZCode"
     open -a ZCode
   fi
