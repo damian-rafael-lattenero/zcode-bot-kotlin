@@ -20,3 +20,5 @@ jobs:
         run: ./gradlew test detekt
       - name: Recorder installDist smoke
         run: ./gradlew :modules:recorder:installDist
+      - name: Daemon installDist smoke
+        run: ./gradlew :modules:daemon:installDist

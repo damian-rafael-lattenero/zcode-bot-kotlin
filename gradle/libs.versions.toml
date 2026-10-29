@@ -2,9 +2,23 @@
 kotlin = "2.4.21"
 serialization = "1.12.0"
 detekt = "1.23.8"
+coroutines = "1.11.0"
+kap = "4.2.0"
+kotest = "6.2.6"
+kotlin-logging = "7.0.7"
+logback = "1.5.18"
+logstash-encoder = "8.1"
 
 [libraries]
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "serialization" }
+kotlinx-coroutines-slf4j = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-slf4j", version.ref = "coroutines" }
+kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "coroutines" }
+kap-core = { module = "io.github.damian-rafael-lattenero:kap-core", version.ref = "kap" }
+kap-resilience = { module = "io.github.damian-rafael-lattenero:kap-resilience", version.ref = "kap" }
+kotlin-logging = { module = "io.github.oshai:kotlin-logging-jvm", version.ref = "kotlin-logging" }
+logback-classic = { module = "ch.qos.logback:logback-classic", version.ref = "logback" }
+logstash-logback-encoder = { module = "net.logstash.logback:logstash-logback-encoder", version.ref = "logstash-encoder" }
+kotest-property = { module = "io.kotest:kotest-property", version.ref = "kotest" }
 
 [plugins]
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
