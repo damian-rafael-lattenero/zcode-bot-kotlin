@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.zcode.bot-comparator</string>
+    <!-- The wrapper guarantees exit 0: launchd must never treat a verdict
+         as a failure-loop — INSUFFICIENT is a VALID answer (the window
+         restarted clean), and DIVERGENT is a finding, not a crash. -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>-c</string>
+        <string>__HOME__/.zcode/bot-comparator/bin/comparator --shadow-dir __HOME__/.zcode/bot-kotlin/shadow --logs-dir __HOME__/.zcode/hooks/logs --out __HOME__/.zcode/bot-kotlin/parity || echo "comparator exited $? (INSUFFICIENT is a verdict, not an error)"</string>
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>JAVA_HOME</key>
+        <string>/Library/Java/JavaVirtualMachines/amazon-corretto-25.jdk/Contents/Home</string>
+    </dict>
+    <key>StartInterval</key>
+    <integer>86400</integer>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>__HOME__/.zcode/bot-kotlin/parity/comparator-launchd.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/.zcode/bot-kotlin/parity/comparator-launchd.log</string>
+</dict>
+</plist>
