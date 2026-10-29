@@ -31,6 +31,7 @@ fun main(args: Array<String>) {
                 exitProcess(2)
             }
         }
+        i++
     }
 
     val recorder = Recorder(stateDir, outDir, capBytes)
