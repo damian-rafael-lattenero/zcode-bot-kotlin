@@ -5,6 +5,9 @@
 # reabre el app, verifica (verify-deploy + smoke hello→hello_ok) y, si todo
 # pasó, jubila al bot Python (scripts/retire-python.sh — B3b).
 #
+# El canónico es el .nu (scripts/deploy-fork-and-retire.nu, Nushell tipado);
+# este .sh es el fallback de emergencia (runtime garantizado: bash de siempre).
+#
 # Modos:
 #   --dryrun  default en desarrollo: la fase 0 (sanity, read-only) corre de
 #             verdad; las fases 1-6 se NARRAN sin tocar nada (ni quit, ni
