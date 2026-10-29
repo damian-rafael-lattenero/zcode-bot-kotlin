@@ -113,6 +113,7 @@ rpt() { REPORT="${REPORT:+$REPORT · }$*"; }
 # app corriendo, pid invisible para pgrep pero visible para ps). La fuente
 # confiable es ps comm exacto; System Events (osascript) también ve el app
 # pero es demasiado pesado para el poll de 2 s.
+# shellcheck disable=SC2009  # pgrep NO ve este app (pbi_name ≠ comm, probado) — ps es la fuente correcta
 zcode_running() { ps -axo comm= 2>/dev/null | grep -x "ZCode" >/dev/null; }
 zcode_pids()    { ps -axo pid=,comm= | awk '$2=="ZCode"{print $1}' | tr '\n' ' '; }
 
@@ -220,7 +221,7 @@ phase1_quit() {
   while [ "$w" -lt 30 ] && zcode_running; do sleep 1; w=$((w+1)); done
   if zcode_running; then
     log "viva tras ${w}s graceful — ÚLTIMO RECURSO: kill $(zcode_pids)"
-    kill $(zcode_pids) 2>/dev/null || true
+    zcode_pids | xargs kill 2>/dev/null || true
   else
     log "ZCode cerró graceful (${w}s)"
   fi
