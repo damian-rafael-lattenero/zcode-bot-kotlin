@@ -104,12 +104,37 @@ def note-or-log [n: string]: nothing -> string {
 }
 
 # Detección del app — el pothole del .sh muere acá: ps de nu ve el main.
+# Detección de procesos VIVOS del app — ZOMBIE-PROOF (medido, incidente 17:36):
+# el ps builtin de nu le pone el nombre viejo a los procesos muertos-sin-enterrar
+# (el defunct 20078 contestaba name==ZCode); el ps EXTERNO responde <defunct> para
+# zombies y el comm exacto "ZCode" excluye a los Helpers. Solo cuenta lo vivo.
 def zcode-running []: nothing -> bool {
-    (ps | where name == ZCode | length) > 0
+    (^ps -axo comm= | lines | any {|c| ($c | str trim) == "ZCode"})
 }
 
 def zcode-pids []: nothing -> list<int> {
-    ps | where name == ZCode | get pid
+    (^ps -axo pid=,comm= | lines | parse "{pid} {comm}" | where comm == ZCode | get pid)
+}
+
+# El app corre como JOB de launchd (application.dev.zcode.app.<nums que cambian>)
+# y launchd LO RESUCITA ~8 s después de matarlo (medido: SIGKILL 17:36:43 → nueva
+# instancia 17:36:51). La única muerte que pega es bootout: mata Y desregistra.
+def app-job-label []: nothing -> string {
+    (^launchctl list | lines | where {|l| $l | str contains "application.dev.zcode"} | first | str trim | split row "\t" | last)
+}
+
+def bootout-app [st: RunState]: nothing -> nothing {
+    let label = (app-job-label)
+    if ($label | is-empty) {
+        log $st "WARN: no encontré el job de launchd del app (¿ya booteado out?)"
+        return
+    }
+    let uid = (^id -u | str trim)
+    log $st $"launchctl bootout gui/($uid)/($label) — la muerte SIN resurrección"
+    let r = (do { ^launchctl bootout $"gui/($uid)/($label)" } | complete)
+    if $r.exit_code != 0 {
+        log $st $"WARN: bootout exit \($r.exit_code\): \(($r.stderr | str trim))\)"
+    }
 }
 
 def is-exec [p: string]: nothing -> bool {
@@ -268,14 +293,15 @@ def phase0-sanity [st: RunState]: nothing -> PhaseResult {
 }
 
 # ────────────────────────────── fase 1: quit ────────────────────────────────
-# Escalera medida contra ESTE app (incidente 17:27, primera corrida real): el
-# quit de AppleScript SOLO CIERRA LA VENTANA — el app queda de FONDO (el puntito
-# gris del Dock, «Stop process in background» al click derecho) — y el SIGTERM
-# también lo ignora. Escalera: graceful → SIGTERM → SIGKILL (inignorable).
+# Escalera medida contra ESTE app (dos incidentes reales): el quit de AppleScript
+# SOLO CIERRA LA VENTANA (queda de fondo, puntito gris), SIGTERM lo ignora, y un
+# SIGKILL al main FUNCIONA pero launchd RESUCITA el app ~8 s después (es un job
+# application.dev.zcode.*). La escalera: graceful → BOOTOUT del job (mata y
+# desregistra — sin resurrección) → SIGTERM → SIGKILL → vigilancia anti-resurrección.
 def phase1-quit [st: RunState]: nothing -> PhaseResult {
     if $st.mode != "real" {
         let viva = if (zcode-running) { "SÍ está corriendo (la cerraría)" } else { "no está corriendo (nada que cerrar)" }
-        log $st $"[dryrun] SKIP fase 1: osascript quit \(solo cierra ventana — queda de fondo, puntito gris\) → ≤30 s → SIGTERM → ≤10 s → SIGKILL \(kill -s 9, el «Stop process in background» programático\) → ≤20 s a cero proceso. Hoy ZCode ($viva)."
+        log $st $"[dryrun] SKIP fase 1: osascript quit \(solo cierra ventana\) → ≤15 s → bootout del job de launchd \(muerte sin resurrección\) → SIGTERM → SIGKILL → 15 s de vigilancia anti-resurrección. Hoy ZCode ($viva)."
         return {state: $st, outcome: {ok: true, note: ""}}
     }
     log $st "quit graceful (osascript) — en este app solo cierra la ventana..."
@@ -284,30 +310,45 @@ def phase1-quit [st: RunState]: nothing -> PhaseResult {
         log $st "WARN: osascript falló (¿ya estaba cerrada?)"
     }
     mut w = 0
-    while ($w < 30) and (zcode-running) { sleep 1sec; $w += 1 }
+    while ($w < 15) and (zcode-running) { sleep 1sec; $w += 1 }
     if not (zcode-running) {
         log $st $"ZCode cerró graceful \(($w)s\)"
     } else {
-        let pids = (zcode-pids)
-        let pids_str = ($pids | each {|p| $p | into string } | str join " ")
-        log $st $"viva tras ($w)s graceful \(puntito gris: app de fondo\) — peldaño 2: SIGTERM a ($pids_str)"
-        try { kill ...$pids } catch {|_e| }
-        while ($w < 40) and (zcode-running) { sleep 1sec; $w += 1 }
+        log $st $"viva tras ($w)s graceful \(puntito gris: app de fondo\) — peldaño 2: BOOTOUT"
+        bootout-app $st
+        while ($w < 25) and (zcode-running) { sleep 1sec; $w += 1 }
         if (zcode-running) {
-            let pids9 = (zcode-pids)
-            let pids9_str = ($pids9 | each {|p| $p | into string } | str join " ")
-            log $st $"viva tras SIGTERM \(medido: la ignora\) — peldaño 3: SIGKILL \(kill -s 9\) a ($pids9_str)"
-            try { kill -s 9 ...$pids9 } catch {|_e| }
+            let pids = (zcode-pids)
+            let pids_str = ($pids | each {|p| $p | into string } | str join " ")
+            log $st $"viva tras bootout — peldaño 3: SIGTERM a ($pids_str)"
+            try { kill ...$pids } catch {|_e| }
+            while ($w < 35) and (zcode-running) { sleep 1sec; $w += 1 }
+            if (zcode-running) {
+                let pids9 = (zcode-pids)
+                let pids9_str = ($pids9 | each {|p| $p | into string } | str join " ")
+                log $st $"viva tras SIGTERM — peldaño 4: SIGKILL \(kill -s 9\) a ($pids9_str)"
+                try { kill -s 9 ...$pids9 } catch {|_e| }
+            }
         }
     }
-    while ($w < 120) and (zcode-running) { sleep 2sec; $w += 2 }
+    # Vigilancia anti-resurrección: launchd revivió el app 8 s después de un
+    # SIGKILL (medido). Si reaparece, un bootout más lo apaga para siempre.
+    while ($w < 50) {
+        if not (zcode-running) { break }
+        sleep 1sec; $w += 1
+    }
     if (zcode-running) {
-        let note = $"ZCode sigue viva tras ($w)s, SIGTERM y SIGKILL — algo muy raro"
+        log $st "resucitó (launchd) — bootout de la nueva instancia"
+        bootout-app $st
+        while ($w < 65) and (zcode-running) { sleep 1sec; $w += 1 }
+    }
+    if (zcode-running) {
+        let note = $"ZCode sigue viva tras ($w)s, bootout, SIGTERM y SIGKILL — algo muy raro"
         log $st $"✗ ($note)"
         return {state: $st, outcome: {ok: false, note: $note}}
     }
     let st = ($st | update quit_done true)
-    log $st $"cero proceso ZCode ✓ \(total ($w)s\)"
+    log $st $"cero proceso ZCode vivo ✓ \(total ($w)s\)"
     {state: $st, outcome: {ok: true, note: ""}}
 }
 

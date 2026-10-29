@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- El autómata del cutover como job ONE-SHOT de launchd (lección medida: un
+     nohup desde adentro del app muere con el árbol del app cuando launchd lo
+     tumba; hijo de launchd, el autómata sobrevive a TODO). Corre al bootstrap,
+     loguea a /tmp/deploy-fork.log, y al salir queda idle (inofensivo). -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.zcode.deploy-fork</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/lattenero/.local/bin/nu-nightly</string>
+    <string>/Users/lattenero/Projects/zcode-bot-kotlin/scripts/deploy-fork-and-retire.nu</string>
+    <string>--real</string>
+  </array>
+  <key>StandardOutPath</key><string>/tmp/deploy-fork.log</string>
+  <key>StandardErrorPath</key><string>/tmp/deploy-fork.log</string>
+  <key>RunAtLoad</key><true/>
+</dict>
+</plist>

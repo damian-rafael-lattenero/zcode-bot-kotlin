@@ -120,6 +120,19 @@ rpt() { REPORT="${REPORT:+$REPORT · }$*"; }
 zcode_running() { ps -axo comm= 2>/dev/null | grep -x "ZCode" >/dev/null; }
 zcode_pids()    { ps -axo pid=,comm= | awk '$2=="ZCode"{print $1}' | tr '\n' ' '; }
 
+# El app corre como job de launchd (application.dev.zcode.*) y launchd LO
+# RESUCITA ~8s después de matarlo (medido: SIGKILL 17:36:43 → nueva instancia
+# 17:36:51). La única muerte que pega es bootout: mata Y desregistra el job.
+bootout_app() {
+  local label uid rc
+  label="$(launchctl list 2>/dev/null | grep 'application\.dev\.zcode' | tail -1 | awk '{print $NF}')"
+  if [ -z "$label" ]; then log "WARN: no encontré el job de launchd del app (¿ya booteado out?)"; return; fi
+  uid="$(id -u)"
+  log "launchctl bootout gui/$uid/$label — la muerte SIN resurrección"
+  launchctl bootout "gui/$uid/$label" 2>/dev/null; rc=$?
+  [ "$rc" != 0 ] && log "WARN: bootout exit $rc"
+}
+
 announce() {
   # En --real: el patrón EXACTO de build-install.sh (token/chat_id de
   # ~/.zcode/telegram-remote.json, texto plano, un curl que nunca rompe el run).
@@ -215,7 +228,7 @@ phase0_sanity() {
 phase1_quit() {
   if [ "$MODE" != "real" ]; then
     if zcode_running; then local viva="SÍ está corriendo (la cerraría)"; else local viva="no está corriendo (nada que cerrar)"; fi
-    log "[dryrun] SKIP fase 1: osascript 'tell application \"ZCode\" to quit' → 30 s graceful → ÚLTIMO RECURSO kill \$(zcode_pids) → esperar ≤120 s sin proceso (ps comm exacto — pgrep no ve este app). Hoy ZCode $viva."
+    log "[dryrun] SKIP fase 1: osascript quit (solo cierra ventana) → ≤30 s → bootout del job de launchd (muerte sin resurrección) → SIGTERM → SIGKILL → 15 s de vigilancia anti-resurrección. Hoy ZCode $viva."
     return 0
   fi
   log "quit graceful (osascript) — en este app solo cierra la ventana..."
@@ -225,16 +238,28 @@ phase1_quit() {
   if ! zcode_running; then
     log "ZCode cerró graceful (${w}s)"
   else
-    log "viva tras ${w}s graceful (puntito gris: app de fondo) — peldaño 2: SIGTERM a $(zcode_pids)"
-    zcode_pids | xargs kill 2>/dev/null || true
+    log "viva tras ${w}s graceful (puntito gris: app de fondo) — peldaño 2: BOOTOUT del job de launchd"
+    bootout_app
     while [ "$w" -lt 40 ] && zcode_running; do sleep 1; w=$((w+1)); done
     if zcode_running; then
-      log "viva tras SIGTERM (medido: la ignora) — peldaño 3: SIGKILL (kill -9) a $(zcode_pids)"
-      zcode_pids | xargs kill -9 2>/dev/null || true
+      log "viva tras bootout — peldaño 3: SIGTERM a $(zcode_pids)"
+      zcode_pids | xargs kill 2>/dev/null || true
+      while [ "$w" -lt 50 ] && zcode_running; do sleep 1; w=$((w+1)); done
+      if zcode_running; then
+        log "viva tras SIGTERM — peldaño 4: SIGKILL (kill -9) a $(zcode_pids)"
+        zcode_pids | xargs kill -9 2>/dev/null || true
+      fi
     fi
   fi
+  # Vigilancia anti-resurrección: launchd revivió el app 8s después de un SIGKILL (medido).
+  while [ "$w" -lt 65 ] && ! zcode_running; do sleep 1; w=$((w+1)); done
+  if zcode_running; then
+    log "resucitó (launchd) — bootout de la nueva instancia"
+    bootout_app
+    while [ "$w" -lt 80 ] && zcode_running; do sleep 1; w=$((w+1)); done
+  fi
   while [ "$w" -lt 120 ] && zcode_running; do sleep 2; w=$((w+2)); done
-  if zcode_running; then ERRNOTE="ZCode sigue viva tras ${w}s, SIGTERM y SIGKILL — algo muy raro"; log "✗ $ERRNOTE"; return 1; fi
+  if zcode_running; then ERRNOTE="ZCode sigue viva tras ${w}s, bootout, SIGTERM y SIGKILL — algo muy raro"; log "✗ $ERRNOTE"; return 1; fi
   QUIT_DONE=1
   log "cero proceso ZCode ✓ (total ${w}s)"
   return 0
