@@ -87,16 +87,15 @@ Sí, es el consenso 2026 — los roadmaps vigentes (roadmap.sh/ai-engineer, Kode
 - [ ] Verificación: una conversación real queda recordada (memoria) y consultable (RAG) al día siguiente.
 - Gate: memoria citada en un turno real + `/brain` respondiendo en Telegram.
 
-### U2 — B2: el transport (cosa 5 — el teléfono en manos del daemon; **plan agresivo decidido por el usuario 30/10: cutover ESTA SEMANA**)
-- [ ] Completar B2: knob de cutover (send shadow|live del daemon + silencio del send Python por config), dry-run mínimo (1-2 días: send-path completo compuesto-y-logueado contra lecturas reales de la API, sin postear), verificación del comportamiento 429.
-- [ ] **Cutover con rollback armado**: solapamiento breve antes que silencio (duplicar una notificación molesta > teléfono mudo); cooldown/outbox/tg-last-ph compartidos como en la transición.
-- [ ] La semana de paridad y el recorder siguen corriendo como **auditoría post-cutover** (los gates ya no bloquean; cualquier DIVERGENT post-cutover = evidencia para el knob).
-- [ ] E2: metrics (Micrometer/Prometheus) en el daemon.
-- Gate: el daemon Kotlin enviando por Telegram en vivo, Python silenciado del send, rollback verificado.
+### U2 — B2: el transport — **CUTOVER HECHO 30/10 (commit `56a7229`)**: el daemon es el dueño del send
+- [x] Knob `shadow|dry-run|live` en `daemon.json` (read-once al boot; typo → SHADOW loudly; +24 tests, suite 197). DRY-RUN deployado 15:41 con selftest real + contratos compartidos verificados (tg-last-ph=19447 = el más nuevo de Python).
+- [x] **FLIP 15:54**: mode=live, Sender wired con los archivos compartidos (tg-cooldown read+write, outbox flock-compatible, tg-last-ph), Python silenciado (`mac_spectator=false` + zconn callado — último announce 15:32), single-reader respetado (Python sigue polleando getUpdates; el daemon JAMÁS pollea en B2). **Primer envío real del Kotlin: `zconn/up message_id=19454` a las 16:00:40. Cero duplicados.**
+- [x] Rollback documentado como comando de una línea en el README (knob a shadow + Python send on).
+- [ ] E2: metrics (Micrometer/Prometheus) en el daemon (pasa a la cola post-B3b).
+- Auditoría post-cutover: el comparator sigue diario; con Python silenciado su evidencia spectator/zconn se apaga (moot por diseño del cutover agresivo).
 
-### U2-parallel — B3a: el canal del fork (el «único camino», arrancado 30/10 en paralelo)
-- [ ] `ZCode` fork: canal «daemon local» (unix socket con auth — §5 security): `handleInboundMessage` + stream `bot-channel-continuous` + service queries (listTasks/quota/meta). ADR del protocolo primero; pipeline del fork (typecheck/oxlint/vitest); commit `[fork]` + push; deploy (`build-install.sh`) cuando Damian pueda reiniciar la app.
-- [ ] `zcode-bot-kotlin`: cliente del socket según el protocolo (post-B2, en B3b).
+### U2-parallel — B3a: el canal del fork (el «único camino») — **HECHO 30/10, commit `9b814dcb` (origin/damian)**
+- [x] `ZCode` fork: canal «daemon local» completo — socket `~/.zcode/daemon-local.sock` (JSONL, protocolo v1 versionado, dueño: el host process), **auth obligatoria** (token 64-hex en `~/.zcode/daemon-local.token` 0600, rotado en cada arranque, handshake hello-primero, comparación timing-safe, guard two-host). Mensajes: `hello/inbound/subscribe/stream_event/query/stop/stopAll/compact/ping/bye`. Provider «daemon» integrado nativo (replies vuelven por el socket; gate = toggle del diálogo Bots + kill-switch `ZCODE_DAEMON_LOCAL_CHANNEL=0`). **Cubre TODO el MVP**: stream V4 crudo (`agent_thought_chunk`, `tool_call` + updates con `toolName` y `streamingRawInputLength` para los contadores de líneas/chars, `parentToolUseId` para subagentes, `at` epoch en el envelope), queries (`listTasks`/`taskList`/`activeTaskIds`/`quota`/`taskMeta`/`botStatus`), control (`stop`/`stopAll`). Pipeline verde: typecheck + oxlint + architecture check + 10/10 tests herméticos (socket y token reales) + bots suite 491/491. **Spec: `docs/fork/DAEMON-CHANNEL.md` + shapes normativos en `packages/shared/src/daemon-channel.ts`** — el contrato de B3b. Deploy pendiente (un ⌘Q de Damian cuando toque el flip global; rollback = cualquier build anterior no tiene el canal).
 
 ### U2.5 — B3b + retiro abrupto: el bot Kotlin al 100% (decisión del dueño 30/10: «deployalo, retira python abruptamente, lo vamos fixeando en caliente»)
 Ejecución automática al terminar B2 y B3a — sin más gates, sin más preguntas.
@@ -179,6 +178,8 @@ El propósito declarado (30/10/2026): **llegar a ser AI engineer construyendo el
 
 ## 7. Changelog
 
+- 2026-10-30 v1.12: **B2 CUTOVER COMPLETO** (`56a7229`): knob shadow|dry-run|live, dry-run verificado 15:41, **flip 15:54, primer envío real 16:00:40 (message_id=19454), Python callado sin duplicados, rollback documentado**. El agente murió al terminar — todo commiteado/pusheado/deployado; el main verificó el flip en vivo. Lanzado el build de B3b (última pieza antes del retiro abrupto).
+- 2026-10-30 v1.11: **B3a COMPLETO** (`9b814dcb` en el fork): el canal daemon-local con auth, protocolo v1, stream V4 crudo (cubre los contadores del MVP), queries y control — pipeline del fork todo verde (491/491 bots suite + 10/10 del canal). Spec en `docs/fork/DAEMON-CHANNEL.md`. Falta: el flip B2 (agente corriendo: knob + dry-run + flip), después B3b sobre la spec, deploy y retiro abrupto.
 - 2026-10-30 v1.10: **MVP del bot Kotlin definido por el dueño**: 8 comandos (/tasks /all_tasks /status /stop /nuclear /quota /help /subagents) + requisitos duros de UX (streaming CoT en vivo, spinner, progreso acumulado líneas/chars, timers, heartbeat visible, NUNCA silencio de radio). El streaming pasa a ser first-class del canal B3a (mensaje al agente del fork con los eventos V4 necesarios). Con esto se sale inmediatamente al retirar Python; el resto se prescinde/hot-fixea.
 - 2026-10-30 v1.9: **directiva del dueño: retiro abrupto del Python y fixeo en caliente.** Al terminar B2+B3a se ejecuta U2.5 automáticamente (B3b wiring live completo → deploy → unload de los LaunchAgents Python → verificación end-to-end → hot-fix loop). B5 (retiro) se adelanta a U2.5; B4 (render completo) pasa a ser recuperación de lo degradado. Sin más gates ni preguntas en esa cadena.
 - 2026-10-30 v1.8: decisión del usuario — **cutover B2 agresivo ESTA SEMANA** (dry-run mínimo + flip con rollback armado; la semana de paridad y el recorder pasan a auditoría post-cutover, ya no bloquean) y **B3a arranca en paralelo ya** (el canal unix socket del fork: el «único camino» como el bot original de ZCode). La regla de gates de §3 queda enmendada para este cutover por decisión explícita del dueño del sistema.
