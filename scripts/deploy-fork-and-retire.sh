@@ -218,18 +218,23 @@ phase1_quit() {
     log "[dryrun] SKIP fase 1: osascript 'tell application \"ZCode\" to quit' → 30 s graceful → ÚLTIMO RECURSO kill \$(zcode_pids) → esperar ≤120 s sin proceso (ps comm exacto — pgrep no ve este app). Hoy ZCode $viva."
     return 0
   fi
-  log "quit graceful (osascript)..."
+  log "quit graceful (osascript) — en este app solo cierra la ventana..."
   osascript -e 'tell application "ZCode" to quit' 2>/dev/null || log "WARN: osascript falló (¿ya estaba cerrada?)"
   local w=0
   while [ "$w" -lt 30 ] && zcode_running; do sleep 1; w=$((w+1)); done
-  if zcode_running; then
-    log "viva tras ${w}s graceful — ÚLTIMO RECURSO: kill $(zcode_pids)"
-    zcode_pids | xargs kill 2>/dev/null || true
-  else
+  if ! zcode_running; then
     log "ZCode cerró graceful (${w}s)"
+  else
+    log "viva tras ${w}s graceful (puntito gris: app de fondo) — peldaño 2: SIGTERM a $(zcode_pids)"
+    zcode_pids | xargs kill 2>/dev/null || true
+    while [ "$w" -lt 40 ] && zcode_running; do sleep 1; w=$((w+1)); done
+    if zcode_running; then
+      log "viva tras SIGTERM (medido: la ignora) — peldaño 3: SIGKILL (kill -9) a $(zcode_pids)"
+      zcode_pids | xargs kill -9 2>/dev/null || true
+    fi
   fi
   while [ "$w" -lt 120 ] && zcode_running; do sleep 2; w=$((w+2)); done
-  if zcode_running; then ERRNOTE="ZCode sigue viva tras ${w}s"; log "✗ $ERRNOTE"; return 1; fi
+  if zcode_running; then ERRNOTE="ZCode sigue viva tras ${w}s, SIGTERM y SIGKILL — algo muy raro"; log "✗ $ERRNOTE"; return 1; fi
   QUIT_DONE=1
   log "cero proceso ZCode ✓ (total ${w}s)"
   return 0
