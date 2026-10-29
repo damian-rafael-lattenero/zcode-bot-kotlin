@@ -42,6 +42,8 @@ object BusEvents {
     }
 
     /** A malformed line is reported, never thrown: the bus is append-only and one bad line must not stop the tail. */
+    // One guard per line, exactly as agent-brain's mirror: the parse ladder reads better flat.
+    @Suppress("ReturnCount")
     fun parse(line: String): Parsed {
         val event = try {
             json.decodeFromString<BusEvent>(line)
