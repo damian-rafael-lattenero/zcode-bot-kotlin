@@ -2,10 +2,16 @@ package dev.lattenero.bot.channel
 
 import dev.lattenero.bot.contracts.PyText
 import io.github.oshai.kotlinlogging.KotlinLogging
+import kotlinx.coroutines.delay
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 private val logger = KotlinLogging.logger {}
 
@@ -14,6 +20,9 @@ interface ChannelOps {
     suspend fun query(query: ChannelQuery): QueryAnswer
 
     suspend fun sendInbound(text: String, messageId: String, receivedAt: Long): InboundReceipt
+
+    /** Python's F17: park a text while its conversation is mid-turn — the queue size after, or -1. */
+    suspend fun enqueueInbound(text: String, messageId: String, receivedAt: Long): Int
 
     suspend fun subscribe(taskId: String, workspacePath: String)
 }
@@ -35,17 +44,24 @@ class BotCommands(
     /** /nuclear's daemon half: stopAll is the channel's; resetting OUR state is the daemon's. */
     private val daemonReset: suspend () -> Unit,
     private val clock: () -> Long = System::currentTimeMillis,
+    /** Python's ctx_tasks source (tasks-index + cli db, read-only) — the history /tasks lists. */
+    private val history: TasksHistory = noHistory,
+    /** Python's config.DEFAULT_WS — the loose-tasks workspace the /tasks scope excludes. */
+    private val defaultWorkspacePath: String = "",
 ) {
+
+    /** /tasks new's pending intent: the NEXT free text skips the bind and CREATES (Python's /task new). */
+    private var newIntent = false
 
     /** One incoming line. Null = not a command (the router sends it as inbound). */
     suspend fun handle(text: String, updateId: Long): String? {
         val (base, rest) = parseCommand(text) ?: return route(text, updateId)
         return when (base) {
-            "tasks" -> tasks()
-            "all_tasks", "alltasks" -> allTasks()
+            "tasks", "task" -> tasks(rest, updateId) // "task" keeps Python's muscle memory alive
+            "all_tasks", "alltasks" -> allTasks(rest, updateId)
             "status" -> status()
-            "stop" -> stop()
-            "nuclear", "nuke" -> nuclear()
+            "stop" -> stop(rest)
+            "nuclear", "nuke" -> nuclear(rest)
             "quota" -> quota()
             "help", "start" -> help()
             "subagents", "agents" -> subagents()
@@ -56,10 +72,46 @@ class BotCommands(
         }
     }
 
-    /** Free text → the REAL conversation (the router's live leg). */
+    /**
+     * Free text → the ACTIVE conversation, NEVER a new one (Python's
+     * `only_active_task` doctrine — Damian, 29/10: «probando probando»
+     * opened a fresh conversation instead of landing in the open one).
+     *
+     * The channel's inbound has NO target field (§3.2 — it rides the
+     * composer's draft/task pipeline), but the botsService's own `/task
+     * <taskId>` command rebinds its context. So the bind is: resolve the
+     * app's open conversation → fire `/task <id>` as an inbound command →
+     * CONFIRM via botStatus (the server does not serialize inbounds — the
+     * text only fires once the context says the target) → then the text.
+     */
+    @Suppress("ReturnCount") // one guard per leg — the router's honest refusals
     private suspend fun route(text: String, updateId: Long): String? {
-        val receipt = ops.sendInbound(text, messageId = "tg-$updateId", receivedAt = clock())
-        return when (receipt) {
+        when (val ctx = contextAnswer()) {
+            ContextAnswer.Degraded ->
+                return "📡 The channel to the app is down (the fork's host is not running?) — " +
+                    "text did NOT reach a conversation. Try again after the app restarts."
+
+            ContextAnswer.None -> return NO_ACTIVE_CONVERSATION
+
+            is ContextAnswer.Ctx -> {
+                val active = ctx.value.activeTaskId
+                when {
+                    active == null && !newIntent -> {
+                        val open = resolveOpenConversation(ctx.value.workspacePath)
+                            ?: return NO_ACTIVE_CONVERSATION
+                        if (!bindTo(open, updateId)) return BIND_FAILED
+                    }
+
+                    // Python's F17 busy path: a mid-turn conversation QUEUES the
+                    // text (it auto-fires on task_complete; /stop interrupts NOW —
+                    // the ⚡/⏳ inline buttons ride the markup hot-fix)
+                    active != null && isRunning(active, ctx.value.workspacePath) ->
+                        return enqueueOrRefuse(text, updateId, active)
+                }
+            }
+        }
+        newIntent = false
+        return when (ops.sendInbound(text, messageId = "tg-$updateId", receivedAt = clock())) {
             InboundReceipt.FIRED -> {
                 watchContext() // the turn this text starts is the one to stream
                 null // the live view + the final render speak; no ack noise
@@ -71,57 +123,156 @@ class BotCommands(
         }
     }
 
+    /** The active task has a live turn (sessions-index's non-terminal phases). */
+    private suspend fun isRunning(taskId: String, workspacePath: String): Boolean =
+        when (val answer = ops.query(ChannelQuery.ActiveTaskIds(workspacePath))) {
+            is QueryAnswer.Ok -> taskId in parseStrings(answer.resultJson)
+            else -> false // degraded guess: fire — the channel's own «task running» reply still speaks
+        }
+
+    /** Python's F17 texts: the queue holds it; task_complete's drain fires it. */
+    private suspend fun enqueueOrRefuse(text: String, updateId: Long, active: String): String {
+        val title = history.ctxTasks(SCOPE_FOR_PICK).firstOrNull { it.sid == active }
+            ?.title?.takeIf { it.isNotEmpty() } ?: active.takeLast(SID_TAIL)
+        val n = ops.enqueueInbound(text, "tg-$updateId", clock())
+        if (n < 0) {
+            return "⚠️ The Mac is busy and I could NOT queue your message — retry in a moment."
+        }
+        return "⏳ The Mac is busy with «${PyText.esc(title)}» — your message stayed in the " +
+            "queue ($n waiting). It runs when the turn finishes (/stop interrupts it now; " +
+            "/nuclear in an emergency)."
+    }
+
+    /**
+     * The app's OPEN conversation (sessions-index: non-terminal phase —
+     * a mid-turn task). Several open → the most recently updated one
+     * (the one in front of the owner). Null = nothing alive to talk to.
+     */
+    @Suppress("ReturnCount") // one guard per degrade of the two queries
+    private suspend fun resolveOpenConversation(workspacePath: String): String? {
+        val running = when (val answer = ops.query(ChannelQuery.ActiveTaskIds(workspacePath))) {
+            is QueryAnswer.Ok -> parseStrings(answer.resultJson)
+            else -> return null
+        }
+        if (running.isEmpty()) return null
+        val metas = when (val answer = ops.query(ChannelQuery.ListTasks(workspacePath))) {
+            is QueryAnswer.Ok -> parseTaskMetas(answer.resultJson)
+            else -> return running.first()
+        }
+        return metas.filter { it.id in running }
+            .maxByOrNull { it.updatedAt ?: 0 }
+            ?.id ?: running.first()
+    }
+
+    /** Fires the botsService's own `/task <id>` and CONFIRMS the context took it. */
+    @Suppress("ReturnCount") // one guard per outcome (fired, confirmed, gave up)
+    private suspend fun bindTo(taskId: String, updateId: Long): Boolean {
+        if (ops.sendInbound("/task $taskId", "tg-$updateId-bind", clock()) != InboundReceipt.FIRED) {
+            return false
+        }
+        repeat(BIND_CONFIRM_TRIES) {
+            delay(BIND_CONFIRM_EVERY_MS)
+            if ((contextAnswer() as? ContextAnswer.Ctx)?.value?.activeTaskId == taskId) return true
+        }
+        return false
+    }
+
     // ---- the eight ---------------------------------------------------------
 
-    /** /tasks — the focused list (listTasks of the bot's active context). */
-    private suspend fun tasks(): String =
-        when (val ctx = contextAnswer()) {
-            ContextAnswer.Degraded -> degraded("botStatus")
-            ContextAnswer.None -> NO_CONTEXT
-            is ContextAnswer.Ctx -> when (val answer = ops.query(ChannelQuery.ListTasks(ctx.value.workspacePath))) {
-                is QueryAnswer.Ok ->
-                    renderTaskArray(answer.resultJson, ctx.value.activeTaskId, focused = true, nowMs = clock())
+    /**
+     * /tasks — Python's `/task`: the projects-scope history (usage-backed
+     * tasks, loose DEFAULT-workspace ones excluded). `n` picks (rebinds the
+     * channel's context), `new` arms the next text to CREATE.
+     */
+    private suspend fun tasks(rest: String, updateId: Long): String = when {
+        rest.isEmpty() -> taskList(all = false)
+        rest.startsWith("@") -> pickBySid(rest.substring(1), updateId)
+        rest.all { it.isDigit() } -> pickScoped(rest.toInt(), all = false, updateId, "tasks")
+        rest.substringBefore(' ') == "new" -> newConversation(rest.removePrefix("new").trim())
+        else -> TASK_USAGE
+    }
 
-                else -> degraded("listTasks")
-            }
+    /** /all_tasks — Python's `/all_tasks`: every conversation, loose ones included. `n` picks. */
+    private suspend fun allTasks(rest: String, updateId: Long): String =
+        if (rest.all { it.isDigit() } && rest.isNotEmpty()) {
+            pickScoped(rest.toInt(), all = true, updateId, "all_tasks")
+        } else {
+            taskList(all = true)
         }
 
-    /** /all_tasks — every conversation the task list knows (timeline, all scopes the bot sees). */
-    private suspend fun allTasks(): String =
-        when (val ctx = contextAnswer()) {
+    /** The list itself — Python's task_list_report(scope): rows + stamps + footer. */
+    private suspend fun taskList(all: Boolean): String {
+        val rows = scopeRows(history.ctxTasks(if (all) ALL_CAP else TASKS_CAP), all, defaultWorkspacePath)
+        return when (val ctx = contextAnswer()) {
             ContextAnswer.Degraded -> degraded("botStatus")
-            ContextAnswer.None -> NO_CONTEXT
+            ContextAnswer.None -> renderTaskList(rows, emptySet(), null, null, all)
             is ContextAnswer.Ctx -> {
-                val query = ChannelQuery.TaskList(
-                    listKind = "timeline",
-                    workspaceScopes = listOf(WorkspaceScope(ctx.value.workspacePath, ctx.value.workspaceIdentity)),
-                    limit = LIST_CAP,
-                )
-                when (val answer = ops.query(query)) {
-                    is QueryAnswer.Ok -> {
-                        val items = (parse(answer.resultJson)?.obj("items") as? JsonArray)?.toString()
-                            ?: answer.resultJson
-                        renderTaskArray(items, ctx.value.activeTaskId, focused = false, nowMs = clock())
-                    }
-
-                    else -> degraded("taskList")
+                val running = when (val answer = ops.query(ChannelQuery.ActiveTaskIds(ctx.value.workspacePath))) {
+                    is QueryAnswer.Ok -> parseStrings(answer.resultJson).toSet()
+                    else -> emptySet()
                 }
+                renderTaskList(rows, running, ctx.value.activeTaskId, ctx.value.workspacePath, all)
             }
         }
+    }
+
+    /** `/tasks n` — Python's task_select: the VISIBLE list's n binds the active conversation. */
+    private suspend fun pickScoped(n: Int, all: Boolean, updateId: Long, word: String): String {
+        val rows = scopeRows(history.ctxTasks(if (all) ALL_CAP else TASKS_CAP), all, defaultWorkspacePath)
+        if (n < 1 || n > rows.size) return outOfList(word, rows.size)
+        return pickBySid(rows[n - 1].sid, updateId)
+    }
+
+    /**
+     * Python's _task_select_sid: bind + the 🎯 reply (the buttons' and
+     * `/task n`'s shared end). The botsService REJECTS switches mid-turn
+     * (getContextTaskBlockReason → taskRunning) — pre-checked here with
+     * the channel's own activeTaskIds so the refusal is instant.
+     */
+    @Suppress("ReturnCount") // one guard per refusal, Python's three-error ladder
+    private suspend fun pickBySid(sid: String, updateId: Long): String {
+        val ctx = contextAnswer() as? ContextAnswer.Ctx
+            ?: return NO_CONTEXT
+        val current = ctx.value.activeTaskId
+        if (current != null && current != sid && isRunning(current, ctx.value.workspacePath)) {
+            return "⏳ The previous task's turn is still running — /stop first, then pick again."
+        }
+        val row = history.ctxTasks(SCOPE_FOR_PICK).firstOrNull { it.sid == sid }
+        if (!bindTo(sid, updateId)) return BIND_FAILED
+        val title = row?.title?.takeIf { it.isNotEmpty() } ?: sid.takeLast(SID_TAIL)
+        return "🎯 Active conversation: «${PyText.esc(title)}»\n" +
+            "All text you send runs there — the live view streams it."
+    }
+
+    /** Python's `/task new [project]`: arms the next free text to CREATE (live: the botsService draft). */
+    @Suppress("ReturnCount") // one guard per refusal shape
+    private suspend fun newConversation(tag: String): String {
+        if (tag.isNotEmpty()) {
+            return "⚠️ /tasks new opens it in the ACTIVE project — switching projects from " +
+                "the phone is a next hot-fix."
+        }
+        val ws = (contextAnswer() as? ContextAnswer.Ctx)?.value?.workspacePath
+        if (ws == null || ops.sendInbound("/new", "tg-new-${clock()}", clock()) != InboundReceipt.FIRED) {
+            return DEGRADED
+        }
+        newIntent = true
+        return "🆕 New conversation in ${PyText.esc(ws.substringAfterLast('/'))} — " +
+            "send the first message and it starts."
+    }
 
     /** /status — what runs NOW (sessions-index) + the daemon's own live view. */
     private suspend fun status(): String {
-        val lines = mutableListOf("🖥️ <b>bot status</b>")
+        val lines = mutableListOf("📊 <b>Status</b>")
         when (val ctx = contextAnswer()) {
             ContextAnswer.Degraded -> lines.add(DEGRADED)
-            ContextAnswer.None ->
-                lines.add("context: none (no conversation yet — text goes to the app's active task)")
+            ContextAnswer.None -> lines.add(ACTIVE_NONE)
             is ContextAnswer.Ctx -> {
                 lines.add(
                     "context: ${PyText.esc(ctx.value.workspacePath.substringAfterLast('/'))}" +
                         " · ${PyText.esc(ctx.value.mode)}",
                 )
-                ctx.value.activeTaskId?.let { lines.add("active task: <code>${PyText.esc(it)}</code>") }
+                lines.add(activeLine(ctx.value.activeTaskId, ctx.value.workspacePath))
+                modelLine(ctx.value.activeTaskId, ctx.value.mode)?.let(lines::add)
                 when (val answer = ops.query(ChannelQuery.ActiveTaskIds(ctx.value.workspacePath))) {
                     is QueryAnswer.Ok -> {
                         val ids = parseStrings(answer.resultJson)
@@ -149,9 +300,15 @@ class BotCommands(
         return lines.joinToString("\n")
     }
 
-    /** /stop — the channel's stop (the SAME V4 stop as the UI's button). */
-    private suspend fun stop(): String =
-        when (val ctx = contextAnswer()) {
+    /**
+     * /stop — Python's two-step: `go` = HARD (everything, now); bare = the
+     * SOFT stop of the active task's turn (the SAME V4 stop as the UI's
+     * button) + the way to the hard one. Python's exact emoji contract.
+     */
+    @Suppress("ReturnCount") // one guard per degrade of the stop path
+    private suspend fun stop(rest: String): String {
+        if (rest == "go") return hardStop()
+        return when (val ctx = contextAnswer()) {
             ContextAnswer.Degraded -> DEGRADED
             ContextAnswer.None -> NO_CONTEXT
             is ContextAnswer.Ctx -> {
@@ -160,27 +317,55 @@ class BotCommands(
                 when (val answer = ops.query(ChannelQuery.Stop(taskId))) {
                     is QueryAnswer.Ok ->
                         "⏹️ Stop sent to <code>${PyText.esc(taskId.takeLast(SID_TAIL))}</code>" +
-                            " — the turn ends on its own."
+                            " — the turn ends on its own.\n💀 /stop go stops EVERYTHING at once."
 
                     is QueryAnswer.Unavailable -> DEGRADED
                     is QueryAnswer.Failed -> "⚠️ Stop failed (${answer.code}): ${PyText.esc(answer.message ?: "?")}"
                 }
             }
         }
+    }
 
-    /** /nuclear — stopAll (the channel's half) + the daemon's reset (our half). */
-    private suspend fun nuclear(): String {
+    /** `/stop go` — Python's hard half: every active task's turn, no confirmation. */
+    private suspend fun hardStop(): String {
         val workspace = (contextAnswer() as? ContextAnswer.Ctx)?.value?.workspacePath
         val stopped = when (val answer = ops.query(ChannelQuery.StopAll(workspace))) {
             is QueryAnswer.Ok -> parseStringsOf(answer.resultJson, "stopped")
-            else -> emptyList()
+            else -> return "⚠️ Stop failed — the channel is down?"
         }
-        daemonReset()
-        return "☢️ Nuclear: stopped ${stopped.size} run(s)" +
-            (stopped.take(NAMES_IN_NUCLEAR).joinToString("") {
-                " · <code>${PyText.esc(it.takeLast(SID_TAIL))}</code>"
-            }) +
-            " — the daemon's live state was reset. ⌘Q of the app stays YOURS (the golden rule)."
+        return "💀 Hard stop: ${stopped.size} run(s) stopped — every active task's turn."
+    }
+
+    /**
+     * /nuclear — Python's two-step (the owner, 29/10: «con go de una, sin
+     * go soft y botón»): `go` = stopAll + the daemon's reset, NOW; bare =
+     * the ☢️ card (Python's exact text, minus the app-restart lines the
+     * ⌘Q golden rule keeps ours from doing) + the confirmation; `no` =
+     * Python's exact cancellation. The ☢️/🙅 inline buttons ride the
+     * callback_query hot-fix — the /nuclear go words work today.
+     */
+    private suspend fun nuclear(rest: String): String = when (rest) {
+        "go" -> {
+            val workspace = (contextAnswer() as? ContextAnswer.Ctx)?.value?.workspacePath
+            val stopped = when (val answer = ops.query(ChannelQuery.StopAll(workspace))) {
+                is QueryAnswer.Ok -> parseStringsOf(answer.resultJson, "stopped")
+                else -> emptyList()
+            }
+            daemonReset()
+            "☢️ Nuclear: stopped ${stopped.size} run(s)" +
+                (stopped.take(NAMES_IN_NUCLEAR).joinToString("") {
+                    " · <code>${PyText.esc(it.takeLast(SID_TAIL))}</code>"
+                }) +
+                " — the daemon's live state was reset. ⌘Q of the app stays YOURS (the golden rule)."
+        }
+
+        "no" -> "🙅 Cancelled — nothing was touched."
+
+        else ->
+            "☢️ <b>Nuclear</b> — emergency:\n" +
+            "⏹️ stops ALL runs\n" +
+            "🔄 resets the bot's live state (the app itself is Damian's ⌘Q — never ours)\n\n" +
+            "Confirm? — /nuclear go · /nuclear no cancels"
     }
 
     /** /quota — the coding plan's pool (IUsageStatsService through the channel). */
@@ -263,6 +448,46 @@ class BotCommands(
         ops.subscribe(taskId, ctx.value.workspacePath)
     }
 
+    /** Python's status line: «🎯 Active: «title»» — the index first, taskMeta as fallback. */
+    @Suppress("ReturnCount") // one guard per fallback of the title lookup
+    private suspend fun activeLine(taskId: String?, workspacePath: String): String {
+        if (taskId == null) return ACTIVE_NONE
+        val fromIndex = history.ctxTasks(SCOPE_FOR_PICK).firstOrNull { it.sid == taskId }?.title
+        val title = fromIndex?.takeIf { it.isNotEmpty() }
+            ?: when (val answer = ops.query(ChannelQuery.TaskMeta(taskId, workspacePath))) {
+                is QueryAnswer.Ok -> parse(answer.resultJson)?.str("title")?.takeIf { it.isNotEmpty() }
+                else -> null
+            }
+            ?: return "🎯 Active: <code>${PyText.esc(taskId.takeLast(SID_TAIL))}</code>"
+        return "🎯 Active: «${PyText.esc(title)}»"
+    }
+
+    /** Python's «🤖 model · 🧠 thinking · 🎛 mode» — model/thinking from db.sqlite, the mode from the context. */
+    @Suppress("ReturnCount") // one guard per absent source (no task, no persisted selection)
+    private suspend fun modelLine(taskId: String?, mode: String): String? {
+        if (taskId == null) return null
+        val sel = runCatching { history.modelSelection(taskId) }.getOrNull() ?: return null
+        return "🤖 ${PyText.esc(sel.modelId)} · 🧠 ${PyText.esc(sel.reasoningLevel)} · 🎛 ${modeLabel(mode)}"
+    }
+
+    /** Python's MODES labels (plan/yolo vocabulary; the fork says full_access for yolo). */
+    private fun modeLabel(mode: String): String = when (mode) {
+        "plan" -> "🗺 Plan mode"
+        "yolo", "full_access" -> "🔓 Full access"
+        else -> mode
+    }
+
+    /** listTasks' bare array → (taskId, title, updatedAt) — the open-conversation resolver's metas. */
+    private fun parseTaskMetas(json: String): List<TaskBrief> = runCatching {
+        (Json.parseToJsonElement(json) as? JsonArray)
+            ?.mapNotNull { it as? JsonObject }
+            ?.mapNotNull { m ->
+                val id = m.str("taskId") ?: return@mapNotNull null
+                TaskBrief(id = id, title = m.str("title") ?: id, updatedAt = m.long("updatedAt"))
+            }
+            .orEmpty()
+    }.getOrDefault(emptyList())
+
     private fun degraded(what: String): String =
         "📡 The channel is down ($what unavailable) — the fork's host is not running?"
 
@@ -283,7 +508,7 @@ class BotCommands(
                 .orEmpty()
         }.orEmpty()
 
-    internal companion object {
+    companion object {
         internal const val UNKNOWN =
             "🤷 Unknown command — /help lists the eight this bot speaks."
         internal const val DEGRADED =
@@ -291,24 +516,63 @@ class BotCommands(
             "Commands that need it wait for the app."
         internal const val NO_CONTEXT =
             "📭 No active conversation context — send text first (it opens/uses the app's real conversation)."
+
+        /** Python's handle_free_text refusal — free text NEVER opens a conversation by itself. */
+        internal const val NO_ACTIVE_CONVERSATION =
+            "📭 There is no active conversation yet — send /tasks and pick one with /tasks n.\n" +
+            "After that, all text you send runs there (live mode)."
+
+        /**
+         * The bind did not land: a turn started mid-switch (the residual
+         * race of the command-based bind — the server does not serialize
+         * inbounds) or the conversation vanished.
+         */
+        internal const val BIND_FAILED =
+            "⚠️ The switch did not land (a turn may have started mid-switch) — /tasks n again, or /stop first."
+
+        /** Python's /task usage hint, renamed to the owner's vocabulary. */
+        internal const val TASK_USAGE =
+            "⚠️ /tasks · /tasks &lt;n&gt; picks · /tasks new [project] · /all_tasks shows all"
+
+        /** Python's status: «🎯 Active: none (/task n to pick one)». */
+        internal const val ACTIVE_NONE = "🎯 Active: none (/tasks n to pick one)"
         internal const val SID_TAIL = 8
-        internal const val LIST_CAP = 20
         internal const val NAMES_IN_NUCLEAR = 3
 
-        internal val HELP = listOf(
-            "📖 <b>The eight</b> (MVP — the rest is hot-fix territory):",
-            "/tasks — conversations of the active project",
-            "/all_tasks — every conversation (timeline)",
-            "/status — what runs now + the live view",
-            "/stop — stop the active task's turn",
-            "/nuclear — stop EVERYTHING + reset the bot",
-            "/quota — coding plan credits",
-            "/subagents — the live task's subagents",
-            "/help — this list",
-            "",
-            "Anything else is TEXT: it goes to the REAL conversation (live mode) " +
-                "and the live view shows every thought, tool and line as it happens.",
-        ).joinToString("\n")
+        /** Python's caps: /task lists 10, /all_tasks 20, picks resolve against 30. */
+        private const val TASKS_CAP = 10
+        private const val ALL_CAP = 20
+        internal const val SCOPE_FOR_PICK = 30
+
+        /** The bind confirmation loop: the server does NOT serialize inbounds (§3.2). */
+        internal const val BIND_CONFIRM_TRIES = 10
+        internal const val BIND_CONFIRM_EVERY_MS = 200L
+
+        /**
+         * The eight — the SINGLE source of both the «/» menu (BotMenu)
+         * and /help's list, so they can never drift apart again (the
+         * owner, 29/10: «la lista de commands no corresponde con la lista
+         * real»). Descriptions in Python's menu_desc tone.
+         */
+        val MENU = listOf(
+            "tasks" to "conversations by project · /tasks n picks the active one",
+            "all_tasks" to "all conversations, loose ones included",
+            "status" to "what is running + the active conversation",
+            "stop" to "stops the active task's turn",
+            "nuclear" to "emergency: stops EVERYTHING and resets the bot",
+            "quota" to "coding plan credits",
+            "subagents" to "the live task's subagents",
+            "help" to "all commands",
+        )
+
+        internal val HELP = (listOf("📖 <b>The eight</b> (MVP — the rest is hot-fix territory):") +
+            MENU.map { (cmd, desc) -> "/$cmd — $desc" } +
+            listOf(
+                "",
+                "Anything else is TEXT: it goes to the ACTIVE conversation (live mode) " +
+                    "and the live view shows every thought, tool and line as it happens. " +
+                    "Free text never opens a new one — /tasks new does.",
+            )).joinToString("\n")
 
         /** (base, rest) of a /command line, with @botname stripped — null when not a command. */
         @Suppress("ReturnCount") // one guard per non-command shape
@@ -320,54 +584,63 @@ class BotCommands(
             return base to (parts.getOrNull(1)?.trim() ?: "")
         }
 
-        /** listTasks' bare array / taskList's items → the numbered list. */
-        @Suppress("CyclomaticComplexMethod") // the list render: parse, sort, cap, mark
-        fun renderTaskArray(json: String, activeTaskId: String?, focused: Boolean, nowMs: Long): String {
-            val metas = runCatching {
-                when (val el = Json.parseToJsonElement(json)) {
-                    is JsonArray -> el
-                    is JsonObject -> (el["items"] as? JsonArray) ?: JsonArray(emptyList())
-                    else -> JsonArray(emptyList())
-                }
-            }.getOrNull() ?: JsonArray(emptyList())
-            val tasks = metas.mapNotNull { it as? JsonObject }
-                .mapNotNull { m ->
-                    val id = m.str("taskId") ?: return@mapNotNull null
-                    TaskBrief(id = id, title = m.str("title") ?: id, updatedAt = m.long("updatedAt"))
-                }
-                .sortedByDescending { it.updatedAt ?: 0 }
-            if (tasks.isEmpty()) return "📭 No conversations${if (focused) " in the active project" else ""}."
-            val head = if (focused) "💬 <b>conversations (project)</b>" else "💬 <b>all conversations</b>"
-            return (listOf(head) + tasks.take(LIST_CAP).mapIndexed { i, t ->
-                val mark = if (t.id == activeTaskId) " 🎯" else ""
-                "  ${i + 1}. «${PyText.esc(t.title.take(TITLE_CAP))}»$mark" +
-                    " · ${t.updatedAt?.let { ago(it, nowMs) } ?: "?"}"
-            } + (if (tasks.size > LIST_CAP) listOf("  ··· ${tasks.size - LIST_CAP} more") else emptyList()))
-                .joinToString("\n")
-        }
+        /** Python's args.out_of_list_error. */
+        fun outOfList(word: String, n: Int): String =
+            "⚠️ Number out of the list (1 to $n) — /$word."
 
-        private fun ago(epochMs: Long, nowMs: Long): String {
-            val s = (nowMs - epochMs) / 1000
-            return when {
-                s < SECS_MIN -> "${s}s ago"
-                s < SECS_HOUR -> "${s / SECS_MIN}m ago"
-                s < SECS_DAY -> "${s / SECS_HOUR}h ago"
-                else -> "${s / SECS_DAY}d ago"
+        /**
+         * Python's task_list_report — the text half of the tappable list:
+         * header, `{stamp} {n}. {title}[ · 📁ws]` per row, footer. The stamp
+         * carries BOTH marks when they co-occur (Damian, 26/10: «quiero los
+         * dos emojis»); the buttons themselves are a next hot-fix (the
+         * daemon's send path has no markup yet).
+         */
+        fun renderTaskList(
+            rows: List<TaskRow>,
+            running: Set<String>,
+            activeSid: String?,
+            activeWs: String?,
+            all: Boolean,
+        ): String {
+            if (rows.isEmpty()) {
+                return if (all) "🧠 No tasks — /all_tasks shows all." else "🧠 No tasks project — /all_tasks shows all."
             }
+            val header = if (all) {
+                "💬 <b>All conversations</b> (loose ones included) — /tasks only projects"
+            } else {
+                "💬 <b>Conversations by project</b> — pick one with /tasks n"
+            }
+            val lines = mutableListOf(header)
+            rows.forEachIndexed { i, t ->
+                val stamp = buildString {
+                    if (t.sid in running) append(STAMP_RUNNING)
+                    if (t.sid == activeSid) append(STAMP_ACTIVE)
+                }.ifEmpty { STAMP_IDLE }
+                val tag = if (t.ws.isNotEmpty() && t.ws != activeWs) {
+                    " · 📁${PyText.esc(t.ws.substringAfterLast('/'))}"
+                } else {
+                    ""
+                }
+                val title = t.title.takeIf { it.isNotEmpty() } ?: t.sid.takeLast(SID_TAIL)
+                lines.add("$stamp ${i + 1}. ${PyText.esc(title)}$tag")
+            }
+            lines.add("")
+            lines.add("Free text you send goes to the active conversation (🎯).")
+            return lines.joinToString("\n")
         }
 
-        private const val TITLE_CAP = 48
-        private const val SECS_MIN = 60L
-        private const val SECS_HOUR = 3600L
-        private const val SECS_DAY = 86400L
-
-        /** quota → the pool line (remaining.percentage / nextResetTime of the entitlement snapshot). */
+        /**
+         * quota → Python's quota_report when the snapshot carries the limits
+         * (⏱ 5 hours + 📅 Weekly, used/limit credits, resets, ⚠️ at ≥75%);
+         * the remaining-only snapshot keeps the one-line fallback.
+         */
         @Suppress("ReturnCount") // one guard per degrade of the entitlement snapshot
         fun renderQuota(json: String, nowMs: Long): String {
             val root = runCatching { Json.parseToJsonElement(json) as? JsonObject }.getOrNull()
                 ?: return "⚠️ Quota answer unparseable"
             val reason = root.str("unavailableReason")
             if (reason != null) return "📊 Quota unavailable: ${PyText.esc(reason)}"
+            renderQuotaWindows(root)?.let { return it }
             val remaining = root.obj("remaining")
                 ?: return "📊 Quota: no pool info (the app is not authenticated?)"
             val pct = remaining.int("percentage")
@@ -388,6 +661,69 @@ class BotCommands(
             } ?: ""
             return "📊 Coding plan: <b>$pool remaining</b>${if (resetText.isNotEmpty()) " · $resetText" else ""}"
         }
+
+        /** Python's windows: only CREDIT_LIMIT rows, 5h first, the weekly after. */
+        private fun renderQuotaWindows(root: JsonObject): String? {
+            val limits = (root.obj("quota")?.get("limits") as? JsonArray)
+                ?.mapNotNull { it as? JsonObject }
+                ?.filter { it.str("type") == "CREDIT_LIMIT" }
+                .orEmpty()
+            if (limits.isEmpty()) return null
+            val lines = mutableListOf("📊 <b>Coding plan</b>")
+            limits.sortedByDescending { it.int("number") ?: 0 }.forEach { lim ->
+                val name = when (lim.int("number")) {
+                    5 -> "⏱ 5 hours"
+                    1 -> "📅 Weekly"
+                    else -> "🔒 Limit"
+                }
+                val pct = lim.int("percentage")
+                val pctText = pct?.let { " ($it%)" } ?: ""
+                val alert = if ((pct ?: 0) >= 75) " ⚠️" else ""
+                val reset = lim.long("nextResetTime")?.let { " · resets ${fmtReset(it)}" } ?: ""
+                lines.add(
+                    "$name: ${fmtNum(lim.num("currentValue"))}/${fmtNum(lim.num("usage"))}" +
+                        " credits$pctText$reset$alert",
+                )
+            }
+            return lines.joinToString("\n")
+        }
+
+        /** A JSON number as Double (ints and fractions alike — credits can be 31.5). */
+        private fun JsonObject.num(key: String): Double? =
+            (this[key] as? JsonPrimitive)?.content?.toDoubleOrNull()
+
+        /** Python's fmt_num: K only from 10K up, no decimals on small counts. */
+        private fun fmtNum(n: Double?): String = when {
+            n == null -> "?"
+            n >= NUM_K_FROM -> {
+                val text = String.format(Locale.ROOT, "%.1f", n / NUM_K_DIVISOR)
+                "${text.replace(".0", "")}K"
+            }
+
+            else -> n.toInt().toString()
+        }
+
+        private const val NUM_K_FROM = 10_000.0
+        private const val NUM_K_DIVISOR = 1_000.0
+
+        /** Python's datetime_dt: HH:MM today, dd/MM HH:MM otherwise (local zone). */
+        private fun fmtReset(epochMs: Long): String {
+            val zone = ZoneId.systemDefault()
+            val dt = Instant.ofEpochMilli(epochMs).atZone(zone)
+            return if (dt.toLocalDate() == LocalDate.now(zone)) {
+                dt.format(TIME_FMT)
+            } else {
+                dt.format(DATE_TIME_FMT)
+            }
+        }
+
+        private const val STAMP_RUNNING = "🔄"
+        private const val STAMP_ACTIVE = "🎯"
+        private const val STAMP_IDLE = "·"
+        private const val SECS_MIN = 60L
+        private const val SECS_HOUR = 3600L
+        private val TIME_FMT = DateTimeFormatter.ofPattern("HH:mm")
+        private val DATE_TIME_FMT = DateTimeFormatter.ofPattern("dd/MM HH:mm")
     }
 
     internal data class Context(

@@ -1,5 +1,6 @@
 package dev.lattenero.bot.daemon
 
+import dev.lattenero.bot.channel.BotCommands
 import dev.lattenero.bot.daemon.send.DaemonSend
 import dev.lattenero.bot.daemon.send.SendKnob
 import dev.lattenero.bot.daemon.send.SendLeg
@@ -145,6 +146,12 @@ fun main(args: Array<String>) {
                 "liveView=$view poller=$poll"
         }
 
+        // Python's register_bot_menu: with the poller ON the daemon owns the
+        // phone, so the «/» menu must be OUR eight — never Python's leftovers
+        if (pollerHandle != null) {
+            launch { registerTelegramMenu(cfg, api, logger) }
+        }
+
         val root = coroutineContext[Job]
         Runtime.getRuntime().addShutdownHook(
             Thread {
@@ -229,6 +236,27 @@ private fun buildLeg(
         logger.info { "send LIVE: Sender wired (cooldown/outbox/tg-last-ph shared, breaker + (0,1,3) retry)" }
         SendLegs.live({ cfg, text, loud -> sender.send(cfg, text, loud) }, remote) to api
     }
+}
+
+/**
+ * Python's register_bot_menu: with the poller ON the daemon owns the
+ * phone, so Telegram's «/» menu must be OUR eight — never Python's
+ * leftovers. Best-effort: a Telegram hiccup logs a line and moves on.
+ */
+private suspend fun registerTelegramMenu(
+    cfg: DaemonConfig,
+    api: dev.lattenero.bot.transport.TgApi?,
+    logger: io.github.oshai.kotlinlogging.KLogger,
+) {
+    val tgCfg = dev.lattenero.bot.transport.TgConfig.load(File(cfg.baseDir, "telegram-remote.json"))
+    val menuApi = api ?: dev.lattenero.bot.transport.TgApi({ tgCfg })
+    val ok = dev.lattenero.bot.channel.BotMenu.register(menuApi, tgCfg)
+    logger.info {
+        "telegram menu ${if (ok) "registered" else "FAILED to register"}: the eight " +
+            "(/tasks /all_tasks /status /stop /nuclear /quota /subagents /help) — " +
+            "${BotCommands.MENU.size} commands"
+    }
+    if (api == null) menuApi.close()
 }
 
 /**
