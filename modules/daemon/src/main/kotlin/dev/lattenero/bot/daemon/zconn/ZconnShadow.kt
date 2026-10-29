@@ -6,6 +6,8 @@ import dev.lattenero.bot.contracts.ZconnState
 import dev.lattenero.bot.daemon.clilogs.CliEvent
 import dev.lattenero.bot.daemon.clilogs.CliLogTailer
 import dev.lattenero.bot.daemon.clilogs.LogCursor
+import dev.lattenero.bot.daemon.send.SendLeg
+import dev.lattenero.bot.daemon.send.SendLegs
 import dev.lattenero.bot.daemon.shadow.ShadowLog
 import dev.lattenero.bot.daemon.shadow.TimeIso
 import io.github.oshai.kotlinlogging.KotlinLogging
@@ -106,6 +108,8 @@ class ZconnShadow(
     private val now: () -> Double,
     /** Python's hooks/state — the live machine whose decisions this shadow must predict. */
     private val pythonStateDir: File = File(File(baseDir, "hooks"), "state"),
+    /** The cutover knob's send leg (default: SHADOW, nothing — ADR-023's contract). */
+    private val sendLeg: SendLeg = SendLegs.NONE,
 ) {
     private val logger = KotlinLogging.logger {}
     private val tailer = CliLogTailer(baseDir)
@@ -129,6 +133,17 @@ class ZconnShadow(
         val result = zconnPass(state, read.events, tNow, seed)
         persist(result)
         return CycleOutcome(read.events.size, (result as? PassResult.Spoke)?.decisions.orEmpty())
+    }
+
+    /**
+     * The send leg, Python's `_notify` order (state saved, decision logged,
+     * THEN the notice speaks) with its loud=True: the ⚠️/✅ are ALWAYS
+     * notifications. Separate from [pass] so the sync IO shell stays
+     * non-suspend — the Main wiring runs one after the other inside the
+     * same Kap body.
+     */
+    suspend fun speak(outcome: CycleOutcome) {
+        outcome.decisions.forEach { d -> sendLeg.deliver(d, loud = true) }
     }
 
     /**
