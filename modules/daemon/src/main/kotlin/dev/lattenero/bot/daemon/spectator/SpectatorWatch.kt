@@ -1,6 +1,6 @@
 package dev.lattenero.bot.daemon.spectator
 
-import dev.lattenero.bot.daemon.shadow.ShadowDecision
+import dev.lattenero.bot.contracts.ShadowDecision
 import dev.lattenero.bot.daemon.shadow.ShadowLog
 import dev.lattenero.bot.daemon.shadow.TimeIso
 import io.github.oshai.kotlinlogging.KotlinLogging
@@ -113,13 +113,17 @@ internal class SpectatorOrchestrator(
         val rollouts = File(File(baseDir, "cli"), "rollout")
         val index = SpectatorIo.sidIndex(rollouts)
         val workers = SpectatorIo.workerSids(stateDir)
+        val cfg = SpectatorIo.cfg(baseDir)
         var started = 0
-        // one filter per candidate marker, in the hook's order
+        // the hook's spawn condition, in its order: no worker, the knob on,
+        // and ONLY the current task (F15 — the comparator's first catch was
+        // exactly this gate missing at spawn time)
         @Suppress("LoopWithTooManyJumpStatements")
         for ((safe, file) in SpectatorIo.markers(stateDir)) {
             if (!file.exists() || turns.containsKey(safe)) continue
             val sid = index[safe] ?: continue
             if (sid in workers) continue // its own worker streams the turn
+            if (!cfg.macSpectator || !SpectatorIo.taskCurrentOk(baseDir, cfg, sid)) continue
             val turn = SpectatorTurn(baseDir, stateDir, shadowLog, now)
             val handle = Kap { turn.run(sid) }
                 .process(

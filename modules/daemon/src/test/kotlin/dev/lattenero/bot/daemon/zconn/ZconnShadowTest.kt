@@ -1,8 +1,8 @@
 package dev.lattenero.bot.daemon.zconn
 
+import dev.lattenero.bot.contracts.ShadowDecision
 import dev.lattenero.bot.contracts.StateFiles
 import dev.lattenero.bot.contracts.ZconnState
-import dev.lattenero.bot.daemon.shadow.ShadowDecision
 import dev.lattenero.bot.daemon.shadow.ShadowLog
 import kotlinx.serialization.json.Json
 import org.junit.jupiter.api.io.TempDir
