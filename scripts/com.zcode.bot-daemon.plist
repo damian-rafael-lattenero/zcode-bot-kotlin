@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.zcode.bot-daemon</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>__HOME__/.zcode/bot-daemon/bin/daemon</string>
+        <string>--home</string>
+        <string>__HOME__/.zcode/bot-kotlin</string>
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>JAVA_HOME</key>
+        <string>/Library/Java/JavaVirtualMachines/amazon-corretto-21.jdk/Contents/Home</string>
+        <key>LOG_DIR</key>
+        <string>__HOME__/.zcode/bot-kotlin/logs</string>
+    </dict>
+    <key>KeepAlive</key>
+    <true/>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>ProcessType</key>
+    <string>Background</string>
+    <key>StandardOutPath</key>
+    <string>__HOME__/.zcode/bot-kotlin/logs/launchd.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/.zcode/bot-kotlin/logs/launchd.err.log</string>
+</dict>
+</plist>

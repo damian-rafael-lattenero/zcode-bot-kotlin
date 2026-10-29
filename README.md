@@ -20,10 +20,11 @@ features, mutability only as a visible escape hatch. See
 |---|---|
 | `modules/contract-types` | Read-side contracts of every persisted format (`schemas.py` is the spec): the bus event (mirror of agent-brain's `BusEvent`) plus bot-session, workers registry, queue, active turn, outbox, zconn, audit, CoT boxes and the nuclear report — **bilingual forever** (readers accept the legacy Spanish keys; writers emit English). |
 | `modules/recorder` | The golden replay recorder: a one-shot pass that snapshots `~/.zcode/hooks/state/` (content + mtime + sha256) into a daily JSONL trace. Later phases replay these traces to prove byte-level parity before every cutover. |
+| `modules/daemon` | The B1 shadow daemon: the watchers reborn on KAP. Today zconn (B1a) — the episode machine ported pure (`ConnTrack` + property laws), the CLI-log tailer (`iter_events` semantics, the `last_files=1` rollover wart mirrored on purpose), byte-exact notice texts — under `Process` (cadence is `repeat(spaced)`, bugs restart under the convergence law, the heartbeat beats at its own pace) with the E1 logging stack (JSONL + MDC, async neverBlock). Shadow mode: decisions land in `~/.zcode/bot-kotlin/shadow/`, the Python bot keeps sending. |
 
-Later: `daemon` (B1 watchers under KAP's `Process`), `transport` (B2,
-Ktor + the same tg-offset/cooldown/outbox contracts), and the render core
-(B4, on KapStream — the SPEC-5.0 dogfooding contract).
+Later: `transport` (B2, Ktor + the same tg-offset/cooldown/outbox
+contracts), and the render core (B4, on KapStream — the SPEC-5.0
+dogfooding contract).
 
 ## The trace contract
 
@@ -43,23 +44,29 @@ as shared clocks (the 429 cooldown's expiry epoch is a mtime).
 ## Build and deploy
 
 ```bash
-# detekt 1.23 needs a Gradle daemon < 24 (the Mac default JDK is 26)
-export JAVA_HOME="$(/usr/libexec/java_home -v 21)"
-./gradlew test detekt                 # CI runs exactly this (Corretto 21)
-scripts/deploy-recorder.sh            # installs ~/.zcode/bot-recorder + LaunchAgent
+# The Mac's ~/.gradle/gradle.properties pins the Gradle daemon JVM to 25
+# (kap's compile toolchain) — and detekt 1.23 cannot run on a daemon >= 24.
+# The command-line override beats gradle.properties; CI runs plain (Corretto 21).
+./gradlew -Dorg.gradle.java.home="$(/usr/libexec/java_home -v 21)" test detekt
+scripts/deploy-recorder.sh       # B0: ~/.zcode/bot-recorder + LaunchAgent
+scripts/deploy-daemon.sh         # B1a: ~/.zcode/bot-daemon + LaunchAgent (shadow)
 ```
 
 The recorder is a fresh JVM per pass (LaunchAgent `StartInterval`, 60 s) —
-the same self-healing dumb-ring pattern the bot's outer healer uses. It is
-additive only: no existing agent is touched.
+the same self-healing dumb-ring pattern the bot's outer healer uses. The
+daemon is one long-lived JVM under a KeepAlive LaunchAgent
+(`com.zcode.bot-daemon`): inner supervision is KAP `Process`, launchd is
+the dumb outer ring. Both are additive only — the daemon reads the CLI
+logs the Python bot also reads, and every write stays under
+`~/.zcode/bot-kotlin/` (ADR-023).
 
 ## Status
 
 | Phase | State |
 |---|---|
 | K0 — kap 4.2 `Process` (restart policies, heartbeat, laws) | done ([kap](https://github.com/damian-rafael-lattenero/kap) 4.2.0) |
-| B0 — this repo: contracts + recorder | recording (gates B1 on >= 2 weeks of traces) |
-| B1 — zconn + spectator watchers (shadow, then cutover) | next |
+| B0 — this repo: contracts + recorder | recording since 2026-10-29 (gates B1's cutover on >= 2 weeks of traces) |
+| B1 — zconn + spectator watchers (shadow, then cutover) | B1a (zconn shadow) deployed 2026-10-29; B1b spectator next |
 | B2 — transport (Ktor, same state files) | |
 | B3 — workers under `Process` | |
 | B4 — render core on KapStream | |
