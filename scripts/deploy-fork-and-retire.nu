@@ -268,31 +268,41 @@ def phase0-sanity [st: RunState]: nothing -> PhaseResult {
 }
 
 # ────────────────────────────── fase 1: quit ────────────────────────────────
+# Escalera medida contra ESTE app (incidente 17:27, primera corrida real): el
+# quit de AppleScript SOLO CIERRA LA VENTANA — el app queda de FONDO (el puntito
+# gris del Dock, «Stop process in background» al click derecho) — y el SIGTERM
+# también lo ignora. Escalera: graceful → SIGTERM → SIGKILL (inignorable).
 def phase1-quit [st: RunState]: nothing -> PhaseResult {
     if $st.mode != "real" {
         let viva = if (zcode-running) { "SÍ está corriendo (la cerraría)" } else { "no está corriendo (nada que cerrar)" }
-        let kill_lit = "$(zcode_pids)"
-        log $st $"[dryrun] SKIP fase 1: osascript 'tell application \"ZCode\" to quit' → 30 s graceful → ÚLTIMO RECURSO kill ($kill_lit) → esperar ≤120 s sin proceso \(ps comm exacto — pgrep no ve este app\). Hoy ZCode ($viva)."
+        log $st $"[dryrun] SKIP fase 1: osascript quit \(solo cierra ventana — queda de fondo, puntito gris\) → ≤30 s → SIGTERM → ≤10 s → SIGKILL \(kill -s 9, el «Stop process in background» programático\) → ≤20 s a cero proceso. Hoy ZCode ($viva)."
         return {state: $st, outcome: {ok: true, note: ""}}
     }
-    log $st "quit graceful (osascript)..."
+    log $st "quit graceful (osascript) — en este app solo cierra la ventana..."
     let osa = (do { ^osascript -e 'tell application "ZCode" to quit' } | complete)
     if $osa.exit_code != 0 {
         log $st "WARN: osascript falló (¿ya estaba cerrada?)"
     }
     mut w = 0
     while ($w < 30) and (zcode-running) { sleep 1sec; $w += 1 }
-    if (zcode-running) {
+    if not (zcode-running) {
+        log $st $"ZCode cerró graceful \(($w)s\)"
+    } else {
         let pids = (zcode-pids)
         let pids_str = ($pids | each {|p| $p | into string } | str join " ")
-        log $st $"viva tras ($w)s graceful — ÚLTIMO RECURSO: kill ($pids_str)"
-        try { kill ...$pids } catch {|_e| }   # 2>/dev/null || true del .sh
-    } else {
-        log $st $"ZCode cerró graceful \(($w)s\)"
+        log $st $"viva tras ($w)s graceful \(puntito gris: app de fondo\) — peldaño 2: SIGTERM a ($pids_str)"
+        try { kill ...$pids } catch {|_e| }
+        while ($w < 40) and (zcode-running) { sleep 1sec; $w += 1 }
+        if (zcode-running) {
+            let pids9 = (zcode-pids)
+            let pids9_str = ($pids9 | each {|p| $p | into string } | str join " ")
+            log $st $"viva tras SIGTERM \(medido: la ignora\) — peldaño 3: SIGKILL \(kill -s 9\) a ($pids9_str)"
+            try { kill -s 9 ...$pids9 } catch {|_e| }
+        }
     }
     while ($w < 120) and (zcode-running) { sleep 2sec; $w += 2 }
     if (zcode-running) {
-        let note = $"ZCode sigue viva tras ($w)s"
+        let note = $"ZCode sigue viva tras ($w)s, SIGTERM y SIGKILL — algo muy raro"
         log $st $"✗ ($note)"
         return {state: $st, outcome: {ok: false, note: $note}}
     }
