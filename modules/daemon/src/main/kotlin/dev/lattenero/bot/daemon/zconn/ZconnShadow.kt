@@ -53,24 +53,58 @@ fun ZconnNotice.toDecision(decisionTs: Double): ShadowDecision = when (this) {
         ts = decisionTs, tsIso = TimeIso.format(decisionTs), watcher = WATCHER,
         decision = "up", text = ZconnText.upText(firstDown, ts), eventTs = ts,
     )
+    is ZconnNotice.RetryWait -> ShadowDecision(
+        ts = decisionTs, tsIso = TimeIso.format(decisionTs), watcher = WATCHER,
+        decision = "retry_wait", text = "⏳ <b>${pill}</b>", eventTs = ts,
+    )
 }
 
 /**
  * Pure reduction — the heart of the port (Python `zconn.listen` minus its
  * IO): fold the cycle's events through the episode machine, advance `since`
- * only over real timestamps clamped to now, render every notice.
+ * only over real timestamps clamped to now, render every notice. A
+ * user's ⌘-stop (cancelled) never enters the machine (the false-cut fix);
+ * the retry_scheduled needles ride their own transition ([feedRetry]).
  */
 fun zconnPass(state: ZconnState?, events: List<CliEvent>, now: Double, armSeed: ZconnState? = null): PassResult {
     if (state == null) return PassResult.Armed(armSeed ?: ZconnState(since = now))
     val (track, notices) = events.fold(
-        ConnTrack(state.down, state.firstDown, state.lastUp, state.reason) to emptyList<ZconnNotice>(),
+        ConnTrack(
+            down = state.down,
+            firstDown = state.firstDown,
+            lastUp = state.lastUp,
+            reason = state.reason,
+            announcedRetry = state.announcedRetry?.toLong(),
+        ) to emptyList<ZconnNotice>(),
     ) { (t, acc), e ->
-        val (next, spoken) =
-            ConnTrackMachine.feed(t, e.ts, e.event, statusMessage(e.context), ZconnText.pillVocab(e.context))
-        next to acc + spoken
+        when {
+            ConnTrackMachine.isCancelledDown(e.event, e.context) -> t to acc // ⌘-stop: not an outage
+            e.event in ConnTrackMachine.RETRY_EVENTS -> {
+                val scheduled = ConnTrackMachine.retryContextOf(e.context)
+                if (scheduled == null) {
+                    t to acc
+                } else {
+                    val (next, spoken) = ConnTrackMachine.feedRetry(t, e.ts, scheduled)
+                    next to acc + spoken
+                }
+            }
+
+            else -> {
+                val (next, spoken) =
+                    ConnTrackMachine.feed(t, e.ts, e.event, statusMessage(e.context), ZconnText.pillVocab(e.context))
+                next to acc + spoken
+            }
+        }
     }
     val since = if (events.isEmpty()) state.since else minOf(events.maxOf { it.ts } + SINCE_ADVANCE_S, now)
-    val next = ZconnState(track.down, track.firstDown, track.lastUp, track.reason, since)
+    val next = ZconnState(
+        down = track.down,
+        firstDown = track.firstDown,
+        lastUp = track.lastUp,
+        reason = track.reason,
+        since = since,
+        announcedRetry = track.announcedRetry?.toDouble(),
+    )
     val decisions = notices.map { it.toDecision(now) }
     return if (decisions.isEmpty()) {
         PassResult.Quiet(next, events.size)

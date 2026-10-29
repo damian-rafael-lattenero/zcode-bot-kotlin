@@ -16,6 +16,7 @@ application {
 dependencies {
     implementation(project(":modules:contract-types"))
     implementation(project(":modules:transport"))
+    implementation(project(":modules:channel"))
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.coroutines.slf4j)
     implementation(libs.kap.core)
