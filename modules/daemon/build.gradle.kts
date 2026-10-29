@@ -6,7 +6,7 @@ plugins {
 }
 
 kotlin {
-    jvmToolchain(21)
+    jvmToolchain(25)
 }
 
 application {
@@ -15,6 +15,7 @@ application {
 
 dependencies {
     implementation(project(":modules:contract-types"))
+    implementation(project(":modules:transport"))
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.coroutines.slf4j)
     implementation(libs.kap.core)

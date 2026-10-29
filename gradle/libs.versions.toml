@@ -1,7 +1,7 @@
 [versions]
 kotlin = "2.4.21"
 serialization = "1.12.0"
-detekt = "1.23.8"
+detekt = "2.0.0-alpha.6"
 coroutines = "1.11.0"
 kap = "4.2.0"
 kotest = "6.2.6"
@@ -9,6 +9,7 @@ kotlin-logging = "7.0.7"
 logback = "1.5.18"
 logstash-encoder = "8.1"
 sqlite-jdbc = "3.50.3.0"
+ktor = "3.6.0"
 
 [libraries]
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "serialization" }
@@ -21,8 +22,11 @@ logback-classic = { module = "ch.qos.logback:logback-classic", version.ref = "lo
 logstash-logback-encoder = { module = "net.logstash.logback:logstash-logback-encoder", version.ref = "logstash-encoder" }
 xerial-sqlite-jdbc = { module = "org.xerial:sqlite-jdbc", version.ref = "sqlite-jdbc" }
 kotest-property = { module = "io.kotest:kotest-property", version.ref = "kotest" }
+ktor-client-core = { module = "io.ktor:ktor-client-core", version.ref = "ktor" }
+ktor-client-cio = { module = "io.ktor:ktor-client-cio", version.ref = "ktor" }
+ktor-client-mock = { module = "io.ktor:ktor-client-mock", version.ref = "ktor" }
 
 [plugins]
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
-detekt = { id = "io.gitlab.arturbosch.detekt", version.ref = "detekt" }
+detekt = { id = "dev.detekt", version.ref = "detekt" }

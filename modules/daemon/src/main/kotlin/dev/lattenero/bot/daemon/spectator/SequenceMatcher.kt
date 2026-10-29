@@ -1,4 +1,5 @@
 package dev.lattenero.bot.daemon.spectator
+import dev.lattenero.bot.contracts.PyText
 
 /**
  * A faithful port of CPython's difflib (SequenceMatcher + the unified

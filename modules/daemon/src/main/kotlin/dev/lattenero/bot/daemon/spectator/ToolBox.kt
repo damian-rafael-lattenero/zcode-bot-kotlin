@@ -1,4 +1,5 @@
 package dev.lattenero.bot.daemon.spectator
+import dev.lattenero.bot.contracts.PyText
 
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
