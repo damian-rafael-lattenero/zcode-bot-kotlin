@@ -183,3 +183,44 @@ this plan just gives each practice a tier or a tool.
   dashboards; the F-code chaos drills.
 - **B5** (+runbook E5): Python retirement; runbook and postmortem
   culture fully ported.
+
+## 7. FP-first development policy (binding, Damian 2026-10-29)
+
+This codebase is **first-class functional programming development**: the
+Haskell discipline on the JVM, with KAP as the effect layer. Pure value,
+pure function, currying, monadic composition, higher-order functions —
+"todo lo bueno de Haskell" — are the FIRST option; mutability and dirt
+only when impossible otherwise.
+
+1. **Pure by default.** Every decision is a pure function from values to
+   values. Effects (IO, time, randomness, Telegram, the channel socket)
+   live at the edges, injected as function parameters. The daemon's core
+   is a pure reduction — events in, notices/actions out (the shapes B0
+   already set: `SnapshotEngine.pass`, `ConnTrack.feed`-style machines).
+2. **Immutability first.** `val` + data classes + `copy()`. A `var` only
+   when impossible, in the narrowest scope, with a comment saying why.
+   No shared mutable state, ever.
+3. **Composition over statements.** Pipelines of small functions,
+   expression bodies, higher-order functions, partial application where
+   it clarifies. Sealed types + exhaustive `when` for every state
+   machine (the compiler enforces the algebra).
+4. **KAP is the standard library.** Any orchestration — retry, cadence,
+   timeouts, supervision, resources, racing, validation, partial
+   failure — must FIRST be expressed with a KAP operator
+   (`retry`, `repeat`, `Process`, `bracket`, `Resource`, `race`,
+   `settled`, `withV`, `timeoutAsFailure`...). **If KAP lacks it, it is
+   implemented IN kap, with laws, and kap's version is bumped** — then
+   used here. No hand-rolled loop or policy in application code.
+5. **Arrow for error channels.** `Either`/`NonEmptyList` via kap-arrow
+   where errors accumulate; exceptions are never control flow inside
+   the pure core.
+6. **Laws before features.** Every new pure module ships with
+   property-based tests (kotest-property) pinning its algebra — the KAP
+   standard.
+7. **The escape hatch, honestly used.** When the JVM or a protocol
+   forces mutation (builders, legacy APIs, hot buffers), the impure
+   shell wraps the pure core: thin, boundary-local, tested through the
+   core. The escape is visible in review, never structural.
+
+The same policy applies to agent-brain as a refactor:
+`agent-brain/docs/fp-refactor-plan.md`.

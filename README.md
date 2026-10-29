@@ -8,6 +8,12 @@ with a deadline, mtimes as shared clocks). The roadmap is
 [`docs/kap-first-migration.md`](https://github.com/damian-rafael-lattenero/zcode-bot/blob/master/docs/kap-first-migration.md)
 in the bot repo; this repo is its **B0**.
 
+**Principles (binding):** FP-first development — pure by default, KAP as
+the effect layer and standard library (anything KAP lacks is added to KAP
+with laws and a version bump), Arrow for error channels, laws before
+features, mutability only as a visible escape hatch. See
+`docs/parity-and-engineering.md` §7.
+
 ## Modules
 
 | Module | What it is |
