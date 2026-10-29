@@ -5,6 +5,7 @@ import dev.lattenero.bot.channel.ChannelClient
 import dev.lattenero.bot.channel.ChannelOps
 import dev.lattenero.bot.channel.ChannelQuery
 import dev.lattenero.bot.channel.ChannelSpec
+import dev.lattenero.bot.channel.InboundReceipt
 import dev.lattenero.bot.channel.LiveHub
 import dev.lattenero.bot.channel.LivePublisher
 import dev.lattenero.bot.channel.LiveTelegram
@@ -14,6 +15,8 @@ import dev.lattenero.bot.channel.ServerFrame
 import dev.lattenero.bot.channel.ToolLive
 import dev.lattenero.bot.channel.UnixSocketTransport
 import dev.lattenero.bot.contracts.ShadowDecision
+import dev.lattenero.bot.daemon.history.TasksHistoryIo
+import dev.lattenero.bot.daemon.queue.InboundQueue
 import dev.lattenero.bot.daemon.send.DaemonSend
 import dev.lattenero.bot.daemon.shadow.TimeIso
 import dev.lattenero.bot.daemon.spectator.ToolBox
@@ -22,11 +25,13 @@ import dev.lattenero.bot.transport.LastPh
 import dev.lattenero.bot.transport.TgApi
 import dev.lattenero.bot.transport.TgConfig
 import io.github.oshai.kotlinlogging.KotlinLogging
+import kotlinx.coroutines.delay
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import java.io.File
+import kotlin.time.Duration.Companion.seconds
 
 private val logger = KotlinLogging.logger {}
 
@@ -91,10 +96,17 @@ internal fun wireChannel(
 
     // the client's stream callback feeds the hub directly; the resync after a
     // reconnect re-baselines the view (the lost events stay lost — no replay)
+    // F17 live: a finished turn (task_complete) drains the dormant queue —
+    // the texts that arrived mid-turn fire as inbounds now
+    val queue = InboundQueue(File(File(cfg.homeDir, "state"), QUEUE_FILE))
+    var drainQueue: suspend () -> Unit = {}
     val client = ChannelClient(
         transportFactory = { UnixSocketTransport { socketFile } },
         tokenReader = { tokenFile.takeIf { it.exists() }?.readText() },
-        onStreamEvent = { frame -> feedAndResync(hub, frame, System.currentTimeMillis()) },
+        onStreamEvent = { frame ->
+            feedAndResync(hub, frame, System.currentTimeMillis())
+            if ((frame.event["type"] as? JsonPrimitive)?.content == "task_complete") drainQueue()
+        },
         onInboundResult = { result ->
             when {
                 result.duplicate -> logger.info { "inbound ${result.id}: DUPLICATE (server dedupe) — not re-sent" }
@@ -107,11 +119,26 @@ internal fun wireChannel(
             hub.resync(taskId)
         },
     )
+    drainQueue = {
+        val pending = queue.drain()
+        if (pending.isNotEmpty()) {
+            delay(QUEUE_DRAIN_DELAY) // let the session's phase settle before the next prompt
+            pending.forEachIndexed { i, p ->
+                val fired = client.sendInbound(p.text, "${p.messageId}-q$i", System.currentTimeMillis())
+                logger.info {
+                    "queue drained: ${p.messageId} (…) ${if (fired == InboundReceipt.FIRED) "fired" else "FAILED"}"
+                }
+            }
+        }
+    }
 
     val liveView = buildLiveView(send, api, pythonState, hub, client, speak, remote)
-    val poller = buildPoller(api, pythonState, pollOn, hub, client, speak, remote)
+    val poller = buildPoller(cfg, api, pythonState, pollOn, hub, client, speak, remote, queue)
     return ChannelStack(client, liveView, poller, hub)
 }
+
+private const val QUEUE_FILE = "inbound-queue.json"
+private val QUEUE_DRAIN_DELAY = 1.seconds
 
 /** The never-silence view — LIVE-only (its birth message is a send). */
 private fun buildLiveView(
@@ -150,6 +177,7 @@ private fun buildLiveView(
 
 /** The single reader — knob-gated (retire-python.sh turns it on). */
 private fun buildPoller(
+    cfg: DaemonConfig,
     api: TgApi?,
     pythonState: File,
     pollOn: Boolean,
@@ -157,14 +185,19 @@ private fun buildPoller(
     client: ChannelClient,
     speak: suspend (String, Boolean) -> Unit,
     remote: File,
+    queue: InboundQueue,
 ): Poller? {
     if (!pollOn) return null
     val liveApi = api ?: TgApi({ TgConfig.load(remote) })
+    val history = TasksHistoryIo(cfg.baseDir)
     val commands = BotCommands(
         ops = object : ChannelOps {
             override suspend fun query(query: ChannelQuery) = client.query(query)
             override suspend fun sendInbound(text: String, messageId: String, receivedAt: Long) =
                 client.sendInbound(text, messageId, receivedAt)
+
+            override suspend fun enqueueInbound(text: String, messageId: String, receivedAt: Long) =
+                queue.add(text, messageId, receivedAt)
 
             override suspend fun subscribe(taskId: String, workspacePath: String) =
                 client.subscribe(taskId, workspacePath)
@@ -174,6 +207,9 @@ private fun buildPoller(
             hub.clear()
             client.reset()
         },
+        // Python's ctx_tasks + model_selection — the same two sqlite files the spectator reads
+        history = history,
+        defaultWorkspacePath = File(File(cfg.baseDir, "workspace"), "default").absolutePath,
     )
     return Poller(
         api = liveApi,
