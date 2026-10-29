@@ -1,5 +1,10 @@
 package dev.lattenero.bot.daemon
 
+import dev.lattenero.bot.daemon.send.DaemonSend
+import dev.lattenero.bot.daemon.send.SendKnob
+import dev.lattenero.bot.daemon.send.SendLeg
+import dev.lattenero.bot.daemon.send.SendLegs
+import dev.lattenero.bot.daemon.send.SendMode
 import dev.lattenero.bot.daemon.shadow.ShadowLog
 import dev.lattenero.bot.daemon.spectator.SpectatorOrchestrator
 import dev.lattenero.bot.daemon.zconn.WATCHER
@@ -35,7 +40,12 @@ import kotlin.time.Duration.Companion.seconds
  *
  * Shadow mode: it never sends. Decisions land in the shadow dir under
  * `<home>/shadow` for the parity diff; the Python bot keeps speaking
- * (ADR-023/024).
+ * (ADR-023/024). B2's cutover knob (`<home>/daemon.json`, read at boot)
+ * adds DRY-RUN (compose the exact request and log it, redacted, without
+ * posting) and LIVE (the daemon owns the Telegram send through the
+ * transport, sharing Python's cooldown/outbox/tg-last-ph; Python keeps
+ * polling getUpdates — this daemon NEVER polls, ADR-001's single
+ * reader). Rollback is the knob back to shadow.
  */
 // The composition root: wiring only, no logic to extract.
 @Suppress("LongMethod")
@@ -44,15 +54,36 @@ fun main(args: Array<String>) {
     val logger = KotlinLogging.logger("daemon")
     logger.info { "daemon starting: home=${cfg.homeDir} base=${cfg.baseDir} interval=${cfg.interval}" }
     runBlocking { transportSelftest(cfg.baseDir, logger) }
+
+    // B2's cutover knob: read ONCE at boot (a mode change is a restart).
+    val knobFile = File(cfg.homeDir, SendKnob.FILE_NAME)
+    val knob = SendKnob.load(knobFile)
+    if (knob.warning != null) logger.warn { "send knob $knobFile: ${knob.warning}" }
+    logger.info { "send knob: mode=${knob.mode} (file=$knobFile)" }
+
     val stateDir = File(cfg.homeDir, "state")
     val shadowLog = ShadowLog(File(cfg.homeDir, "shadow"))
     val pythonState = File(File(cfg.baseDir, "hooks"), "state")
+    val remote = { File(cfg.baseDir, "telegram-remote.json") }
+    val (leg, api) = buildLeg(knob.mode, remote, pythonState, logger)
+    val send = DaemonSend.of(knob.mode, leg)
+    if (knob.mode == SendMode.LIVE) {
+        logger.info {
+            "send LIVE: tg-cooldown/outbox.json/tg-last-ph are SHARED with Python at ${pythonState.absolutePath} " +
+                "— the strangler's handover files (Python still polls getUpdates; this daemon NEVER does)"
+        }
+    }
+
     val clock = { System.currentTimeMillis() / MILLIS_PER_SECOND }
-    val zconnWatch = ZconnShadow(cfg.baseDir, stateDir, shadowLog, clock, pythonState)
+    val zconnWatch = ZconnShadow(cfg.baseDir, stateDir, shadowLog, clock, pythonState, send.leg)
     val hbZconn = File(stateDir, HB_ZCONN)
     val hbSpectator = File(stateDir, HB_SPECTATOR)
 
-    val zconn = Kap { withContext(MDCContext(mapOf(COMPONENT_KEY to WATCHER))) { zconnWatch.pass() } }
+    val zconn = Kap {
+        withContext(MDCContext(mapOf(COMPONENT_KEY to WATCHER))) {
+            zconnWatch.speak(zconnWatch.pass())
+        }
+    }
         .repeat(Schedule.spaced(cfg.interval))
         .process(
             name = WATCHER,
@@ -65,7 +96,7 @@ fun main(args: Array<String>) {
         )
 
     runBlocking {
-        val orchestrator = SpectatorOrchestrator(cfg.baseDir, pythonState, shadowLog, clock, this)
+        val orchestrator = SpectatorOrchestrator(cfg.baseDir, pythonState, shadowLog, clock, this, send)
         val spectator = Kap { orchestrator.scan() }
             .repeat(Schedule.spaced(SPECTATOR_SCAN))
             .process(
@@ -85,6 +116,7 @@ fun main(args: Array<String>) {
             Thread {
                 zconnHandle.stop()
                 spectatorHandle.stop()
+                api?.close() // the live leg's client — no sends outlive the daemon
                 root?.cancel() // the per-turn spectators must not hang the exit
             },
         )
@@ -107,6 +139,41 @@ fun main(args: Array<String>) {
         } finally {
             root?.cancel()
         }
+    }
+}
+
+/**
+ * B2's knob positions as wiring: SHADOW is today's no-op leg; DRY-RUN
+ * composes-and-logs (no client at all — nothing can post by accident);
+ * LIVE builds the full Sender with the SHARED contract files — Python's
+ * own tg-cooldown (read AND write: the window is addressed to the chat,
+ * never to a process), the flock-compatible outbox (a parked message is
+ * flushed by whichever bot cycles next — Python's poller still does),
+ * and tg-last-ph (the ll floats under the newest message, either bot's).
+ */
+private fun buildLeg(
+    mode: SendMode,
+    remote: () -> File,
+    pythonState: File,
+    logger: io.github.oshai.kotlinlogging.KLogger,
+): Pair<SendLeg, dev.lattenero.bot.transport.TgApi?> = when (mode) {
+    SendMode.SHADOW -> SendLegs.NONE to null
+
+    SendMode.DRY_RUN -> SendLegs.dryRun(remote) to null
+
+    SendMode.LIVE -> {
+        val api = dev.lattenero.bot.transport.TgApi({ dev.lattenero.bot.transport.TgConfig.load(remote()) })
+        val sender = dev.lattenero.bot.transport.Sender(
+            api,
+            dev.lattenero.bot.transport.Cooldown(
+                readFile = { File(pythonState, "tg-cooldown") },
+                writeFile = { File(pythonState, "tg-cooldown") },
+            ),
+            dev.lattenero.bot.transport.Outbox(File(pythonState, "outbox.json")),
+            dev.lattenero.bot.transport.LastPh({ File(pythonState, "tg-last-ph") }),
+        )
+        logger.info { "send LIVE: Sender wired (cooldown/outbox/tg-last-ph shared, breaker + (0,1,3) retry)" }
+        SendLegs.live({ cfg, text, loud -> sender.send(cfg, text, loud) }, remote) to api
     }
 }
 

@@ -1,6 +1,8 @@
 package dev.lattenero.bot.daemon.spectator
 
 import dev.lattenero.bot.contracts.ShadowDecision
+import dev.lattenero.bot.daemon.send.SendLeg
+import dev.lattenero.bot.daemon.send.SendLegs
 import dev.lattenero.bot.daemon.shadow.ShadowLog
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.advanceTimeBy
@@ -158,5 +160,65 @@ class SpectatorWatchTest {
 
         val orch = SpectatorOrchestrator(base, stateDir, ShadowLog(shadowDir), { 1000.0 }, backgroundScope)
         assertEquals(0, orch.scan(), "Python spawns only for the focused task (hook F15 gate)")
+    }
+
+    @Test
+    fun theSendLegCarriesOnlyGatedMessagesSilently() = runTest {
+        // B2's knob: Python's send_msg sends ONLY when may_push says yes
+        // (the decision is recorded either way), and the boxes are silent
+        // (loud=False — only zconn's ⚠️/✅ notify)
+        val marker = SpectatorIo.markerPath(stateDir, sid)
+        marker.writeText("""{"token": "t1", "prompt": "p"}""")
+        stateDir.resolve("bot-session.json").writeText("""{"sid": "$sid", "title": "t"}""")
+        val rollout = File(rollouts, "model-io-$sid.jsonl")
+        rollout.writeText("")
+
+        val delivered = mutableListOf<Pair<String, Boolean>>()
+        val leg = SendLeg { d, loud -> delivered.add(d.text to loud) }
+        val turn = SpectatorTurn(base, stateDir, ShadowLog(shadowDir), leg) { 1000.0 }
+        val job = launch { turn.run(sid) }
+        runCurrent()
+
+        rollout.appendText(recordLine(text = "voy") + recordLine(command = "wc -l x.kt"))
+        advanceTimeBy(1_000)
+        runCurrent()
+        assertEquals(3, decisions().size, "all three decisions recorded, gated or not")
+        assertEquals(3, delivered.size, "the task is current — every message passed the live gate")
+        assertTrue(delivered.all { it.second == false }, "the spectator never notifies loudly")
+
+        // the F15 gate closes mid-turn: the stream focus moves away — the
+        // decisions keep landing in the shadow log, the send goes quiet
+        stateDir.resolve("bot-session.json").writeText("""{"sid": "session_otra", "title": "t"}""")
+        rollout.appendText(recordLine(command = "ls"))
+        advanceTimeBy(1_000)
+        runCurrent()
+        assertEquals(4, decisions().size, "the decision is still recorded")
+        assertEquals(3, delivered.size, "but nothing is sent while gated")
+
+        marker.delete()
+        advanceTimeBy(2_000)
+        job.join()
+    }
+
+    @Test
+    fun theOwnerIgnoresMacSpectatorFalseAtTheCutover() = runTest {
+        // The flip's meaning change: mac_spectator=false silences PYTHON's
+        // spawns; the OWNER (send mode != shadow) keeps spawning — turning
+        // the knob off must not mute the phone. In shadow mode the knob
+        // still gates BOTH sides (parity, unchanged).
+        File(rollouts, "model-io-$sid.jsonl").writeText("")
+        stateDir.resolve("bot-session.json").writeText("""{"sid": "$sid", "title": "t"}""")
+        SpectatorIo.markerPath(stateDir, sid).writeText("""{"token": "t1", "prompt": "p"}""")
+        File(base, "telegram-remote.json").writeText("""{"mac_spectator": false}""")
+
+        val parity = SpectatorOrchestrator(base, stateDir, ShadowLog(shadowDir), { 1000.0 }, backgroundScope)
+        assertEquals(0, parity.scan(), "shadow mode honors the knob on both sides — today's contract")
+
+        SpectatorIo.markerPath(stateDir, sid).writeText("""{"token": "t2", "prompt": "p"}""")
+        val owner = SpectatorOrchestrator(
+            base, stateDir, ShadowLog(shadowDir), { 1000.0 }, backgroundScope,
+            dev.lattenero.bot.daemon.send.DaemonSend(leg = SendLegs.NONE, ownsSpectator = true),
+        )
+        assertEquals(1, owner.scan(), "the owner spawns: the knob now silences only Python")
     }
 }

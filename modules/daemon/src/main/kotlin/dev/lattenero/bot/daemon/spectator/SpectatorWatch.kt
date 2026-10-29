@@ -1,6 +1,9 @@
 package dev.lattenero.bot.daemon.spectator
 
 import dev.lattenero.bot.contracts.ShadowDecision
+import dev.lattenero.bot.daemon.send.DaemonSend
+import dev.lattenero.bot.daemon.send.SendLeg
+import dev.lattenero.bot.daemon.send.SendLegs
 import dev.lattenero.bot.daemon.shadow.ShadowLog
 import dev.lattenero.bot.daemon.shadow.TimeIso
 import io.github.oshai.kotlinlogging.KotlinLogging
@@ -33,6 +36,7 @@ internal class SpectatorTurn(
     private val baseDir: File,
     private val stateDir: File,
     private val shadowLog: ShadowLog,
+    private val sendLeg: SendLeg = SendLegs.NONE,
     private val now: () -> Double,
 ) {
     private val logger = KotlinLogging.logger {}
@@ -68,7 +72,12 @@ internal class SpectatorTurn(
                 result.second.forEach { m ->
                     val mayPush = SpectatorIo.taskCurrentOk(baseDir, cfg, sid) &&
                         !SpectatorIo.viewAlive(stateDir, sid, now())
-                    shadowLog.append(m.toDecision(sid, now(), mayPush))
+                    val d = m.toDecision(sid, now(), mayPush)
+                    shadowLog.append(d)
+                    // Python's send_msg: the gate guards the SEND, the
+                    // decision is recorded either way; loud=False (silent
+                    // boxes — only zconn's ⚠️/✅ notify)
+                    if (mayPush) sendLeg.deliver(d, loud = false)
                 }
             }
             Tick.Keep
@@ -118,6 +127,7 @@ internal class SpectatorOrchestrator(
     private val shadowLog: ShadowLog,
     private val now: () -> Double,
     private val turnScope: CoroutineScope,
+    private val send: DaemonSend = DaemonSend(),
 ) {
     private val logger = KotlinLogging.logger {}
 
@@ -134,14 +144,21 @@ internal class SpectatorOrchestrator(
         var started = 0
         // the hook's spawn condition, in its order: no worker, the knob on,
         // and ONLY the current task (F15 — the comparator's first catch was
-        // exactly this gate missing at spawn time)
+        // exactly this gate missing at spawn time). At the cutover the knob
+        // flips meaning: mac_spectator=false silences PYTHON, and the owner
+        // (send mode != shadow) ignores it — a muted phone is the incident
+        // the owner's overlap rule exists to prevent.
         @Suppress("LoopWithTooManyJumpStatements")
         for ((safe, file) in SpectatorIo.markers(stateDir)) {
             if (!file.exists() || turns.containsKey(safe)) continue
             val sid = index[safe] ?: continue
             if (sid in workers) continue // its own worker streams the turn
-            if (!cfg.macSpectator || !SpectatorIo.taskCurrentOk(baseDir, cfg, sid)) continue
-            val turn = SpectatorTurn(baseDir, stateDir, shadowLog, now)
+            if ((!cfg.macSpectator && !send.ownsSpectator) ||
+                !SpectatorIo.taskCurrentOk(baseDir, cfg, sid)
+            ) {
+                continue
+            }
+            val turn = SpectatorTurn(baseDir, stateDir, shadowLog, send.leg, now)
             val handle = Kap { turn.run(sid) }
                 .process(
                     name = "spectator-$safe",

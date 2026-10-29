@@ -279,5 +279,34 @@ class ZconnShadowTest {
         assertEquals(ZconnState(since = 3000.0), armTrack(null, now = 3000.0), "absent Python arms virgin")
     }
 
+    @Test
+    fun speakDeliversEveryDecisionLoudTheMainWiringOrder() = kotlinx.coroutines.test.runTest {
+        // B2's cutover knob: the SAME pass that feeds the shadow log feeds
+        // the send leg — state saved, decision logged, THEN the notice
+        // speaks (Python's _notify order), always loud=True.
+        logFile().writeText("")
+        var nowVal = 100.0
+        val delivered = mutableListOf<Pair<String, Boolean>>()
+        val leg = dev.lattenero.bot.daemon.send.SendLeg { d, loud -> delivered.add(d.text to loud) }
+        val z = ZconnShadow(base, stateDir, ShadowLog(shadowDir), { nowVal }, sendLeg = leg)
+        z.pass() // arm
+
+        logFile().writeText(downLine("2026-10-29T10:00:01.000Z", "Cannot connect: ETIMEDOUT", attempt = 2))
+        nowVal = 130.0
+        val out = z.pass()
+        assertEquals(1, out.decisions.size)
+        z.speak(out)
+        assertEquals(
+            listOf(
+                "⚠️ <b>z.ai connection lost</b>\nCannot connect: ETIMEDOUT\n(attempt 2/11, next retry 4s)" to true,
+            ),
+            delivered,
+        )
+
+        // the default leg (SHADOW) delivers nothing — ADR-023 unchanged
+        val zShadow = shadow { nowVal }
+        zShadow.speak(zShadow.pass()) // quiet pass: no decisions, no sends
+    }
+
     private fun ts(iso: String): Double = java.time.Instant.parse(iso).toEpochMilli() / 1000.0
 }

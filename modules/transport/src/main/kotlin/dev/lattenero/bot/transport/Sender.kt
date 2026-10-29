@@ -1,15 +1,11 @@
 package dev.lattenero.bot.transport
 
-import dev.lattenero.bot.contracts.PyText
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kap.Kap
 import kap.evalGraph
 import kap.retry
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
 
 private val logger = KotlinLogging.logger {}
 
@@ -66,18 +62,9 @@ class Sender(
             if (aOutbox) outbox.put(text)
             return SendResult.Parked
         }
-        val notify = loud ?: cfg.loudAll
-        val base = buildJsonObject {
-            put("chat_id", cfg.chatId)
-            put("text", htmlTruncate(text, CH_REPLY))
-            put("parse_mode", "HTML")
-            put("disable_notification", !notify)
-        }
-        val params = if (markup != null) {
-            JsonObject(base + ("reply_markup" to JsonPrimitive(PyText.jsonDumps(markup))))
-        } else {
-            base
-        }
+        // ONE composition path: the dry-run knob logs this exact object and
+        // this call posts it — they cannot diverge by construction
+        val params = SendRequest.compose(cfg, text, loud, markup)
         return try {
             val mid = breaker.call {
                 Kap { messageIdOf(api.call("sendMessage", params)) }
