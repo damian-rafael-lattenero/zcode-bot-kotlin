@@ -590,4 +590,86 @@ class BotCommandsTest {
         assertEquals(2, scopeRows(rows, all = false, defaultWs = defaultWs).size)
         assertEquals(3, scopeRows(rows, all = true, defaultWs = defaultWs).size)
     }
+
+    // ---- the audit's reply-contract gaps (30/10) ---------------------------
+
+    @Test
+    fun startAliasSpeaksTheHelp() = runBlocking {
+        val (bc, _) = commands(ops())
+        assertTrue("The nine" in bc.reply("/start", 1L)!!)
+        assertTrue("The nine" in bc.reply("/help", 2L)!!)
+    }
+
+    @Test
+    fun statusWithoutContextAndDownAreHonest() = runBlocking {
+        val (bc, _) = commands(ops(status = """{"bot":{"id":"daemon-local","enabled":true},"context":null}"""))
+        val none = bc.reply("/status", 1L)!!
+        assertTrue("🎯 Active: none" in none, none)
+        assertTrue("running now" !in none, "no context, no running line")
+        val (bcDown, _) = commands(ops().apply { available = false })
+        assertTrue("channel to the app is down" in bcDown.reply("/status", 2L)!!)
+    }
+
+    @Test
+    fun stopWithNothingActiveDoesNotFireAQuery() = runBlocking {
+        val o = ops(status = draftStatus).apply { answers["botStatus"] = draftStatus }
+        val (bc, _) = commands(o)
+        assertEquals(
+            "🤷 Nothing to stop — the bot's context has no active task.",
+            bc.reply("/stop", 1L),
+        )
+        assertTrue(o.asked.filterIsInstance<ChannelQuery.Stop>().isEmpty())
+    }
+
+    @Test
+    fun quotaSpeaksWhenTheChannelFails() = runBlocking {
+        val (bcDown, _) = commands(ops().apply { available = false })
+        assertTrue("channel to the app is down" in bcDown.reply("/quota", 1L)!!)
+        val (bcFail, _) = commands(ops().apply { answers.remove("quota") })
+        assertTrue("⚠️ Quota failed (internal)" in bcFail.reply("/quota", 2L)!!)
+    }
+
+    @Test
+    fun tasksNewWithAProjectTagIsRefused() = runBlocking {
+        val o = ops(status = draftStatus).apply { answers["botStatus"] = draftStatus }
+        val (bc, _) = commands(o)
+        val reply = bc.reply("/tasks new otro-proyecto", 1L)!!
+        assertTrue(reply.startsWith("⚠️ /tasks new opens it in the ACTIVE project"), reply)
+        assertTrue(o.inbound.none { it.first == "/new" }, "the refusal fires nothing")
+    }
+
+    @Test
+    fun tasksAtSidPicksDirectlyLikeTheButton() = runBlocking {
+        val boundTo02 = """
+            {"bot":{"id":"daemon-local","enabled":true},
+             "context":{"workspacePath":"$app","activeTaskId":"task-02","mode":"task"}}
+        """.trimIndent()
+        val o = ops().apply {
+            botStatusJson = draftStatus
+            answers["botStatus"] = draftStatus
+            onInbound = { text -> if (text.startsWith("/task ")) answers["botStatus"] = boundTo02 }
+        }
+        val (bc, _) = commands(o)
+        val reply = bc.reply("/tasks @task-02", 8L)!!
+        assertTrue("🎯 Active conversation: «second»" in reply)
+        assertEquals(listOf("/task task-02" to "tg-8-bind"), o.awaited)
+    }
+
+    @Test
+    fun allTasksPickOutOfListNamesItsOwnCommand() = runBlocking {
+        val (bc, _) = commands(ops())
+        assertEquals(
+            "⚠️ Number out of the list (1 to 3) — /all_tasks.",
+            bc.reply("/all_tasks 9", 1L),
+        )
+    }
+
+    @Test
+    fun tasksZeroIsBelowTheList() = runBlocking {
+        val (bc, _) = commands(ops())
+        assertEquals(
+            "⚠️ Number out of the list (1 to 2) — /tasks.",
+            bc.reply("/tasks 0", 1L),
+        )
+    }
 }
