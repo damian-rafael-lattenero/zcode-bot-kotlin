@@ -1,6 +1,7 @@
 package dev.lattenero.bot.daemon.history
 
 import dev.lattenero.bot.channel.ModelSel
+import dev.lattenero.bot.channel.SubagentRow
 import dev.lattenero.bot.channel.TaskRow
 import dev.lattenero.bot.channel.TasksHistory
 import kotlinx.serialization.json.Json
@@ -20,6 +21,7 @@ import java.util.Properties
  * same read-only pattern as the spectator: short-lived xerial
  * connections, mode=ro, zero writes.
  */
+@Suppress("TooManyFunctions") // one read per contract surface — the class IS the repo port
 internal class TasksHistoryIo(private val baseDir: File) : TasksHistory {
 
     override suspend fun ctxTasks(limit: Int): List<TaskRow> {
@@ -80,6 +82,43 @@ internal class TasksHistoryIo(private val baseDir: File) : TasksHistory {
                 }
             }
         }.getOrDefault(false)
+    }
+
+    /**
+     * /subagents «inactivos» — today's ENDED subagent rows of the cli db's
+     * own `session` table (parent_id IS NOT NULL): last_outcome != ''
+     * (empty = STILL RUNNING — measured live 30/10: the two running
+     * subagents carried '', the ended ones 'completed'/'interrupted'),
+     * updated today, newest first, MAX 10 (the owner's cap). Same
+     * read-only pattern as every other read here.
+     */
+    override suspend fun subagentsToday(parentSid: String?, dayStartMs: Long): List<SubagentRow> {
+        val db = cliDb()
+        if (!db.exists()) return emptyList()
+        val scoped = !parentSid.isNullOrEmpty()
+        val sql = if (scoped) SUBAGENTS_QUERY_PARENT else SUBAGENTS_QUERY_ALL
+        return runCatching {
+            DriverManager.getConnection("jdbc:sqlite:${db.absolutePath}", roProps()).use { conn ->
+                conn.prepareStatement(sql).use { ps ->
+                    ps.setLong(1, dayStartMs)
+                    if (scoped) ps.setString(2, parentSid)
+                    ps.executeQuery().use { rs ->
+                        val rows = mutableListOf<SubagentRow>()
+                        while (rs.next()) {
+                            rows.add(
+                                SubagentRow(
+                                    title = rs.getString(SUB_TITLE_COL).orEmpty(),
+                                    outcome = rs.getString(SUB_OUTCOME_COL).orEmpty(),
+                                    startedMs = rs.getLong(SUB_CREATED_COL),
+                                    endedMs = rs.getLong(SUB_UPDATED_COL),
+                                ),
+                            )
+                        }
+                        rows
+                    }
+                }
+            }
+        }.getOrDefault(emptyList())
     }
 
     /** Latest model_usage per session, subagents excluded — Python's usage dict. */
@@ -195,5 +234,25 @@ internal class TasksHistoryIo(private val baseDir: File) : TasksHistory {
         /** The tombstone guard's count: alive ⇔ a row exists with deleted=0 AND archived=0. */
         const val ALIVE_QUERY =
             "SELECT COUNT(*) FROM tasks WHERE task_id=? AND deleted=0 AND archived=0"
+
+        /** /subagents «inactivos»: ENDED subagents (last_outcome ≠ ''), today's, newest first, 10. */
+        const val SUBAGENTS_QUERY_ALL =
+            "SELECT title, last_outcome, time_created, time_updated FROM session " +
+                "WHERE parent_id IS NOT NULL AND COALESCE(last_outcome,'') != '' " +
+                "AND time_updated >= ? " +
+                "ORDER BY time_updated DESC LIMIT 10"
+
+        /** The watched-conversation scope of the same read (parent_id = the task). */
+        const val SUBAGENTS_QUERY_PARENT =
+            "SELECT title, last_outcome, time_created, time_updated FROM session " +
+                "WHERE parent_id IS NOT NULL AND COALESCE(last_outcome,'') != '' " +
+                "AND time_updated >= ? AND parent_id = ? " +
+                "ORDER BY time_updated DESC LIMIT 10"
+
+        /** The subagents row's column positions (the read's own naming, MagicNumber's law). */
+        const val SUB_TITLE_COL = 1
+        const val SUB_OUTCOME_COL = 2
+        const val SUB_CREATED_COL = 3
+        const val SUB_UPDATED_COL = 4
     }
 }
