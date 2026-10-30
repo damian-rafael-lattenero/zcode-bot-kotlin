@@ -289,6 +289,40 @@ def phase0-sanity [st: RunState]: nothing -> PhaseResult {
     if not ($st.tg_cfg | path exists) {
         log $st $"WARN: falta ($st.tg_cfg) — los anuncios de Telegram se descartan"
     }
+
+    # El propio job launchd del cutover converge al repo (30/10: RunAtLoad
+    # era true y CADA boot disparaba el --real solo — el dueño lo vivió).
+    # La copia cargada se re-arma desde el repo SI su RunAtLoad difiere:
+    # el deploy queda disparable por kickstart, jamás por un bootstrap.
+    let plist_repo = ($st.repo + "/scripts/com.zcode.deploy-fork.plist")
+    let plist_loaded = ($env.HOME + "/Library/LaunchAgents/com.zcode.deploy-fork.plist")
+    if ($env.HOME | is-empty) or not ($plist_repo | path exists) {
+        log $st "WARN: no pude verificar el plist del cutover (repo o HOME ausentes)"
+    } else {
+        let repo_autorun = (open $plist_repo | get -o "RunAtLoad" | default false)
+        let loaded_autorun = if ($plist_loaded | path exists) {
+            open $plist_loaded | get -o "RunAtLoad" | default false
+        } else {
+            false
+        }
+        if $loaded_autorun != $repo_autorun {
+            log $st $"plist del cutover diverge (cargado RunAtLoad=($loaded_autorun), repo=($repo_autorun)) — re-armando desde el repo"
+            let dst_dir = ($plist_loaded | path dirname)
+            mkdir $dst_dir
+            cp $plist_repo $plist_loaded
+            let uid = (id -u)
+            do { ^launchctl bootout $"gui/($uid)/com.zcode.deploy-fork" } | complete
+            sleep 1sec
+            let bs = (do { ^launchctl bootstrap $"gui/($uid)" $plist_loaded } | complete)
+            if $bs.exit_code == 0 {
+                log $st "plist del cutover re-armado desde el repo (RunAtLoad=false — kickstart-only) ✓"
+            } else {
+                log $st $"WARN: bootstrap del plist falló ($bs.stderr | str trim) — el deploy continúa; revisar a mano"
+            }
+        } else {
+            log $st "plist del cutover: copia cargada == repo (kickstart-only) ✓"
+        }
+    }
     {state: $st, outcome: {ok: true, note: ""}}
 }
 
