@@ -65,8 +65,10 @@ private fun JsonObject.pickStringList(vararg keys: String): List<String>? {
 
 /**
  * bot-session.json (core.set_active_bot_session). model/mode/mode_set only
- * go into the JSON when set; focus_sid (F76) and bot_mode (F75) are newer
- * optional keys.
+ * go into the JSON when set; focus_sid is a newer optional key. bot_mode
+ * (F75, the Python reader/writer duality) is GONE by owner order — the bot
+ * talks to zcode direct, there is no reader/writer split anymore; the key
+ * is simply not carried (the file may still hold it, we ignore it).
  */
 @Serializable
 data class BotSession(
@@ -77,7 +79,6 @@ data class BotSession(
     val mode: String? = null,
     @SerialName("mode_set") val modeSet: String? = null,
     @SerialName("focus_sid") val focusSid: String? = null,
-    @SerialName("bot_mode") val botMode: String? = null,
 ) {
     companion object {
         fun fromJson(o: JsonObject) = BotSession(
@@ -88,7 +89,6 @@ data class BotSession(
             mode = o.pickString("mode"),
             modeSet = o.pickString("mode_set"),
             focusSid = o.pickString("focus_sid"),
-            botMode = o.pickString("bot_mode"),
         )
     }
 }
