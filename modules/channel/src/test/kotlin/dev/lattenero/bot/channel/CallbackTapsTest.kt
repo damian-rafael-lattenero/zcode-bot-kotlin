@@ -1,0 +1,122 @@
+package dev.lattenero.bot.channel
+
+import kotlinx.coroutines.runBlocking
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertTrue
+
+/**
+ * The tap vocabulary's reply contract, ON the dispatcher (KeyboardsTest
+ * pins the pure table, BotCommandsTest the t: re-bind): the F17 pair
+ * (intr:/qgo:), the ☢️ pair and the 💀 hard stop — every tap arrives as
+ * the owner's typed words (R5's table) and answers its own promise.
+ * cot:/cotr: never reach the dispatcher — the wiring folds them into
+ * hub.expandCot directly (LiveTurnTest pins that half).
+ */
+class CallbackTapsTest {
+
+    private class FakeOps : ChannelOps {
+        var available = true
+        val queries = mutableListOf<ChannelQuery>()
+        val answers = mutableMapOf<String, String>()
+
+        override suspend fun query(query: ChannelQuery): QueryAnswer {
+            queries.add(query)
+            if (!available) return QueryAnswer.Unavailable
+            return answers[queryKind(query)]?.let { QueryAnswer.Ok(it) }
+                ?: QueryAnswer.Failed("internal", "no canned answer")
+        }
+
+        override suspend fun sendInbound(text: String, messageId: String, receivedAt: Long) = InboundReceipt.FIRED
+
+        override suspend fun sendInboundAwait(
+            text: String,
+            messageId: String,
+            receivedAt: Long,
+        ) = InboundAnswer.Answered(duplicate = false, replies = emptyList())
+
+        override suspend fun enqueueInbound(text: String, messageId: String, receivedAt: Long) = 0
+
+        override suspend fun subscribe(taskId: String, workspacePath: String) {}
+    }
+
+    private val status = """
+        {"bot":{"id":"daemon-local","enabled":true},
+         "context":{"workspacePath":"/Users/damian/Projects/app","activeTaskId":"task-77","mode":"task"}}
+    """.trimIndent()
+
+    private fun commands(o: FakeOps, resets: () -> String = { "ladder ok" }): BotCommands = BotCommands(
+        ops = o,
+        hub = LiveHub(),
+        daemonReset = resets,
+        clock = { 1_000_000L },
+        history = object : TasksHistory {
+            override suspend fun ctxTasks(limit: Int) = emptyList<TaskRow>()
+            override suspend fun modelSelection(sid: String): ModelSel? = null
+            override suspend fun freshestTask(workspacePath: String): TaskRow? = null
+            override suspend fun taskAlive(sid: String) = true
+        },
+    )
+
+    @Test
+    fun thePushTapStopsTheTurnAndPromisesTheFire() = runBlocking {
+        val o = FakeOps().apply {
+            answers["botStatus"] = status
+            answers["stop"] = """{"stopped":["task-77"]}"""
+        }
+        val reply = commands(o).onCallback("intr:task-77", 1L)!!
+        assertEquals("⚡ Interrumpido — tu mensaje entra ya.", reply.text)
+        assertEquals(
+            listOf<ChannelQuery>(ChannelQuery.Stop("task-77")),
+            o.queries,
+            "the push IS the stop — the drain fires the parked text",
+        )
+    }
+
+    @Test
+    fun aRefusedPushPointsAtTheHardWay() = runBlocking {
+        val o = FakeOps().apply { answers["botStatus"] = status } // no canned stop -> Failed
+        val reply = commands(o).onCallback("intr:task-77", 2L)!!
+        assertTrue("⚠️ No pude interrumpir (internal)" in reply.text, reply.text)
+        assertTrue("/stop go es la vía dura" in reply.text)
+    }
+
+    @Test
+    fun theKeepQueuedTapSpeaksWithoutTouchingTheChannel() = runBlocking {
+        val o = FakeOps().apply { answers["botStatus"] = status }
+        val reply = commands(o).onCallback("qgo:task-77", 3L)!!
+        assertEquals("📬 Queda encolado — entra cuando el turno termine.", reply.text)
+        assertTrue(o.queries.isEmpty(), "the natural wait is a no-op by design")
+    }
+
+    @Test
+    fun theConfirmTapRunsTheWholeLadderThroughTheTable() = runBlocking {
+        val o = FakeOps().apply { answers["botStatus"] = status }
+        var runs = 0
+        val reply = commands(o, resets = { runs += 1; "2 stopped, app booted" })
+            .onCallback("nuc:go", 4L)!!
+        assertEquals(1, runs)
+        assertTrue(reply.text.startsWith("☢️ Nuclear go — 2 stopped, app booted"), reply.text)
+    }
+
+    @Test
+    fun theCancelTapTouchesNothing() = runBlocking {
+        val o = FakeOps().apply { answers["botStatus"] = status }
+        var runs = 0
+        val reply = commands(o, resets = { runs += 1; "never" }).onCallback("nuc:no", 5L)!!
+        assertEquals("🙅 Cancelled — nothing was touched.", reply.text)
+        assertEquals(0, runs)
+        assertTrue(o.queries.isEmpty())
+    }
+
+    @Test
+    fun theSkullTapIsTheHardAll() = runBlocking {
+        val o = FakeOps().apply {
+            answers["botStatus"] = status
+            answers["stopAll"] = """{"stopped":["task-77","task-02"]}"""
+        }
+        val reply = commands(o).onCallback("stop:go", 6L)!!
+        assertEquals("💀 Hard stop: 2 run(s) stopped — every active task's turn.", reply.text)
+        assertTrue(o.queries.any { it is ChannelQuery.StopAll })
+    }
+}

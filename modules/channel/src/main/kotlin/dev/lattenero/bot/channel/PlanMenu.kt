@@ -38,6 +38,7 @@ object PlanMenu {
             plans.flatMap { it.models }.firstOrNull { it.first == modelId }?.second
     }
 
+    @Suppress("ReturnCount") // one guard per shape: unparseable, nothing-usable, the parsed views
     fun parse(resultJson: String): Views? {
         val root = runCatching { Json.parseToJsonElement(resultJson).jsonObject }.getOrNull() ?: return null
         fun sel(key: String): Triple<String, String, String?>? {
