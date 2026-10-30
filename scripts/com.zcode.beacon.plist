@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.zcode.beacon</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>__HOME__/.local/bin/nu-nightly</string>
+        <string>__HOME__/Projects/zcode-bot-kotlin/scripts/beacon.nu</string>
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>StartInterval</key>
+    <integer>60</integer>
+    <key>ProcessType</key>
+    <string>Background</string>
+    <key>StandardOutPath</key>
+    <string>__HOME__/.zcode/bot-kotlin/logs/beacon-launchd.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/.zcode/bot-kotlin/logs/beacon-launchd.err.log</string>
+</dict>
+</plist>
