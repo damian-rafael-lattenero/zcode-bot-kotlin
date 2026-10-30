@@ -1,5 +1,6 @@
 package dev.lattenero.bot.channel
 
+import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -45,7 +46,7 @@ class CallbackTapsTest {
          "context":{"workspacePath":"/Users/damian/Projects/app","activeTaskId":"task-77","mode":"task"}}
     """.trimIndent()
 
-    private fun commands(o: FakeOps, resets: () -> String = { "ladder ok" }): BotCommands = BotCommands(
+    private fun commands(o: FakeOps, resets: suspend () -> String = { "ladder ok" }): BotCommands = BotCommands(
         ops = o,
         hub = LiveHub(),
         daemonReset = resets,
@@ -118,5 +119,25 @@ class CallbackTapsTest {
         val reply = commands(o).onCallback("stop:go", 6L)!!
         assertEquals("💀 Hard stop: 2 run(s) stopped — every active task's turn.", reply.text)
         assertTrue(o.queries.any { it is ChannelQuery.StopAll })
+    }
+
+    @Test
+    fun aSecondNuclearWhileOneRunsIsRefusedInFlight() = runBlocking {
+        // the 08:42 lesson: the button stays on screen ~40s and impatience is
+        // indistinguishable from a loop — one ladder at a time, honestly refused
+        val o = FakeOps().apply { answers["botStatus"] = status }
+        val bc = commands(o, resets = {
+            kotlinx.coroutines.delay(100)
+            "slow ladder"
+        })
+        val first = async { bc.handle("/nuclear go", 7L) }
+        kotlinx.coroutines.delay(20)
+        val second = bc.handle("/nuclear go", 8L)!!
+        val one = first.await()!!
+        assertTrue(one.text.contains("slow ladder"), one.text)
+        assertEquals("☢️ Ya hay un nuclear corriendo — esperá el resumen antes de lanzar otro.", second.text)
+        // the gate LIFTS when the ladder ends: a third trigger runs again
+        val third = bc.handle("/nuclear go", 9L)!!
+        assertTrue(third.text.contains("slow ladder"), third.text)
     }
 }
