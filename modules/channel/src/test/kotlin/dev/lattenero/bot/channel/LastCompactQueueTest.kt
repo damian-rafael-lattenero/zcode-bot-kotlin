@@ -233,11 +233,11 @@ class LastCompactQueueTest {
     // ---- the menu contract ---------------------------------------------------
 
     @Test
-    fun menuListsTheTwelveAndHelpSpeaksThem() {
-        assertEquals(12, BotCommands.MENU.size)
+    fun menuListsTheThirteenAndHelpSpeaksThem() {
+        assertEquals(13, BotCommands.MENU.size)
         val names = BotCommands.MENU.map { it.first }
         assertTrue("last" in names && "compact" in names && "queue" in names)
         assertTrue("/last" in BotCommands.HELP && "/compact" in BotCommands.HELP && "/queue" in BotCommands.HELP)
-        assertTrue("The twelve" in BotCommands.HELP)
+        assertTrue("The thirteen" in BotCommands.HELP)
     }
 }

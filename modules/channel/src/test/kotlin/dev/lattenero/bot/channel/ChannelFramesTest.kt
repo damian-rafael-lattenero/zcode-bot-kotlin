@@ -172,6 +172,7 @@ class ChannelFramesTest {
         assertEquals("activeTaskIds", queryKind(ChannelQuery.ActiveTaskIds("/w")))
         assertEquals("taskMeta", queryKind(ChannelQuery.TaskMeta("t")))
         assertEquals("taskSnapshot", queryKind(ChannelQuery.TaskSnapshot("t")))
+        assertEquals("contextWindow", queryKind(ChannelQuery.ContextWindow("t")))
         assertEquals("taskUsage", queryKind(ChannelQuery.TaskUsage("t")))
         assertEquals("quota", queryKind(ChannelQuery.Quota()))
         assertEquals("botStatus", queryKind(ChannelQuery.BotStatus))

@@ -54,6 +54,15 @@ sealed interface ChannelQuery {
 
     data class TaskSnapshot(val taskId: String, val workspacePath: String? = null) : ChannelQuery
 
+    /**
+     * The /context_window command's read: the conversation's REAL context
+     * meter (used tokens + the model's window), the same source the fork's
+     * own desktop meter restores — never estimated on either side. Wire
+     * shape is the fork's contextWindow query (9cfb39a9; aditivo:
+     * servidores viejos dicen unknown_query — el comando lo habla honesto).
+     */
+    data class ContextWindow(val taskId: String, val workspacePath: String? = null) : ChannelQuery
+
     data class TaskUsage(val taskId: String, val workspacePath: String? = null) : ChannelQuery
 
     data class Quota(val invalidateBalanceCache: Boolean = false) : ChannelQuery
@@ -199,6 +208,12 @@ private fun encodeQuery(query: ChannelQuery): JsonObject = when (query) {
 
     is ChannelQuery.TaskSnapshot -> buildJsonObject {
         put("kind", "taskSnapshot")
+        put("taskId", query.taskId)
+        if (query.workspacePath != null) put("workspacePath", query.workspacePath)
+    }
+
+    is ChannelQuery.ContextWindow -> buildJsonObject {
+        put("kind", "contextWindow")
         put("taskId", query.taskId)
         if (query.workspacePath != null) put("workspacePath", query.workspacePath)
     }
@@ -366,12 +381,14 @@ fun describe(frame: ClientFrame): String = when (frame) {
 }
 
 /** The query kind name — for logs and errors, one spelling with the wire. */
+@Suppress("CyclomaticComplexMethod") // one branch per query kind — the wire table's own shape
 fun queryKind(query: ChannelQuery): String = when (query) {
     is ChannelQuery.ListTasks -> "listTasks"
     is ChannelQuery.TaskList -> "taskList"
     is ChannelQuery.ActiveTaskIds -> "activeTaskIds"
     is ChannelQuery.TaskMeta -> "taskMeta"
     is ChannelQuery.TaskSnapshot -> "taskSnapshot"
+    is ChannelQuery.ContextWindow -> "contextWindow"
     is ChannelQuery.TaskUsage -> "taskUsage"
     is ChannelQuery.Quota -> "quota"
     is ChannelQuery.ModelSelection -> "modelSelection"

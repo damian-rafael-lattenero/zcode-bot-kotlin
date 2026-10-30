@@ -93,6 +93,7 @@ class BotCommands(
             "plan" -> plan()
             "last" -> BotReply(lastAnswer())
             "compact" -> compact()
+            "context_window" -> contextWindow()
             "queue" -> queue()
             else -> BotReply(UNKNOWN)
         }
@@ -778,6 +779,38 @@ class BotCommands(
         }
     }
 
+    /**
+     * /context_window — the active conversation's REAL context meter, the
+     * owner's order: «que te marque eso, la ventana de tokens usada hasta
+     * el momento por nK segun el modelo y el porcentaje que representa».
+     * Every number rides the fork's contextWindow query (the desktop
+     * meter's own source, 9cfb39a9) — NOTHING is estimated here. An old
+     * host refuses the query BY NAME (unknown_query) and the refusal says
+     * the fork update is the fix, /plan's degrade spirit.
+     */
+    @Suppress("ReturnCount") // one guard per query outcome — the commands' shared shape
+    private suspend fun contextWindow(): BotReply {
+        val ctx = contextAnswer() as? ContextAnswer.Ctx ?: return BotReply(noConversationOrDown())
+        val taskId = ctx.value.activeTaskId
+            ?: return BotReply("📭 No active conversation — /tasks n picks one; its answers come back here.")
+        val title = history.ctxTasks(SCOPE_FOR_PICK).firstOrNull { it.sid == taskId }
+            ?.title?.takeIf { it.isNotEmpty() } ?: taskId.takeLast(SID_TAIL)
+        return when (val answer = ops.query(ChannelQuery.ContextWindow(taskId, ctx.value.workspacePath))) {
+            is QueryAnswer.Ok -> BotReply(renderContextWindow(answer.resultJson, title))
+            is QueryAnswer.Unavailable -> BotReply(DEGRADED)
+            is QueryAnswer.Failed -> BotReply(contextWindowFailure(answer.code, answer.message))
+        }
+    }
+
+    /** The honest failure: an old host refuses the query by name — the fork deploy is the fix. */
+    private fun contextWindowFailure(code: String, message: String?): String =
+        if (code == UNKNOWN_QUERY_CODE) {
+            "⚠️ La app conectada no conoce la query «contextWindow» — falta deployar el fork " +
+                "actualizado (ZCode damian, commit 9cfb39a9+); el bot ya la habla."
+        } else {
+            "⚠️ Context window failed ($code): ${PyText.esc(message ?: "?")}"
+        }
+
     /** /queue — the F17 queue's honest peek: what is parked, 🚀 launch or 🗑 discard per row. */
     private suspend fun queue(): BotReply {
         val entries = ops.queueEntries()
@@ -952,7 +985,7 @@ class BotCommands(
 
     companion object {
         internal const val UNKNOWN =
-            "🤷 Unknown command — /help lists the twelve this bot speaks."
+            "🤷 Unknown command — /help lists the thirteen this bot speaks."
         internal const val DEGRADED =
             "📡 The channel to the app is down — the fork's host is not running? " +
                 "Commands that need it wait for the app."
@@ -992,6 +1025,7 @@ class BotCommands(
             "plan" to "plan, model and effort — tap to change",
             "last" to "re-sends the active conversation's last answer",
             "compact" to "shrinks the active conversation's context",
+            "context_window" to "context window used — tokens, model window and percent",
             "queue" to "the parked texts — launch or discard",
             "stop" to "stops the active task's turn",
             "nuclear" to "emergency: stops EVERYTHING and resets the bot",
@@ -1000,7 +1034,7 @@ class BotCommands(
             "help" to "all commands",
         )
 
-        internal val HELP = (listOf("📖 <b>The twelve</b> (the owner's MVP — the rest is hot-fix territory):") +
+        internal val HELP = (listOf("📖 <b>The thirteen</b> (the owner's MVP — the rest is hot-fix territory):") +
             MENU.map { (cmd, desc) -> "/$cmd — $desc" } +
             listOf(
                 "",
@@ -1027,6 +1061,64 @@ class BotCommands(
 
         /** /last's body cap: the header + the ✂️ note must fit inside the pipe's CH_REPLY. */
         internal const val LAST_BODY_CAP = 3600
+
+        /**
+         * The context meter's render (pure — /context_window's body): the
+         * header, one model line, the ▰▱ bar. Honesty ladder: used+window →
+         * the full meter; used only → «ventana desconocida» with NO percent
+         * and NO bar (you cannot scale without the window); neither → the
+         * honest ⚠️. Zero invented numbers, ever.
+         */
+        @Suppress("ReturnCount") // one guard per honesty tier of the meter
+        fun renderContextWindow(json: String, title: String): String {
+            val root = runCatching { Json.parseToJsonElement(json) as? JsonObject }.getOrNull()
+                ?: return CTX_WINDOW_UNPARSEABLE
+            val model = root.str("model")?.takeIf { it.isNotEmpty() } ?: CTX_MODEL_UNKNOWN
+            val used = root.long("usedTokens") ?: return CTX_WINDOW_NO_DATA
+            if (used < 0) return CTX_WINDOW_NO_DATA
+            val header = "🪟 <b>Ventana de contexto «${PyText.esc(title)}»</b>"
+            val window = root.long("windowTokens")
+            val line = if (window == null || window <= 0) {
+                "Modelo <b>${PyText.esc(model)}</b>: ${fmtK(used)} · ventana desconocida"
+            } else {
+                // Rounded to the nearest whole percent; >100% is honest (the window is gone).
+                val pct = ((used * CTX_PERCENT_SCALE + window / 2) / window).toInt()
+                val filled = ((pct.toLong() * CTX_BAR_CELLS + CTX_PERCENT_HALF) / CTX_PERCENT_SCALE)
+                    .toInt()
+                    .coerceIn(0, CTX_BAR_CELLS)
+                val bar = CTX_BAR_FULL.repeat(filled) + CTX_BAR_EMPTY.repeat(CTX_BAR_CELLS - filled)
+                "Modelo <b>${PyText.esc(model)}</b>: ${fmtK(used)} de ${fmtK(window)} ($pct%)\n$bar"
+            }
+            return "$header\n$line"
+        }
+
+        /** nK for the meter: one decimal below 100K (45.3K), whole K at or above (123K). */
+        private fun fmtK(tokens: Long): String = when {
+            tokens >= CTX_K_DECIMAL_LIMIT -> "${(tokens + CTX_K_ROUND_HALF) / CTX_K_DIVISOR}K"
+            else -> String.format(Locale.ROOT, "%.1f", tokens.toDouble() / CTX_K_DIVISOR) + "K"
+        }
+
+        /** The fork's refusal code for a query the connected host predates. */
+        internal const val UNKNOWN_QUERY_CODE = "unknown_query"
+        internal const val CTX_WINDOW_UNPARSEABLE =
+            "⚠️ No pude leer la respuesta de la ventana de contexto"
+
+        /** No usedTokens at all: the conversation never reported usage — ask, don't invent. */
+        internal const val CTX_WINDOW_NO_DATA =
+            "⚠️ La conversación aún no reporta uso de contexto — mandá un mensaje y volvé a probar."
+        private const val CTX_MODEL_UNKNOWN = "desconocido"
+        private const val CTX_BAR_FULL = "▰"
+        private const val CTX_BAR_EMPTY = "▱"
+
+        /** The bar's fixed cell count (a ~10-cell meter reads at a glance). */
+        private const val CTX_BAR_CELLS = 10
+        private const val CTX_PERCENT_SCALE = 100L
+        private const val CTX_PERCENT_HALF = 50L
+        private const val CTX_K_DIVISOR = 1000L
+
+        /** The K rendering switch: one decimal below, whole K from here up. */
+        private const val CTX_K_DECIMAL_LIMIT = 100_000L
+        private const val CTX_K_ROUND_HALF = 500L
 
         /** The discard's one-line preview of what was thrown away. */
         private const val DISCARD_PREVIEW = 40
