@@ -23,6 +23,7 @@ import dev.lattenero.bot.daemon.nuclear.MacProcessEdge
 import dev.lattenero.bot.daemon.nuclear.NuclearLadder
 import dev.lattenero.bot.daemon.queue.InboundQueue
 import dev.lattenero.bot.daemon.send.DaemonSend
+import dev.lattenero.bot.daemon.send.SendLanes
 import dev.lattenero.bot.daemon.shadow.TimeIso
 import dev.lattenero.bot.daemon.spectator.ToolBox
 import dev.lattenero.bot.transport.Cooldown
@@ -79,10 +80,11 @@ internal suspend fun feedAndResync(hub: LiveHub, frame: ServerFrame.StreamEvent,
  * the only thing that flips it). The final render rides the spectator's
  * own renderer, INJECTED so the channel module never depends on daemon.
  */
+@Suppress("LongMethod") // wiring breadth: the stack's every piece, one home
 internal fun wireChannel(
     cfg: DaemonConfig,
     send: DaemonSend,
-    api: TgApi?,
+    lanes: SendLanes,
     pythonState: File,
     pollOn: Boolean,
 ): ChannelStack {
@@ -94,11 +96,29 @@ internal fun wireChannel(
     // one send path for everything the channel says: the knob's leg (shadow
     // logs, dry-run composes+logs, LIVE posts with cooldown/outbox/last-ph);
     // the markup (the buttons) rides deliverMarkup — live posts it, the
-    // shadow contract stays text
+    // shadow contract stays text. This is the COMMANDS lane (the main
+    // throat): replies, buttons, announces — never render volume.
     val speak: suspend (String, Boolean, JsonObject?) -> Unit = { text, loud, markup ->
         val now = System.currentTimeMillis() / 1000.0
         send.leg.deliverMarkup(
             ShadowDecision(ts = now, tsIso = TimeIso.format(now), watcher = "channel", decision = "say", text = text),
+            loud,
+            markup,
+        )
+    }
+
+    // the RENDER lane's speak: the live view's final answer/boxes ride the
+    // firehose throat — render volume never touches the commands budget
+    val fireSpeak: suspend (String, Boolean, JsonObject?) -> Unit = { text, loud, markup ->
+        val now = System.currentTimeMillis() / 1000.0
+        send.firehose.deliverMarkup(
+            ShadowDecision(
+                ts = now,
+                tsIso = TimeIso.format(now),
+                watcher = "channel-live",
+                decision = "say",
+                text = text,
+            ),
             loud,
             markup,
         )
@@ -142,39 +162,35 @@ internal fun wireChannel(
         }
     }
 
-    val liveView = buildLiveView(send, api, pythonState, hub, client, speak, remote)
-    val poller = buildPoller(cfg, api, pythonState, pollOn, hub, client, speak, remote, queue)
+    val liveView = buildLiveView(send, lanes, hub, client, fireSpeak)
+    val poller = buildPoller(cfg, lanes.api, pythonState, pollOn, hub, client, speak, remote, queue)
     return ChannelStack(client, liveView, poller, hub)
 }
 
 private const val QUEUE_FILE = "inbound-queue.json"
 private val QUEUE_DRAIN_DELAY = 1.seconds
 
-/** The never-silence view — LIVE-only (its birth message is a send). */
+/** The never-silence view — LIVE-only (its birth message is a send), on the RENDER lane. */
 private fun buildLiveView(
     send: DaemonSend,
-    api: TgApi?,
-    pythonState: File,
+    lanes: SendLanes,
     hub: LiveHub,
     client: ChannelClient,
-    speak: suspend (String, Boolean, JsonObject?) -> Unit,
-    remote: File,
+    fireSpeak: suspend (String, Boolean, JsonObject?) -> Unit,
 ): LivePublisher? {
-    if (!send.ownsSpectator || api == null) return null
+    val lane = lanes.live
+    if (lane == null || !send.ownsSpectator) return null
     val telegram = LiveTelegram(
-        api = api,
-        cooldown = Cooldown(
-            readFile = { File(pythonState, "tg-cooldown") },
-            writeFile = { File(pythonState, "tg-cooldown") },
-        ),
-        lastPh = LastPh({ File(pythonState, "tg-last-ph") }),
+        api = lane.api,
+        cooldown = lane.cooldown,
+        lastPh = lane.lastPh,
     )
     return LivePublisher(
         hub = hub,
         telegram = telegram,
-        config = { TgConfig.load(remote) },
+        config = lane.config,
         channelAlive = { client.connected }, // 💓 vs 📡 in the status line: "channel healthy" vs "channel dead"
-        speak = { text -> speak(text, false, null) },
+        speak = { text -> fireSpeak(text, false, null) },
         finalBoxes = { tools -> finalBoxesOf(tools) },
         finalAnswer = { taskId ->
             when (val answer = client.query(ChannelQuery.TaskSnapshot(taskId))) {

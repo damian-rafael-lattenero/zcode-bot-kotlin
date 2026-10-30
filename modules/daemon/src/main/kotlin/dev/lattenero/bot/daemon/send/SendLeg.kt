@@ -58,13 +58,16 @@ object SendLegs {
         }
     }
 
-    fun dryRun(remote: () -> File): SendLeg = object : SendLeg {
+    fun dryRun(
+        remote: () -> File,
+        view: (TgConfig) -> TgConfig = { it },
+    ): SendLeg = object : SendLeg {
         override suspend fun deliver(d: ShadowDecision, loud: Boolean) {
             deliverMarkup(d, loud, null)
         }
 
         override suspend fun deliverMarkup(d: ShadowDecision, loud: Boolean, markup: JsonObject?) {
-            val r = composeSend(TgConfig.load(remote()), d.text, loud, markup)
+            val r = composeSend(view(TgConfig.load(remote())), d.text, loud, markup)
             logger.info {
                 "send DRY-RUN ${d.watcher}/${d.decision}: method=${r.method} url=${r.url} body=${r.body}"
             }
@@ -116,11 +119,13 @@ object SendLegs {
  */
 data class DaemonSend(
     val leg: SendLeg = SendLegs.NONE,
+    /** The FIREHOSE leg — the render lane (spectator, live view); the leg itself when there is no split. */
+    val firehose: SendLeg = leg,
     val ownsSpectator: Boolean = false,
 ) {
     companion object {
         /** SHADOW keeps today's parity wiring; DRY-RUN and LIVE own the feature. */
-        fun of(mode: SendMode, leg: SendLeg): DaemonSend =
-            DaemonSend(leg = leg, ownsSpectator = mode != SendMode.SHADOW)
+        fun of(mode: SendMode, leg: SendLeg, firehoseLeg: SendLeg = leg): DaemonSend =
+            DaemonSend(leg = leg, firehose = firehoseLeg, ownsSpectator = mode != SendMode.SHADOW)
     }
 }
