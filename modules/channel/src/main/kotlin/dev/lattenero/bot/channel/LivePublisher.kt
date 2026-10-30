@@ -134,11 +134,29 @@ class LivePublisher(
         val state = hub.peek() ?: return
         val now = clock()
         if (statusMessageId == null && state.phase != TurnPhase.Idle) {
-            statusMessageId = telegram.birth(cfg, LiveTurn.birthText(state))
+            // A failed birth (cooldown window) must NOT retry every tick:
+            // the 14:55 loop logged «born message_id=null» every 3s and
+            // would hammer Telegram the moment the window lifted. Back off
+            // BIRTH_RETRY_TICKS ticks between attempts, say it ONCE.
+            if (birthCooldownTicks > 0) {
+                birthCooldownTicks -= 1
+                return
+            }
+            val born = telegram.birth(cfg, LiveTurn.birthText(state))
+            if (born == null) {
+                if (!birthFailLogged) {
+                    logger.warn { "live view birth BLOCKED (cooldown/config) — retrying every ~$BIRTH_RETRY_TICKS ticks" }
+                    birthFailLogged = true
+                }
+                birthCooldownTicks = BIRTH_RETRY_TICKS
+                return
+            }
+            statusMessageId = born
+            birthFailLogged = false
             sealed = false
             statusTaskId = state.taskId
             lastText = ""
-            orphanStore?.save(statusMessageId ?: 0, state.taskId) // the boot seal's pointer
+            orphanStore?.save(born, state.taskId) // the boot seal's pointer
             logger.info { "live view born: taskId=${state.taskId} message_id=$statusMessageId" }
         }
         val mid = statusMessageId ?: return
@@ -206,9 +224,14 @@ class LivePublisher(
             )
 
     private var spinCount = 0
+    private var birthCooldownTicks = 0
+    private var birthFailLogged = false
 
     private companion object {
         val EDIT_CADENCE = 3.seconds
         const val SPIN_CYCLE = 4
+
+        /** A blocked birth retries every ~30s (10 ticks × 3s), not every tick. */
+        const val BIRTH_RETRY_TICKS = 10
     }
 }
