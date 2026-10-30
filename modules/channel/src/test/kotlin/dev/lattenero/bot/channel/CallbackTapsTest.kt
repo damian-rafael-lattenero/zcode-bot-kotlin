@@ -2,8 +2,11 @@ package dev.lattenero.bot.channel
 
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -11,8 +14,9 @@ import kotlin.test.assertTrue
  * pins the pure table, BotCommandsTest the t: re-bind): the F17 pair
  * (intr:/qgo:), the ☢️ pair and the 💀 hard stop — every tap arrives as
  * the owner's typed words (R5's table) and answers its own promise.
- * cot:/cotr: never reach the dispatcher — the wiring folds them into
- * hub.expandCot directly (LiveTurnTest pins that half).
+ * The CoT BLOCK taps (cb:) DO reach the dispatcher: they toggle the hub's
+ * expanded-block pointer and answer NULL — the card edits itself in
+ * place (never a new message; the wiring nudges the immediate tick).
  */
 class CallbackTapsTest {
 
@@ -58,6 +62,42 @@ class CallbackTapsTest {
             override suspend fun taskAlive(sid: String) = true
         },
     )
+
+    @Test
+    fun theBlockTapExpandsAndTheSameTapFoldsWithoutAReply() = runBlocking {
+        val hub = LiveHub()
+        val o = FakeOps()
+        val cmds = BotCommands(
+            ops = o,
+            hub = hub,
+            daemonReset = { "ladder ok" },
+            clock = { 1_000_000L },
+        )
+        // one block sealed: 3000 cp of streamed thinking through the hub
+        hub.apply(
+            ServerFrame.StreamEvent(
+                "task-9",
+                1,
+                100L,
+                buildJsonObject {
+                    put("type", "agent_thought_chunk")
+                    put("content", "x".repeat(3000))
+                },
+            ),
+            100L,
+        )
+        // the tap EXPANDS: null reply (the card edits itself — never a new
+        // message), no channel query, the pointer rides the hub
+        assertNull(cmds.onCallback("cb:1", 1L))
+        assertEquals(1, hub.peek()!!.cotExpandedBlock)
+        assertTrue(o.queries.isEmpty())
+        // the SAME tap folds
+        assertNull(cmds.onCallback("cb:1", 2L))
+        assertNull(hub.peek()!!.cotExpandedBlock)
+        // a stale/out-of-range tap folds silently, honestly
+        assertNull(cmds.onCallback("cb:9", 3L))
+        assertNull(hub.peek()!!.cotExpandedBlock)
+    }
 
     @Test
     fun thePushTapStopsTheTurnAndPromisesTheFire() = runBlocking {

@@ -166,6 +166,42 @@ class LivePublisherTest {
         assertEquals("arreglá el login", hub.peek()?.title)
     }
 
+    @Test
+    fun theSealShowerCarriesTheKeyboardDroppedBlocks() = runTest {
+        // 9 blocks: the keyboard held the most recent 8 — the close's
+        // shower keeps the promise the live render made (the honest cap)
+        val taskId = "task-9"
+        val hub = LiveHub()
+        repeat(9) { pass ->
+            hub.apply(
+                frame(taskId, "agent_thought_chunk", at = 1_000L + pass, "content" to JsonPrimitive(pass.toString().repeat(3000))),
+                nowMs = 1_000L + pass,
+            )
+        }
+        hub.apply(frame(taskId, "task_complete", at = 9_999, "stopReason" to JsonPrimitive("end_turn")), nowMs = 9_999)
+        val wire = Wire()
+        val spoken = mutableListOf<String>()
+        val publisher = LivePublisher(
+            hub = hub,
+            telegram = LiveTelegram(
+                api = TgApi({ cfg }, engineFactory = wire.factory),
+                cooldown = Cooldown(readFile = { null }),
+            ),
+            config = { cfg },
+            channelAlive = { true },
+            speak = { text -> spoken.add(text) },
+            finalBoxes = { "" },
+            finalAnswer = { null },
+            clock = { TICK_MS },
+        )
+        publisher.tick() // the seal tick
+        // the seal's record counts the blocks; the shower speaks the
+        // dropped block's REAL text (verbatim — never a summary)
+        val seal = wire.bodies.last { it.second == "editMessageText" }.first
+        assertTrue("9 bloques CoT" in seal)
+        assertTrue(spoken.any { "los primeros 1 bloque" in it && "000" in it })
+    }
+
     private companion object {
         const val TICK_MS = 2_000L
     }

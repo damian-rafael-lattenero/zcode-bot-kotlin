@@ -163,20 +163,34 @@ object Keyboards {
     }
 
     /**
-     * The CoT cajita's open/fold buttons (Python's ct:/cr: vocabulary):
-     * collapsed shows «🧠 cot 1.2K», expanded shows the fold ⤴️.
+     * The CoT BLOCKS' keyboard (Python's box_buttons — reasoning.py — the
+     * ct: vocabulary reborn as cb:): one «📖 CoT N» per sealed block, the
+     * most recent [COT_BUTTONS_CAP]; the EXPANDED one wears ⤴️ (Python's
+     * collapse mark) and the SAME tap folds it — one data, the toggle.
+     * The owner's 30/10 refinement: the block's text opens IN the card,
+     * right above this row. cb:<n> worst case ≈ 9 bytes — the 64-byte law
+     * never even breathes. Null while no block has sealed (the live tail
+     * needs no button).
      */
-    fun cotButtons(expanded: Boolean): JsonObject = buildJsonObject {
-        putJsonArray("inline_keyboard") {
-            add(
-                buildJsonArray {
-                    if (expanded) {
-                        add(button("⤴️ plegar", "cotr:x"))
-                    } else {
-                        add(button("🧠 cot", "cot:x"))
-                    }
-                },
-            )
+    fun cotBlocksButtons(count: Int, expanded: Int?): JsonObject? {
+        if (count <= 0) return null
+        val first = maxOf(1, count - COT_BUTTONS_CAP + 1)
+        val rows = mutableListOf<MutableList<JsonObject>>()
+        var row = mutableListOf<JsonObject>()
+        for (n in first..count) {
+            row.add(button(if (n == expanded) "⤴️ CoT $n" else "📖 CoT $n", "cb:$n"))
+            if (row.size == COT_BUTTONS_ROW) {
+                rows.add(row)
+                row = mutableListOf()
+            }
+        }
+        if (row.isNotEmpty()) rows.add(row)
+        return buildJsonObject {
+            putJsonArray("inline_keyboard") {
+                rows.forEach { r ->
+                    add(buildJsonArray { r.forEach { add(it) } })
+                }
+            }
         }
     }
 
@@ -255,6 +269,15 @@ object Keyboards {
     private const val CALLBACK_TEXT_CAP = 64
     private const val PREVIEW_CAP = 24
     private const val QUEUE_ROWS_CAP = 8
+
+    /**
+     * The CoT block buttons' cap (the owner's «~8»): the keyboard shows the
+     * most recent ones; the older blocks travel with the close's shower
+     * (the render's honest note names the promise). [COT_BUTTONS_ROW] per
+     * row — 4 keeps «📖 CoT 12» legible on the phone.
+     */
+    internal const val COT_BUTTONS_CAP = 8
+    private const val COT_BUTTONS_ROW = 4
 }
 
 /** A command's answer: the words plus, when it carries choices, the inline keyboard. */
