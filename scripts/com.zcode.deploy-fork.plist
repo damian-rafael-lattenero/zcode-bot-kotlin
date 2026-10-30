@@ -1,8 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- El autómata del cutover como job ONE-SHOT de launchd (lección medida: un
      nohup desde adentro del app muere con el árbol del app cuando launchd lo
-     tumba; hijo de launchd, el autómata sobrevive a TODO). Corre al bootstrap,
-     loguea a /tmp/deploy-fork.log, y al salir queda idle (inofensivo). -->
+     tumba; hijo de launchd, el autómata sobrevive a TODO).
+     30/10: RunAtLoad era true — en CADA boot el cutover corria solo (--real:
+     cierra el app, buildea, swap, reabre). El dueño lo vivio: reinicio la PC,
+     abrio ZCode y el script arranco solo. DEPLOY = DECISION DEL DUEÑO, nunca
+     un bootstrap. Carga manual cuando el la pide:
+       launchctl kickstart gui/$(id -u)/com.zcode.deploy-fork
+     Loguea a /tmp/deploy-fork.log, y al salir queda idle (inofensivo). -->
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
@@ -15,6 +20,6 @@
   </array>
   <key>StandardOutPath</key><string>/tmp/deploy-fork.log</string>
   <key>StandardErrorPath</key><string>/tmp/deploy-fork.log</string>
-  <key>RunAtLoad</key><true/>
+  <key>RunAtLoad</key><false/>
 </dict>
 </plist>
