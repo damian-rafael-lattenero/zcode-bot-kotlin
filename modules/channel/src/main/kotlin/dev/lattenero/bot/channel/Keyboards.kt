@@ -1,6 +1,7 @@
 package dev.lattenero.bot.channel
 
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
@@ -82,7 +83,43 @@ object Keyboards {
     /** The blue lane: ▶️ while open, ⏹️ once closed (the owner's exact marks). */
     internal fun subagentLabel(lane: ToolLive): String {
         val mark = if (lane.status == null) MARK_RUNNING_LANE else MARK_STOPPED_LANE
-        return "$SUBAGENT_MARK ${lane.name} $mark"
+        return "$SUBAGENT_MARK ${subagentName(lane)} $mark"
+    }
+
+    /**
+     * The subagent's REAL name — what the owner named it at spawn: the
+     * dispatch input's `description`, falling back to the event's own title
+     * (only when it says more than the bare tool name), then the tool name.
+     * The 30/10 complaint: the buttons said «bash, bash, read, read».
+     */
+    internal fun subagentName(lane: ToolLive): String =
+        (lane.input?.get("description") as? JsonPrimitive)?.takeIf { it.isString }?.content
+            ?.take(TITLE_CAP)?.takeIf { it.isNotBlank() }
+            ?: lane.title?.takeIf { it.isNotBlank() && it != lane.name }
+            ?: lane.name
+
+    /**
+     * /subagents' ACTIVE view keyboard: one row per open dispatch lane —
+     * the `sa:` tap attaches that subagent's stream (the session attach
+     * when the fork names it, lane-scope otherwise) — then the view-switch
+     * row. The «inactivos» view stays text-only: ended sessions have no
+     * stream to attach to.
+     */
+    fun subagentsKeyboard(lanes: List<ToolLive>, inactiveView: Boolean): JsonObject = buildJsonObject {
+        putJsonArray("inline_keyboard") {
+            lanes.forEach { lane ->
+                add(
+                    buildJsonArray {
+                        add(button(subagentLabel(lane), "sa:${lane.toolId.takeLast(LANE_TAIL)}"))
+                    },
+                )
+            }
+            add(
+                buildJsonArray {
+                    if (inactiveView) add(button("▶️ activos", "saa:")) else add(button("⏹️ inactivos", "sao:"))
+                },
+            )
+        }
     }
 
     /** Python's exact ☢️ confirmation row (handlers_system._cmd_nuclear) — ONE row, both buttons. */
