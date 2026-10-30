@@ -29,7 +29,12 @@ sed -e "s|__HOME__|$HOME|g" "$REPO/scripts/$PLIST_LABEL.plist" > "$PLIST_DST"
 if launchctl print "gui/$UID_N/$PLIST_LABEL" >/dev/null 2>&1; then
     launchctl bootout "gui/$UID_N/$PLIST_LABEL" || true
 fi
-launchctl bootstrap "gui/$UID_N" "$PLIST_DST"
+# bootout's teardown races the bootstrap (measured twice tonight: error 5,
+# "Input/output error") — give launchd a beat and retry once before giving up
+if ! launchctl bootstrap "gui/$UID_N" "$PLIST_DST"; then
+    sleep 2
+    launchctl bootstrap "gui/$UID_N" "$PLIST_DST"
+fi
 
 echo "==> verification: first heartbeat + armed state (deadline 15s)"
 ok=0
