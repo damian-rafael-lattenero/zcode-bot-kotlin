@@ -250,4 +250,45 @@ class SenderTest {
         assertEquals(1, ok)
         assertEquals(listOf("primera"), parkedTexts(), "the failed one is back, at the FRONT, alone")
     }
+
+    @Test
+    fun outboxFlushDrainsPacedNeverBackToBack() = runTest {
+        behavior = { throw IOException("down") }
+        val s = sender()
+        s.send(cfg, "primera")
+        s.send(cfg, "segunda")
+        s.send(cfg, "tercera")
+
+        behavior = { respond("""{"result": {"message_id": 100}}""") }
+        var pauses = 0
+        val ok = s.outboxFlush(cfg, pause = { pauses++ })
+        assertEquals(3, ok)
+        // one pause BETWEEN messages (n-1), none before the first nor
+        // after the last — a paced drain, never a back-to-back burst
+        assertEquals(2, pauses)
+        assertEquals("[]", outboxFile.readText())
+    }
+
+    @Test
+    fun outboxFlushStopsAtTheFirstParkAndRequeuesTheRestUntouched() = runTest {
+        behavior = { throw IOException("down") }
+        val s = sender()
+        s.send(cfg, "primera")
+        s.send(cfg, "segunda")
+        s.send(cfg, "tercera")
+
+        // the first flush send meets a 429: the window opens mid-drain —
+        // the rest must not even be attempted (they would all park)
+        behavior = {
+            respond(
+                """{"ok": false, "error_code": 429, "parameters": {"retry_after": 30}}""",
+                HttpStatusCode.TooManyRequests,
+            )
+        }
+        val requestsBefore = requests.size
+        val ok = s.outboxFlush(cfg, pause = {})
+        assertEquals(0, ok)
+        assertEquals(requestsBefore + 1, requests.size, "exactly ONE flush attempt — no hammering into the window")
+        assertEquals(listOf("primera", "segunda", "tercera"), parkedTexts(), "the whole pile back, in order")
+    }
 }

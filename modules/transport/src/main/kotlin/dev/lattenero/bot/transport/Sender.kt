@@ -5,7 +5,9 @@ import kap.Kap
 import kap.evalGraph
 import kap.retry
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 import kotlinx.serialization.json.JsonObject
+import kotlin.time.Duration.Companion.seconds
 
 private val logger = KotlinLogging.logger {}
 
@@ -103,13 +105,34 @@ class Sender(
      * The lock only covers the SWAP (fast) — sends go OUTSIDE, failed
      * ones go back to the FRONT of the queue, aOutbox=false avoids the
      * nested re-enqueue (the 15:47 self-deadlock lesson).
+     *
+     * The drain is PACED (one message per FLUSH_PAUSE_S): a back-to-back
+     * flush of a parked backlog is a burst that re-trips Telegram's
+     * flood limit the instant the window lifts — the ratchet that took
+     * the penalty from seconds to hours on 29/10 (third offense; the
+     * same burst Python's outbox_flush had). The first Parked answer
+     * re-queues the REST untouched (they would all park into `remaining`
+     * anyway — one cooldown read, no loop theater).
      */
-    suspend fun outboxFlush(cfg: TgConfig): Int {
+    suspend fun outboxFlush(cfg: TgConfig, pause: suspend () -> Unit = { delay(FLUSH_PAUSE_S) }): Int {
         val taken = outbox.takeAll() ?: return 0
         var ok = 0
         val remaining = mutableListOf<dev.lattenero.bot.contracts.OutboxItem>()
-        for (item in taken) {
-            if (send(cfg, item.text, loud = false, aOutbox = false) is SendResult.Sent) ok++ else remaining.add(item)
+        for ((index, item) in taken.withIndex()) {
+            if (index > 0) pause() // the burst guard: sustained, never back-to-back
+            if (send(cfg, item.text, loud = false, aOutbox = false) is SendResult.Sent) {
+                ok++
+            } else {
+                remaining.add(item)
+                if (cooldown.active()) {
+                    // a 429 opened the window mid-drain — the rest would all
+                    // park; re-queue them untouched and stop (a lone 4xx does
+                    // NOT stop the drain: the poison item stays at the front,
+                    // the rest still go out — Python's semantics)
+                    remaining.addAll(taken.drop(index + 1))
+                    break
+                }
+            }
         }
         outbox.putBack(remaining)
         return ok
@@ -117,5 +140,8 @@ class Sender(
 
     private companion object {
         const val ATTEMPTS = 3
+
+        /** 1 msg/s is Telegram's per-chat sustained line — the flush rides it exactly. */
+        private val FLUSH_PAUSE_S = 1.seconds
     }
 }
