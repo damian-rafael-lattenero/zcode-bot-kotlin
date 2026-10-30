@@ -44,8 +44,14 @@ interface ChannelOps {
 class BotCommands(
     private val ops: ChannelOps,
     private val hub: LiveHub,
-    /** /nuclear's daemon half: stopAll is the channel's; resetting OUR state is the daemon's. */
-    private val daemonReset: suspend () -> Unit,
+    /**
+     * /nuclear's daemon half — the WHOLE ladder (owner's order, 29/10:
+     * «el nuclear debe reiniciar todo a lo duro…»): stopAll, the CLI
+     * kills, the app bootout+reopen, the hello wait, the self-kickstart.
+     * Answers the summary (the ladder announces to Telegram itself; the
+     * return is the log's paper trail).
+     */
+    private val daemonReset: suspend () -> String,
     private val clock: () -> Long = System::currentTimeMillis,
     /** Python's ctx_tasks source (tasks-index + cli db, read-only) — the history /tasks lists. */
     private val history: TasksHistory = noHistory,
@@ -526,9 +532,11 @@ class BotCommands(
 
     /**
      * /nuclear — Python's two-step (the owner, 29/10: «con go de una, sin
-     * go soft y botón»): `go` = stopAll + the daemon's reset, NOW; bare =
-     * the ☢️ card + Python's EXACT confirmation row (☢️ Confirm / 🙅
-     * Cancel, `nuc:go`/`nuc:no`); `no` = Python's exact cancellation.
+     * go soft y botón»): `go` = the FULL ladder (the owner's order:
+     * «reiniciar todo a lo duro — el bot de kotlin y todo zcode habido y
+     * por haber»); bare = the ☢️ card + Python's EXACT confirmation row
+     * (☢️ Confirm / 🙅 Cancel, `nuc:go`/`nuc:no`); `no` = the exact
+     * cancellation.
      */
     private suspend fun nuclear(rest: String): BotReply = when (rest) {
         "go" -> BotReply(nuclearGo())
@@ -538,26 +546,22 @@ class BotCommands(
         else -> BotReply(
             "☢️ <b>Nuclear</b> — emergency:\n" +
                 "⏹️ stops ALL runs\n" +
-                "🔄 resets the bot's live state (the app itself is Damian's ⌘Q — never ours)\n\n" +
+                "💀 kills every zcode CLI on the Mac\n" +
+                "🔄 restarts the app AND the bot, connects de cero\n\n" +
                 "Confirm?",
             markup = Keyboards.nuclearConfirm(),
         )
     }
 
-    /** The `/nuclear go` half — the stopAll + daemon reset (nuclear.py's channel-side reach). */
-    @Suppress("ReturnCount") // one guard per degrade
+    /**
+     * The `/nuclear go` half — the daemon's LADDER owns everything now
+     * (stopAll included): it announces both ends itself and ends by
+     * restarting this very daemon; the returned summary is the log's
+     * paper trail (the phone already heard it from the ladder).
+     */
     private suspend fun nuclearGo(): String {
-        val workspace = (contextAnswer() as? ContextAnswer.Ctx)?.value?.workspacePath
-        val stopped = when (val answer = ops.query(ChannelQuery.StopAll(workspace))) {
-            is QueryAnswer.Ok -> parseStringsOf(answer.resultJson, "stopped")
-            else -> emptyList()
-        }
-        daemonReset()
-        return "☢️ Nuclear: stopped ${stopped.size} run(s)" +
-            (stopped.take(NAMES_IN_NUCLEAR).joinToString("") {
-                " · <code>${PyText.esc(it.takeLast(SID_TAIL))}</code>"
-            }) +
-            " — the daemon's live state was reset. ⌘Q of the app stays YOURS (the golden rule)."
+        val summary = daemonReset()
+        return "☢️ Nuclear go — $summary"
     }
 
     /** /quota — the coding plan's pool (IUsageStatsService through the channel). */

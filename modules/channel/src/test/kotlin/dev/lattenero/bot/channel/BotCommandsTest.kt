@@ -123,7 +123,7 @@ class BotCommandsTest {
         val bc = BotCommands(
             ops = o,
             hub = LiveHub(),
-            daemonReset = { resets += 1 },
+            daemonReset = { resets += 1; "fake ladder: 2 stopped" },
             clock = { 1_000_000L },
             history = history,
             defaultWorkspacePath = defaultWs,
@@ -425,7 +425,7 @@ class BotCommandsTest {
         var resets = 0
         val o = ops()
         val bc = BotCommands(
-            ops = o, hub = LiveHub(), daemonReset = { resets += 1 },
+            ops = o, hub = LiveHub(), daemonReset = { resets += 1; "fake ladder: 2 stopped" },
             clock = { 1_000_000L }, history = FakeHistory(rows), defaultWorkspacePath = defaultWs,
         )
         val card = bc.reply("/nuclear", 1L)!!
@@ -434,7 +434,7 @@ class BotCommandsTest {
         assertTrue("Confirm?" in card)
         assertEquals("🙅 Cancelled — nothing was touched.", bc.reply("/nuclear no", 2L))
         val go = bc.reply("/nuclear go", 3L)!!
-        assertTrue(go.startsWith("☢️ Nuclear: stopped 2 run(s)"))
+        assertTrue("fake ladder: 2 stopped" in go) // the ladder's own summary rides the reply
         assertEquals(1, resets)
     }
 
@@ -515,7 +515,7 @@ class BotCommandsTest {
             )
         }
         val bc = BotCommands(
-            ops = o, hub = hub, daemonReset = {}, clock = { 2_000L },
+            ops = o, hub = hub, daemonReset = { "" }, clock = { 2_000L },
             history = FakeHistory(rows), defaultWorkspacePath = defaultWs,
         )
         val reply = bc.reply("/subagents", 1L)!!
