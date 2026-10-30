@@ -531,7 +531,13 @@ class BotCommands(
                         running = running,
                         activeSid = ctx.value.activeTaskId,
                         watchedTaskId = watched?.taskId,
-                        subagents = watched?.tools.orEmpty().filter { it.parentToolUseId != null },
+                        // ONLY the live dispatch lanes (the owner's 30/10 bug: the
+                        // old parentToolUseId!=null filter showed the agents' inner
+                        // tools as «bash, bash, read, read» — a subagent row IS the
+                        // open Agent/Task dispatch lane, named as he named it)
+                        subagents = watched?.tools.orEmpty().filter {
+                            it.parentToolUseId == null && it.status == null && it.name in SUBAGENT_DISPATCH_NAMES
+                        },
                     ),
                 )
             }
@@ -973,7 +979,11 @@ class BotCommands(
             } else {
                 renderSubagentsActive(turn, clock())
             }
-            BotReply(text + hint, markup = Keyboards.subagentsViewButtons(inactiveView = false))
+            // one row per live dispatch lane — the tap ATTACHES its stream
+            val lanes = turn?.tools.orEmpty().filter {
+                it.parentToolUseId == null && it.status == null && it.name in SUBAGENT_DISPATCH_NAMES
+            }
+            BotReply(text + hint, markup = Keyboards.subagentsKeyboard(lanes, inactiveView = false))
         }
     }
 
@@ -1028,7 +1038,7 @@ class BotCommands(
             groups.forEach { g ->
                 if (g.dispatch != null) {
                     append(
-                        "• 🔵 <b>${PyText.esc(g.dispatch.name)}</b> ▶️ · running " +
+                        "• 🔵 <b>${PyText.esc(Keyboards.subagentName(g.dispatch))}</b> ▶️ · running " +
                             "${LiveTurn.fmtDur(nowMs - g.dispatch.openedAtMs)}",
                     )
                 } else {

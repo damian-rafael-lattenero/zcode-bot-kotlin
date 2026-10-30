@@ -316,4 +316,59 @@ class TaskAttachTest {
         hub.clear() // the seal's own path
         assertNull(hub.peekPin())
     }
+
+    // ---- the 30/10 button bugs: real names, /tasks dispatch-only, /subagents rows ---
+
+    private fun laneWith(name: String, toolId: String, description: String? = null): ToolLive {
+        val input = description?.let {
+            kotlinx.serialization.json.buildJsonObject {
+                put("description", kotlinx.serialization.json.JsonPrimitive(it))
+            }
+        }
+        return ToolLive(
+            toolId = toolId,
+            name = name,
+            title = name,
+            input = input,
+            openedAtMs = 1_000_000L,
+        )
+    }
+
+    @Test
+    fun subagentRowsSpeakTheRealNameAndCarryTheAttachTap() {
+        val kb = Keyboards.subagentsKeyboard(
+            lanes = listOf(
+                laneWith("Agent", "toolu_dispatchaaaa1111", "fix the /plan menu"),
+                laneWith("Task", "toolu_dispatchbbbb2222"),
+            ),
+            inactiveView = false,
+        ).toString()
+        // the NAME the owner gave it — never the bare tool name (the «bash, bash» bug)
+        assertTrue("fix the /plan menu" in kb)
+        assertTrue("Task" in kb) // no description → the honest fallback
+        // the rows ARE the attach taps (same vocabulary the dispatcher owns)
+        assertTrue("sa:${"toolu_dispatchaaaa1111".takeLast(16)}" in kb)
+        assertTrue("sa:${"toolu_dispatchbbbb2222".takeLast(16)}" in kb)
+        assertTrue("sao:" in kb) // the view switch rides along
+    }
+
+    @Test
+    fun taskKeyboardSubagentRowsAreDispatchLanesOnly() {
+        // the 30/10 bug: the agents' inner bash/read tools leaked into the
+        // /tasks keyboard — the wiring's filter is the dispatch-only law
+        val inner = ToolLive(
+            toolId = "toolu_inner_bashhh111",
+            name = "Bash",
+            title = "Bash",
+            parentToolUseId = laneId,
+            openedAtMs = 1_000_000L,
+        )
+        val dispatch = laneWith("Agent", laneId, "research plugins")
+        val rows = listOf(inner, dispatch).filter {
+            it.parentToolUseId == null && it.status == null && it.name in setOf("Task", "Agent")
+        }
+        assertEquals(listOf(dispatch), rows)
+        assertTrue("research plugins" in Keyboards.subagentLabel(dispatch))
+        assertTrue("Bash" !in Keyboards.subagentLabel(dispatch))
+    }
 }
