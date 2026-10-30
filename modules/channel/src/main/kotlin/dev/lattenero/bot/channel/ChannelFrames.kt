@@ -65,7 +65,13 @@ sealed interface ChannelQuery {
 
     data class TaskUsage(val taskId: String, val workspacePath: String? = null) : ChannelQuery
 
-    data class Quota(val invalidateBalanceCache: Boolean = false) : ChannelQuery
+    /**
+     * The owner's own quota. `taskId` (additive, 30/10): the active
+     * conversation whose model selection names the provider — the fork
+     * classifies it into the accountAccess hint that makes the Start Plan
+     * path answer with REAL buckets instead of the lying not_configured.
+     */
+    data class Quota(val invalidateBalanceCache: Boolean = false, val taskId: String? = null) : ChannelQuery
 
     data object BotStatus : ChannelQuery
 
@@ -227,6 +233,7 @@ private fun encodeQuery(query: ChannelQuery): JsonObject = when (query) {
     is ChannelQuery.Quota -> buildJsonObject {
         put("kind", "quota")
         if (query.invalidateBalanceCache) put("invalidateBalanceCache", true)
+        query.taskId?.let { put("taskId", it) }
     }
 
     is ChannelQuery.ModelSelection -> buildJsonObject {

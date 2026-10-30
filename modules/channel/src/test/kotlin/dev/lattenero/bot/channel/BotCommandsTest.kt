@@ -480,6 +480,40 @@ class BotCommandsTest {
     }
 
     @Test
+    fun quotaSpeaksTheStartPlanBucketsWithTheUsedPercent() {
+        // the owner's 30/10 order: «340K/500K usado x%» — the Start Plan's
+        // REAL balance buckets (the fork's builder carries usage/unit raw;
+        // its percentage is REMAINING-based, so the used % is computed here)
+        val json = """
+            {"authenticated":true,
+             "provider":{"id":"account:zai-start-plan","name":"Start Plan"},
+             "remaining":{"count":160000,"isShow":true,"percentage":0.32},
+             "quota":{"level":"Start","limits":[
+               {"type":"tok_5h","meter":"tokens","period":"5 hours","unit":500000,"usage":340000,"remaining":160000,"percentage":0.32,"nextResetTime":3600000},
+               {"type":"tok_week","meter":"tokens","period":"weekly","unit":4000000,"usage":900000,"remaining":3100000,"percentage":0.775,"nextResetTime":500000000}]}
+            }
+        """.trimIndent()
+        val text = BotCommands.renderQuota(json, nowMs = 0L)
+        assertTrue("📊 <b>Start plan</b>" in text)
+        assertTrue("• 5 hours: 340K/500K usado 68%" in text)
+        assertTrue("• weekly: 900K/4000K usado 22%" in text)
+        assertTrue("⚠️" !in text) // 68% and 22% are below the 75% alert
+    }
+
+    @Test
+    fun quotaStartPlanBucketsAlertAtSeventyFive() {
+        val json = """
+            {"authenticated":true,
+             "quota":{"level":"Start","limits":[
+               {"type":"tok_5h","meter":"tokens","period":"5 hours","unit":400000,"usage":340000,"nextResetTime":3600000}]}
+            }
+        """.trimIndent()
+        val text = BotCommands.renderQuota(json, nowMs = 0L)
+        assertTrue("340K/400K usado 85%" in text)
+        assertTrue("⚠️" in text)
+    }
+
+    @Test
     fun helpListsExactlyTheMenu() {
         assertNotNull(BotCommands.HELP)
         assertEquals(13, BotCommands.MENU.size)
