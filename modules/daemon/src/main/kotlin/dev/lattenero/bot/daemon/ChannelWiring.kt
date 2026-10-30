@@ -273,6 +273,14 @@ private fun buildPoller(
                 override suspend fun sendInbound(text: String, messageId: String, receivedAt: Long) =
                     client.sendInbound(text, messageId, receivedAt)
 
+                // the ✍️ armed order: direct to the named session (the fork's inbound taskId)
+                override suspend fun sendOrder(
+                    text: String,
+                    messageId: String,
+                    receivedAt: Long,
+                    taskId: String,
+                ) = client.sendInbound(text, messageId, receivedAt, taskId)
+
                 override suspend fun sendInboundAwait(text: String, messageId: String, receivedAt: Long) =
                     client.sendInboundAwait(text, messageId, receivedAt)
 

@@ -27,6 +27,15 @@ interface ChannelOps {
 
     suspend fun sendInbound(text: String, messageId: String, receivedAt: Long): InboundReceipt
 
+    /**
+     * An ORDER direct to one session (the fork's inbound taskId — the ✍️
+     * armed shot at an attached subagent). The honest default for wiring
+     * that never learned orders: UNAVAILABLE — an order must NEVER ride
+     * the ordinary inbound and land in the wrong conversation.
+     */
+    suspend fun sendOrder(text: String, messageId: String, receivedAt: Long, taskId: String): InboundReceipt =
+        InboundReceipt.UNAVAILABLE
+
     /** The bind's send: the inbound's own answer (replies = the botsService's words). */
     suspend fun sendInboundAwait(text: String, messageId: String, receivedAt: Long): InboundAnswer
 
@@ -123,6 +132,8 @@ class BotCommands(
         data.startsWith("t:") -> taskAttach(data.removePrefix("t:"), updateId)
 
         data.startsWith("sa:") -> laneAttach(data.removePrefix("sa:"))
+
+        data.startsWith("so:") -> orderArm(data.removePrefix("so:"))
 
         data.startsWith("qgo:") -> {
             logger.info { "callback ⏳ qgo: the parked text keeps its natural wait" }
@@ -335,6 +346,25 @@ class BotCommands(
             }
         }
         newIntent = false
+        // LA ORDEN ARMADA (the owner's loop: tap a subagent → read its stream →
+        // write an order): one armed shot — the next free text goes DIRECT to
+        // that session (the fork's inbound taskId), then the arm disarms. The
+        // reply lands on the attached card's own stream.
+        armedOrder?.let { order ->
+            armedOrder = null
+            logger.info {
+                "route: ORDER to ${order.sessionId} («${order.title}»): ${text.take(ORDER_LOG_PREVIEW)}"
+            }
+            return when (
+                ops.sendOrder(text, messageId = "tg-$updateId-ord", receivedAt = clock(), taskId = order.sessionId)
+            ) {
+                InboundReceipt.FIRED -> BotReply(
+                    "⚔️ Orden entregada a «${PyText.esc(order.title)}» — su respuesta llega en la carta attachada.",
+                )
+
+                InboundReceipt.UNAVAILABLE -> BotReply(RouteTexts.CHANNEL_DOWN)
+            }
+        }
         return when (ops.sendInbound(text, messageId = "tg-$updateId", receivedAt = clock())) {
             InboundReceipt.FIRED -> {
                 logger.info { "route: text FIRED at ${plan.sid} (${plan.reason})" }
@@ -605,6 +635,36 @@ class BotCommands(
             "👁 «${PyText.esc(title)}» suscripto — la carta en vivo entra cuando arranque su próximo turno."
         }
         return BotReply("$watchLine\n${pickBySid(sid, updateId)}")
+    }
+
+    /** One armed order: the next free text flies to this session. The §7 escape hatch. */
+    private data class ArmedOrder(val sessionId: String, val title: String)
+
+    @Volatile
+    private var armedOrder: ArmedOrder? = null
+
+    /**
+     * A subagent's ORDER tap (`so:<tail>` — the ✍️ next to the 🔵 attach):
+     * ATTACHES the subagent's stream (the full form when the fork names the
+     * child, lane-scope otherwise — [laneAttach]'s semantics) AND arms the
+     * next free text as an order direct to that session. One tap, one shot:
+     * the order flies, the arm disarms, the card keeps streaming.
+     */
+    private suspend fun orderArm(tail: String): BotReply {
+        val attachReply = laneAttach(tail)
+        val lane = hub.peek()?.tools?.lastOrNull { it.toolId.endsWith(tail) }
+        if (lane != null) {
+            armedOrder = ArmedOrder(
+                sessionId = hub.peekPin() ?: lane.toolId,
+                title = Keyboards.subagentName(lane),
+            )
+            logger.info { "callback ✍️ so: ORDER ARMED for ${armedOrder?.sessionId} (${lane.name})" }
+            return BotReply(
+                "👁 ${attachReply.text}\n" +
+                    "✍️ Armado: tu PRÓXIMO texto va como orden a «${PyText.esc(Keyboards.subagentName(lane))}».",
+            )
+        }
+        return attachReply // the honest miss — nothing armed
     }
 
     /**
@@ -1245,6 +1305,9 @@ class BotCommands(
 
         /** The CLI session store's child-session convention — measured live 30/10 in the db rows. */
         internal const val SUBAGENT_SESSION_PREFIX = "sess_subagent_"
+
+        /** The armed order's log preview cap. */
+        private const val ORDER_LOG_PREVIEW = 60
         internal const val NAMES_IN_NUCLEAR = 3
 
         /** Python's caps: /task lists 10, /all_tasks 20, picks resolve against 30. */
