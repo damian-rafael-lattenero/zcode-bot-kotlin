@@ -346,10 +346,16 @@ class BotCommandsTest {
     fun freeTextMidTurnQueuesLikePythonsF17() = runBlocking {
         val o = ops().apply { answers["activeTaskIds"] = """["task-77"]""" }
         val (bc, _) = commands(o)
-        val reply = bc.reply("y ahora esto", 5L)!!
+        val full = bc.handle("y ahora esto", 5L)!!
+        val reply = full.text
         assertTrue("⏳ The Mac is busy with «arreglá el login»" in reply)
         assertTrue("stayed in the queue (1 waiting)" in reply)
-        assertTrue("/stop interrupts it now" in reply)
+        // 30/10: the park ASKS — push-or-enqueue (the owner's «que me
+        // pregunte interrumpir o encolar»), the buttons replace the old
+        // /stop hint line
+        val datas = full.markup.toString()
+        assertTrue("intr:" in datas, "the ⚡ push button is there")
+        assertTrue("qgo:" in datas, "the ⏳ keep-queued button is there")
         assertTrue(o.inbound.isEmpty()) // parked, not fired
         assertEquals(listOf(Triple("y ahora esto", "tg-5", 1_000_000L)), o.queued)
     }

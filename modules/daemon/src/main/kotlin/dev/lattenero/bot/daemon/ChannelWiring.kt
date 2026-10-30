@@ -250,9 +250,22 @@ private fun buildPoller(
         },
         hub = hub,
         daemonReset = {
-            hub.clear()
-            client.reset() // subscriptions die with the socket — the reconnect replays nothing stale
-            ladder.run().summary()
+            // The cross-restart single-flight (the 08:42 loop's lesson: each
+            // extra ☢️ tap ran a FULL ladder, and the ladder's own kickstart
+            // resets any in-memory gate): the gate file's MTIME is the clock
+            // — a start younger than the debounce is a double-trigger,
+            // honestly refused; a crash leaves it stale and the next pass.
+            val gate = File(pythonState, NUCLEAR_GATE)
+            val ageMs = System.currentTimeMillis() - gate.lastModified()
+            if (gate.exists() && ageMs in 0 until NUCLEAR_DEBOUNCE_MS) {
+                "REFUSED: otro nuclear arrancó hace ${ageMs / 1000}s — esperá su resumen " +
+                    "(single-flight; sobrevive al kickstart del propio nuclear)"
+            } else {
+                gate.writeText("started") // the write IS the mtime stamp
+                hub.clear()
+                client.reset() // subscriptions die with the socket — the reconnect replays nothing stale
+                ladder.run().summary()
+            }
         },
         // Python's ctx_tasks + model_selection — the same two sqlite files the spectator reads
         history = history,
@@ -332,3 +345,7 @@ internal fun snapshotAnswerOf(resultJson: String): String? = runCatching {
 }.getOrNull()
 
 private const val FINAL_BOXES = 6
+
+/** The nuclear gate's file (mtime = the last start) and its double-trigger window. */
+private const val NUCLEAR_GATE = "nuclear-last"
+private const val NUCLEAR_DEBOUNCE_MS = 180_000L
