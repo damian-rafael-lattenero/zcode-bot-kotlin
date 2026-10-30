@@ -131,6 +131,10 @@ class BotCommandsTest {
         return bc to o
     }
 
+
+    /** The dispatcher's String view — the markup has its own tests (KeyboardsTest). */
+    private suspend fun BotCommands.reply(text: String, updateId: Long): String? = handle(text, updateId)?.text
+
     @Test
     fun parseCommandStripsBotNameAndCase() {
         assertEquals("tasks" to "5", BotCommands.parseCommand("/Tasks@glm_bot 5"))
@@ -152,7 +156,7 @@ class BotCommandsTest {
 
             Free text you send goes to the active conversation (🎯).
             """.trimIndent(),
-            bc.handle("/tasks", 1L),
+            bc.reply("/tasks", 1L),
         )
     }
 
@@ -160,7 +164,7 @@ class BotCommandsTest {
     fun allTasksIncludesTheLooseOnes() = runBlocking {
         val o = ops().apply { answers["activeTaskIds"] = """["task-02"]""" }
         val (bc, _) = commands(o)
-        val reply = bc.handle("/all_tasks", 1L)!!
+        val reply = bc.reply("/all_tasks", 1L)!!
         assertTrue("💬 <b>All conversations</b> (loose ones included) — /tasks only projects" in reply)
         assertTrue("🔄 2. second · 📁bot" in reply)
         assertTrue("· 3. task-03 · 📁default" in reply) // loose row kept, sid tail as title
@@ -169,7 +173,7 @@ class BotCommandsTest {
     @Test
     fun tasksWithoutContextStillListsPythonsWay() = runBlocking {
         val (bc, _) = commands(ops(status = """{"bot":{"id":"daemon-local","enabled":true},"context":null}"""))
-        val reply = bc.handle("/tasks", 1L)!! // Python: /task is HOW you get an active one
+        val reply = bc.reply("/tasks", 1L)!! // Python: /task is HOW you get an active one
         assertTrue("Conversations by project" in reply)
         assertTrue("· 1. arreglá el login · 📁app" in reply) // no context: every row tagged
     }
@@ -179,7 +183,7 @@ class BotCommandsTest {
         val (bc, _) = commands(
             ops(status = """{"bot":{"id":"daemon-local","enabled":false},"context":{"workspacePath":"$app"}}"""),
         )
-        assertTrue("Conversations by project" in bc.handle("/tasks", 1L)!!)
+        assertTrue("Conversations by project" in bc.reply("/tasks", 1L)!!)
     }
 
     @Test
@@ -196,7 +200,7 @@ class BotCommandsTest {
             }
         }
         val (bc, _) = commands(o)
-        val reply = bc.handle("/tasks 2", 7L)!!
+        val reply = bc.reply("/tasks 2", 7L)!!
         assertTrue("🎯 Active conversation: «second»" in reply)
         assertTrue("/task task-02" in o.awaited.map { it.first })
         assertEquals("tg-7-bind", o.awaited.first { it.first == "/task task-02" }.second)
@@ -207,7 +211,7 @@ class BotCommandsTest {
         val (bc, _) = commands(ops())
         assertEquals(
             "⚠️ Number out of the list (1 to 2) — /tasks.",
-            bc.handle("/tasks 9", 1L),
+            bc.reply("/tasks 9", 1L),
         )
     }
 
@@ -217,7 +221,7 @@ class BotCommandsTest {
         val (bc, _) = commands(o)
         assertEquals(
             "⏳ The previous task's turn is still running — /stop first, then pick again.",
-            bc.handle("/tasks 2", 1L),
+            bc.reply("/tasks 2", 1L),
         )
         assertTrue(o.inbound.isEmpty()) // the doomed bind never fires
     }
@@ -225,7 +229,7 @@ class BotCommandsTest {
     @Test
     fun freeTextGoesToTheBoundConversationAndSubscribes() = runBlocking {
         val (bc, o) = commands(ops())
-        val reply = bc.handle("arreglá el login del bot", 4242L)
+        val reply = bc.reply("arreglá el login del bot", 4242L)
         assertNull(reply) // no ack: the live view and the final render speak
         assertEquals(listOf("arreglá el login del bot" to "tg-4242"), o.inbound)
         assertEquals(listOf("task-77" to app), o.subscribed)
@@ -241,7 +245,7 @@ class BotCommandsTest {
             }
         }
         val (bc, _) = commands(o)
-        assertNull(bc.handle("probando probando", 10L))
+        assertNull(bc.reply("probando probando", 10L))
         assertEquals(listOf("probando probando" to "tg-10"), o.inbound)
         assertEquals(
             listOf("/task task-77" to "tg-10-bind"),
@@ -266,7 +270,7 @@ class BotCommandsTest {
         }
         val history = FakeHistory(rows, alive = { it != "task-dead" })
         val (bc, _) = commands(o, history)
-        assertNull(bc.handle("probando probando", 11L))
+        assertNull(bc.reply("probando probando", 11L))
         assertEquals(listOf("probando probando" to "tg-11"), o.inbound)
         assertEquals(
             listOf("/task task-77" to "tg-11-bind"),
@@ -283,7 +287,7 @@ class BotCommandsTest {
         val o = ops().apply { answers["botStatus"] = boundDead }
         val history = FakeHistory(rows, freshest = null, alive = { it != "task-dead" })
         val (bc, _) = commands(o, history)
-        val reply = bc.handle("hola", 1L)!!
+        val reply = bc.reply("hola", 1L)!!
         assertTrue("was deleted" in reply)
         assertTrue(o.inbound.isEmpty()) // firing would CREATE — the tombstone guard refuses
     }
@@ -302,7 +306,7 @@ class BotCommandsTest {
             answers["activeTaskIds"] = """["task-02"]"""
         }
         val (bc, _) = commands(o) // freshest = task-77 (open) ≠ bound task-02 (running)
-        val reply = bc.handle("re-apuntá", 6L)!!
+        val reply = bc.reply("re-apuntá", 6L)!!
         assertTrue(reply.startsWith("🔄 task corriendo, no puedo re-apuntar"))
         assertTrue("stayed in the queue (1 waiting)" in reply)
         assertTrue(o.awaited.isEmpty()) // the pre-check refuses BEFORE any bind is fired
@@ -319,7 +323,7 @@ class BotCommandsTest {
             )
         }
         val (bc, _) = commands(o)
-        val reply = bc.handle("probando", 12L)!!
+        val reply = bc.reply("probando", 12L)!!
         assertTrue("switch did not land" in reply)
         assertTrue(o.inbound.isEmpty()) // refused bind → the text NEVER fires
         assertTrue(o.awaited.isNotEmpty())
@@ -333,7 +337,7 @@ class BotCommandsTest {
         }
         val history = FakeHistory(rows, freshest = null) // the index sees nothing open
         val (bc, _) = commands(o, history)
-        val reply = bc.handle("hola", 1L)!!
+        val reply = bc.reply("hola", 1L)!!
         assertTrue("There is no active conversation yet" in reply)
         assertTrue(o.inbound.isEmpty()) // free text NEVER creates a conversation
     }
@@ -342,7 +346,7 @@ class BotCommandsTest {
     fun freeTextMidTurnQueuesLikePythonsF17() = runBlocking {
         val o = ops().apply { answers["activeTaskIds"] = """["task-77"]""" }
         val (bc, _) = commands(o)
-        val reply = bc.handle("y ahora esto", 5L)!!
+        val reply = bc.reply("y ahora esto", 5L)!!
         assertTrue("⏳ The Mac is busy with «arreglá el login»" in reply)
         assertTrue("stayed in the queue (1 waiting)" in reply)
         assertTrue("/stop interrupts it now" in reply)
@@ -357,9 +361,9 @@ class BotCommandsTest {
             answers["botStatus"] = draftStatus
         }
         val (bc, _) = commands(o)
-        val reply = bc.handle("/tasks new", 3L)!!
+        val reply = bc.reply("/tasks new", 3L)!!
         assertTrue(reply.startsWith("🆕 New conversation in app"))
-        assertNull(bc.handle("primer mensaje", 4L))
+        assertNull(bc.reply("primer mensaje", 4L))
         assertEquals(2, o.inbound.size)
         assertTrue(o.inbound[0].first == "/new") // the botsService's own draft
         assertTrue(o.inbound.none { it.first.startsWith("/task ") }) // no bind: CREATE intent
@@ -368,9 +372,8 @@ class BotCommandsTest {
     @Test
     fun stopSoftCarriesTheGoHint() = runBlocking {
         val (bc, o) = commands(ops())
-        val reply = bc.handle("/stop", 1L)!!
+        val reply = bc.reply("/stop", 1L)!!
         assertTrue("⏹️ Stop sent" in reply)
-        assertTrue("💀 /stop go stops EVERYTHING" in reply)
         assertTrue(o.asked.filterIsInstance<ChannelQuery.Stop>().isNotEmpty())
     }
 
@@ -379,9 +382,42 @@ class BotCommandsTest {
         val (bc, o) = commands(ops())
         assertEquals(
             "💀 Hard stop: 2 run(s) stopped — every active task's turn.",
-            bc.handle("/stop go", 1L),
+            bc.reply("/stop go", 1L),
         )
         assertTrue(o.asked.filterIsInstance<ChannelQuery.StopAll>().isNotEmpty())
+    }
+
+    @Test
+    fun tasksAndStopsAndNuclearCarryTheirKeyboards() = runBlocking {
+        val (bc, _) = commands(ops())
+        val tasks = bc.handle("/tasks", 1L)!!
+        assertTrue(tasks.markup != null, "/tasks carries the green keyboard")
+        assertTrue(tasks.markup.toString().contains("\"t:task-77\""))
+        val all = bc.handle("/all_tasks", 2L)!!
+        assertTrue(all.markup != null, "/all_tasks too")
+        val stop = bc.handle("/stop", 3L)!!
+        assertTrue(stop.markup.toString().contains("\"stop:go\""), "bare /stop carries the 💀 confirm")
+        val nuclear = bc.handle("/nuclear", 4L)!!
+        assertTrue(nuclear.markup.toString().contains("\"nuc:go\""), "bare /nuclear carries ☢️/🙅")
+        assertNull(bc.handle("/nuclear no", 5L)!!.markup, "the cancellation carries no buttons")
+        assertNull(bc.handle("/quota", 6L)!!.markup, "plain replies stay plain")
+    }
+
+    @Test
+    fun theTButtonTapRebindsThroughTheSameMachinery() = runBlocking {
+        val boundTo02 = """
+            {"bot":{"id":"daemon-local","enabled":true},
+             "context":{"workspacePath":"$app","activeTaskId":"task-02","mode":"task"}}
+        """.trimIndent()
+        val o = ops().apply {
+            botStatusJson = draftStatus
+            answers["botStatus"] = draftStatus
+            onInbound = { text -> if (text.startsWith("/task ")) answers["botStatus"] = boundTo02 }
+        }
+        val (bc, _) = commands(o)
+        val reply = bc.onCallback("t:task-02", 99L)!!
+        assertTrue("🎯 Active conversation: «second»" in reply.text)
+        assertEquals(listOf("/task task-02" to "tg-99-bind"), o.awaited)
     }
 
     @Test
@@ -392,12 +428,12 @@ class BotCommandsTest {
             ops = o, hub = LiveHub(), daemonReset = { resets += 1 },
             clock = { 1_000_000L }, history = FakeHistory(rows), defaultWorkspacePath = defaultWs,
         )
-        val card = bc.handle("/nuclear", 1L)!!
+        val card = bc.reply("/nuclear", 1L)!!
         assertTrue(card.startsWith("☢️ <b>Nuclear</b> — emergency:"))
         assertTrue("⏹️ stops ALL runs" in card)
-        assertTrue("Confirm? — /nuclear go · /nuclear no cancels" in card)
-        assertEquals("🙅 Cancelled — nothing was touched.", bc.handle("/nuclear no", 2L))
-        val go = bc.handle("/nuclear go", 3L)!!
+        assertTrue("Confirm?" in card)
+        assertEquals("🙅 Cancelled — nothing was touched.", bc.reply("/nuclear no", 2L))
+        val go = bc.reply("/nuclear go", 3L)!!
         assertTrue(go.startsWith("☢️ Nuclear: stopped 2 run(s)"))
         assertEquals(1, resets)
     }
@@ -406,7 +442,7 @@ class BotCommandsTest {
     fun statusShowsTitleModelAndWhatRuns() = runBlocking {
         val o = ops().apply { answers["activeTaskIds"] = """["task-77"]""" }
         val (bc, _) = commands(o, FakeHistory(rows, ModelSel("GLM-5.3", "high")))
-        val reply = bc.handle("/status", 1L)!!
+        val reply = bc.reply("/status", 1L)!!
         assertTrue("📊 <b>Status</b>" in reply)
         assertTrue("🎯 Active: «arreglá el login»" in reply)
         assertTrue("🤖 GLM-5.3 · 🧠 high · 🎛 🔓 Full access" in reply)
@@ -417,7 +453,7 @@ class BotCommandsTest {
     @Test
     fun quotaRendersThePoolAndReset() = runBlocking {
         val (bc, _) = commands(ops())
-        val reply = bc.handle("/quota", 1L)!!
+        val reply = bc.reply("/quota", 1L)!!
         assertTrue("41% remaining" in reply)
         assertTrue("resets in 1h" in reply)
     }
@@ -482,7 +518,7 @@ class BotCommandsTest {
             ops = o, hub = hub, daemonReset = {}, clock = { 2_000L },
             history = FakeHistory(rows), defaultWorkspacePath = defaultWs,
         )
-        val reply = bc.handle("/subagents", 1L)!!
+        val reply = bc.reply("/subagents", 1L)!!
         assertTrue("subagents" in reply)
         assertTrue("Task" in reply)
         assertTrue("10 chars thought" in reply)
@@ -491,21 +527,21 @@ class BotCommandsTest {
     @Test
     fun subagentsWithNoTurnIsHonest() = runBlocking {
         val (bc, _) = commands(ops())
-        val reply = bc.handle("/subagents", 1L)!!
+        val reply = bc.reply("/subagents", 1L)!!
         assertTrue("No turn is being watched" in reply)
     }
 
     @Test
     fun unknownCommandGetsTheBanner() = runBlocking {
         val (bc, _) = commands(ops())
-        assertTrue("Unknown command" in bc.handle("/deploy", 1L)!!)
+        assertTrue("Unknown command" in bc.reply("/deploy", 1L)!!)
     }
 
     @Test
     fun freeTextWithTheChannelDownApologizes() = runBlocking {
         val o = ops().apply { available = false }
         val (bc, _) = commands(o)
-        val reply = bc.handle("hola", 1L)!!
+        val reply = bc.reply("hola", 1L)!!
         assertTrue("channel to the app is down" in reply)
     }
 
@@ -513,8 +549,8 @@ class BotCommandsTest {
     fun commandsWithTheChannelDownExplainThemselves() = runBlocking {
         val o = ops().apply { available = false }
         val (bc, _) = commands(o)
-        assertTrue("channel is down" in bc.handle("/tasks", 1L)!!)
-        assertTrue("channel to the app is down" in bc.handle("/stop", 1L)!!)
+        assertTrue("channel is down" in bc.reply("/tasks", 1L)!!)
+        assertTrue("channel to the app is down" in bc.reply("/stop", 1L)!!)
     }
 
     @Test

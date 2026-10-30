@@ -68,7 +68,7 @@ class PollerTest {
         val seen = mutableListOf<String>()
         var offsetDuringDispatch = 0L
         val poller = poller(dir, """{"result":[${update(10, "/status")}, ${update(11, "hola")}]}""") { _, m ->
-            seen.add(m.text)
+            if (m is InboundUpdate.Message) seen.add(m.text)
             offsetDuringDispatch = TgOffset.current(File(dir, "tg-offset"))
         }
         val outcome = poller.cycle(cfg)
@@ -108,7 +108,7 @@ class PollerTest {
         val noOwner = cfg.copy(ownerUserId = null)
         val seen = mutableListOf<String>()
         val api = TgApi({ noOwner }, engineFactory = factory("""{"result":[${update(10, "hi")}]}"""))
-        val poller = Poller(api = api, offsetFile = File(dir, "tg-offset"), dispatch = { _, m -> seen.add(m.text) })
+        val poller = Poller(api = api, offsetFile = File(dir, "tg-offset"), dispatch = { _, m -> if (m is InboundUpdate.Message) seen.add(m.text) })
         poller.cycle(noOwner)
         assertEquals(emptyList(), seen)
     }
@@ -148,13 +148,36 @@ class PollerTest {
         val poller = poller(
             dir,
             """{"result":[
-                {"update_id":10,"callback_query":{"id":"1","data":"x"}},
+                {"update_id":10,"callback_query":{"id":"cb1","data":"nuc:go","from":{"id":8}}},
                 {"update_id":11,"edited_message":{"text":"edited","from":{"id":7}}},
                 {"update_id":12,"message":{"photo":"x","from":{"id":7}}}
             ]}""",
-        ) { _, m -> seen.add(m.text) }
+        ) { _, m ->
+            when (m) {
+                is InboundUpdate.Message -> seen.add(m.text)
+                is InboundUpdate.Callback -> seen.add("cb:${m.data}")
+            }
+        }
         val outcome = poller.cycle(cfg)
-        assertEquals(listOf("edited"), seen) // callbacks and photos are post-MVP; edits count
+        assertEquals(listOf("edited"), seen) // a STRANGER's tap and photos never dispatch; edits count
         assertEquals(13L, outcome.offset) // but the cursor advanced over ALL of them
+    }
+
+    @Test
+    fun theOwnersButtonTapDispatchesAsACallback() = runTest {
+        val dir = tempDir()
+        val seen = mutableListOf<InboundUpdate>()
+        val poller = poller(
+            dir,
+            """{"result":[
+                {"update_id":10,"callback_query":{"id":"cb9","data":"t:ses_abc","from":{"id":7}}}
+            ]}""",
+        ) { _, m -> seen.add(m) }
+        val outcome = poller.cycle(cfg)
+        assertEquals(1, seen.size)
+        val cb = seen.single() as InboundUpdate.Callback
+        assertEquals("cb9", cb.callbackId)
+        assertEquals("t:ses_abc", cb.data)
+        assertEquals(11L, outcome.offset)
     }
 }

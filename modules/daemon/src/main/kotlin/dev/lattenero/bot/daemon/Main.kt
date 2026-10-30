@@ -234,7 +234,10 @@ private fun buildLeg(
             dev.lattenero.bot.transport.LastPh({ File(pythonState, "tg-last-ph") }),
         )
         logger.info { "send LIVE: Sender wired (cooldown/outbox/tg-last-ph shared, breaker + (0,1,3) retry)" }
-        SendLegs.live({ cfg, text, loud -> sender.send(cfg, text, loud) }, remote) to api
+        SendLegs.live(
+            { cfg, text, loud, markup -> sender.send(cfg, text, loud, markup) },
+            remote,
+        ) to api
     }
 }
 

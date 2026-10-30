@@ -58,7 +58,7 @@ class SendLegTest {
     @Test
     fun `LIVE passes text and loudness to the sender and reports the message_id line`() = runTest {
         val calls = mutableListOf<Pair<String, Boolean>>()
-        val leg = SendLegs.live({ _, text, loud ->
+        val leg = SendLegs.live({ _, text, loud, _ ->
             calls.add(text to loud)
             SendResult.Sent(777)
         }) { java.io.File("/nonexistent/telegram-remote.json") } // unreadable → TgConfig defaults; the leg's fn is what we pin
@@ -69,7 +69,7 @@ class SendLegTest {
 
     @Test
     fun `LIVE answers parked without raising - the outbox holds it`() = runTest {
-        val leg = SendLegs.live({ _, _, _ -> SendResult.Parked }) {
+        val leg = SendLegs.live({ _, _, _, _ -> SendResult.Parked }) {
             java.io.File("/nonexistent/telegram-remote.json")
         }
         leg.deliver(decision(), loud = true) // must not throw — a hook must never break the session
