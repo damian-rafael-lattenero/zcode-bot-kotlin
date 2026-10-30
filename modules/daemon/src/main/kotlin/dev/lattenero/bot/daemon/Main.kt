@@ -2,7 +2,10 @@ package dev.lattenero.bot.daemon
 
 import dev.lattenero.bot.channel.BotCommands
 import dev.lattenero.bot.daemon.send.DaemonSend
+import dev.lattenero.bot.daemon.send.LiveLane
 import dev.lattenero.bot.daemon.send.SendKnob
+import dev.lattenero.bot.daemon.send.SendLanes
+import dev.lattenero.bot.daemon.send.buildLanes
 import dev.lattenero.bot.daemon.send.SendLeg
 import dev.lattenero.bot.daemon.send.SendLegs
 import dev.lattenero.bot.daemon.send.SendMode
@@ -49,7 +52,7 @@ import kotlin.time.Duration.Companion.seconds
  * reader). Rollback is the knob back to shadow.
  */
 // The composition root: wiring only, no logic to extract.
-@Suppress("LongMethod")
+@Suppress("LongMethod", "CyclomaticComplexMethod") // wiring breadth, not logic depth
 fun main(args: Array<String>) {
     val cfg = DaemonConfig.parse(args.toList())
     val logger = KotlinLogging.logger("daemon")
@@ -75,18 +78,22 @@ fun main(args: Array<String>) {
     val shadowLog = ShadowLog(File(cfg.homeDir, "shadow"))
     val pythonState = File(File(cfg.baseDir, "hooks"), "state")
     val remote = { File(cfg.baseDir, "telegram-remote.json") }
-    val (leg, api) = buildLeg(knob.mode, remote, pythonState, logger)
-    val send = DaemonSend.of(knob.mode, leg)
+    // BOTH throats, one chat: the commands lane and (when the config says
+    // so) the firehose lane — the spectator/live-view renders ride their
+    // OWN token+files, so a render flood can never mute a command
+    val lanes = buildLanes(knob.mode, remote, pythonState)
+    val send = DaemonSend.of(knob.mode, lanes.leg, lanes.firehose)
+    val (leg, api) = lanes.leg to lanes.api
     if (knob.mode == SendMode.LIVE) {
         logger.info {
-            "send LIVE: tg-cooldown/outbox.json/tg-last-ph are SHARED with Python at ${pythonState.absolutePath} " +
-                "— the strangler's handover files (Python still polls getUpdates; this daemon NEVER does)"
+            "send LIVE: two-throat wiring — commands on the shared tg-cooldown/outbox.json, " +
+                "renders on ${if (lanes.live?.leg === lanes.leg) "the SAME throat (no firehose_token)" else "the firehose throat (own files)"}"
         }
     }
 
     // B3b: the channel stack (client always; live view when the daemon owns
     // the send; poller only at the retirement knob)
-    val stack = wireChannel(cfg, send, api, pythonState, pollKnob.on)
+    val stack = wireChannel(cfg, send, lanes, pythonState, pollKnob.on)
 
     val clock = { System.currentTimeMillis() / MILLIS_PER_SECOND }
     val zconnWatch = ZconnShadow(cfg.baseDir, stateDir, shadowLog, clock, pythonState, send.leg)
@@ -152,11 +159,32 @@ fun main(args: Array<String>) {
             launch { registerTelegramMenu(cfg, api, logger) }
         }
 
+        // the outbox drain (Python's poller used to do this; retired with it):
+        // BOTH lanes' piles flush on their own pace — 1 msg/s, stopped at a
+        // window — so a parked message is a DELAY, never a loss
+        val outboxDrain = Kap { lanes.flush() }
+            .repeat(Schedule.spaced(OUTBOX_DRAIN_EVERY))
+            .process(
+                name = "outbox-drain",
+                restart = RestartPolicy.exponential(base = 1.seconds),
+                onRestart = { attempt, error, delay ->
+                    logger.warn(error) { "outbox drain failed — restart $attempt in $delay" }
+                },
+            )
+            .startIn(this)
+
+        // the firehose lane's boot probe: a fresh bot that was never /started
+        // answers 403 on every send — diagnosable from the FIRST minutes
+        if (knob.mode == SendMode.LIVE && lanes.live?.leg === lanes.firehose && lanes.firehose !== lanes.leg) {
+            launch { firehoseProbe(lanes.live!!, logger) }
+        }
+
         val root = coroutineContext[Job]
         Runtime.getRuntime().addShutdownHook(
             Thread {
                 zconnHandle.stop()
                 spectatorHandle.stop()
+                outboxDrain.stop()
                 pollerHandle?.stop()
                 liveHandle?.stop()
                 pingHandle.stop()
@@ -203,43 +231,6 @@ fun main(args: Array<String>) {
     }
 }
 
-/**
- * B2's knob positions as wiring: SHADOW is today's no-op leg; DRY-RUN
- * composes-and-logs (no client at all — nothing can post by accident);
- * LIVE builds the full Sender with the SHARED contract files — Python's
- * own tg-cooldown (read AND write: the window is addressed to the chat,
- * never to a process), the flock-compatible outbox (a parked message is
- * flushed by whichever bot cycles next — Python's poller still does),
- * and tg-last-ph (the ll floats under the newest message, either bot's).
- */
-private fun buildLeg(
-    mode: SendMode,
-    remote: () -> File,
-    pythonState: File,
-    logger: io.github.oshai.kotlinlogging.KLogger,
-): Pair<SendLeg, dev.lattenero.bot.transport.TgApi?> = when (mode) {
-    SendMode.SHADOW -> SendLegs.NONE to null
-
-    SendMode.DRY_RUN -> SendLegs.dryRun(remote) to null
-
-    SendMode.LIVE -> {
-        val api = dev.lattenero.bot.transport.TgApi({ dev.lattenero.bot.transport.TgConfig.load(remote()) })
-        val sender = dev.lattenero.bot.transport.Sender(
-            api,
-            dev.lattenero.bot.transport.Cooldown(
-                readFile = { File(pythonState, "tg-cooldown") },
-                writeFile = { File(pythonState, "tg-cooldown") },
-            ),
-            dev.lattenero.bot.transport.Outbox(File(pythonState, "outbox.json")),
-            dev.lattenero.bot.transport.LastPh({ File(pythonState, "tg-last-ph") }),
-        )
-        logger.info { "send LIVE: Sender wired (cooldown/outbox/tg-last-ph shared, breaker + (0,1,3) retry)" }
-        SendLegs.live(
-            { cfg, text, loud, markup -> sender.send(cfg, text, loud, markup) },
-            remote,
-        ) to api
-    }
-}
 
 /**
  * Python's register_bot_menu: with the poller ON the daemon owns the
@@ -299,7 +290,42 @@ private fun touch(file: File) {
     }
 }
 
+/**
+ * The firehose lane's boot probe: a bot the owner never /started answers
+ * 403 to EVERY send — the LOUD warn makes the cause readable in the first
+ * minutes instead of a pile of parked renders.
+ */
+@Suppress("TooGenericExceptionCaught", "ReturnCount") // a probe never raises: the lane fails loud, the daemon lives
+private suspend fun firehoseProbe(
+    lane: dev.lattenero.bot.daemon.send.LiveLane,
+    logger: io.github.oshai.kotlinlogging.KLogger,
+) {
+    val cfg = lane.config()
+    if (!cfg.configured) return
+    try {
+        lane.api.call(
+            "getChat",
+            kotlinx.serialization.json.buildJsonObject { put("chat_id", cfg.chatId) },
+        )
+        logger.info { "firehose lane probe OK — the firehose bot talks to the chat" }
+    } catch (e: dev.lattenero.bot.transport.TgHttpException) {
+        if (e.code == NOT_STARTED_403) {
+            logger.warn {
+                "firehose lane rejected (403) — did the owner /start the firehose bot? " +
+                    "Every render send will park in outbox-firehose.json until then"
+            }
+        } else {
+            logger.warn { "firehose lane probe failed: ${e.message}" }
+        }
+    } catch (e: Exception) {
+        logger.warn { "firehose lane probe failed: ${e.message}" }
+    }
+}
+
 private const val HB_ZCONN = "hb-zconn-shadow"
+
+/** Telegram's 403: the bot was never /started by the chat's user. */
+private const val NOT_STARTED_403 = 403
 private const val HB_SPECTATOR = "hb-spectator"
 private const val HB_CHANNEL = "hb-channel"
 private const val HB_LIVE_VIEW = "hb-live-view"
@@ -307,4 +333,5 @@ private const val HB_POLLER = "hb-poller"
 private const val COMPONENT_KEY = "component"
 private val DEFAULT_HEARTBEAT_EVERY = 30.seconds
 private val SPECTATOR_SCAN = 2.seconds
+private val OUTBOX_DRAIN_EVERY = 15.seconds
 private const val MILLIS_PER_SECOND = 1000.0

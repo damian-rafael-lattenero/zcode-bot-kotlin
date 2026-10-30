@@ -158,7 +158,8 @@ internal class SpectatorOrchestrator(
             ) {
                 continue
             }
-            val turn = SpectatorTurn(baseDir, stateDir, shadowLog, send.leg, now)
+            // the RENDER lane: firehose when split, the leg itself when not
+            val turn = SpectatorTurn(baseDir, stateDir, shadowLog, send.firehose, now)
             val handle = Kap { turn.run(sid) }
                 .process(
                     name = "spectator-$safe",
