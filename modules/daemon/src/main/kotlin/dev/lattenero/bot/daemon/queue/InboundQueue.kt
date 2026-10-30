@@ -38,6 +38,23 @@ internal class InboundQueue(private val file: File) {
         return items
     }
 
+    /** The parked list as-is, no drain — /queue's honest peek. */
+    @Synchronized
+    fun entries(): List<Pending> = read()
+
+    /**
+     * Removes ONE parked text by its update identity — /queue's 🚀 launch
+     * and 🗑 discard both take it out; null means it is already gone (the
+     * turn's drain beat the tap — the honest answer, not an error).
+     */
+    @Synchronized
+    fun take(messageId: String): Pending? {
+        val items = read()
+        val hit = items.firstOrNull { it.messageId == messageId } ?: return null
+        write(items.filterNot { it.messageId == messageId })
+        return hit
+    }
+
     private fun read(): List<Pending> = runCatching {
         Json.parseToJsonElement(file.readText()).jsonArray.map { el ->
             val o = el.jsonObject

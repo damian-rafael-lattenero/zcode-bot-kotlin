@@ -143,6 +143,26 @@ object Keyboards {
     }
 
     /**
+     * /queue's rows: one per parked text, 🚀 launch + 🗑 discard on the
+     * same row (the owner decides per text, not per queue). The preview
+     * is one line, capped; `ql:tg-<updateId>` worst case ≈ 20 bytes —
+     * far under Telegram's 64.
+     */
+    fun queueKeyboard(entries: List<QueuedText>): JsonObject = buildJsonObject {
+        putJsonArray("inline_keyboard") {
+            entries.take(QUEUE_ROWS_CAP).forEach { item ->
+                val preview = item.text.take(PREVIEW_CAP).replace('\n', ' ')
+                add(
+                    buildJsonArray {
+                        add(button("🚀 «$preview»", "ql:${item.messageId}"))
+                        add(button("🗑", "qd:${item.messageId}"))
+                    },
+                )
+            }
+        }
+    }
+
+    /**
      * Python's callback_text (R5's table, our subset): callback_data →
      * the text the owner «typed». Default: the data itself as free text
      * (the historical behavior — unknown buttons stay owner words).
@@ -175,6 +195,8 @@ object Keyboards {
     internal const val LANE_TAIL = 16
     private const val CALLBACK_BYTES = 64
     private const val CALLBACK_TEXT_CAP = 64
+    private const val PREVIEW_CAP = 24
+    private const val QUEUE_ROWS_CAP = 8
 }
 
 /** A command's answer: the words plus, when it carries choices, the inline keyboard. */
