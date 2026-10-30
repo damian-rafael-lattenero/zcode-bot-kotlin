@@ -22,6 +22,9 @@ private val logger = KotlinLogging.logger {}
  * value, the holder is the thinnest mutable box, and every transition is
  * the reducer's (tested) decision, never an in-place mutation.
  */
+// the hub is the thinnest mutable box over the turn value — one method per
+// honest verb (apply/pin/attach/retitle/resync…), none extractable
+@Suppress("TooManyFunctions")
 class LiveHub {
     private val mutex = Mutex()
     private var current: TurnLive? = null
@@ -97,6 +100,18 @@ class LiveHub {
     /** The current lane scope — the sa: tap's resolution and tests. */
     suspend fun watchedLaneId(): String? = mutex.withLock { watchedLane }
 
+    /**
+     * The card's real title, resolved OUTSIDE the stream (the fork's
+     * session_info_update never carries it for some sessions — the
+     * history's tasks-index does): retitle the watched turn in place, the
+     * next tick renders and seals with the honest name.
+     */
+    suspend fun retitle(taskId: String, title: String) {
+        mutex.withLock {
+            if (current?.taskId == taskId) current = current?.copy(title = title)
+        }
+    }
+
     /** A reconnect's resync: the lost events stay lost, the state re-baselines. */
     suspend fun resync(taskId: String) {
         mutex.withLock {
@@ -146,6 +161,13 @@ class LivePublisher(
     private val clock: () -> Long = System::currentTimeMillis,
     /** The per-action verbs — the wiring injects the spectator's classification map. */
     private val verbs: ToolVerbifier = ToolVerbs.MINIMAL,
+    /**
+     * The REAL title's source (injected like [finalAnswer]): the history's
+     * tasks-index — the stream's session_info_update title never arrives
+     * for some sessions and the card wore the sid's tail. Null answer =
+     * the honest fallback stays (nothing invented).
+     */
+    private val resolveTitle: suspend (taskId: String) -> String? = { null },
     /** The durable message id — the boot-time ORPHAN SEAL reads it (LiveOrphanStore). */
     private val orphanStore: LiveOrphanStore? = null,
 ) {
@@ -157,6 +179,7 @@ class LivePublisher(
     private var lastText: String = ""
     private var sealed = false
     private var orphanChecked = false
+    private var titleResolvedFor: String? = null
 
     /**
      * The ORPHAN SEAL — this process's FIRST tick after a restart edits
@@ -185,15 +208,33 @@ class LivePublisher(
         }
     }
 
-    /** One tick of the never-silence clock. */
-    @Suppress("ReturnCount") // the tick ladder: no state, no message, no edit — one guard each
+    /**
+     * One tick of the never-silence clock.
+     */
+    // the tick ladder (boot seal → title → birth → replace → seal → edit)
+    // IS the publisher: one guard per step, splitting it hides the order
+    @Suppress("ReturnCount", "CyclomaticComplexMethod")
     suspend fun tick() {
         val cfg = config()
         if (!cfg.configured) return
         sealOrphan(cfg) // the first tick's boot duty, before anything else
-        val state = hub.peek() ?: return
+        var state = hub.peek() ?: return
         val now = clock()
         if (statusMessageId == null && state.phase != TurnPhase.Idle) {
+            // THE REAL TITLE (the owner's 30/10 verdict: «644150daf013» in
+            // his card's head): ONE resolution attempt per turn, exactly at
+            // the birth tick — the birth message and every render/seal then
+            // carry the honest name. Not before: an Idle turn (a stray
+            // usage_update) must not burn the attempt before the card exists.
+            if (titleResolvedFor != state.taskId) {
+                titleResolvedFor = state.taskId
+                if (LiveTurn.isFallbackTitle(state.taskId, state.title)) {
+                    resolveTitle(state.taskId)?.takeIf { it.isNotBlank() }?.let { real ->
+                        hub.retitle(state.taskId, real)
+                        state = hub.peek() ?: return
+                    }
+                }
+            }
             tryBirth(cfg, state)
         }
         val mid = statusMessageId ?: return
@@ -212,6 +253,7 @@ class LivePublisher(
             statusTaskId = null
             lastText = ""
             sealed = false
+            titleResolvedFor = null // the new task's card resolves its own title
             return
         }
         if (state.phase is TurnPhase.Done && !sealed) {

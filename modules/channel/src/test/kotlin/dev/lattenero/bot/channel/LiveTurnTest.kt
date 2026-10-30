@@ -208,7 +208,7 @@ class LiveTurnTest {
     }
 
     @Test
-    fun renderShowsSpinnerCountersTimersHeartbeatAndPill() {
+    fun renderShowsSpinnerCountersTimersAndTheSoberStatusLine() {
         var s: TurnLive? = null
         val startAt = now
         s = reduce(null, ServerFrame.StreamEvent("task-9", 1, startAt, buildJsonObject { put("type", "task_run_started") }))
@@ -220,21 +220,28 @@ class LiveTurnTest {
         assertTrue("pensando" in text)
         assertTrue("40 caracteres" in text) // the counter, with the total
         assertTrue("2s" in text) // the turn's timer, ticking
-        assertTrue("💓 en vivo" in text) // the visible heartbeat
+        assertTrue("💓" !in text) // THE HEART IS DEAD (the owner's 30/10 verdict)
+        assertTrue("en vivo · último evento hace 2s · 0 listos" in text) // the sober line
         assertTrue("0 listos" in text)
 
         // the odd spin blinks the OTHER face — visibly alive every edit
         val odd = LiveTurn.render(s, nowMs = last + 5_000, spin = 1, channelAlive = true)
         assertTrue("💭" in odd)
-        // the dead channel switches the heartbeat's face
+        // the dead channel speaks frozen — the 📡 reconnect line AND the sober word
         val dead = LiveTurn.render(s, nowMs = last + 5_000, spin = 1, channelAlive = false)
         assertTrue("📡" in dead)
+        assertTrue("frozen · 5s sin eventos · 0 listos" in dead)
 
         // THE OWNER'S RULE: 42s of silence — the clocks FREEZE at the last
         // real event (the elapsed stays 0s) and the silence speaks honestly
         val frozen = LiveTurn.render(s, nowMs = last + 42_000, spin = 0, channelAlive = true)
         assertTrue("(42s sin eventos)" in frozen)
         assertTrue("· 0s (42s sin eventos)" in frozen, "the turn timer froze at the last event")
+        // 42s of silence is still «en vivo» — the line carries the honest age,
+        // «frozen» is reserved for the cut stream (the hard word lives at 90s)
+        assertTrue("en vivo · último evento hace 42s" in frozen)
+        val cut = LiveTurn.render(s, nowMs = last + 120_000, spin = 0, channelAlive = true)
+        assertTrue("frozen · 2m00s sin eventos" in cut)
     }
 
     @Test
@@ -431,5 +438,221 @@ class LiveTurnTest {
         assertEquals(TurnPhase.Idle, s.phase)
         val text = LiveTurn.render(s, nowMs = 6L, spin = 0, channelAlive = true)
         assertTrue("nada corriendo" in text)
+    }
+
+    // ---- the owner's 30/10 verdict on the corpse card («quedó fatal») ----
+
+    @Test
+    fun theFallbackTitleIsTheSidTail() {
+        // the card's fallback IS the sid's tail — «644150daf013», the head
+        // the owner refused; the resolver's guard is exactly this shape
+        val sid = "sess_abcdef644150daf013"
+        assertTrue(LiveTurn.isFallbackTitle(sid, sid.takeLast(12)))
+        assertTrue(!LiveTurn.isFallbackTitle(sid, "arreglá el login"))
+    }
+
+    @Test
+    fun editCountsGrowWhileTheInputStreams() {
+        // the +N/−M breathe: the differ runs per delta on the PARTIAL pair —
+        // the owner watches the edit grow, not a static 0/0 for seconds
+        var s: TurnLive? = null
+        s = reduce(
+            s,
+            ev(
+                "tool_call_update", "toolId" to str("te"), "toolName" to str("Edit"), "status" to str("pending"),
+                "input" to buildJsonObject { put("old_string", str("a")); put("new_string", str("a\nX")) },
+            ),
+        )
+        assertEquals(1, s!!.tools.first().added)
+        assertEquals(0, s.tools.first().removed)
+        s = reduce(
+            s,
+            ev(
+                "tool_call_update", "toolId" to str("te"), "toolName" to str("Edit"), "status" to str("pending"),
+                "input" to buildJsonObject { put("old_string", str("a\nb")); put("new_string", str("a\nX\nc")) },
+            ),
+        )
+        assertEquals(2, s!!.tools.first().added)
+        assertEquals(1, s.tools.first().removed)
+        val live = LiveTurn.render(s, nowMs = s.lastEventAtMs!!, spin = 0, channelAlive = true)
+        assertTrue("🟢 +2 · 🔴 −1" in live)
+        // the close recomputes on the COMPLETE input — the authority
+        s = reduce(
+            s,
+            ev(
+                "tool_call", "toolId" to str("te"), "toolName" to str("Edit"),
+                "input" to buildJsonObject { put("old_string", str("a\nb\nc")); put("new_string", str("a\nX\nc\nd")) },
+            ),
+        )
+        s = reduce(s, ev("tool_call_update", "toolId" to str("te"), "status" to str("completed")))
+        assertEquals(3, s!!.tools.first().added)
+        assertEquals(2, s.tools.first().removed)
+    }
+
+    @Test
+    fun bashLaneShowsItsCommandAndPromisesTheOutputAtClose() {
+        // the daemon's real map puts the command in the detail — the lane
+        // shows WHAT runs, not just the verb
+        val verbs = ToolVerbifier { name, input, _ ->
+            if (name == "Bash") ToolVerb("⚡", "shell", input?.str("command") ?: "") else ToolVerb("🔧", name)
+        }
+        var s: TurnLive? = null
+        s = reduce(
+            s,
+            ev(
+                "tool_call", "toolId" to str("tb"), "toolName" to str("Bash"),
+                "input" to buildJsonObject { put("command", str("npm test")) },
+            ),
+        )
+        val text = LiveTurn.render(s!!, nowMs = s.lastEventAtMs!!, spin = 0, channelAlive = true, verbs = verbs)
+        assertTrue("⚡ <b>shell</b> <code>npm test</code>" in text) // the command renders on the lane
+        assertTrue("salida al cerrar" in text) // honest: this fork streams no live tool output
+        assertTrue("0 líneas" !in text) // the invented zero is GONE
+    }
+
+    @Test
+    fun theOutputLandsAtCloseCountedOnce() {
+        var s: TurnLive? = null
+        s = reduce(
+            s,
+            ev(
+                "tool_call", "toolId" to str("tb"), "toolName" to str("Bash"),
+                "input" to buildJsonObject { put("command", str("npm test")) },
+            ),
+        )
+        // while the tool runs: NO output claim — the fork streams none
+        val open = LiveTurn.render(s!!, nowMs = s.lastEventAtMs!!, spin = 0, channelAlive = true)
+        assertTrue("líneas de salida" !in open)
+        // the close carries the result content — counted ONCE, at close
+        s = reduce(
+            s,
+            ev(
+                "tool_call_update", "toolId" to str("tb"), "status" to str("completed"),
+                "content" to str("passing 1\npassing 2\npassing 3"),
+            ),
+        )
+        assertEquals(3, s!!.tools.first().outputLines)
+        val text = LiveTurn.render(s, nowMs = s.lastEventAtMs!!, spin = 0, channelAlive = true)
+        assertTrue("🔧 Bash: 3 líneas de salida" in text)
+        // a structured payload invents no count (the close boxes render it)
+        s = reduce(
+            s,
+            ev(
+                "tool_call", "toolId" to str("tj"), "toolName" to str("Bash"),
+                "input" to buildJsonObject { put("command", str("echo '{}'")) },
+            ),
+        )
+        s = reduce(
+            s,
+            ev(
+                "tool_call_update", "toolId" to str("tj"), "status" to str("completed"),
+                "content" to buildJsonObject { put("ok", true) },
+            ),
+        )
+        assertNull(s!!.tools.first { it.toolId == "tj" }.outputLines)
+    }
+
+    @Test
+    fun theLaneCapKeepsTheCardBounded() {
+        // seven lanes open — the card shows only the 5 MOST RECENT (the
+        // command in the detail is how each lane is told apart)
+        val verbs = ToolVerbifier { _, input, _ -> ToolVerb("🔧", "shell", input?.str("command") ?: "") }
+        var s: TurnLive? = null
+        repeat(7) { i ->
+            s = reduce(
+                s,
+                ev(
+                    "tool_call", "toolId" to str("t$i"), "toolName" to str("Bash"),
+                    "input" to buildJsonObject { put("command", str("cmd$i")) },
+                ),
+            )
+        }
+        val text = LiveTurn.render(s!!, nowMs = s.lastEventAtMs!!, spin = 0, channelAlive = true, verbs = verbs)
+        assertTrue("cmd6" in text)
+        assertTrue("cmd2" in text) // the 5 most recent survive
+        assertTrue("cmd1" !in text) // the corpses drop off entirely
+        assertTrue("cmd0" !in text)
+    }
+
+    @Test
+    fun aStaleLaneRendersFrozenWithItsClockStopped() {
+        // the command in the detail is how the lane is told apart
+        val verbs = ToolVerbifier { _, input, _ -> ToolVerb("🔧", "shell", input?.str("command") ?: "") }
+        var s: TurnLive? = null
+        s = reduce(
+            s,
+            ev(
+                "tool_call", "toolId" to str("told"), "toolName" to str("Bash"),
+                "input" to buildJsonObject { put("command", str("npm install")) },
+            ),
+        )
+        val openedAt = s!!.tools.first().openedAtMs
+        // the stream moves on (another lane) while the Bash lane hears nothing
+        s = reduce(
+            s,
+            ev(
+                "tool_call", "toolId" to str("tnew"), "toolName" to str("Bash"),
+                "input" to buildJsonObject { put("command", str("sleep 5")) },
+            ),
+        )
+        // past LANE_FROZEN_MS of lane silence: the lane dims, its timer
+        // stops at its last real event, the silence speaks honestly
+        val text = LiveTurn.render(
+            s!!,
+            nowMs = openedAt + LiveTurn.LANE_FROZEN_MS + 5_000,
+            spin = 0,
+            channelAlive = true,
+            verbs = verbs,
+        )
+        assertTrue("❄️" in text)
+        assertTrue("npm install" in text)
+        assertTrue("frozen · 10m05s sin eventos" in text) // now − touchedAt
+        assertTrue("· 0s · frozen" in text, "the frozen clock stops at the last real event")
+        // an ACKed dispatch lane NEVER freezes — the child runs as its OWN
+        // session (the sa: card is the live view there); a frozen claim the
+        // parent stream cannot verify would be the lie in the other direction
+        s = reduce(
+            s,
+            ev(
+                "tool_call", "toolId" to str("td"), "toolName" to str("Agent"),
+                "subagentAgentId" to str("agent-9"),
+                "input" to buildJsonObject { put("description", str("fix the menu")) },
+            ),
+        )
+        val later = LiveTurn.render(s, nowMs = openedAt + 2 * LiveTurn.LANE_FROZEN_MS, spin = 0, channelAlive = true, verbs = verbs)
+        // the LANE line (the phase line has no counts): it must stay warm
+        val dispatchLine = later.lineSequence().first { "<b>shell</b>" in it && "salida al cerrar" in it }
+        assertTrue("❄️" !in dispatchLine)
+    }
+
+    @Test
+    fun aDispatchCloseFoldsItsInnerLanes() {
+        var s: TurnLive? = null
+        s = reduce(
+            s,
+            ev(
+                "tool_call", "toolId" to str("d1"), "toolName" to str("Agent"),
+                "input" to buildJsonObject { put("description", str("fix the /plan menu")) },
+            ),
+        )
+        s = reduce(
+            s,
+            ev(
+                "tool_call", "toolId" to str("inner"), "toolName" to str("Bash"),
+                "parentToolUseId" to str("d1"),
+                "input" to buildJsonObject { put("command", str("ls")) },
+            ),
+        )
+        s = reduce(s, thought("child thinking", parent = "d1"))
+        assertEquals(14, s!!.subagentThought["d1"])
+        // the dispatch closes: the child's world folds away WITH it — no
+        // orphan lane ticking forever (the owner's 30/10 corpse card)
+        s = reduce(s, ev("tool_call_update", "toolId" to str("d1"), "status" to str("completed")))
+        assertTrue(s!!.tools.none { it.toolId == "inner" })
+        assertTrue(s.subagentThought.isEmpty())
+        assertEquals("completed", s.tools.first { it.toolId == "d1" }.status)
+        val text = LiveTurn.render(s, nowMs = s.lastEventAtMs!! + 1_000, spin = 0, channelAlive = true)
+        assertTrue("ls" !in text) // the inner lane left the card
+        assertTrue("subagente" !in text) // its thought counter left with it
     }
 }
