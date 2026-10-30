@@ -179,7 +179,7 @@ internal fun wireChannel(
         File(File(cfg.homeDir, "state"), LIVE_ORPHAN_FILE),
         history,
     )
-    val poller = buildPoller(cfg, lanes.api, pythonState, pollOn, hub, client, speak, remote, queue, history)
+    val poller = buildPoller(cfg, lanes.api, pythonState, pollOn, hub, client, speak, remote, queue, history, liveView)
     return ChannelStack(client, liveView, poller, hub)
 }
 
@@ -249,6 +249,7 @@ private fun buildPoller(
     remote: File,
     queue: InboundQueue,
     history: TasksHistory,
+    liveView: LivePublisher?,
 ): Poller? {
     if (!pollOn) return null
     val liveApi = api ?: TgApi({ TgConfig.load(remote) })
@@ -330,13 +331,14 @@ private fun buildPoller(
 
                 is InboundUpdate.Callback -> {
                     answerCallback(liveApi, update.callbackId)
-                    when {
-                        update.data.startsWith("cot:") -> hub.expandCot(expand = true)
-                        update.data.startsWith("cotr:") -> hub.expandCot(expand = false)
-                        else ->
-                            commands.onCallback(update.data, update.updateId)
-                                ?.let { speak(it.text, false, it.markup) }
-                    }
+                    commands.onCallback(update.data, update.updateId)
+                        ?.let { speak(it.text, false, it.markup) }
+                    // THE BLOCK TAP'S EDIT IS IMMEDIATE (the owner taps «📖
+                    // CoT N» and reads it right there — the ~3s cadence
+                    // continues after): the tick re-renders the card with
+                    // the toggled block; the publisher's tick mutex
+                    // serializes it with the scheduled clock
+                    if (update.data.startsWith("cb:")) liveView?.tick()
                 }
             }
         },

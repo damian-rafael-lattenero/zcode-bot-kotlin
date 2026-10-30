@@ -116,6 +116,7 @@ class BotCommands(
      * own), ⏳ confirms the natural wait. The tap's toast
      * (answerCallbackQuery) is the wiring's effect, not ours.
      */
+    @Suppress("CyclomaticComplexMethod") // one branch per tap vocabulary — the dispatcher's own shape
     suspend fun onCallback(data: String, updateId: Long): BotReply? = when {
         data.startsWith("intr:") -> interruptNow(data.removePrefix("intr:"), updateId)
 
@@ -140,6 +141,18 @@ class BotCommands(
 
         data.startsWith("pl:") || data.startsWith("pm:") || data.startsWith("pe:") || data == "pd:" ->
             planTap(data)
+
+        // The CoT BLOCK tap (Python's ct:/cr: cycle, the cb: vocabulary): the
+        // tap toggles that block's full text IN the card — expand, and the
+        // SAME tap folds. Reply null ON PURPOSE: the expand is the card's own
+        // in-place edit, never a new message; the toast is the wiring's and
+        // the wiring nudges the publisher's tick so the edit is immediate.
+        data.startsWith("cb:") -> {
+            val n = data.removePrefix("cb:").toIntOrNull() ?: 0
+            logger.info { "callback 📖 cb:$n — toggles the block in the card (no reply)" }
+            hub.toggleCotBlock(n)
+            null
+        }
 
         else -> {
             logger.info { "callback \"$data\" -> \"${Keyboards.callbackText(data)}\"" }

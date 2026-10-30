@@ -112,20 +112,42 @@ class LiveHub {
         }
     }
 
-    /** A reconnect's resync: the lost events stay lost, the state re-baselines. */
+    /** A reconnect's resync: the lost events stay lost, the state re-baselines.
+     *  The SEALED blocks survive (they are complete real text — a gap cuts
+     *  the seam, never a sealed box); the live windows die (a tail/pending
+     *  spanning the gap would render a continuity that no longer exists). */
     suspend fun resync(taskId: String) {
         mutex.withLock {
             if (current?.taskId == taskId) {
-                current = current?.copy(cotTail = "", cotExpanded = false, phase = TurnPhase.Idle)
+                current = current?.copy(
+                    cotTail = "",
+                    cotPending = "",
+                    cotExpandedBlock = null,
+                    phase = TurnPhase.Idle,
+                )
             }
         }
     }
 
     suspend fun peek(): TurnLive? = mutex.withLock { current }
 
-    /** The cajita's taps: cot: opens, cotr: folds (the next tick re-renders). */
-    suspend fun expandCot(expand: Boolean) {
-        mutex.withLock { current = current?.copy(cotExpanded = expand) }
+    /**
+     * The block taps: cb:<n> expands block n IN the card; the same tap
+     * folds it (one expanded at a time — the single pointer). A stale or
+     * out-of-range n folds silently (the old button of a resynced card
+     * must no-op honestly, never crash).
+     */
+    suspend fun toggleCotBlock(n: Int) {
+        mutex.withLock {
+            val cur = current ?: return@withLock
+            current = cur.copy(
+                cotExpandedBlock = when (n) {
+                    cur.cotExpandedBlock -> null
+                    in 1..cur.cotBlocks.size -> n
+                    else -> null
+                },
+            )
+        }
     }
 
     /** After the seal is published the turn is spent; /nuclear also lands here.
@@ -209,12 +231,17 @@ class LivePublisher(
     }
 
     /**
-     * One tick of the never-silence clock.
+     * One tick of the never-silence clock. MUTEXED: the scheduled ~3s
+     * process AND the block tap's immediate nudge both land here — the
+     * cells (statusMessageId, lastText, spin) are the publisher's only
+     * mutable state and a tap must never race a seal.
      */
+    suspend fun tick() = tickMutex.withLock { tickLocked() }
+
     // the tick ladder (boot seal → title → birth → replace → seal → edit)
     // IS the publisher: one guard per step, splitting it hides the order
     @Suppress("ReturnCount", "CyclomaticComplexMethod")
-    suspend fun tick() {
+    private suspend fun tickLocked() {
         val cfg = config()
         if (!cfg.configured) return
         sealOrphan(cfg) // the first tick's boot duty, before anything else
@@ -268,7 +295,10 @@ class LivePublisher(
     private suspend fun seal(cfg: TgConfig, mid: Long, state: TurnLive, now: Long) {
         sealed = true
         telegram.edit(cfg, mid, LiveTurn.sealText(state, now))
-        // the final shower: the spectator renderer's boxes + the turn's answer
+        // the final shower: the keyboard-dropped CoT blocks FIRST (the
+        // honest cap's promise — the live render told him they'd travel),
+        // then the spectator renderer's boxes + the turn's answer
+        LiveTurn.overflowShower(state).forEach { speak(it) }
         val boxes = finalBoxes(state.tools)
         val answer = finalAnswer(state.taskId)?.takeIf { it.isNotBlank() }
         if (answer != null) speak(answer)
@@ -336,6 +366,7 @@ class LivePublisher(
     private var spinCount = 0
     private var birthCooldownTicks = 0
     private var birthFailLogged = false
+    private val tickMutex = Mutex()
 
     private companion object {
         val EDIT_CADENCE = 3.seconds
