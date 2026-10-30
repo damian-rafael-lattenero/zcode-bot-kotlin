@@ -17,6 +17,8 @@ import dev.lattenero.bot.channel.ToolLive
 import dev.lattenero.bot.channel.UnixSocketTransport
 import dev.lattenero.bot.contracts.ShadowDecision
 import dev.lattenero.bot.daemon.history.TasksHistoryIo
+import dev.lattenero.bot.daemon.nuclear.MacProcessEdge
+import dev.lattenero.bot.daemon.nuclear.NuclearLadder
 import dev.lattenero.bot.daemon.queue.InboundQueue
 import dev.lattenero.bot.daemon.send.DaemonSend
 import dev.lattenero.bot.daemon.shadow.TimeIso
@@ -196,6 +198,20 @@ private fun buildPoller(
     if (!pollOn) return null
     val liveApi = api ?: TgApi({ TgConfig.load(remote) })
     val history = TasksHistoryIo(cfg.baseDir)
+    // ☢️ the nuclear ladder — the daemon-side restart of EVERYTHING (the
+    // owner's order overrides the old «never kill the app» rule; the
+    // channel protocol stays clean — this speaks macOS directly)
+    val ladder = NuclearLadder(
+        edge = MacProcessEdge(),
+        stopAll = {
+            when (val answer = client.query(ChannelQuery.StopAll(null), timeout = 10.seconds)) {
+                is QueryAnswer.Ok -> stoppedCountOf(answer.resultJson)
+                else -> 0
+            }
+        },
+        helloOk = { client.connected },
+        announce = { text -> speak(text, true, null) },
+    )
     val commands = BotCommands(
         ops = object : ChannelOps {
             override suspend fun query(query: ChannelQuery) = client.query(query)
@@ -214,7 +230,8 @@ private fun buildPoller(
         hub = hub,
         daemonReset = {
             hub.clear()
-            client.reset()
+            client.reset() // subscriptions die with the socket — the reconnect replays nothing stale
+            ladder.run().summary()
         },
         // Python's ctx_tasks + model_selection — the same two sqlite files the spectator reads
         history = history,
@@ -248,6 +265,11 @@ private suspend fun answerCallback(api: TgApi, callbackId: String) {
         logger.warn(e) { "answerCallbackQuery failed (the tap's action still ran): ${e.message}" }
     }
 }
+
+/** stopAll's answer → how many runs it stopped (the ladder's step-1 evidence). */
+internal fun stoppedCountOf(resultJson: String): Int = runCatching {
+    ((Json.parseToJsonElement(resultJson) as? JsonObject)?.get("stopped") as? JsonArray)?.size ?: 0
+}.getOrDefault(0)
 
 /** The final render's boxes: the spectator's renderer, one box per completed tool. */
 internal fun finalBoxesOf(tools: List<ToolLive>): String =
