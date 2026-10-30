@@ -540,9 +540,19 @@ object LiveTurn {
         verbs: ToolVerbifier = ToolVerbs.MINIMAL,
     ): String {
         val brain = if (spin % 2 == 0) "🧠" else "💭"
-        val elapsed = state.startedAtMs?.let { fmtDur(nowMs - it) } ?: "—"
-        val head = "${PyText.esc(state.title)} · $elapsed"
+        // THE OWNER'S RULE («los segundos no deben correr»): when reality
+        // is not advancing — silence, a dead channel, an error pill — every
+        // clock in this render derives from the LAST REAL EVENT, never from
+        // the present. A ticking timer during an outage is the lie class
+        // he has rejected three times.
         val silence = silenceMs(state, nowMs)
+        val frozen = !channelAlive ||
+            silence >= STALE_SOFT_MS ||
+            state.typedError != null ||
+            state.apiRetry != null
+        val clockNow = if (frozen) (state.lastEventAtMs ?: nowMs) else nowMs
+        val elapsed = state.startedAtMs?.let { fmtDur(clockNow - it) } ?: "—"
+        val head = "${PyText.esc(state.title)} · $elapsed"
         val lines = mutableListOf<String>()
         when (val phase = state.phase) {
             is TurnPhase.Idle -> lines.add("💻 <b>«$head»</b> — suscripto, nada corriendo")
@@ -551,7 +561,7 @@ object LiveTurn {
                 lines.add("$brain <b>«$head»</b>")
                 val stale = stalenessWord(silence, channelAlive)
                 lines.add(
-                    "<b>pensando</b> · ${phase.chars} caracteres · ${fmtDur(nowMs - phase.sinceMs)}$stale",
+                    "<b>pensando</b> · ${phase.chars} caracteres · ${fmtDur(clockNow - phase.sinceMs)}$stale",
                 )
             }
 
@@ -561,7 +571,8 @@ object LiveTurn {
                 if (phase.tool == null) {
                     lines.add("✍️ <b>«$head»</b>")
                     lines.add(
-                        "✍️ escribiendo la respuesta · ${phase.rawChars} caracteres · ${fmtDur(nowMs - phase.sinceMs)}",
+                        "✍️ escribiendo la respuesta · ${phase.rawChars} caracteres · " +
+                            fmtDur(clockNow - phase.sinceMs),
                     )
                 } else {
                     lines.add("${verb.emoji} <b>«$head»</b>")
