@@ -22,7 +22,7 @@ import kotlin.test.assertTrue
 
 /**
  * register_bot_menu's parity: the «/» menu the daemon posts at boot —
- * the EXACT eight, in order, Python's scope (the owner's chat only).
+ * the EXACT nine, in order, Python's scope (the owner's chat only).
  */
 class BotMenuTest {
 
@@ -37,9 +37,9 @@ class BotMenuTest {
     fun bodyCarriesTheEightInOrder() {
         val body = BotMenu.body(TgConfig(token = "t", chatId = JsonNull))
         val commands = body["commands"]!!.jsonArray
-        assertEquals(8, commands.size)
+        assertEquals(9, commands.size)
         assertEquals(
-            listOf("tasks", "all_tasks", "status", "stop", "nuclear", "quota", "subagents", "help"),
+            listOf("tasks", "all_tasks", "status", "plan", "stop", "nuclear", "quota", "subagents", "help"),
             commands.map { it.jsonObject["command"]!!.jsonPrimitive.content },
         )
         commands.forEach { c ->
@@ -71,7 +71,7 @@ class BotMenuTest {
         }
         assertEquals(listOf("setMyCommands"), methods)
         val posted = Json.parseToJsonElement(bodies.single()).jsonObject
-        assertEquals(8, posted["commands"]!!.jsonArray.size) // the exact eight on the wire
+        assertEquals(9, posted["commands"]!!.jsonArray.size) // the exact nine on the wire
     }
 
     @Test

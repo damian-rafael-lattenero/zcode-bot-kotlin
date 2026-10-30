@@ -482,7 +482,7 @@ class BotCommandsTest {
     @Test
     fun helpListsExactlyTheMenu() {
         assertNotNull(BotCommands.HELP)
-        assertEquals(8, BotCommands.MENU.size)
+        assertEquals(9, BotCommands.MENU.size)
         BotCommands.MENU.forEach { (cmd, desc) ->
             assertTrue("/$cmd — $desc" in BotCommands.HELP, "$cmd missing from /help")
         }
