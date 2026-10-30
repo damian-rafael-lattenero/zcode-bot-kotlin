@@ -99,6 +99,24 @@ class ContextWindowTest {
     }
 
     @Test
+    fun theOwnersCalibratedWindowRendersApproximate() {
+        // windowSource "owner_default" = the 1M calibration (the owner's
+        // order 30/10: his models are 1M max, nothing else exposes it) —
+        // rendered with the (~) marker, never as a hard fact
+        val approx = BotCommands.renderContextWindow(
+            """{"model":"m","usedTokens":200000,"windowTokens":1000000,"windowSource":"owner_default"}""",
+            "t",
+        )
+        assertTrue("200K de 1000K (~) (20%)" in approx)
+        // a REAL window (model registry / runtime) never carries the marker
+        val real = BotCommands.renderContextWindow(
+            """{"model":"m","usedTokens":200000,"windowTokens":1000000,"windowSource":"model"}""",
+            "t",
+        )
+        assertTrue("(~)" !in real)
+    }
+
+    @Test
     fun theWireFrameIsTheForksContextWindowQuery() {
         val line = encodeClient(ClientFrame.Query("q1", ChannelQuery.ContextWindow("task-77", "/ws")))
         assertEquals(

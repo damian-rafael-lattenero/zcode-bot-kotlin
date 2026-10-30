@@ -804,7 +804,10 @@ class BotCommands(
 
     /** /quota — the coding plan's pool (IUsageStatsService through the channel). */
     private suspend fun quota(): String {
-        return when (val answer = ops.query(ChannelQuery.Quota())) {
+        // the active conversation names the provider — the fork needs it to
+        // classify the accountAccess hint (the Start Plan path's gate)
+        val taskId = (contextAnswer() as? ContextAnswer.Ctx)?.value?.activeTaskId
+        return when (val answer = ops.query(ChannelQuery.Quota(taskId = taskId))) {
             is QueryAnswer.Ok -> renderQuota(answer.resultJson, clock())
             is QueryAnswer.Unavailable -> DEGRADED
             is QueryAnswer.Failed -> "⚠️ Quota failed (${answer.code}): ${PyText.esc(answer.message ?: "?")}"
@@ -1296,6 +1299,7 @@ class BotCommands(
             if (used < 0) return CTX_WINDOW_NO_DATA
             val header = "🪟 <b>Ventana de contexto «${PyText.esc(title)}»</b>"
             val window = root.long("windowTokens")
+            val windowSource = root.str("windowSource")
             val line = if (window == null || window <= 0) {
                 "Modelo <b>${PyText.esc(model)}</b>: ${fmtK(used)} · ventana desconocida"
             } else {
@@ -1305,7 +1309,10 @@ class BotCommands(
                     .toInt()
                     .coerceIn(0, CTX_BAR_CELLS)
                 val bar = CTX_BAR_FULL.repeat(filled) + CTX_BAR_EMPTY.repeat(CTX_BAR_CELLS - filled)
-                "Modelo <b>${PyText.esc(model)}</b>: ${fmtK(used)} de ${fmtK(window)} ($pct%)\n$bar"
+                // the owner's own 1M calibration when nothing exposes the
+                // window — rendered approximate, never as a hard fact
+                val approx = if (windowSource == "owner_default") " (~)" else ""
+                "Modelo <b>${PyText.esc(model)}</b>: ${fmtK(used)} de ${fmtK(window)}$approx ($pct%)\n$bar"
             }
             return "$header\n$line"
         }
@@ -1407,13 +1414,14 @@ class BotCommands(
          * (⏱ 5 hours + 📅 Weekly, used/limit credits, resets, ⚠️ at ≥75%);
          * the remaining-only snapshot keeps the one-line fallback.
          */
-        @Suppress("ReturnCount") // one guard per degrade of the entitlement snapshot
+        @Suppress("ReturnCount", "CyclomaticComplexMethod") // one guard per degrade / honesty tier
         fun renderQuota(json: String, nowMs: Long): String {
             val root = runCatching { Json.parseToJsonElement(json) as? JsonObject }.getOrNull()
                 ?: return "⚠️ Quota answer unparseable"
             val reason = root.str("unavailableReason")
             if (reason != null) return "📊 Quota unavailable: ${PyText.esc(reason)}"
             renderQuotaWindows(root)?.let { return it }
+            renderStartPlanBuckets(root)?.let { return it }
             val remaining = root.obj("remaining")
                 ?: return "📊 Quota: no pool info (the app is not authenticated?)"
             val pct = remaining.int("percentage")
@@ -1433,6 +1441,41 @@ class BotCommands(
                 }
             } ?: ""
             return "📊 Coding plan: <b>$pool remaining</b>${if (resetText.isNotEmpty()) " · $resetText" else ""}"
+        }
+
+        /**
+         * The Start Plan's buckets (30/10's owner order: «necesito saber
+         * cuántos tokens me quedan en las próximas 5 horas y en la semana;
+         * si el plan no muestra esos dos valores, la cantidad y el
+         * porcentaje usado — 340K/500K usado x%»). One line per REAL
+         * balance bucket: used/total in tokens with the USED percent and
+         * its own reset — the fork's builder carries the numbers raw
+         * (usage/unit/remaining), never a bot-invented window.
+         */
+        @Suppress("CyclomaticComplexMethod") // one guard per bucket-line field
+        private fun renderStartPlanBuckets(root: JsonObject): String? {
+            val limits = (root.obj("quota")?.get("limits") as? JsonArray)
+                ?.mapNotNull { it as? JsonObject }
+                ?.filter { it.num("unit") != null || it.num("usage") != null }
+                .orEmpty()
+            if (limits.isEmpty()) return null
+            val lines = mutableListOf("📊 <b>Start plan</b>")
+            limits.forEach { lim ->
+                val total = lim.num("unit")
+                val used = lim.num("usage") ?: 0.0
+                val label = lim.str("period") ?: lim.str("meter") ?: "cuota"
+                val body = when {
+                    total != null && total > 0 ->
+                        "${fmtNum(used)}/${fmtNum(total)} usado " +
+                            "${((used / total) * 100).toInt()}%"
+
+                    else -> "${fmtNum(used)} usados"
+                }
+                val reset = lim.long("nextResetTime")?.let { " · resets ${fmtReset(it)}" } ?: ""
+                val pctAlert = if (total != null && total > 0 && (used / total) >= 0.75) " ⚠️" else ""
+                lines.add("• $label: $body$reset$pctAlert")
+            }
+            return lines.joinToString("\n")
         }
 
         /** Python's windows: only CREDIT_LIMIT rows, 5h first, the weekly after. */
