@@ -49,6 +49,30 @@ internal object ToolBox {
         }
     }
 
+    /**
+     * The LIVE VIEW's classification (29/10's per-action verbs): the
+     * SAME tool families the boxes render by, one answer per name — the
+     * channel's verbs ride this, never a second table.
+     */
+    enum class Family { READ, WRITE, EDIT, SHELL, SEARCH, SUBAGENT, TODO, OTHER }
+
+    fun familyOf(name: String): Family = when {
+        name == "Bash" || name == "Shell" -> Family.SHELL
+        name in READ_TOOLS -> Family.READ
+        name in WRITE_TOOLS -> Family.WRITE
+        name in EDIT_TOOLS -> Family.EDIT
+        name == "Task" -> Family.SUBAGENT
+        name == "Grep" || name == "Glob" -> Family.SEARCH
+        name == "TodoWrite" || name == "TodoRead" -> Family.TODO
+        else -> Family.OTHER
+    }
+
+    /** The file a read/write/edit touches — shortDesc's own path chain (file_path, path). */
+    fun filePathOf(inp: JsonObject): String? =
+        listOf("file_path", "path").firstNotNullOfOrNull { k ->
+            (inp[k] as? JsonPrimitive)?.takeIf { it.isString }?.content?.takeIf { it.isNotEmpty() }
+        }
+
     /** One-line desc (step index, live box head). */
     // Python's descending key chain, one return per key (verbatim).
     @Suppress("ReturnCount")

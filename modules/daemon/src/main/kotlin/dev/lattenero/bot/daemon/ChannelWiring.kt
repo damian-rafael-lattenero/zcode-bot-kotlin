@@ -16,6 +16,8 @@ import dev.lattenero.bot.channel.ServerFrame
 import dev.lattenero.bot.channel.ToolLive
 import dev.lattenero.bot.channel.UnixSocketTransport
 import dev.lattenero.bot.contracts.ShadowDecision
+import dev.lattenero.bot.daemon.history.LIVE_VERBS
+import dev.lattenero.bot.daemon.history.SEQUENCE_LINE_DIFFER
 import dev.lattenero.bot.daemon.history.TasksHistoryIo
 import dev.lattenero.bot.daemon.nuclear.MacProcessEdge
 import dev.lattenero.bot.daemon.nuclear.NuclearLadder
@@ -64,7 +66,7 @@ internal suspend fun feedAndResync(hub: LiveHub, frame: ServerFrame.StreamEvent,
         }
         hub.resync(frame.taskId)
     }
-    hub.apply(frame, nowMs)
+    hub.apply(frame, nowMs, SEQUENCE_LINE_DIFFER)
 }
 
 /**
@@ -180,6 +182,8 @@ private fun buildLiveView(
                 else -> null
             }
         },
+        // the per-action verbs: the spectator's own classification, injected
+        verbs = LIVE_VERBS,
     )
 }
 
@@ -249,7 +253,13 @@ private fun buildPoller(
 
                 is InboundUpdate.Callback -> {
                     answerCallback(liveApi, update.callbackId)
-                    commands.onCallback(update.data, update.updateId)?.let { speak(it.text, false, it.markup) }
+                    when {
+                        update.data.startsWith("cot:") -> hub.expandCot(expand = true)
+                        update.data.startsWith("cotr:") -> hub.expandCot(expand = false)
+                        else ->
+                            commands.onCallback(update.data, update.updateId)
+                                ?.let { speak(it.text, false, it.markup) }
+                    }
                 }
             }
         },

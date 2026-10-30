@@ -248,8 +248,145 @@ class LiveTurnTest {
             ),
         )
         val text = LiveTurn.render(s!!, nowMs = s.lastEventAtMs!! + 10_000, spin = 0, channelAlive = true)
-        assertTrue("🔧 <b>Write</b> · 4 lines · 99 chars raw" in text)
+        assertTrue("🔧 <b>Write</b> · 4 lines" in text) // the MINIMAL fallback verb (the real map is daemon-side)
+        assertTrue("4 lines · 99 raw" in text) // the open lane keeps its counters
         assertTrue("⚠️ Rate limited — retrying 2/5" in text)
+    }
+
+    // ---- the owner's two hard rules (29/10): honesty and distinct verbs ----
+
+    @Test
+    fun thinkingDegradesHonestlyUnderSilence() {
+        // the owner's exact scenario: the stream died and the bot kept
+        // saying "thinking..." while the seconds passed — NEVER again
+        var s: TurnLive? = null
+        s = reduce(s, thought("pensando"))
+        val last = s!!.lastEventAtMs!!
+        val fresh = LiveTurn.render(s, nowMs = last + 5_000, spin = 0, channelAlive = true)
+        assertTrue("sin eventos" !in fresh) // fresh = a plain honest thinking line
+        val stale = LiveTurn.render(s, nowMs = last + 30_000, spin = 0, channelAlive = true)
+        assertTrue("(30s sin eventos)" in stale) // 20-30s of silence: the degrade
+        val cut = LiveTurn.render(s, nowMs = last + 120_000, spin = 0, channelAlive = true)
+        assertTrue("(2m00s sin eventos — stream cortado?)" in cut) // the hard word
+    }
+
+    @Test
+    fun aDroppedSocketIsAReconnectStateNotAFakeTurn() {
+        var s: TurnLive? = null
+        s = reduce(s, thought("pensando"))
+        val text = LiveTurn.render(s!!, nowMs = s.lastEventAtMs!! + 8_000, spin = 0, channelAlive = false)
+        assertTrue("📡 canal caído — reconectando…" in text)
+    }
+
+    @Test
+    fun theTypedErrorResolvesTheTurnWithItsOwnPill() {
+        // quota exhaustion — the owner's exact scenario («se me acabaron los
+        // tokens»): the turn ends with the TYPED error visible, never a spinner
+        var s: TurnLive? = null
+        s = reduce(s, thought("pensando"))
+        s = reduce(
+            s,
+            ev(
+                "task_error",
+                "error" to str("usage cap exceeded"),
+                "code" to str("fault.provider.quotaExhausted"),
+                "attribution" to buildJsonObject {
+                    put("source", str("provider")); put("statusCode", 429); put("retryable", false)
+                },
+            ),
+        )
+        assertTrue(s!!.phase is TurnPhase.Done) // resolved — never a hanging thinking
+        val pill = s.typedError!!
+        assertTrue(pill.isQuota)
+        val text = LiveTurn.render(s, nowMs = s.lastEventAtMs!! + 1_000, spin = 0, channelAlive = true)
+        assertTrue("💀 <b>error:</b> usage cap exceeded" in text)
+        assertTrue("fault.provider.quotaExhausted" in text)
+        assertTrue("HTTP 429" in text)
+        assertTrue("💳 QUOTA" in text)
+        val seal = LiveTurn.sealText(s, nowMs = s.lastEventAtMs!! + 2_000)
+        assertTrue("usage cap exceeded" in seal)
+        assertTrue("💳 QUOTA" in seal)
+    }
+
+    @Test
+    fun everyActionHasItsOwnVerb() {
+        // «cada thinking debe ser distinto» — the render speaks the INJECTED
+        // verbifier's vocabulary (the wiring passes the spectator's map)
+        val verbs = ToolVerbifier { name, input, _ ->
+            when (name) {
+                "Read" -> ToolVerb("📖", "reading", input?.str("file_path") ?: "")
+                "Bash" -> ToolVerb("⚡", "shell", input?.str("command") ?: "")
+                else -> ToolVerb("🔧", name)
+            }
+        }
+        var s: TurnLive? = null
+        s = reduce(
+            s,
+            ev(
+                "tool_call", "toolId" to str("tr"), "toolName" to str("Read"),
+                "input" to buildJsonObject { put("file_path", str("/w/Main.kt")) },
+            ),
+        )
+        var text = LiveTurn.render(s!!, nowMs = s.lastEventAtMs!!, spin = 0, channelAlive = true, verbs = verbs)
+        assertTrue("📖 <b>reading</b> <code>/w/Main.kt</code>" in text)
+
+        s = reduce(
+            null,
+            ev(
+                "tool_call", "toolId" to str("tb"), "toolName" to str("Bash"),
+                "input" to buildJsonObject { put("command", str("npm test")) },
+            ),
+        )
+        text = LiveTurn.render(s!!, nowMs = s.lastEventAtMs!!, spin = 0, channelAlive = true, verbs = verbs)
+        assertTrue("⚡ <b>shell</b> <code>npm test</code>" in text)
+
+        // the minimal fallback knows MCP on its own (mcp__ or the plugin marker)
+        s = reduce(
+            null,
+            ev(
+                "tool_call", "toolId" to str("tm"), "toolName" to str("mcp__serper__search"),
+                "pluginMetadata" to buildJsonObject { put("component", str("mcp")); put("pluginId", str("serper")) },
+            ),
+        )
+        assertTrue(s!!.tools.first().isMcp)
+        text = LiveTurn.render(s, nowMs = s.lastEventAtMs!!, spin = 0, channelAlive = true)
+        assertTrue("🔌 <b>mcp</b> <code>serper__search</code>" in text)
+    }
+
+    @Test
+    fun theEditStampCarriesTheDifferVerdict() {
+        var s: TurnLive? = null
+        s = reduce(
+            s,
+            ev(
+                "tool_call", "toolId" to str("te"), "toolName" to str("Edit"),
+                "input" to buildJsonObject {
+                    put("old_string", str("a\nb\nc"))
+                    put("new_string", str("a\nX\nc\nd"))
+                },
+            ),
+        )
+        s = reduce(s, ev("tool_call_update", "toolId" to str("te"), "status" to str("completed")))
+        val lane = s!!.tools.first()
+        assertEquals(3, lane.added) // X, c and d (the simple differ counts the whole sides)
+        assertEquals(2, lane.removed) // b and c
+        val text = LiveTurn.render(s, nowMs = s.lastEventAtMs!!, spin = 0, channelAlive = true)
+        assertTrue("🟢 +3 · 🔴 −2" in text)
+    }
+
+    @Test
+    fun theCotCajitaCollapsesAt3KAndTheButtonsFlipIt() {
+        var s: TurnLive? = null
+        repeat(400) { s = reduce(s, thought("0123456789")) } // 4000 chars
+        val collapsed = LiveTurn.render(s!!, nowMs = s.lastEventAtMs!!, spin = 0, channelAlive = true)
+        assertTrue("🧠 cot 4K chars — tocá el botón para abrirlo" in collapsed) // the TOTAL speaks
+        assertTrue("<blockquote>" !in collapsed) // the box is GONE, the button holds it
+        assertTrue(LiveTurn.cotMarkup(s!!)?.get("inline_keyboard").toString().contains("cot:x"))
+        assertTrue(Keyboards.cotButtons(expanded = false)["inline_keyboard"].toString().contains("cot:x"))
+
+        val expanded = LiveTurn.render(s.copy(cotExpanded = true), nowMs = 1L, spin = 0, channelAlive = true)
+        assertTrue("<blockquote>" in expanded) // the tap reopens the cajita
+        assertTrue(Keyboards.cotButtons(expanded = true)["inline_keyboard"].toString().contains("cotr:x"))
     }
 
     @Test

@@ -27,24 +27,35 @@ class LiveHub {
     private var current: TurnLive? = null
 
     /** One stream event folded in; answers the state after the fold. */
-    suspend fun apply(frame: ServerFrame.StreamEvent, nowMs: Long): TurnLive? = mutex.withLock {
+    suspend fun apply(
+        frame: ServerFrame.StreamEvent,
+        nowMs: Long,
+        differ: LineDiffer = SimpleLineDiffer,
+    ): TurnLive? = mutex.withLock {
         val fresh = when {
             // a new task's event replaces the watched turn (a /task pick or a
             // new subscribe): the old turn's status message stays sealed in the chat
             current != null && current!!.taskId != frame.taskId -> null
             else -> current
         }
-        LiveTurn.reduce(fresh, frame, nowMs).also { current = it }
+        LiveTurn.reduce(fresh, frame, nowMs, differ).also { current = it }
     }
 
     /** A reconnect's resync: the lost events stay lost, the state re-baselines. */
     suspend fun resync(taskId: String) {
         mutex.withLock {
-            if (current?.taskId == taskId) current = current?.copy(cotTail = "", phase = TurnPhase.Idle)
+            if (current?.taskId == taskId) {
+                current = current?.copy(cotTail = "", cotExpanded = false, phase = TurnPhase.Idle)
+            }
         }
     }
 
     suspend fun peek(): TurnLive? = mutex.withLock { current }
+
+    /** The cajita's taps: cot: opens, cotr: folds (the next tick re-renders). */
+    suspend fun expandCot(expand: Boolean) {
+        mutex.withLock { current = current?.copy(cotExpanded = expand) }
+    }
 
     /** After the seal is published the turn is spent; /nuclear also lands here. */
     suspend fun clear(): Unit = mutex.withLock { current = null }
@@ -73,6 +84,8 @@ class LivePublisher(
     private val finalBoxes: suspend (List<ToolLive>) -> String,
     private val finalAnswer: suspend (taskId: String) -> String?,
     private val clock: () -> Long = System::currentTimeMillis,
+    /** The per-action verbs — the wiring injects the spectator's classification map. */
+    private val verbs: ToolVerbifier = ToolVerbs.MINIMAL,
 ) {
 
     /** the message being edited — the publisher's only mutable cell (§7 escape hatch). */
@@ -99,9 +112,9 @@ class LivePublisher(
             seal(cfg, mid, state, now)
             return
         }
-        val text = LiveTurn.render(state, now, spin(), channelAlive())
+        val text = LiveTurn.render(state, now, spin(), channelAlive(), verbs)
         if (text == lastText) return // nothing visible changed: no edit (the 429 budget is shared)
-        if (telegram.edit(cfg, mid, text)) lastText = text
+        if (telegram.edit(cfg, mid, text, LiveTurn.cotMarkup(state))) lastText = text
     }
 
     private suspend fun seal(cfg: TgConfig, mid: Long, state: TurnLive, now: Long) {
