@@ -525,11 +525,21 @@ class BotCommands(
                 }
                 val watched = hub.peek()
                 BotReply(
-                    text = renderTaskList(rows, running, ctx.value.activeTaskId, ctx.value.workspacePath, all),
+                    text = renderTaskList(
+                        rows,
+                        running,
+                        ctx.value.activeTaskId,
+                        ctx.value.workspacePath,
+                        all,
+                        watchedSid = watched?.taskId,
+                    ),
                     markup = Keyboards.tasksKeyboard(
                         rows = rows,
                         running = running,
-                        activeSid = ctx.value.activeTaskId,
+                        // the 🎯 follows THE PIPE THE OWNER IS WATCHING (30/10:
+                        // «me muestra siempre unificador» — the bind REFUSES to
+                        // move while that turn runs; his selection is the attach)
+                        activeSid = watched?.taskId ?: ctx.value.activeTaskId,
                         watchedTaskId = watched?.taskId,
                         // ONLY the live dispatch lanes (the owner's 30/10 bug: the
                         // old parentToolUseId!=null filter showed the agents' inner
@@ -1381,6 +1391,7 @@ class BotCommands(
             activeSid: String?,
             activeWs: String?,
             all: Boolean,
+            watchedSid: String? = null,
         ): String {
             if (rows.isEmpty()) {
                 return if (all) "🧠 No tasks — /all_tasks shows all." else "🧠 No tasks project — /all_tasks shows all."
@@ -1406,6 +1417,14 @@ class BotCommands(
             }
             lines.add("")
             lines.add("Free text you send goes to the active conversation (🎯).")
+            if (watchedSid != null && watchedSid != activeSid) {
+                val watchedTitle = rows.firstOrNull { it.sid == watchedSid }
+                    ?.title?.takeIf { it.isNotEmpty() } ?: watchedSid.takeLast(SID_TAIL)
+                lines.add(
+                    "👁 Viendo en vivo: «${PyText.esc(watchedTitle)}» — tu texto sigue yendo a la " +
+                        "activa (el bind se niega mientras ese turno corre; el attach es solo lectura).",
+                )
+            }
             return lines.joinToString("\n")
         }
 
