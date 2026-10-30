@@ -6,6 +6,7 @@ import dev.lattenero.bot.channel.ChannelOps
 import dev.lattenero.bot.channel.ChannelQuery
 import dev.lattenero.bot.channel.ChannelSpec
 import dev.lattenero.bot.channel.InboundReceipt
+import dev.lattenero.bot.channel.InboundUpdate
 import dev.lattenero.bot.channel.LiveHub
 import dev.lattenero.bot.channel.LivePublisher
 import dev.lattenero.bot.channel.LiveTelegram
@@ -28,8 +29,10 @@ import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.delay
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.put
 import java.io.File
 import kotlin.time.Duration.Companion.seconds
 
@@ -85,12 +88,15 @@ internal fun wireChannel(
     val remote = File(cfg.baseDir, "telegram-remote.json")
 
     // one send path for everything the channel says: the knob's leg (shadow
-    // logs, dry-run composes+logs, LIVE posts with cooldown/outbox/last-ph)
-    val speak: suspend (String, Boolean) -> Unit = { text, loud ->
+    // logs, dry-run composes+logs, LIVE posts with cooldown/outbox/last-ph);
+    // the markup (the buttons) rides deliverMarkup — live posts it, the
+    // shadow contract stays text
+    val speak: suspend (String, Boolean, JsonObject?) -> Unit = { text, loud, markup ->
         val now = System.currentTimeMillis() / 1000.0
-        send.leg.deliver(
+        send.leg.deliverMarkup(
             ShadowDecision(ts = now, tsIso = TimeIso.format(now), watcher = "channel", decision = "say", text = text),
             loud,
+            markup,
         )
     }
 
@@ -111,7 +117,7 @@ internal fun wireChannel(
             when {
                 result.duplicate -> logger.info { "inbound ${result.id}: DUPLICATE (server dedupe) — not re-sent" }
                 result.replies.isEmpty() -> logger.info { "inbound ${result.id}: accepted (no system replies)" }
-                else -> result.replies.forEach { reply -> speak(reply, false) }
+                else -> result.replies.forEach { reply -> speak(reply, false, null) }
             }
         },
         onResubscribed = { taskId ->
@@ -147,7 +153,7 @@ private fun buildLiveView(
     pythonState: File,
     hub: LiveHub,
     client: ChannelClient,
-    speak: suspend (String, Boolean) -> Unit,
+    speak: suspend (String, Boolean, JsonObject?) -> Unit,
     remote: File,
 ): LivePublisher? {
     if (!send.ownsSpectator || api == null) return null
@@ -164,7 +170,7 @@ private fun buildLiveView(
         telegram = telegram,
         config = { TgConfig.load(remote) },
         channelAlive = { client.connected }, // 💓 vs 📡 in the status line: "channel healthy" vs "channel dead"
-        speak = { text -> speak(text, false) },
+        speak = { text -> speak(text, false, null) },
         finalBoxes = { tools -> finalBoxesOf(tools) },
         finalAnswer = { taskId ->
             when (val answer = client.query(ChannelQuery.TaskSnapshot(taskId))) {
@@ -183,7 +189,7 @@ private fun buildPoller(
     pollOn: Boolean,
     hub: LiveHub,
     client: ChannelClient,
-    speak: suspend (String, Boolean) -> Unit,
+    speak: suspend (String, Boolean, JsonObject?) -> Unit,
     remote: File,
     queue: InboundQueue,
 ): Poller? {
@@ -218,10 +224,29 @@ private fun buildPoller(
         api = liveApi,
         offsetFile = File(pythonState, "tg-offset"), // Python's own cursor — the torch passes at retirement
         dispatch = { _, update ->
-            val reply = commands.handle(update.text, update.updateId)
-            if (reply != null) speak(reply, false)
+            // the buttons' dispatch: a tap is answered (the toast) and runs
+            // as the owner's typed words; a message is the words themselves
+            when (update) {
+                is InboundUpdate.Message ->
+                    commands.handle(update.text, update.updateId)?.let { speak(it.text, false, it.markup) }
+
+                is InboundUpdate.Callback -> {
+                    answerCallback(liveApi, update.callbackId)
+                    commands.onCallback(update.data, update.updateId)?.let { speak(it.text, false, it.markup) }
+                }
+            }
         },
     )
+}
+
+/** The tap's toast — best-effort by design (Python's bare except; the action itself already ran). */
+@Suppress("TooGenericExceptionCaught") // Python's bare except: a failed toast never fails the tap
+private suspend fun answerCallback(api: TgApi, callbackId: String) {
+    try {
+        api.call("answerCallbackQuery", buildJsonObject { put("callback_query_id", callbackId) })
+    } catch (e: Exception) {
+        logger.warn(e) { "answerCallbackQuery failed (the tap's action still ran): ${e.message}" }
+    }
 }
 
 /** The final render's boxes: the spectator's renderer, one box per completed tool. */

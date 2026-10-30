@@ -25,12 +25,25 @@ import kotlin.time.Duration.Companion.seconds
 
 private val logger = KotlinLogging.logger {}
 
-/** One Telegram update normalized into the dispatcher's message (or skipped). */
-data class InboundUpdate(
-    val updateId: Long,
-    val fromId: Long?,
-    val text: String,
-)
+/** One Telegram update normalized into the dispatcher's shape (or skipped). */
+sealed interface InboundUpdate {
+    val updateId: Long
+    val fromId: Long?
+
+    /** The owner's words. */
+    data class Message(override val updateId: Long, override val fromId: Long?, val text: String) : InboundUpdate
+
+    /**
+     * A button tap (the markup hot-fix): `data` is the callback_data
+     * (Python's R5 vocabulary), `callbackId` answers the tap's toast.
+     */
+    data class Callback(
+        override val updateId: Long,
+        override val fromId: Long?,
+        val callbackId: String,
+        val data: String,
+    ) : InboundUpdate
+}
 
 /** One poll cycle's outcome — the offset to confirm POST-dispatch (F2d's at-least-once). */
 data class PollOutcome(val offset: Long, val messages: Int, val conflict: Boolean = false)
@@ -121,23 +134,35 @@ class Poller(
     }
 
     /**
-     * normalize_update + from_owner in one pass: the update's text (a
-     * callback's pseudo-message is post-MVP), stamped with its update_id;
-     * the owner filter is FAIL-CLOSED — with no owner_user_id in the
-     * config NOBODY gets through (never the first message that arrives).
+     * normalize_update + from_owner in one pass: the update's message OR
+     * callback_query, stamped with its update_id; the owner filter is
+     * FAIL-CLOSED — with no owner_user_id in the config NOBODY gets
+     * through (never the first message that arrives), and it gates the
+     * BUTTON TAPS too (a button is a message).
      */
     @Suppress("ReturnCount") // normalize_update guard chain, one per line (Python shape)
     private fun normalize(cfg: TgConfig, update: JsonObject, updateId: Long): InboundUpdate? {
-        val message = update["message"] as? JsonObject ?: update["edited_message"] as? JsonObject ?: return null
-        val text = (message["text"] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: return null
-        val from = (message["from"] as? JsonObject)?.get("id")?.let { (it as? JsonPrimitive)?.longOrNull }
         val owner = cfg.ownerUserId
         if (owner == null) {
             logger.warn { "from_owner: config without owner_user_id — update discarded (fail-closed)" }
             return null
         }
-        if (from != owner) return null
-        return InboundUpdate(updateId = updateId, fromId = from, text = text)
+        val from = { obj: JsonObject ->
+            (obj["from"] as? JsonObject)?.get("id")?.let { (it as? JsonPrimitive)?.longOrNull }
+        }
+        val message = update["message"] as? JsonObject ?: update["edited_message"] as? JsonObject
+        if (message != null) {
+            val text = (message["text"] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: return null
+            val fromId = from(message)
+            if (fromId != owner) return null
+            return InboundUpdate.Message(updateId = updateId, fromId = fromId, text = text)
+        }
+        val callback = update["callback_query"] as? JsonObject ?: return null
+        val callbackId = (callback["id"] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: return null
+        val data = (callback["data"] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: return null
+        val fromId = from(callback)
+        if (fromId != owner) return null
+        return InboundUpdate.Callback(updateId = updateId, fromId = fromId, callbackId = callbackId, data = data)
     }
 
     /** The poller Process: one cycle per iteration, the long-poll inside the body is the pacing. */

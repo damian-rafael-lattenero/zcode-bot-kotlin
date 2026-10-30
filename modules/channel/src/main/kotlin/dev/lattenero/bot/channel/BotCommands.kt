@@ -57,22 +57,35 @@ class BotCommands(
     private var newIntent = false
 
     /** One incoming line. Null = not a command (the router sends it as inbound). */
-    suspend fun handle(text: String, updateId: Long): String? {
-        val (base, rest) = parseCommand(text) ?: return route(text, updateId)
-        return when (base) {
+    suspend fun handle(text: String, updateId: Long): BotReply? {
+        val (base, rest) = parseCommand(text) ?: return route(text, updateId)?.let { BotReply(it) }
+        val reply: BotReply = when (base) {
             "tasks", "task" -> tasks(rest, updateId) // "task" keeps Python's muscle memory alive
             "all_tasks", "alltasks" -> allTasks(rest, updateId)
-            "status" -> status()
+            "status" -> BotReply(status())
             "stop" -> stop(rest)
             "nuclear", "nuke" -> nuclear(rest)
-            "quota" -> quota()
-            "help", "start" -> help()
-            "subagents", "agents" -> subagents()
-            else -> UNKNOWN
-        }.let { reply ->
-            logger.info { "command /$base (${rest.length} args) -> ${reply.length} chars" }
-            reply
+            "quota" -> BotReply(quota())
+            "help", "start" -> BotReply(help())
+            "subagents", "agents" -> BotReply(subagents())
+            else -> BotReply(UNKNOWN)
         }
+        logger.info {
+            "command /$base (${rest.length} args) -> ${reply.text.length} chars" +
+                (if (reply.markup != null) " + keyboard" else "")
+        }
+        return reply
+    }
+
+    /**
+     * A button tap (callback_query): translate by Python's R5 table and
+     * run it as the owner's typed words — a `t:<sid>` tap RE-BINDS via
+     * the same /task machinery the router uses. The tap's toast
+     * (answerCallbackQuery) is the wiring's effect, not ours.
+     */
+    suspend fun onCallback(data: String, updateId: Long): BotReply? {
+        logger.info { "callback \"$data\" -> \"${Keyboards.callbackText(data)}\"" }
+        return handle(Keyboards.callbackText(data), updateId)
     }
 
     /**
@@ -327,34 +340,49 @@ class BotCommands(
      * tasks, loose DEFAULT-workspace ones excluded). `n` picks (rebinds the
      * channel's context), `new` arms the next text to CREATE.
      */
-    private suspend fun tasks(rest: String, updateId: Long): String = when {
+    private suspend fun tasks(rest: String, updateId: Long): BotReply = when {
         rest.isEmpty() -> taskList(all = false)
-        rest.startsWith("@") -> pickBySid(rest.substring(1), updateId)
-        rest.all { it.isDigit() } -> pickScoped(rest.toInt(), all = false, updateId, "tasks")
-        rest.substringBefore(' ') == "new" -> newConversation(rest.removePrefix("new").trim())
-        else -> TASK_USAGE
+        rest.startsWith("@") -> BotReply(pickBySid(rest.substring(1), updateId))
+        rest.all { it.isDigit() } -> BotReply(pickScoped(rest.toInt(), all = false, updateId, "tasks"))
+        rest.substringBefore(' ') == "new" -> BotReply(newConversation(rest.removePrefix("new").trim()))
+        else -> BotReply(TASK_USAGE)
     }
 
     /** /all_tasks — Python's `/all_tasks`: every conversation, loose ones included. `n` picks. */
-    private suspend fun allTasks(rest: String, updateId: Long): String =
+    private suspend fun allTasks(rest: String, updateId: Long): BotReply =
         if (rest.all { it.isDigit() } && rest.isNotEmpty()) {
-            pickScoped(rest.toInt(), all = true, updateId, "all_tasks")
+            BotReply(pickScoped(rest.toInt(), all = true, updateId, "all_tasks"))
         } else {
             taskList(all = true)
         }
 
-    /** The list itself — Python's task_list_report(scope): rows + stamps + footer. */
-    private suspend fun taskList(all: Boolean): String {
+    /**
+     * The list itself — Python's task_list_report(scope): rows + stamps +
+     * footer, and now the KEYBOARD (the structural gap the interface map
+     * named): one green 🟢 row per task (`t:<sid>` re-binds on tap), the
+     * blue 🔵 lanes nested under the watched task only.
+     */
+    private suspend fun taskList(all: Boolean): BotReply {
         val rows = scopeRows(history.ctxTasks(if (all) ALL_CAP else TASKS_CAP), all, defaultWorkspacePath)
         return when (val ctx = contextAnswer()) {
-            ContextAnswer.Degraded -> degraded("botStatus")
-            ContextAnswer.None -> renderTaskList(rows, emptySet(), null, null, all)
+            ContextAnswer.Degraded -> BotReply(degraded("botStatus"))
+            ContextAnswer.None -> BotReply(renderTaskList(rows, emptySet(), null, null, all))
             is ContextAnswer.Ctx -> {
                 val running = when (val answer = ops.query(ChannelQuery.ActiveTaskIds(ctx.value.workspacePath))) {
                     is QueryAnswer.Ok -> parseStrings(answer.resultJson).toSet()
                     else -> emptySet()
                 }
-                renderTaskList(rows, running, ctx.value.activeTaskId, ctx.value.workspacePath, all)
+                val watched = hub.peek()
+                BotReply(
+                    text = renderTaskList(rows, running, ctx.value.activeTaskId, ctx.value.workspacePath, all),
+                    markup = Keyboards.tasksKeyboard(
+                        rows = rows,
+                        running = running,
+                        activeSid = ctx.value.activeTaskId,
+                        watchedTaskId = watched?.taskId,
+                        subagents = watched?.tools.orEmpty().filter { it.parentToolUseId != null },
+                    ),
+                )
             }
         }
     }
@@ -459,24 +487,28 @@ class BotCommands(
     /**
      * /stop — Python's two-step: `go` = HARD (everything, now); bare = the
      * SOFT stop of the active task's turn (the SAME V4 stop as the UI's
-     * button) + the way to the hard one. Python's exact emoji contract.
+     * button) + the 💀 confirm button for the hard one. Python's exact
+     * emoji contract.
      */
     @Suppress("ReturnCount") // one guard per degrade of the stop path
-    private suspend fun stop(rest: String): String {
-        if (rest == "go") return hardStop()
+    private suspend fun stop(rest: String): BotReply {
+        if (rest == "go") return BotReply(hardStop())
         return when (val ctx = contextAnswer()) {
-            ContextAnswer.Degraded -> DEGRADED
-            ContextAnswer.None -> RouteTexts.NO_CONTEXT
+            ContextAnswer.Degraded -> BotReply(DEGRADED)
+            ContextAnswer.None -> BotReply(RouteTexts.NO_CONTEXT)
             is ContextAnswer.Ctx -> {
                 val taskId = ctx.value.activeTaskId
-                    ?: return "🤷 Nothing to stop — the bot's context has no active task."
+                    ?: return BotReply("🤷 Nothing to stop — the bot's context has no active task.")
                 when (val answer = ops.query(ChannelQuery.Stop(taskId))) {
-                    is QueryAnswer.Ok ->
+                    is QueryAnswer.Ok -> BotReply(
                         "⏹️ Stop sent to <code>${PyText.esc(taskId.takeLast(SID_TAIL))}</code>" +
-                            " — the turn ends on its own.\n💀 /stop go stops EVERYTHING at once."
+                            " — the turn ends on its own.",
+                        markup = Keyboards.stopConfirm(),
+                    )
 
-                    is QueryAnswer.Unavailable -> DEGRADED
-                    is QueryAnswer.Failed -> "⚠️ Stop failed (${answer.code}): ${PyText.esc(answer.message ?: "?")}"
+                    is QueryAnswer.Unavailable -> BotReply(DEGRADED)
+                    is QueryAnswer.Failed ->
+                        BotReply("⚠️ Stop failed (${answer.code}): ${PyText.esc(answer.message ?: "?")}")
                 }
             }
         }
@@ -495,33 +527,37 @@ class BotCommands(
     /**
      * /nuclear — Python's two-step (the owner, 29/10: «con go de una, sin
      * go soft y botón»): `go` = stopAll + the daemon's reset, NOW; bare =
-     * the ☢️ card (Python's exact text, minus the app-restart lines the
-     * ⌘Q golden rule keeps ours from doing) + the confirmation; `no` =
-     * Python's exact cancellation. The ☢️/🙅 inline buttons ride the
-     * callback_query hot-fix — the /nuclear go words work today.
+     * the ☢️ card + Python's EXACT confirmation row (☢️ Confirm / 🙅
+     * Cancel, `nuc:go`/`nuc:no`); `no` = Python's exact cancellation.
      */
-    private suspend fun nuclear(rest: String): String = when (rest) {
-        "go" -> {
-            val workspace = (contextAnswer() as? ContextAnswer.Ctx)?.value?.workspacePath
-            val stopped = when (val answer = ops.query(ChannelQuery.StopAll(workspace))) {
-                is QueryAnswer.Ok -> parseStringsOf(answer.resultJson, "stopped")
-                else -> emptyList()
-            }
-            daemonReset()
-            "☢️ Nuclear: stopped ${stopped.size} run(s)" +
-                (stopped.take(NAMES_IN_NUCLEAR).joinToString("") {
-                    " · <code>${PyText.esc(it.takeLast(SID_TAIL))}</code>"
-                }) +
-                " — the daemon's live state was reset. ⌘Q of the app stays YOURS (the golden rule)."
-        }
+    private suspend fun nuclear(rest: String): BotReply = when (rest) {
+        "go" -> BotReply(nuclearGo())
 
-        "no" -> "🙅 Cancelled — nothing was touched."
+        "no" -> BotReply("🙅 Cancelled — nothing was touched.")
 
-        else ->
+        else -> BotReply(
             "☢️ <b>Nuclear</b> — emergency:\n" +
-            "⏹️ stops ALL runs\n" +
-            "🔄 resets the bot's live state (the app itself is Damian's ⌘Q — never ours)\n\n" +
-            "Confirm? — /nuclear go · /nuclear no cancels"
+                "⏹️ stops ALL runs\n" +
+                "🔄 resets the bot's live state (the app itself is Damian's ⌘Q — never ours)\n\n" +
+                "Confirm?",
+            markup = Keyboards.nuclearConfirm(),
+        )
+    }
+
+    /** The `/nuclear go` half — the stopAll + daemon reset (nuclear.py's channel-side reach). */
+    @Suppress("ReturnCount") // one guard per degrade
+    private suspend fun nuclearGo(): String {
+        val workspace = (contextAnswer() as? ContextAnswer.Ctx)?.value?.workspacePath
+        val stopped = when (val answer = ops.query(ChannelQuery.StopAll(workspace))) {
+            is QueryAnswer.Ok -> parseStringsOf(answer.resultJson, "stopped")
+            else -> emptyList()
+        }
+        daemonReset()
+        return "☢️ Nuclear: stopped ${stopped.size} run(s)" +
+            (stopped.take(NAMES_IN_NUCLEAR).joinToString("") {
+                " · <code>${PyText.esc(it.takeLast(SID_TAIL))}</code>"
+            }) +
+            " — the daemon's live state was reset. ⌘Q of the app stays YOURS (the golden rule)."
     }
 
     /** /quota — the coding plan's pool (IUsageStatsService through the channel). */
