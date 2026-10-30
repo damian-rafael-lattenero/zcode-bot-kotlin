@@ -17,6 +17,7 @@ import kotlinx.serialization.json.putJsonArray
  * subagent rows blue 🔵 with ▶️ running / ⏹️ stopped. A tap re-binds via
  * the SAME /task bind machinery (callback → command text → [BotCommands.handle]).
  */
+@Suppress("TooManyFunctions") // one builder per command's keyboard — the vocabulary IS the object
 object Keyboards {
 
     /** One button row — Python's {"text": …, "callback_data": …}. */
@@ -136,6 +137,26 @@ object Keyboards {
                         add(button("⤴️ plegar", "cotr:x"))
                     } else {
                         add(button("🧠 cot", "cot:x"))
+                    }
+                },
+            )
+        }
+    }
+
+    /**
+     * /subagents's ONE view-switch button: the active view offers
+     * «inactivos» (`sao:` — today's ended subagents), the inactive view
+     * offers the way back, «activos» (`saa:`). Both datas are fixed 4-byte
+     * strings — Telegram's 64-byte law never even breathes.
+     */
+    fun subagentsViewButtons(inactiveView: Boolean): JsonObject = buildJsonObject {
+        putJsonArray("inline_keyboard") {
+            add(
+                buildJsonArray {
+                    if (inactiveView) {
+                        add(button("▶️ activos", "saa:"))
+                    } else {
+                        add(button("⏹️ inactivos", "sao:"))
                     }
                 },
             )

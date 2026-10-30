@@ -25,7 +25,34 @@ interface TasksHistory {
 
     /** True when the task exists alive in the index — the tombstone guard (deleted ≠ aimable). */
     suspend fun taskAlive(sid: String): Boolean
+
+    /**
+     * /subagents «inactivos»'s source: TODAY's ENDED subagent rows — the
+     * cli db's own `session` rows (parent_id IS NOT NULL, last_outcome
+     * != '' — an empty outcome is a STILL-RUNNING subagent), newest first,
+     * capped at [SUBAGENTS_INACTIVE_CAP]. The daemon implements it with a
+     * read-only query on the SAME db file it already opens for ctx_tasks —
+     * the app itself persists these rows, so no second journal exists to
+     * feed, corrupt or lose on restart (data honesty: every row is a REAL
+     * session the CLI wrote, never a bot-invented one).
+     */
+    suspend fun subagentsToday(parentSid: String?, dayStartMs: Long): List<SubagentRow> = emptyList()
 }
+
+/**
+ * One ENDED subagent of today — /subagents «inactivos»'s row. `outcome`
+ * is the cli db's own last_outcome word (completed, interrupted, …);
+ * started/ended are the session's real time_created/time_updated.
+ */
+data class SubagentRow(
+    val title: String,
+    val outcome: String,
+    val startedMs: Long,
+    val endedMs: Long,
+)
+
+/** /subagents «inactivos»'s cap — the owner's MAX 10 rows. */
+const val SUBAGENTS_INACTIVE_CAP = 10
 
 /** One row of Python's `Task` dataclass (reporting.py) — sid/title/ws carry the list. */
 data class TaskRow(
