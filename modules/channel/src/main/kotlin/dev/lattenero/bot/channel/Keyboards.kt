@@ -100,10 +100,11 @@ object Keyboards {
 
     /**
      * /subagents' ACTIVE view keyboard: one row per open dispatch lane —
-     * the `sa:` tap attaches that subagent's stream (the session attach
-     * when the fork names it, lane-scope otherwise) — then the view-switch
-     * row. The «inactivos» view stays text-only: ended sessions have no
-     * stream to attach to.
+     * the 🔵 `sa:` tap attaches that subagent's stream (the session attach
+     * when the fork names it, lane-scope otherwise) and the ✍️ `so:` tap
+     * ARMS the next free text as an ORDER direct to it — then the
+     * view-switch row. The «inactivos» view stays text-only: ended
+     * sessions have no stream to attach to, no ear to hear an order.
      */
     fun subagentsKeyboard(lanes: List<ToolLive>, inactiveView: Boolean): JsonObject = buildJsonObject {
         putJsonArray("inline_keyboard") {
@@ -111,6 +112,8 @@ object Keyboards {
                 add(
                     buildJsonArray {
                         add(button(subagentLabel(lane), "sa:${lane.toolId.takeLast(LANE_TAIL)}"))
+                        // the ✍️ arms the next free text as an ORDER to that subagent
+                        add(button("✍️", "so:${lane.toolId.takeLast(LANE_TAIL)}"))
                     },
                 )
             }

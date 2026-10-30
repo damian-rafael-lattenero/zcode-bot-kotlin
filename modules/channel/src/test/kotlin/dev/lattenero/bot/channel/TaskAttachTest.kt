@@ -52,6 +52,18 @@ class TaskAttachTest {
         override suspend fun subscribe(taskId: String, workspacePath: String) {
             subscribed.add(taskId to workspacePath)
         }
+
+        val orders = mutableListOf<Pair<String, String>>() // text to taskId
+
+        override suspend fun sendOrder(
+            text: String,
+            messageId: String,
+            receivedAt: Long,
+            taskId: String,
+        ): InboundReceipt {
+            orders.add(text to taskId)
+            return InboundReceipt.FIRED
+        }
     }
 
     private class FakeHistory(private val rows: List<TaskRow>) : TasksHistory {
@@ -350,6 +362,42 @@ class TaskAttachTest {
         assertTrue("sa:${"toolu_dispatchaaaa1111".takeLast(16)}" in kb)
         assertTrue("sa:${"toolu_dispatchbbbb2222".takeLast(16)}" in kb)
         assertTrue("sao:" in kb) // the view switch rides along
+    }
+
+    // ---- the ✍️ armed order: the loop closes (read the stream → write the order) —
+
+    @Test
+    fun orderTapAttachesAndArmsTheNextFreeText() = runBlocking {
+        val ops = FakeOps(boundStatus).apply { answers["activeTaskIds"] = """[]""" }
+        val history = FakeHistory(rows).apply { runningSubs = listOf("sess_subagent_agent_x") }
+        val hub = LiveHub()
+        val bc = BotCommands(
+            ops = ops,
+            hub = hub,
+            daemonReset = { "fake ladder" },
+            clock = { 1_000_000L },
+            history = history,
+            defaultWorkspacePath = "/Users/damian/.zcode/workspace/default",
+        )
+        hub.apply(
+            streamEvent(
+                "task-02",
+                """{"type":"tool_call","toolId":"$laneId","toolName":"Task","subagentAgentId":"agent_x"}""",
+                1,
+            ),
+            1_000_000L,
+        )
+        val arm = bc.onCallback("so:$laneTail", 9L)!!
+        assertTrue("Armado" in arm.text) // the arm rides the attach
+        assertEquals(1, ops.subscribed.size) // the tap ALSO attaches
+        // the FIRST free text after the arm is the ORDER — direct to the session
+        val ack = bc.handle("cambiale el título a la carta", 10L)!!
+        assertTrue("Orden entregada" in ack.text, "got: $ack")
+        assertEquals(listOf("cambiale el título a la carta" to "sess_subagent_agent_x"), ops.orders)
+        // the arm is ONE shot: the next text rides the normal routing again
+        val second = bc.handle("esto ya va a la conversación", 11L)
+        assertEquals(1, ops.orders.size)
+        assertTrue("Orden entregada" !in (second?.text ?: ""))
     }
 
     @Test

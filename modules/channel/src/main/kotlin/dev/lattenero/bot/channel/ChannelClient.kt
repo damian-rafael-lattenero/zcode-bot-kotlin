@@ -335,11 +335,16 @@ class ChannelClient(
 
     /** Free text → the REAL conversation (the composer's own pipeline). */
     @Suppress("TooGenericExceptionCaught") // fire-and-forget: any miss answers UNAVAILABLE
-    suspend fun sendInbound(text: String, messageId: String, receivedAt: Long): InboundReceipt {
+    suspend fun sendInbound(
+        text: String,
+        messageId: String,
+        receivedAt: Long,
+        taskId: String? = null,
+    ): InboundReceipt {
         val live = session ?: return InboundReceipt.UNAVAILABLE
         val id = "r${ids.incrementAndGet()}"
         return try {
-            live.fire(ClientFrame.Inbound(id, text, messageId, receivedAt))
+            live.fire(ClientFrame.Inbound(id, text, messageId, receivedAt, taskId))
             InboundReceipt.FIRED
         } catch (e: CancellationException) {
             throw e

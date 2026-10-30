@@ -118,6 +118,8 @@ sealed interface ClientFrame {
         val text: String,
         val messageId: String?,
         val receivedAt: Long?,
+        /** La sesión DESTINO (una ORDEN del dueño a un subagente attachado) — null = el routing de siempre. */
+        val taskId: String? = null,
     ) : ClientFrame
 
     data class Subscribe(val id: String, val taskId: String, val workspacePath: String) : ClientFrame
@@ -144,6 +146,7 @@ fun encodeClient(frame: ClientFrame): String = when (frame) {
         put("text", frame.text)
         if (frame.messageId != null) put("messageId", frame.messageId)
         if (frame.receivedAt != null) put("receivedAt", frame.receivedAt)
+        if (frame.taskId != null) put("taskId", frame.taskId)
     }
 
     is ClientFrame.Subscribe -> buildJsonObject {
