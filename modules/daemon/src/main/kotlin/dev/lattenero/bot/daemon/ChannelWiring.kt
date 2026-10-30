@@ -244,6 +244,9 @@ private fun buildPoller(
     return Poller(
         api = liveApi,
         offsetFile = File(pythonState, "tg-offset"), // Python's own cursor — the torch passes at retirement
+        // the bot explains its own silences: a long mute window ends with the
+        // apology (loud — the owner must learn WHY it was quiet, from the bot)
+        onReconnected = { window -> speak(window.render(), true, null) },
         dispatch = { _, update ->
             // the buttons' dispatch: a tap is answered (the toast) and runs
             // as the owner's typed words; a message is the words themselves

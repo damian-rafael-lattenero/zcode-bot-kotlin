@@ -73,7 +73,11 @@ class Poller(
     private val breaker: TgBreaker = TgBreaker(),
     private val longPoll: Duration = 3.seconds,
     private val limit: Int = 100,
+    /** The bot explains its own silences: a long getUpdates failure window ends with the apology. */
+    private val onReconnected: suspend (MuteWindow) -> Unit = {},
+    private val clock: () -> Long = System::currentTimeMillis,
 ) {
+    private val mute = MuteTracker(clock)
 
     /** One cycle: fetch → filter → dispatch → confirm the offset. */
     @Suppress("TooGenericExceptionCaught", "SwallowedException", "ReturnCount") // poison must not crash-loop (F35b)
@@ -82,11 +86,23 @@ class Poller(
         val offset = TgOffset.current(offsetFile)
         val (next, messages) = try {
             fetch(cfg, offset)
+        } catch (e: CircuitBreakerOpen) {
+            // policy, not error: the breaker is OPEN — an empty cycle; the
+            // probe reopens on its own timeout. The phone is still deaf
+            // while it lasts: the mute window EXTENDS, it does not close.
+            mute.onFetchFailed()
+            logger.warn { "getUpdates: breaker OPEN (${e.retryAfter}s) — empty cycle, the probe reopens it" }
+            return PollOutcome(offset, 0)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
+            mute.onFetchFailed()
             logger.warn { "getUpdates failed: ${e.message}" }
             return PollOutcome(offset, 0, conflict = (e as? TgHttpException)?.code == CONFLICT)
+        }
+        mute.onFetchOk()?.let { window ->
+            logger.warn { "poller RECOVERED after a ${window.toMs - window.fromMs}ms mute window — telling the owner" }
+            onReconnected(window)
         }
         for (message in messages) {
             try {
@@ -109,15 +125,8 @@ class Poller(
             put("timeout", longPoll.inWholeSeconds)
             put("limit", limit)
         }
-        val result = try {
-            breaker.call {
-                api.call("getUpdates", params)
-            }
-        } catch (e: CircuitBreakerOpen) {
-            // policy, not error: the breaker is OPEN — an empty cycle; it
-            // reopens the probe on its own timeout (e carries the wait)
-            logger.warn { "getUpdates: breaker OPEN (${e.retryAfter}s) — empty cycle, the probe reopens it" }
-            return offset to emptyList()
+        val result = breaker.call {
+            api.call("getUpdates", params)
         }
         val updates = (result as? JsonObject)?.get("result") as? kotlinx.serialization.json.JsonArray
             ?: return offset to emptyList()
