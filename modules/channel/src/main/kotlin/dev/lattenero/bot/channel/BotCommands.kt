@@ -21,6 +21,9 @@ interface ChannelOps {
 
     suspend fun sendInbound(text: String, messageId: String, receivedAt: Long): InboundReceipt
 
+    /** The bind's send: the inbound's own answer (replies = the botsService's words). */
+    suspend fun sendInboundAwait(text: String, messageId: String, receivedAt: Long): InboundAnswer
+
     /** Python's F17: park a text while its conversation is mid-turn — the queue size after, or -1. */
     suspend fun enqueueInbound(text: String, messageId: String, receivedAt: Long): Int
 
@@ -77,50 +80,173 @@ class BotCommands(
      * `only_active_task` doctrine — Damian, 29/10: «probando probando»
      * opened a fresh conversation instead of landing in the open one).
      *
-     * The channel's inbound has NO target field (§3.2 — it rides the
-     * composer's draft/task pipeline), but the botsService's own `/task
-     * <taskId>` command rebinds its context. So the bind is: resolve the
-     * app's open conversation → fire `/task <id>` as an inbound command →
-     * CONFIRM via botStatus (the server does not serialize inbounds — the
-     * text only fires once the context says the target) → then the text.
+     * The decision is [planRoute]'s (pure, frozen facts in — the test
+     * table); THIS is the effectful half: gather the facts (each one
+     * logged — the owner's standing rule: never radio silence, every
+     * routing decision visible in daemon.jsonl), execute the plan, and
+     * speak the honest refusals. The bind is the botsService's own
+     * `/task <id>` command, AWAITED (its replies ARE the verdict:
+     * taskRunning, taskMissing) and CONFIRMED via botStatus — the server
+     * does not serialize inbounds.
      */
-    @Suppress("ReturnCount") // one guard per leg — the router's honest refusals
+    @Suppress("ReturnCount") // one branch per plan — the router's honest outcomes
     private suspend fun route(text: String, updateId: Long): String? {
-        when (val ctx = contextAnswer()) {
-            ContextAnswer.Degraded ->
-                return "📡 The channel to the app is down (the fork's host is not running?) — " +
-                    "text did NOT reach a conversation. Try again after the app restarts."
+        val facts = routeFacts()
+        val plan = planRoute(facts, newIntent)
+        logger.info {
+            "route: update=$updateId ctxWs=${facts.workspacePath?.substringAfterLast('/')} " +
+                "active=${facts.activeTaskId ?: "none"} alive=${facts.activeAlive} " +
+                "running=${facts.running.size} open=${facts.openSid ?: "none"} " +
+                "(${facts.openTitle ?: "?"}) -> ${plan::class.simpleName} ${plan.reasonForLog()}"
+        }
+        return when (plan) {
+            is RoutePlan.Refuse -> plan.reason
 
-            ContextAnswer.None -> return NO_ACTIVE_CONVERSATION
-
-            is ContextAnswer.Ctx -> {
-                val active = ctx.value.activeTaskId
-                when {
-                    active == null && !newIntent -> {
-                        val open = resolveOpenConversation(ctx.value.workspacePath)
-                            ?: return NO_ACTIVE_CONVERSATION
-                        if (!bindTo(open, updateId)) return BIND_FAILED
-                    }
-
-                    // Python's F17 busy path: a mid-turn conversation QUEUES the
-                    // text (it auto-fires on task_complete; /stop interrupts NOW —
-                    // the ⚡/⏳ inline buttons ride the markup hot-fix)
-                    active != null && isRunning(active, ctx.value.workspacePath) ->
-                        return enqueueOrRefuse(text, updateId, active)
+            is RoutePlan.BusyRebind -> {
+                logger.warn {
+                    "route: re-aim to ${plan.wantedSid} REFUSED — ${plan.active} still runs " +
+                        "(taskRunning); falling back to only_active_task (queue)"
                 }
+                RouteTexts.BUSY_REBIND + "\n" + enqueueOrRefuse(text, updateId, plan.active)
+            }
+
+            is RoutePlan.Enqueue -> {
+                logger.info { "route: ${plan.reason} — text parked (F17)" }
+                enqueueOrRefuse(text, updateId, plan.sid)
+            }
+
+            is RoutePlan.Fire -> firePlan(plan, text, updateId, facts)
+        }
+    }
+
+    /** The plan's one-line log suffix (the sealed shape has no common field). */
+    private fun RoutePlan.reasonForLog(): String = when (this) {
+        is RoutePlan.Fire -> "(${reason})"
+        is RoutePlan.Enqueue -> "(${reason})"
+        is RoutePlan.BusyRebind -> "(wanted «${wantedTitle ?: wantedSid}»)"
+        is RoutePlan.Refuse -> ""
+    }
+
+    /**
+     * Executes a Fire: bind first when the plan says so, then the text.
+     * A bind that lands on a RUNNING conversation parks the text (the
+     * server would only bounce it with taskRunning — honest and quiet).
+     */
+    @Suppress("ReturnCount") // one guard per bind outcome
+    private suspend fun firePlan(
+        plan: RoutePlan.Fire,
+        text: String,
+        updateId: Long,
+        facts: RouteFacts,
+    ): String? {
+        if (plan.bind) {
+            when (val bind = bindTo(plan.sid, updateId)) {
+                is BindOutcome.Confirmed -> logger.info { "route: bound to ${plan.sid} (${bind.how})" }
+
+                is BindOutcome.Refused -> {
+                    // the pre-check said idle but a turn started mid-switch — the
+                    // server's own refusal text already reached the chat via the
+                    // awaited replies; park the text on what actually runs
+                    logger.warn { "route: bind to ${plan.sid} REFUSED (${bind.reply}) — ${bind.fallback}" }
+                    return RouteTexts.BIND_FAILED
+                }
+
+                is BindOutcome.Failed -> {
+                    logger.warn { "route: bind to ${plan.sid} FAILED: ${bind.reason}" }
+                    return RouteTexts.BIND_FAILED
+                }
+            }
+            // the bind may have landed on a conversation that just STARTED
+            // (task_run_started races the text): park instead of bouncing
+            val ws = facts.workspacePath
+            if (ws != null && isRunning(plan.sid, ws) && plan.sid != facts.activeTaskId) {
+                logger.info { "route: ${plan.sid} started running mid-bind — text parked (F17)" }
+                return enqueueOrRefuse(text, updateId, plan.sid)
             }
         }
         newIntent = false
         return when (ops.sendInbound(text, messageId = "tg-$updateId", receivedAt = clock())) {
             InboundReceipt.FIRED -> {
+                logger.info { "route: text FIRED at ${plan.sid} (${plan.reason})" }
                 watchContext() // the turn this text starts is the one to stream
                 null // the live view + the final render speak; no ack noise
             }
 
-            InboundReceipt.UNAVAILABLE ->
-                "📡 The channel to the app is down (the fork's host is not running?) — " +
-                    "text did NOT reach a conversation. Try again after the app restarts."
+            InboundReceipt.UNAVAILABLE -> {
+                logger.warn { "route: text NOT fired — the channel is down" }
+                RouteTexts.CHANNEL_DOWN
+            }
         }
+    }
+
+    /**
+     * The router's frozen inputs, each one named in the log. The open
+     * conversation comes from the tasks-index DIRECT READ (the freshest
+     * alive task of the bot's workspace — `activeTaskIds` only lists
+     * RUNNING tasks and cannot see an idle open conversation); the
+     * channel's listTasks is the fallback when the index has nothing.
+     */
+    @Suppress("ReturnCount") // one branch per context answer
+    private suspend fun routeFacts(): RouteFacts = when (val ctx = contextAnswer()) {
+        ContextAnswer.Degraded -> RouteFacts.DEGRADED
+
+        ContextAnswer.None -> RouteFacts(
+            contextReachable = true,
+            contextPresent = false,
+            workspacePath = null,
+            activeTaskId = null,
+            activeAlive = false,
+            running = emptySet(),
+            openSid = null,
+            openTitle = null,
+        )
+
+        is ContextAnswer.Ctx -> {
+            val ws = ctx.value.workspacePath
+            val running = runningIds(ws)
+            val active = ctx.value.activeTaskId
+            val activeAlive = active == null || runCatching { history.taskAlive(active) }.getOrDefault(true)
+            val open = openConversation(ws)
+            RouteFacts(
+                contextReachable = true,
+                contextPresent = true,
+                workspacePath = ws,
+                activeTaskId = active,
+                activeAlive = activeAlive,
+                running = running,
+                openSid = open?.id,
+                openTitle = open?.title?.takeIf { it.isNotEmpty() },
+            )
+        }
+    }
+
+    /** sessions-index truth: the tasks with a live turn (empty answer = degraded guess). */
+    private suspend fun runningIds(workspacePath: String): Set<String> =
+        when (val answer = ops.query(ChannelQuery.ActiveTaskIds(workspacePath))) {
+            is QueryAnswer.Ok -> parseStrings(answer.resultJson).toSet()
+            else -> emptySet()
+        }
+
+    /** The open conversation: tasks-index first (sees idle tasks), listTasks as fallback. */
+    @Suppress("ReturnCount") // one guard per source: the index row, then each channel fallback
+    private suspend fun openConversation(workspacePath: String): TaskBrief? {
+        runCatching { history.freshestTask(workspacePath) }.getOrNull()?.let { row ->
+            return TaskBrief(id = row.sid, title = row.title, updatedAt = row.whenMs)
+        }
+        // fallback: the channel's own view (running metas, most recently updated)
+        val running = when (val answer = ops.query(ChannelQuery.ActiveTaskIds(workspacePath))) {
+            is QueryAnswer.Ok -> parseStrings(answer.resultJson)
+            else -> return null
+        }
+        if (running.isEmpty()) return null
+        val metas = when (val answer = ops.query(ChannelQuery.ListTasks(workspacePath))) {
+            is QueryAnswer.Ok -> parseTaskMetas(answer.resultJson)
+            else -> return TaskBrief(running.first(), "", null)
+        }
+        return metas.filter { it.id in running }
+            .maxByOrNull { it.updatedAt ?: 0 }
+            ?.let { TaskBrief(it.id, it.title, it.updatedAt) }
+            ?: TaskBrief(running.first(), "", null)
     }
 
     /** The active task has a live turn (sessions-index's non-terminal phases). */
@@ -144,37 +270,54 @@ class BotCommands(
     }
 
     /**
-     * The app's OPEN conversation (sessions-index: non-terminal phase —
-     * a mid-turn task). Several open → the most recently updated one
-     * (the one in front of the owner). Null = nothing alive to talk to.
+     * The bind's three outcomes. [Confirmed] carries HOW (the awaited
+     * command's reply or the botStatus poll — both count); [Refused] is
+     * the server's own word (taskRunning/taskMissing — locale texts
+     * matched by their stable markers); [Failed] is transport-level.
      */
-    @Suppress("ReturnCount") // one guard per degrade of the two queries
-    private suspend fun resolveOpenConversation(workspacePath: String): String? {
-        val running = when (val answer = ops.query(ChannelQuery.ActiveTaskIds(workspacePath))) {
-            is QueryAnswer.Ok -> parseStrings(answer.resultJson)
-            else -> return null
-        }
-        if (running.isEmpty()) return null
-        val metas = when (val answer = ops.query(ChannelQuery.ListTasks(workspacePath))) {
-            is QueryAnswer.Ok -> parseTaskMetas(answer.resultJson)
-            else -> return running.first()
-        }
-        return metas.filter { it.id in running }
-            .maxByOrNull { it.updatedAt ?: 0 }
-            ?.id ?: running.first()
+    internal sealed interface BindOutcome {
+        data class Confirmed(val how: String) : BindOutcome
+
+        data class Refused(val reply: String, val fallback: String) : BindOutcome
+
+        data class Failed(val reason: String) : BindOutcome
     }
 
-    /** Fires the botsService's own `/task <id>` and CONFIRMS the context took it. */
-    @Suppress("ReturnCount") // one guard per outcome (fired, confirmed, gave up)
-    private suspend fun bindTo(taskId: String, updateId: Long): Boolean {
-        if (ops.sendInbound("/task $taskId", "tg-$updateId-bind", clock()) != InboundReceipt.FIRED) {
-            return false
+    /**
+     * Fires the botsService's own `/task <id>` — AWAITED (the replies are
+     * the verdict) — and CONFIRMS via botStatus (the server does not
+     * serialize inbounds: the command's write and the poll are separate).
+     */
+    @Suppress("ReturnCount") // one guard per outcome (answered+confirmed, refused, gave up)
+    private suspend fun bindTo(taskId: String, updateId: Long): BindOutcome {
+        val sent = ops.sendInboundAwait("/task $taskId", "tg-$updateId-bind", clock())
+        val replies = when (sent) {
+            is InboundAnswer.Answered -> sent.replies
+            is InboundAnswer.Unavailable -> return BindOutcome.Failed("channel down")
+            is InboundAnswer.TimedOut -> {
+                logger.warn { "bind: /task $taskId answered nothing in ${sent.waitedMs}ms — polling botStatus" }
+                emptyList()
+            }
+        }
+        val firstReply = replies.firstOrNull()
+        logger.info {
+            "bind: /task $taskId replied ${replies.size} line(s)${firstReply?.let { ": $it" } ?: ""}"
+        }
+        replies.firstOrNull { TASK_RUNNING_MARKER in it }?.let {
+            return BindOutcome.Refused(reply = it, fallback = "taskRunning — the old task still runs")
+        }
+        replies.firstOrNull { TASK_MISSING_MARKER in it }?.let {
+            return BindOutcome.Refused(reply = it, fallback = "taskMissing — not in the bot's workspace/project")
         }
         repeat(BIND_CONFIRM_TRIES) {
             delay(BIND_CONFIRM_EVERY_MS)
-            if ((contextAnswer() as? ContextAnswer.Ctx)?.value?.activeTaskId == taskId) return true
+            if ((contextAnswer() as? ContextAnswer.Ctx)?.value?.activeTaskId == taskId) {
+                return BindOutcome.Confirmed(
+                    how = if (replies.isEmpty()) "botStatus poll" else "command reply + poll",
+                )
+            }
         }
-        return false
+        return BindOutcome.Failed("botStatus never said activeTaskId=$taskId")
     }
 
     // ---- the eight ---------------------------------------------------------
@@ -232,13 +375,26 @@ class BotCommands(
     @Suppress("ReturnCount") // one guard per refusal, Python's three-error ladder
     private suspend fun pickBySid(sid: String, updateId: Long): String {
         val ctx = contextAnswer() as? ContextAnswer.Ctx
-            ?: return NO_CONTEXT
+            ?: return RouteTexts.NO_CONTEXT
         val current = ctx.value.activeTaskId
         if (current != null && current != sid && isRunning(current, ctx.value.workspacePath)) {
+            logger.warn { "pick $sid refused: ${current} still runs (taskRunning)" }
             return "⏳ The previous task's turn is still running — /stop first, then pick again."
         }
         val row = history.ctxTasks(SCOPE_FOR_PICK).firstOrNull { it.sid == sid }
-        if (!bindTo(sid, updateId)) return BIND_FAILED
+        when (val bind = bindTo(sid, updateId)) {
+            is BindOutcome.Confirmed -> logger.info { "pick $sid bound (${bind.how})" }
+
+            is BindOutcome.Refused -> {
+                logger.warn { "pick $sid refused: ${bind.reply} (${bind.fallback})" }
+                return "⏳ ${PyText.esc(bind.reply)}"
+            }
+
+            is BindOutcome.Failed -> {
+                logger.warn { "pick $sid failed: ${bind.reason}" }
+                return RouteTexts.BIND_FAILED
+            }
+        }
         val title = row?.title?.takeIf { it.isNotEmpty() } ?: sid.takeLast(SID_TAIL)
         return "🎯 Active conversation: «${PyText.esc(title)}»\n" +
             "All text you send runs there — the live view streams it."
@@ -310,7 +466,7 @@ class BotCommands(
         if (rest == "go") return hardStop()
         return when (val ctx = contextAnswer()) {
             ContextAnswer.Degraded -> DEGRADED
-            ContextAnswer.None -> NO_CONTEXT
+            ContextAnswer.None -> RouteTexts.NO_CONTEXT
             is ContextAnswer.Ctx -> {
                 val taskId = ctx.value.activeTaskId
                     ?: return "🤷 Nothing to stop — the bot's context has no active task."
@@ -513,22 +669,11 @@ class BotCommands(
             "🤷 Unknown command — /help lists the eight this bot speaks."
         internal const val DEGRADED =
             "📡 The channel to the app is down — the fork's host is not running? " +
-            "Commands that need it wait for the app."
-        internal const val NO_CONTEXT =
-            "📭 No active conversation context — send text first (it opens/uses the app's real conversation)."
+                "Commands that need it wait for the app."
 
-        /** Python's handle_free_text refusal — free text NEVER opens a conversation by itself. */
-        internal const val NO_ACTIVE_CONVERSATION =
-            "📭 There is no active conversation yet — send /tasks and pick one with /tasks n.\n" +
-            "After that, all text you send runs there (live mode)."
-
-        /**
-         * The bind did not land: a turn started mid-switch (the residual
-         * race of the command-based bind — the server does not serialize
-         * inbounds) or the conversation vanished.
-         */
-        internal const val BIND_FAILED =
-            "⚠️ The switch did not land (a turn may have started mid-switch) — /tasks n again, or /stop first."
+        /** The botsService's own refusal replies, matched by their stable markers (en-US). */
+        const val TASK_RUNNING_MARKER = "still running"
+        const val TASK_MISSING_MARKER = "Task not found"
 
         /** Python's /task usage hint, renamed to the owner's vocabulary. */
         internal const val TASK_USAGE =

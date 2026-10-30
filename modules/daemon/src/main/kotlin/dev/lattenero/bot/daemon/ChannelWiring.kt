@@ -196,6 +196,9 @@ private fun buildPoller(
             override suspend fun sendInbound(text: String, messageId: String, receivedAt: Long) =
                 client.sendInbound(text, messageId, receivedAt)
 
+            override suspend fun sendInboundAwait(text: String, messageId: String, receivedAt: Long) =
+                client.sendInboundAwait(text, messageId, receivedAt)
+
             override suspend fun enqueueInbound(text: String, messageId: String, receivedAt: Long) =
                 queue.add(text, messageId, receivedAt)
 

@@ -155,6 +155,36 @@ class ChannelClientTest {
     }
 
     @Test
+    fun awaitedInboundOwnsItsResultTheCallbackStaysSilent() = runTest {
+        // the bind's contract: sendInboundAwait reads the replies itself —
+        // the unawaited callback must NOT double-speak them
+        val results = mutableListOf<ServerFrame.InboundResult>()
+        val transport = FakeTransport { line ->
+            when {
+                line.contains("\"hello\"") -> helloOk(line)
+                line.contains("\"type\":\"inbound\"") -> listOf(
+                    """{"type":"inbound_result","id":"${idOf(line)}","duplicate":false,""" +
+                        """"replies":[{"text":"The current task is still running. Try again later."}]}""",
+                )
+
+                else -> emptyList()
+            }
+        }
+        val client = ChannelClient({ transport }, { token }, {}, onInboundResult = { results.add(it) })
+        var answer: InboundAnswer? = null
+        val job = launch {
+            while (!client.connected) delay(10)
+            answer = client.sendInboundAwait("/task task-9", "tg-7-bind", 5L)
+            transport.shutdown()
+        }
+        client.session()
+        job.join()
+        val answered = answer as InboundAnswer.Answered
+        assertTrue(answered.replies.single().contains("still running"))
+        assertEquals(0, results.size) // awaited: the waiter owns the result
+    }
+
+    @Test
     fun subscriptionsReplayOnEverySession() = runTest {
         val transport = FakeTransport { line ->
             when {

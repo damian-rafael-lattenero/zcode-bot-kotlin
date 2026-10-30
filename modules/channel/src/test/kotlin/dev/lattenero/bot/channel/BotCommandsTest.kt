@@ -23,8 +23,12 @@ class BotCommandsTest {
         var answers: MutableMap<String, String> = mutableMapOf()
         var available = true
         val inbound = mutableListOf<Pair<String, String>>()
+        val awaited = mutableListOf<Pair<String, String>>()
         val queued = mutableListOf<Triple<String, String, Long>>()
         val subscribed = mutableListOf<Pair<String, String>>()
+
+        /** The awaited bind's canned replies (taskRunning/taskMissing texts). */
+        var awaitReplies: List<String> = emptyList()
 
         /** Server-side effect of an inbound command (tests flip botStatus on /task). */
         var onInbound: (String) -> Unit = {}
@@ -43,6 +47,13 @@ class BotCommandsTest {
             return InboundReceipt.FIRED
         }
 
+        override suspend fun sendInboundAwait(text: String, messageId: String, receivedAt: Long): InboundAnswer {
+            if (!available) return InboundAnswer.Unavailable
+            awaited.add(text to messageId)
+            onInbound(text)
+            return InboundAnswer.Answered(duplicate = false, replies = awaitReplies)
+        }
+
         override suspend fun enqueueInbound(text: String, messageId: String, receivedAt: Long): Int {
             queued.add(Triple(text, messageId, receivedAt))
             return queued.size
@@ -57,9 +68,13 @@ class BotCommandsTest {
     private class FakeHistory(
         private val rows: List<TaskRow>,
         private val sel: ModelSel? = null,
+        private val freshest: TaskRow? = rows.firstOrNull(),
+        private val alive: (String) -> Boolean = { true },
     ) : TasksHistory {
         override suspend fun ctxTasks(limit: Int): List<TaskRow> = rows.take(limit)
         override suspend fun modelSelection(sid: String): ModelSel? = sel
+        override suspend fun freshestTask(workspacePath: String): TaskRow? = freshest
+        override suspend fun taskAlive(sid: String): Boolean = alive(sid)
     }
 
     private val app = "/Users/damian/Projects/app"
@@ -183,8 +198,8 @@ class BotCommandsTest {
         val (bc, _) = commands(o)
         val reply = bc.handle("/tasks 2", 7L)!!
         assertTrue("🎯 Active conversation: «second»" in reply)
-        assertTrue("/task task-02" in o.inbound.map { it.first })
-        assertEquals("tg-7-bind", o.inbound.first { it.first == "/task task-02" }.second)
+        assertTrue("/task task-02" in o.awaited.map { it.first })
+        assertEquals("tg-7-bind", o.awaited.first { it.first == "/task task-02" }.second)
     }
 
     @Test
@@ -221,18 +236,93 @@ class BotCommandsTest {
         val o = ops().apply {
             botStatusJson = draftStatus
             answers["botStatus"] = draftStatus
-            answers["activeTaskIds"] = """["task-02","task-77"]"""
             onInbound = { text ->
                 if (text.startsWith("/task ")) answers["botStatus"] = boundStatus
             }
         }
         val (bc, _) = commands(o)
         assertNull(bc.handle("probando probando", 10L))
+        assertEquals(listOf("probando probando" to "tg-10"), o.inbound)
         assertEquals(
-            listOf("/task task-77" to "tg-10-bind", "probando probando" to "tg-10"),
-            o.inbound, // the switch command FIRST, the text after the confirm
+            listOf("/task task-77" to "tg-10-bind"),
+            o.awaited, // the switch command FIRST (awaited), the text after the confirm
         )
         assertEquals(listOf("task-77" to app), o.subscribed)
+    }
+
+    @Test
+    fun tombstonedBindNeverCreatesFiresTheRebindInstead() = runBlocking {
+        // 29/10's live failure: the context pointed at a DELETED task — naked
+        // inbound would tombstone into a fresh conversation
+        val boundDead = """
+            {"bot":{"id":"daemon-local","enabled":true},
+             "context":{"workspacePath":"$app","activeTaskId":"task-dead","mode":"task"}}
+        """.trimIndent()
+        val o = ops().apply {
+            answers["botStatus"] = boundDead
+            onInbound = { text ->
+                if (text.startsWith("/task ")) answers["botStatus"] = boundStatus
+            }
+        }
+        val history = FakeHistory(rows, alive = { it != "task-dead" })
+        val (bc, _) = commands(o, history)
+        assertNull(bc.handle("probando probando", 11L))
+        assertEquals(listOf("probando probando" to "tg-11"), o.inbound)
+        assertEquals(
+            listOf("/task task-77" to "tg-11-bind"),
+            o.awaited, // the re-aim happened — the text never touched the draft
+        )
+    }
+
+    @Test
+    fun tombstoneWithNothingOpenRefusesHonestly() = runBlocking {
+        val boundDead = """
+            {"bot":{"id":"daemon-local","enabled":true},
+             "context":{"workspacePath":"$app","activeTaskId":"task-dead","mode":"task"}}
+        """.trimIndent()
+        val o = ops().apply { answers["botStatus"] = boundDead }
+        val history = FakeHistory(rows, freshest = null, alive = { it != "task-dead" })
+        val (bc, _) = commands(o, history)
+        val reply = bc.handle("hola", 1L)!!
+        assertTrue("was deleted" in reply)
+        assertTrue(o.inbound.isEmpty()) // firing would CREATE — the tombstone guard refuses
+    }
+
+    @Test
+    fun busyRebindTellsTheOwnerAndParksOnTheRunningTask() = runBlocking {
+        // the open conversation moved, but the OLD bound task runs: the
+        // botsService refuses the switch (taskRunning) — Python's
+        // only_active_task fallback parks the text on what runs
+        val boundTo02 = """
+            {"bot":{"id":"daemon-local","enabled":true},
+             "context":{"workspacePath":"$app","activeTaskId":"task-02","mode":"task"}}
+        """.trimIndent()
+        val o = ops().apply {
+            answers["botStatus"] = boundTo02
+            answers["activeTaskIds"] = """["task-02"]"""
+        }
+        val (bc, _) = commands(o) // freshest = task-77 (open) ≠ bound task-02 (running)
+        val reply = bc.handle("re-apuntá", 6L)!!
+        assertTrue(reply.startsWith("🔄 task corriendo, no puedo re-apuntar"))
+        assertTrue("stayed in the queue (1 waiting)" in reply)
+        assertTrue(o.awaited.isEmpty()) // the pre-check refuses BEFORE any bind is fired
+        assertEquals(listOf(Triple("re-apuntá", "tg-6", 1_000_000L)), o.queued)
+    }
+
+    @Test
+    fun bindRefusedMidFlightByTaskRunningAnswersBindFailed() = runBlocking {
+        val o = ops().apply {
+            botStatusJson = draftStatus
+            answers["botStatus"] = draftStatus
+            awaitReplies = listOf(
+                "The current task is still running. Try again later, or use **/stop** to stop the current task.",
+            )
+        }
+        val (bc, _) = commands(o)
+        val reply = bc.handle("probando", 12L)!!
+        assertTrue("switch did not land" in reply)
+        assertTrue(o.inbound.isEmpty()) // refused bind → the text NEVER fires
+        assertTrue(o.awaited.isNotEmpty())
     }
 
     @Test
@@ -241,10 +331,10 @@ class BotCommandsTest {
             botStatusJson = draftStatus
             answers["botStatus"] = draftStatus
         }
-        val (bc, _) = commands(o)
+        val history = FakeHistory(rows, freshest = null) // the index sees nothing open
+        val (bc, _) = commands(o, history)
         val reply = bc.handle("hola", 1L)!!
         assertTrue("There is no active conversation yet" in reply)
-        assertTrue("never opens" !in reply || true)
         assertTrue(o.inbound.isEmpty()) // free text NEVER creates a conversation
     }
 

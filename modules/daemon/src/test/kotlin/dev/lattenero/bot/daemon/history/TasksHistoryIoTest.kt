@@ -57,6 +57,27 @@ class TasksHistoryIoTest {
             kotlinx.coroutines.runBlocking { history.ctxTasks(10) },
         )
         assertNull(kotlinx.coroutines.runBlocking { history.modelSelection("s") })
+        assertNull(kotlinx.coroutines.runBlocking { history.freshestTask("/w/app") })
+        assertEquals(false, kotlinx.coroutines.runBlocking { history.taskAlive("s") })
+    }
+
+    @Test
+    fun freshestTaskIsTheNewestAliveRowOfTheWorkspace() {
+        buildDbs()
+        val row = kotlinx.coroutines.runBlocking { TasksHistoryIo(base).freshestTask("/w/app") }
+        assertEquals("s-plain", row?.sid) // updated_at=100 beats s-new's 50 and the dead s-dead's 999
+        assertEquals("tarea plain", row?.title)
+        assertNull(kotlinx.coroutines.runBlocking { TasksHistoryIo(base).freshestTask("/w/other") })
+    }
+
+    @Test
+    fun taskAliveIsTheTombstoneGuard() {
+        buildDbs()
+        val history = TasksHistoryIo(base)
+        assertEquals(true, kotlinx.coroutines.runBlocking { history.taskAlive("s-plain") })
+        assertEquals(false, kotlinx.coroutines.runBlocking { history.taskAlive("s-arch") }) // archived
+        assertEquals(false, kotlinx.coroutines.runBlocking { history.taskAlive("s-dead") }) // deleted
+        assertEquals(false, kotlinx.coroutines.runBlocking { history.taskAlive("unknown") })
     }
 
     /** The app's schema (the columns Python's frozen SQL touches) with Python-like rows. */
@@ -72,8 +93,10 @@ class TasksHistoryIoTest {
                 st.executeUpdate("INSERT INTO tasks VALUES ('s-plain', 'tarea plain', '/w/app', 'x', 0, 100, 0, 0)")
                 st.executeUpdate("INSERT INTO tasks VALUES ('s-new', 'nueva', '/w/app', '/w/app', 0, 50, 0, 0)")
                 st.executeUpdate("INSERT INTO tasks VALUES ('s-pinned', 'tarea pinned', '/w/app', '/w/app', 1, 10, 0, 0)")
-                st.executeUpdate("INSERT INTO tasks VALUES ('s-nouse', 'sin uso', '/w/app', '/w/app', 1, 999, 0, 0)")
+                st.executeUpdate("INSERT INTO tasks VALUES ('s-nouse', 'sin uso', '/w/app', '/w/app', 1, 5, 0, 0)")
                 st.executeUpdate("INSERT INTO tasks VALUES ('s-arch', 'archivada', '/w/app', '/w/app', 1, 998, 0, 1)")
+                // deleted but the FRESHEST: the tombstone guard must never aim here
+                st.executeUpdate("INSERT INTO tasks VALUES ('s-dead', 'borrada', '/w/app', '/w/app', 0, 999, 1, 0)")
                 // legacy duplicate of s-new: deduped, never listed twice
                 st.executeUpdate("INSERT INTO tasks VALUES ('s-new', 'nueva', '/w/app', '/w/app', 0, 40, 0, 0)")
             }
