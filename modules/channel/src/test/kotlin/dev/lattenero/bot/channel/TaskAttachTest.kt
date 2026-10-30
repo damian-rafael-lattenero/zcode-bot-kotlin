@@ -3,6 +3,7 @@ package dev.lattenero.bot.channel
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -54,10 +55,14 @@ class TaskAttachTest {
     }
 
     private class FakeHistory(private val rows: List<TaskRow>) : TasksHistory {
+        /** The store's running children — the sa: attach's verification set. */
+        var runningSubs: List<String> = emptyList()
+
         override suspend fun ctxTasks(limit: Int): List<TaskRow> = rows.take(limit)
         override suspend fun modelSelection(sid: String): ModelSel? = null
         override suspend fun freshestTask(workspacePath: String): TaskRow? = rows.firstOrNull()
         override suspend fun taskAlive(sid: String): Boolean = true
+        override suspend fun subagentSessionIds(parentSid: String): List<String> = runningSubs
     }
 
     private val app = "/Users/damian/Projects/app"
@@ -214,5 +219,101 @@ class TaskAttachTest {
         val reply = commands(ops).onCallback("sa:deadbeefdeadbeef", 7L)!!
         assertTrue("🤷" in reply.text)
         assertTrue("/tasks" in reply.text)
+    }
+
+    // ---- the FULL form: the subagent's OWN session stream -------------------
+
+    @Test
+    fun laneTapWithAKnownAgentIdSubscribesTheChildSession() = runBlocking {
+        val agentId = "agent_419b5d75-bcf3-4343-9b9f-64c718249330"
+        val ops = FakeOps(boundStatus).apply { answers["activeTaskIds"] = """[]""" }
+        val history = FakeHistory(rows).apply { runningSubs = listOf("sess_subagent_$agentId") }
+        val hub = LiveHub()
+        val bc = BotCommands(
+            ops = ops,
+            hub = hub,
+            daemonReset = { "fake ladder" },
+            clock = { 1_000_000L },
+            history = history,
+            defaultWorkspacePath = "/Users/damian/.zcode/workspace/default",
+        )
+        // the parent's dispatch lane carries the fork's additive launch-ACK field
+        hub.apply(
+            streamEvent(
+                "task-02",
+                """{"type":"tool_call","toolId":"$laneId","toolName":"Task","subagentAgentId":"$agentId"}""",
+                1,
+            ),
+            1_000_000L,
+        )
+        val reply = bc.onCallback("sa:$laneTail", 7L)!!
+        // the REAL link: subscribed to the CHILD's session, card pinned to it
+        assertEquals(listOf("sess_subagent_$agentId" to app), ops.subscribed)
+        assertEquals("sess_subagent_$agentId", hub.peekPin())
+        assertTrue("su turno COMPLETO" in reply.text)
+    }
+
+    @Test
+    fun laneTapWithAnUnknownSessionFallsBackToLaneScope() = runBlocking {
+        // the store doesn't hold the child (old fork / ended): no subscribe,
+        // no pin — the honest sparser lane-scope view instead
+        val agentId = "agent_80116bbd-c21b-4988-9c1f-11d7c2130164"
+        val ops = FakeOps(boundStatus).apply { answers["activeTaskIds"] = """[]""" }
+        val hub = LiveHub()
+        val bc = BotCommands(
+            ops = ops,
+            hub = hub,
+            daemonReset = { "fake ladder" },
+            clock = { 1_000_000L },
+            history = FakeHistory(rows), // runningSubs stays empty
+            defaultWorkspacePath = "/Users/damian/.zcode/workspace/default",
+        )
+        hub.apply(
+            streamEvent(
+                "task-02",
+                """{"type":"tool_call","toolId":"$laneId","toolName":"Task","subagentAgentId":"$agentId"}""",
+                1,
+            ),
+            1_000_000L,
+        )
+        val reply = bc.onCallback("sa:$laneTail", 7L)!!
+        assertTrue(ops.subscribed.isEmpty())
+        assertEquals(laneId, hub.watchedLaneId())
+        assertNull(hub.peekPin())
+        assertTrue("mirando solo su stream" in reply.text)
+    }
+
+    @Test
+    fun pinDropsOtherTasksEventsAndFoldsThePinnedOnes() = runBlocking {
+        val hub = LiveHub()
+        val pinned = "sess_subagent_agent_x"
+        hub.pin(pinned)
+        // the parent keeps talking while the card watches the child: dropped
+        hub.apply(
+            streamEvent("task-02", """{"type":"agent_thought_chunk","content":"padre","parentToolUseId":null}""", 1),
+            1_000_000L,
+        )
+        assertNull(hub.peek())
+        // the pinned session's own thought: folds as a FRESH turn (identical UI)
+        val folded = hub.apply(
+            streamEvent(pinned, """{"type":"agent_thought_chunk","content":"soy el sub","parentToolUseId":null}""", 2),
+            1_000_001L,
+        )!!
+        assertEquals(pinned, folded.taskId)
+        assertEquals(10, folded.thoughtChars)
+        // a foreign task AFTER the pin's card exists: still dropped
+        hub.apply(
+            streamEvent("task-77", """{"type":"agent_thought_chunk","content":"otro","parentToolUseId":null}""", 3),
+            1_000_002L,
+        )
+        assertEquals(10, hub.peek()!!.thoughtChars)
+    }
+
+    @Test
+    fun clearLiftsThePinSoTheParentReLights() = runBlocking {
+        val hub = LiveHub()
+        hub.pin("sess_subagent_agent_x")
+        hub.clear() // the seal's own path
+        assertNull(hub.peekPin())
     }
 }

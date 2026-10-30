@@ -37,6 +37,14 @@ interface TasksHistory {
      * session the CLI wrote, never a bot-invented one).
      */
     suspend fun subagentsToday(parentSid: String?, dayStartMs: Long): List<SubagentRow> = emptyList()
+
+    /**
+     * The RUNNING subagent session ids of one parent (last_outcome '' —
+     * measured live 30/10), straight from the CLI's own session store. The
+     * sa: attach's verification half: a constructed `sess_subagent_<agentId>`
+     * is only trusted when the store itself holds it.
+     */
+    suspend fun subagentSessionIds(parentSid: String): List<String> = emptyList()
 }
 
 /**
