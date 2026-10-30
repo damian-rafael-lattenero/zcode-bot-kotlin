@@ -59,12 +59,15 @@ class BotCommands(
     private val defaultWorkspacePath: String = "",
 ) {
 
+    /** /nuclear's single-flight companion: the in-process half (the wiring adds the cross-restart mtime gate). */
+    private val nuclearGate = java.util.concurrent.atomic.AtomicBoolean(false)
+
     /** /tasks new's pending intent: the NEXT free text skips the bind and CREATES (Python's /task new). */
     private var newIntent = false
 
     /** One incoming line. Null = not a command (the router sends it as inbound). */
     suspend fun handle(text: String, updateId: Long): BotReply? {
-        val (base, rest) = parseCommand(text) ?: return route(text, updateId)?.let { BotReply(it) }
+        val (base, rest) = parseCommand(text) ?: return route(text, updateId)
         val reply: BotReply = when (base) {
             "tasks", "task" -> tasks(rest, updateId) // "task" keeps Python's muscle memory alive
             "all_tasks", "alltasks" -> allTasks(rest, updateId)
@@ -86,12 +89,41 @@ class BotCommands(
     /**
      * A button tap (callback_query): translate by Python's R5 table and
      * run it as the owner's typed words — a `t:<sid>` tap RE-BINDS via
-     * the same /task machinery the router uses. The tap's toast
+     * the same /task machinery the router uses. The F17 pair is the
+     * owner's push-or-enqueue («que me pregunte interrumpir o encolar»):
+     * ⚡ stops the busy turn (the queued text then fires on its own),
+     * ⏳ confirms the natural wait. The tap's toast
      * (answerCallbackQuery) is the wiring's effect, not ours.
      */
-    suspend fun onCallback(data: String, updateId: Long): BotReply? {
-        logger.info { "callback \"$data\" -> \"${Keyboards.callbackText(data)}\"" }
-        return handle(Keyboards.callbackText(data), updateId)
+    suspend fun onCallback(data: String, updateId: Long): BotReply? = when {
+        data.startsWith("intr:") -> interruptNow(data.removePrefix("intr:"), updateId)
+
+        data.startsWith("qgo:") -> {
+            logger.info { "callback ⏳ qgo: the parked text keeps its natural wait" }
+            BotReply("📬 Queda encolado — entra cuando el turno termine.")
+        }
+
+        else -> {
+            logger.info { "callback \"$data\" -> \"${Keyboards.callbackText(data)}\"" }
+            handle(Keyboards.callbackText(data), updateId)
+        }
+    }
+
+    /**
+     * ⚡ — the text is already in the F17 queue: stopping the turn IS the
+     * push (task_complete's drain fires it immediately after). /stop go
+     * stays the hard-all fallback when a single stop cannot land.
+     */
+    private suspend fun interruptNow(sid: String, updateId: Long): BotReply {
+        logger.info { "callback ⚡ intr: stopping $sid — the parked text (update=$updateId) fires on turn end" }
+        return when (val answer = ops.query(ChannelQuery.Stop(sid))) {
+            is QueryAnswer.Ok -> BotReply("⚡ Interrumpido — tu mensaje entra ya.")
+            is QueryAnswer.Unavailable -> BotReply(DEGRADED)
+            is QueryAnswer.Failed -> BotReply(
+                "⚠️ No pude interrumpir (${answer.code}): ${PyText.esc(answer.message ?: "?")}" +
+                    " — /stop go es la vía dura.",
+            )
+        }
     }
 
     /**
@@ -109,7 +141,7 @@ class BotCommands(
      * does not serialize inbounds.
      */
     @Suppress("ReturnCount") // one branch per plan — the router's honest outcomes
-    private suspend fun route(text: String, updateId: Long): String? {
+    private suspend fun route(text: String, updateId: Long): BotReply? {
         val facts = routeFacts()
         val plan = planRoute(facts, newIntent)
         logger.info {
@@ -119,14 +151,15 @@ class BotCommands(
                 "(${facts.openTitle ?: "?"}) -> ${plan::class.simpleName} ${plan.reasonForLog()}"
         }
         return when (plan) {
-            is RoutePlan.Refuse -> plan.reason
+            is RoutePlan.Refuse -> BotReply(plan.reason)
 
             is RoutePlan.BusyRebind -> {
                 logger.warn {
                     "route: re-aim to ${plan.wantedSid} REFUSED — ${plan.active} still runs " +
                         "(taskRunning); falling back to only_active_task (queue)"
                 }
-                RouteTexts.BUSY_REBIND + "\n" + enqueueOrRefuse(text, updateId, plan.active)
+                val enq = enqueueOrRefuse(text, updateId, plan.active)
+                BotReply(RouteTexts.BUSY_REBIND + "\n" + enq.text, markup = enq.markup)
             }
 
             is RoutePlan.Enqueue -> {
@@ -157,7 +190,7 @@ class BotCommands(
         text: String,
         updateId: Long,
         facts: RouteFacts,
-    ): String? {
+    ): BotReply? {
         if (plan.bind) {
             when (val bind = bindTo(plan.sid, updateId)) {
                 is BindOutcome.Confirmed -> logger.info { "route: bound to ${plan.sid} (${bind.how})" }
@@ -167,12 +200,12 @@ class BotCommands(
                     // server's own refusal text already reached the chat via the
                     // awaited replies; park the text on what actually runs
                     logger.warn { "route: bind to ${plan.sid} REFUSED (${bind.reply}) — ${bind.fallback}" }
-                    return RouteTexts.BIND_FAILED
+                    return BotReply(RouteTexts.BIND_FAILED)
                 }
 
                 is BindOutcome.Failed -> {
                     logger.warn { "route: bind to ${plan.sid} FAILED: ${bind.reason}" }
-                    return RouteTexts.BIND_FAILED
+                    return BotReply(RouteTexts.BIND_FAILED)
                 }
             }
             // the bind may have landed on a conversation that just STARTED
@@ -193,7 +226,7 @@ class BotCommands(
 
             InboundReceipt.UNAVAILABLE -> {
                 logger.warn { "route: text NOT fired — the channel is down" }
-                RouteTexts.CHANNEL_DOWN
+                BotReply(RouteTexts.CHANNEL_DOWN)
             }
         }
     }
@@ -275,17 +308,24 @@ class BotCommands(
             else -> false // degraded guess: fire — the channel's own «task running» reply still speaks
         }
 
-    /** Python's F17 texts: the queue holds it; task_complete's drain fires it. */
-    private suspend fun enqueueOrRefuse(text: String, updateId: Long, active: String): String {
+    /**
+     * Python's F17 texts: the queue holds it; task_complete's drain fires
+     * it. The park is NEVER silent (30/10's lesson): the answer carries
+     * the push-or-enqueue question — an offer, never a gate (no tap and
+     * the text still fires when the turn naturally ends).
+     */
+    private suspend fun enqueueOrRefuse(text: String, updateId: Long, active: String): BotReply {
         val title = history.ctxTasks(SCOPE_FOR_PICK).firstOrNull { it.sid == active }
             ?.title?.takeIf { it.isNotEmpty() } ?: active.takeLast(SID_TAIL)
         val n = ops.enqueueInbound(text, "tg-$updateId", clock())
         if (n < 0) {
-            return "⚠️ The Mac is busy and I could NOT queue your message — retry in a moment."
+            return BotReply("⚠️ The Mac is busy and I could NOT queue your message — retry in a moment.")
         }
-        return "⏳ The Mac is busy with «${PyText.esc(title)}» — your message stayed in the " +
-            "queue ($n waiting). It runs when the turn finishes (/stop interrupts it now; " +
-            "/nuclear in an emergency)."
+        return BotReply(
+            "⏳ The Mac is busy with «${PyText.esc(title)}» — your message stayed in the " +
+                "queue ($n waiting). It runs when the turn finishes.",
+            markup = Keyboards.interruptQuestion(active),
+        )
     }
 
     /**
@@ -560,8 +600,20 @@ class BotCommands(
      * paper trail (the phone already heard it from the ladder).
      */
     private suspend fun nuclearGo(): String {
-        val summary = daemonReset()
-        return "☢️ Nuclear go — $summary"
+        // SINGLE-FLIGHT (the 08:42 loop's lesson): every extra ☢️ tap while
+        // one nuclear runs is another full restart of the Mac's stack — the
+        // button stays on screen during the ~40s ladder, and impatience is
+        // indistinguishable from a loop. One at a time, honestly refused.
+        if (!nuclearGate.compareAndSet(false, true)) {
+            logger.warn { "nuclear: already running — extra trigger REFUSED (single-flight)" }
+            return "☢️ Ya hay un nuclear corriendo — esperá el resumen antes de lanzar otro."
+        }
+        try {
+            val summary = daemonReset()
+            return "☢️ Nuclear go — $summary"
+        } finally {
+            nuclearGate.set(false)
+        }
     }
 
     /** /quota — the coding plan's pool (IUsageStatsService through the channel). */

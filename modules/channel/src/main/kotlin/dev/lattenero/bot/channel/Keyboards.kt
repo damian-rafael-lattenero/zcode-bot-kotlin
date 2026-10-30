@@ -108,6 +108,23 @@ object Keyboards {
     }
 
     /**
+     * The F17 question (the owner's words, 30/10: «que me pregunte
+     * interrumpir o encolar») — the parked text is ALREADY in the queue:
+     * ⚡ stops the turn (the drain then fires the text by itself), ⏳
+     * keeps the natural wait. The question is an OFFER, never a gate.
+     */
+    fun interruptQuestion(sid: String): JsonObject = buildJsonObject {
+        putJsonArray("inline_keyboard") {
+            add(
+                buildJsonArray {
+                    add(button("⚡ Empujar e interrumpir", "intr:$sid"))
+                    add(button("⏳ Dejar encolado", "qgo:$sid"))
+                },
+            )
+        }
+    }
+
+    /**
      * The CoT cajita's open/fold buttons (Python's ct:/cr: vocabulary):
      * collapsed shows «🧠 cot 1.2K», expanded shows the fold ⤴️.
      */
