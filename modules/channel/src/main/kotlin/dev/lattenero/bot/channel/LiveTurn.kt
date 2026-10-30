@@ -408,6 +408,12 @@ object LiveTurn {
         val delta = StreamEvents.content(event)
         val parent = StreamEvents.parentToolUseId(event)
         return if (parent == null) {
+            // Replay guard (measured live 30/10: the fork's stream recovery
+            // can re-emit the same chunk; the tail already ends with it — a
+            // duplicate would double-print the sentence in the cajita).
+            // Length-gated: tiny legitimate repeats (separators, short tokens)
+            // must pass — only sentence-sized re-emissions are replays.
+            if (delta.length >= REPLAY_GUARD_MIN_CP && state.cotTail.endsWith(delta)) return state
             val chars = state.thoughtChars + delta.length
             state.copy(
                 thoughtChars = chars,
@@ -539,13 +545,13 @@ object LiveTurn {
         val silence = silenceMs(state, nowMs)
         val lines = mutableListOf<String>()
         when (val phase = state.phase) {
-            is TurnPhase.Idle -> lines.add("💻 <b>«$head»</b> — subscribed, nothing running")
+            is TurnPhase.Idle -> lines.add("💻 <b>«$head»</b> — suscripto, nada corriendo")
 
             is TurnPhase.Thinking -> {
                 lines.add("$brain <b>«$head»</b>")
                 val stale = stalenessWord(silence, channelAlive)
                 lines.add(
-                    "<b>thinking</b> · ${phase.chars} chars · ${fmtDur(nowMs - phase.sinceMs)}$stale",
+                    "<b>pensando</b> · ${phase.chars} caracteres · ${fmtDur(nowMs - phase.sinceMs)}$stale",
                 )
             }
 
@@ -555,7 +561,7 @@ object LiveTurn {
                 if (phase.tool == null) {
                     lines.add("✍️ <b>«$head»</b>")
                     lines.add(
-                        "✍️ writing the answer · ${phase.rawChars} chars · ${fmtDur(nowMs - phase.sinceMs)}",
+                        "✍️ escribiendo la respuesta · ${phase.rawChars} caracteres · ${fmtDur(nowMs - phase.sinceMs)}",
                     )
                 } else {
                     lines.add("${verb.emoji} <b>«$head»</b>")
@@ -567,7 +573,7 @@ object LiveTurn {
 
             is TurnPhase.Done -> lines.add(
                 "${if (state.failedTools > 0) "⚠️" else "✅"} <b>«$head»</b>" +
-                    " — done: ${PyText.esc(phase.stopReason)}",
+                    " — listo: ${PyText.esc(phase.stopReason)}",
             )
         }
         // the socket drop is a STATE, not a background detail: the phase line
@@ -576,16 +582,13 @@ object LiveTurn {
             lines.add("📡 canal caído — reconectando… (última señal hace ${fmtDur(silence)})")
         }
         state.typedError?.let { pill ->
-            val quota = if (pill.isQuota) " · 💳 QUOTA" else ""
+            val quota = if (pill.isQuota) " · 💳 CUOTA" else ""
             lines.add("💀 <b>error:</b> ${pill.line()}$quota")
         }
         // open tool lanes (the live action beyond the phase line)
         state.tools.asSequence().filter { it.status == null }.take(OPEN_LANES).forEach {
             val verb = verbs.of(it.name, it.input, it.isMcp)
-            val counts = buildString {
-                append("${it.lines} lines")
-                if (it.rawChars > 0) append(" · ${it.rawChars} raw")
-            }
+            val counts = "${it.lines} líneas"
             lines.add(
                 "${verb.emoji} ${PyText.esc(it.name)} · $counts · ${fmtDur(nowMs - it.openedAtMs)}",
             )
@@ -599,9 +602,9 @@ object LiveTurn {
                 )
             }
         state.subagentThought.forEach { (parent, chars) ->
-            lines.add("🤖 subagent ${parent.takeLast(SUBAGENT_ID_TAIL)} · $chars chars thought")
+            lines.add("🤖 subagente ${parent.takeLast(SUBAGENT_ID_TAIL)} · $chars caracteres pensando")
         }
-        state.interaction?.let { lines.add("${it.emoji} waiting: ${PyText.esc(it.title ?: it.kind)}") }
+        state.interaction?.let { lines.add("${it.emoji} esperando: ${PyText.esc(it.title ?: it.kind)}") }
         // the fork's own pill — the honest difference between «z.ai down» and «I typed too much»
         state.apiRetry?.let { pill ->
             val suffix = pill.errorStatus?.let { " (HTTP $it)" } ?: ""
@@ -609,7 +612,7 @@ object LiveTurn {
         }
         cotBlock(state)?.let(lines::add)
         val beat = if (channelAlive) "💓" else "📡"
-        lines.add("$beat alive · last event ${fmtDur(silence)} ago · ${state.doneTools} done")
+        lines.add("$beat en vivo · último evento hace ${fmtDur(silence)} · ${state.doneTools} listos")
         return lines.joinToString("\n")
     }
 
@@ -631,7 +634,7 @@ object LiveTurn {
             lane != null && (lane.added != null || lane.removed != null) ->
                 "${verb.head()}$detail · 🟢 +${lane.added ?: 0} · 🔴 −${lane.removed ?: 0} · $timer"
 
-            phase.lines > 0 -> "${verb.head()}$detail · ${phase.lines} lines · $timer$stale"
+            phase.lines > 0 -> "${verb.head()}$detail · ${phase.lines} líneas · $timer$stale"
 
             else -> "${verb.head()}$detail · $timer$stale"
         }
@@ -697,7 +700,7 @@ object LiveTurn {
     fun sealText(state: TurnLive, nowMs: Long): String {
         val phase = state.phase as? TurnPhase.Done ?: return render(state, nowMs, 0, true)
         val total = state.startedAtMs?.let { fmtDur(nowMs - it) } ?: "?"
-        val error = state.typedError?.let { "\n💀 ${it.line()}" + if (it.isQuota) " · 💳 QUOTA" else "" } ?: ""
+        val error = state.typedError?.let { "\n💀 ${it.line()}" + if (it.isQuota) " · 💳 CUOTA" else "" } ?: ""
         return "✅ <b>«${PyText.esc(state.title)}»</b> — ${PyText.esc(phase.stopReason)} in $total · " +
             "🧠 ${state.thoughtChars} chars · 🔧 ${state.doneTools} tools" +
             (if (state.usageTokens != null) " · ${state.usageTokens} tok" else "") +
@@ -729,6 +732,12 @@ object LiveTurn {
     private const val OPEN_LANES = 3
     private const val EDIT_STAMPS = 2
     private const val DETAIL_CP = 60
+
+    /**
+     * The replay guard's floor: only sentence-sized re-emissions count as
+     * replays — legitimate small repeats (separators, short tokens) pass.
+     */
+    internal const val REPLAY_GUARD_MIN_CP = 24
     private const val TEN = 10L
     private const val SECONDS_PER_MINUTE = 60L
     private const val SECONDS_PER_HOUR = 3600L

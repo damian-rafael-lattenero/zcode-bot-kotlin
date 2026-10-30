@@ -215,11 +215,11 @@ class LiveTurnTest {
         s = reduce(s, thought("estoy pensando mucho sobre este problema"))
         val text = LiveTurn.render(s!!, nowMs = startAt + 42_000, spin = 0, channelAlive = true)
         assertTrue("🧠" in text) // the even spin of the blink
-        assertTrue("thinking" in text)
-        assertTrue("40 chars" in text) // the counter, with the total
+        assertTrue("pensando" in text)
+        assertTrue("40 caracteres" in text) // the counter, with the total
         assertTrue("42s" in text) // the turn's timer
-        assertTrue("💓 alive" in text) // the visible heartbeat
-        assertTrue("0 done" in text)
+        assertTrue("💓 en vivo" in text) // the visible heartbeat
+        assertTrue("0 listos" in text)
 
         // the odd spin blinks the OTHER face — visibly alive every edit
         val odd = LiveTurn.render(s, nowMs = startAt + 45_000, spin = 1, channelAlive = true)
@@ -248,8 +248,8 @@ class LiveTurnTest {
             ),
         )
         val text = LiveTurn.render(s!!, nowMs = s.lastEventAtMs!! + 10_000, spin = 0, channelAlive = true)
-        assertTrue("🔧 <b>Write</b> · 4 lines" in text) // the MINIMAL fallback verb (the real map is daemon-side)
-        assertTrue("4 lines · 99 raw" in text) // the open lane keeps its counters
+        assertTrue("🔧 <b>Write</b> · 4 líneas" in text) // the MINIMAL fallback verb (the real map is daemon-side)
+        assertTrue("4 líneas · " in text) // raw is gone — human copy only counts lines // the open lane keeps its counters
         assertTrue("⚠️ Rate limited — retrying 2/5" in text)
     }
 
@@ -302,10 +302,10 @@ class LiveTurnTest {
         assertTrue("💀 <b>error:</b> usage cap exceeded" in text)
         assertTrue("fault.provider.quotaExhausted" in text)
         assertTrue("HTTP 429" in text)
-        assertTrue("💳 QUOTA" in text)
+        assertTrue("💳 CUOTA" in text)
         val seal = LiveTurn.sealText(s, nowMs = s.lastEventAtMs!! + 2_000)
         assertTrue("usage cap exceeded" in seal)
-        assertTrue("💳 QUOTA" in seal)
+        assertTrue("💳 CUOTA" in seal)
     }
 
     @Test
@@ -422,6 +422,6 @@ class LiveTurnTest {
         val s = LiveTurn.reduce(null, ev("usage_update"), nowMs = 5L)
         assertEquals(TurnPhase.Idle, s.phase)
         val text = LiveTurn.render(s, nowMs = 6L, spin = 0, channelAlive = true)
-        assertTrue("nothing running" in text)
+        assertTrue("nada corriendo" in text)
     }
 }

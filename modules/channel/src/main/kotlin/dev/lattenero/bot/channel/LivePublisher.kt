@@ -86,6 +86,8 @@ class LivePublisher(
     private val clock: () -> Long = System::currentTimeMillis,
     /** The per-action verbs — the wiring injects the spectator's classification map. */
     private val verbs: ToolVerbifier = ToolVerbs.MINIMAL,
+    /** The durable message id — the boot-time ORPHAN SEAL reads it (LiveOrphanStore). */
+    private val orphanStore: LiveOrphanStore? = null,
 ) {
 
     /** the message being edited — the publisher's only mutable cell (§7 escape hatch). */
@@ -93,18 +95,48 @@ class LivePublisher(
     private var statusMessageId: Long? = null
     private var lastText: String = ""
     private var sealed = false
+    private var orphanChecked = false
+
+    /**
+     * The ORPHAN SEAL — this process's FIRST tick after a restart edits
+     * the frozen pre-restart status message once with the honest terminal
+     * text (a restart must never leave a lying "thinking..." behind) and
+     * burns the pointer. Runs before any birth: the seal and this boot's
+     * own message are different messages.
+     */
+    private suspend fun sealOrphan(cfg: TgConfig) {
+        if (orphanChecked) return
+        orphanChecked = true
+        val orphan = orphanStore?.readLast()
+        if (orphan == null) {
+            orphanStore?.clear() // a stale unreadable pointer dies with the boot
+            return
+        }
+        orphanStore.clear()
+        if (telegram.edit(
+                cfg,
+                orphan.messageId,
+                "⛓️ turno perdido — el bot se reinició (nuclear/crash) y este cartel quedó huérfano. " +
+                    "El estado real está en la app; un texto nuevo abre la vista en vivo de nuevo.",
+            )
+        ) {
+            logger.info { "live view ORPHAN sealed: message_id=${orphan.messageId} taskId=${orphan.taskId}" }
+        }
+    }
 
     /** One tick of the never-silence clock. */
     @Suppress("ReturnCount") // the tick ladder: no state, no message, no edit — one guard each
     suspend fun tick() {
-        val state = hub.peek() ?: return
         val cfg = config()
         if (!cfg.configured) return
+        sealOrphan(cfg) // the first tick's boot duty, before anything else
+        val state = hub.peek() ?: return
         val now = clock()
         if (statusMessageId == null && state.phase != TurnPhase.Idle) {
             statusMessageId = telegram.birth(cfg, LiveTurn.birthText(state))
             sealed = false
             lastText = ""
+            orphanStore?.save(statusMessageId ?: 0, state.taskId) // the boot seal's pointer
             logger.info { "live view born: taskId=${state.taskId} message_id=$statusMessageId" }
         }
         val mid = statusMessageId ?: return
@@ -130,6 +162,7 @@ class LivePublisher(
                 "thought=${state.thoughtChars} tools=${state.doneTools} answer=${answer?.length ?: 0} chars"
         }
         hub.clear()
+        orphanStore?.clear()
         statusMessageId = null
     }
 
