@@ -48,13 +48,20 @@ sealed interface TurnPhase {
     data class Done(val stopReason: String, val atMs: Long) : TurnPhase
 }
 
-/** One tool call in flight — the spec's §3.3 table, one lane per toolId. */
-data class ToolLive(
-    val toolId: String,
-    val name: String,
-    val title: String? = null,
-    val parentToolUseId: String? = null,
-    val openedAtMs: Long,
+    /** One tool call in flight — the spec's §3.3 table, one lane per toolId. */
+    data class ToolLive(
+        val toolId: String,
+        val name: String,
+        val title: String? = null,
+        val parentToolUseId: String? = null,
+        /**
+         * A dispatch lane's launch ACK (Agent/Task tools): the child's
+         * agentId — the fork's additive field; the session store's
+         * `sess_subagent_<agentId>` convention turns it into the address
+         * the sa: attach subscribes to.
+         */
+        val subagentAgentId: String? = null,
+        val openedAtMs: Long,
     val lines: Int = 0,
     val rawChars: Int = 0,
     val input: JsonObject? = null,
@@ -207,6 +214,9 @@ internal object StreamEvents {
 
     fun parentToolUseId(event: JsonObject): String? =
         (event["parentToolUseId"] as? JsonPrimitive)?.content?.takeIf { it != "null" && it.isNotEmpty() }
+
+    /** The dispatch lane's launch ACK (the fork's additive field) — the lane→session link. */
+    fun subagentAgentId(event: JsonObject): String? = event.str("subagentAgentId")
 
     fun content(event: JsonObject): String = (event["content"] as? JsonPrimitive)?.content ?: ""
 
@@ -467,6 +477,7 @@ object LiveTurn {
             name = name,
             title = StreamEvents.title(event) ?: existing?.title,
             parentToolUseId = StreamEvents.parentToolUseId(event) ?: existing?.parentToolUseId,
+            subagentAgentId = StreamEvents.subagentAgentId(event) ?: existing?.subagentAgentId,
             openedAtMs = existing?.openedAtMs ?: nowMs,
             lines = lines,
             rawChars = StreamEvents.streamingRawInputLength(event) ?: existing?.rawChars ?: 0,

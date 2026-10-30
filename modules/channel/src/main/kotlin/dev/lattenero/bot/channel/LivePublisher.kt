@@ -26,8 +26,16 @@ class LiveHub {
     private val mutex = Mutex()
     private var current: TurnLive? = null
 
-    /** The lane scope (a sa: attach) — null watches the whole task's stream. */
+    /** The lane scope (a sa: attach's fallback) — null watches the whole task's stream. */
     private var watchedLane: String? = null
+
+    /**
+     * A pinned card (a sa: attach's full form — the subagent's OWN session):
+     * other tasks' events — the parent's among them — are DROPPED until the
+     * pin lifts, or the single-task hub would flip the card back at the
+     * parent's every event.
+     */
+    private var pinnedTaskId: String? = null
 
     /** One stream event folded in; answers the state after the fold. */
     suspend fun apply(
@@ -35,6 +43,8 @@ class LiveHub {
         nowMs: Long,
         differ: LineDiffer = SimpleLineDiffer,
     ): TurnLive? = mutex.withLock {
+        // the pinned view owns the hub: drop everyone else's frames whole
+        if (pinnedTaskId != null && frame.taskId != pinnedTaskId) return@withLock current
         val fresh = when {
             // a new task's event replaces the watched turn (a /task pick or a
             // new subscribe): the old turn's status message stays sealed in the chat
@@ -54,6 +64,19 @@ class LiveHub {
         }
         LiveTurn.reduce(fresh, frame, nowMs, differ).also { current = it }
     }
+
+    /** The sa: attach's full form: the card IS the subagent's own turn stream. */
+    suspend fun pin(taskId: String) {
+        mutex.withLock { pinnedTaskId = taskId }
+    }
+
+    /** Back to the whole-task world — a t: attach lifts any pin. */
+    suspend fun unpin() {
+        mutex.withLock { pinnedTaskId = null }
+    }
+
+    /** The pin's current target — tests and the tap's own bookkeeping. */
+    suspend fun peekPin(): String? = mutex.withLock { pinnedTaskId }
 
     /** A sa: attach: the card speaks ONLY that subagent's stream (subagent implements task). */
     suspend fun attachLane(laneId: String) {
@@ -90,8 +113,12 @@ class LiveHub {
         mutex.withLock { current = current?.copy(cotExpanded = expand) }
     }
 
-    /** After the seal is published the turn is spent; /nuclear also lands here. */
-    suspend fun clear(): Unit = mutex.withLock { current = null }
+    /** After the seal is published the turn is spent; /nuclear also lands here.
+     *  A pin dies with the card: the parent's next event re-lights its own. */
+    suspend fun clear(): Unit = mutex.withLock {
+        current = null
+        pinnedTaskId = null
+    }
 }
 
 /**

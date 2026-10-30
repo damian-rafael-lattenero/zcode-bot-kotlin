@@ -121,6 +121,30 @@ internal class TasksHistoryIo(private val baseDir: File) : TasksHistory {
         }.getOrDefault(emptyList())
     }
 
+    /**
+     * The sa: attach's verification half: the RUNNING subagent session ids
+     * of one parent (last_outcome '' = still running — measured live 30/10
+     * with two running subagents carrying ''). A constructed
+     * `sess_subagent_<agentId>` is only trusted when the store itself holds
+     * it; same read-only pattern as every other read here.
+     */
+    override suspend fun subagentSessionIds(parentSid: String): List<String> {
+        val db = cliDb()
+        if (!db.exists()) return emptyList()
+        return runCatching {
+            DriverManager.getConnection("jdbc:sqlite:${db.absolutePath}", roProps()).use { conn ->
+                conn.prepareStatement(RUNNING_SUBS_QUERY).use { ps ->
+                    ps.setString(1, parentSid)
+                    ps.executeQuery().use { rs ->
+                        val ids = mutableListOf<String>()
+                        while (rs.next()) ids.add(rs.getString(RUNNING_SUB_ID_COL))
+                        ids
+                    }
+                }
+            }
+        }.getOrDefault(emptyList())
+    }
+
     /** Latest model_usage per session, subagents excluded — Python's usage dict. */
     private fun usageBySession(db: File): Map<String, Usage> {
         if (!db.exists()) return emptyMap()
@@ -254,5 +278,10 @@ internal class TasksHistoryIo(private val baseDir: File) : TasksHistory {
         const val SUB_OUTCOME_COL = 2
         const val SUB_CREATED_COL = 3
         const val SUB_UPDATED_COL = 4
+
+        /** The tap's verification read: the parent's RUNNING children (empty outcome). */
+        const val RUNNING_SUBS_QUERY =
+            "SELECT id FROM session WHERE parent_id = ? AND COALESCE(last_outcome,'') = ''"
+        const val RUNNING_SUB_ID_COL = 1
     }
 }

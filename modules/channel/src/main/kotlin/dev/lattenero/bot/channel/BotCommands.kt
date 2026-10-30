@@ -565,7 +565,8 @@ class BotCommands(
         }
         val live = isRunning(sid, ws)
         ops.subscribe(sid, ws)
-        hub.watchTask() // a task attach is the WHOLE stream — any lane scope dies here
+        hub.unpin() // a task attach is the WHOLE world — any pin or lane scope dies here
+        hub.watchTask()
         logger.info { "callback 🟢 t: pipe ATTACHED to $sid (running=$live) — bind attempt rides along" }
         val title = row?.title?.takeIf { it.isNotEmpty() } ?: sid.takeLast(SID_TAIL)
         val watchLine = if (live) {
@@ -578,17 +579,39 @@ class BotCommands(
     }
 
     /**
-     * A subagent lane's tap (`sa:<tail>`): the SAME card as a task, scoped
-     * to that lane's stream — subagent implements task (the owner's model,
-     * 30/10: «si yo hago attach a un subagent debo ver la ui exactamente
-     * igual a la de una task»). The keyboard only carries the toolId's
-     * 16-char tail (the 64B law), so the FULL parentToolUseId resolves
-     * against the live state's lanes; a tail with no lane is an honest
-     * miss (the subagent ended and the state moved on).
+     * A subagent lane's tap (`sa:<tail>`): the SAME card as a task — the
+     * owner's model, 30/10: «si yo hago attach a un subagent debo ver la ui
+     * exactamente igual a la de una task». FULL FORM: the fork's additive
+     * launch-ACK field names the child's session
+     * (`sess_subagent_<agentId>`, the store's own convention) — constructed,
+     * VERIFIED against the running store, then subscribed and pinned: the
+     * card becomes the subagent's REAL turn (thoughts, tools, answer), kept
+     * against the parent's own stream until it seals. FALLBACK (old fork /
+     * ended child / degraded context): the parent's stream lane-scoped to
+     * just that subagent (the honest, sparser view).
      */
+    @Suppress("ReturnCount") // two attach paths, one guard each
     private suspend fun laneAttach(tail: String): BotReply {
-        val lane = hub.peek()?.tools?.lastOrNull { it.toolId.endsWith(tail) }
+        val state = hub.peek()
+        val lane = state?.tools?.lastOrNull { it.toolId.endsWith(tail) }
             ?: return BotReply("🤷 Ese subagente ya no está en la tubería — /tasks para re-engancharte.")
+        val agentId = lane.subagentAgentId
+        val ws = (contextAnswer() as? ContextAnswer.Ctx)?.value?.workspacePath
+        if (agentId != null && ws != null) {
+            val sessId = "$SUBAGENT_SESSION_PREFIX$agentId"
+            if (sessId in history.subagentSessionIds(state.taskId)) {
+                ops.subscribe(sessId, ws)
+                hub.pin(sessId)
+                logger.info {
+                    "callback 🔵 sa: SESSION ATTACHED $sessId (${lane.name}) — the card IS the subagent's turn"
+                }
+                return BotReply(
+                    "👁 Subagente «${PyText.esc(lane.name)}» en vivo — su turno COMPLETO fluye acá " +
+                        "(misma carta que una task); se sella cuando cierra.",
+                )
+            }
+            logger.info { "callback 🔵 sa: $sessId not in the running store — honest lane-scope fallback" }
+        }
         hub.attachLane(lane.toolId)
         logger.info { "callback 🔵 sa: lane ATTACHED ${lane.toolId} (${lane.name}) — the card speaks only its stream" }
         return BotReply(
@@ -1183,6 +1206,9 @@ class BotCommands(
         /** Python's status: «🎯 Active: none (/task n to pick one)». */
         internal const val ACTIVE_NONE = "🎯 Active: none (/tasks n to pick one)"
         internal const val SID_TAIL = 8
+
+        /** The CLI session store's child-session convention — measured live 30/10 in the db rows. */
+        internal const val SUBAGENT_SESSION_PREFIX = "sess_subagent_"
         internal const val NAMES_IN_NUCLEAR = 3
 
         /** Python's caps: /task lists 10, /all_tasks 20, picks resolve against 30. */
