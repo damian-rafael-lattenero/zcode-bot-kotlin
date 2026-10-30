@@ -15,6 +15,7 @@ import dev.lattenero.bot.channel.LiveTelegram
 import dev.lattenero.bot.channel.Poller
 import dev.lattenero.bot.channel.QueryAnswer
 import dev.lattenero.bot.channel.ServerFrame
+import dev.lattenero.bot.channel.TasksHistory
 import dev.lattenero.bot.channel.ToolLive
 import dev.lattenero.bot.channel.UnixSocketTransport
 import dev.lattenero.bot.channel.QueuedText
@@ -165,6 +166,10 @@ internal fun wireChannel(
         }
     }
 
+    // the history reader, built ONCE (the queue's pattern): both consumers
+    // share it — the poller's commands AND the live view's title resolution
+    val history: TasksHistory = TasksHistoryIo(cfg.baseDir)
+
     val liveView = buildLiveView(
         send,
         lanes,
@@ -172,8 +177,9 @@ internal fun wireChannel(
         client,
         fireSpeak,
         File(File(cfg.homeDir, "state"), LIVE_ORPHAN_FILE),
+        history,
     )
-    val poller = buildPoller(cfg, lanes.api, pythonState, pollOn, hub, client, speak, remote, queue)
+    val poller = buildPoller(cfg, lanes.api, pythonState, pollOn, hub, client, speak, remote, queue, history)
     return ChannelStack(client, liveView, poller, hub)
 }
 
@@ -186,6 +192,10 @@ private val QUEUE_DRAIN_DELAY = 1.seconds
  * the RENDER lane. [orphanFile] is the boot-time ORPHAN SEAL's pointer
  * (the publisher's first tick edits a frozen pre-restart status message
  * once and dies — a restart never leaves a lying "thinking..." behind).
+ * [history] is the REAL TITLE's source: the stream's
+ * session_info_update title never arrives for some sessions and the
+ * card wore the sid's tail — the resolution window is the SAME constant
+ * the commands resolve picks against (no drift).
  */
 private fun buildLiveView(
     send: DaemonSend,
@@ -194,6 +204,7 @@ private fun buildLiveView(
     client: ChannelClient,
     fireSpeak: suspend (String, Boolean, JsonObject?) -> Unit,
     orphanFile: File,
+    history: TasksHistory,
 ): LivePublisher? {
     val lane = lanes.live
     if (lane == null || !send.ownsSpectator) return null
@@ -217,6 +228,11 @@ private fun buildLiveView(
         },
         // the per-action verbs: the spectator's own classification, injected
         verbs = LIVE_VERBS,
+        // the card's head: the history's honest name for the live task
+        // (null → the fallback stays — nothing invented)
+        resolveTitle = { taskId ->
+            history.ctxTasks(BotCommands.SCOPE_FOR_PICK).firstOrNull { it.sid == taskId }?.title
+        },
         orphanStore = LiveOrphanStore(orphanFile),
     )
 }
@@ -232,10 +248,10 @@ private fun buildPoller(
     speak: suspend (String, Boolean, JsonObject?) -> Unit,
     remote: File,
     queue: InboundQueue,
+    history: TasksHistory,
 ): Poller? {
     if (!pollOn) return null
     val liveApi = api ?: TgApi({ TgConfig.load(remote) })
-    val history = TasksHistoryIo(cfg.baseDir)
     // ☢️ the nuclear ladder — the daemon-side restart of EVERYTHING (the
     // owner's order overrides the old «never kill the app» rule; the
     // channel protocol stays clean — this speaks macOS directly)
