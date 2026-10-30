@@ -213,20 +213,28 @@ class LiveTurnTest {
         val startAt = now
         s = reduce(null, ServerFrame.StreamEvent("task-9", 1, startAt, buildJsonObject { put("type", "task_run_started") }))
         s = reduce(s, thought("estoy pensando mucho sobre este problema"))
-        val text = LiveTurn.render(s!!, nowMs = startAt + 42_000, spin = 0, channelAlive = true)
+        // LIVE: fresh event (2s old) — the clocks tick
+        val last = s!!.lastEventAtMs!!
+        val text = LiveTurn.render(s, nowMs = last + 2_000, spin = 0, channelAlive = true)
         assertTrue("🧠" in text) // the even spin of the blink
         assertTrue("pensando" in text)
         assertTrue("40 caracteres" in text) // the counter, with the total
-        assertTrue("42s" in text) // the turn's timer
+        assertTrue("2s" in text) // the turn's timer, ticking
         assertTrue("💓 en vivo" in text) // the visible heartbeat
         assertTrue("0 listos" in text)
 
         // the odd spin blinks the OTHER face — visibly alive every edit
-        val odd = LiveTurn.render(s, nowMs = startAt + 45_000, spin = 1, channelAlive = true)
+        val odd = LiveTurn.render(s, nowMs = last + 5_000, spin = 1, channelAlive = true)
         assertTrue("💭" in odd)
         // the dead channel switches the heartbeat's face
-        val dead = LiveTurn.render(s, nowMs = startAt + 45_000, spin = 1, channelAlive = false)
+        val dead = LiveTurn.render(s, nowMs = last + 5_000, spin = 1, channelAlive = false)
         assertTrue("📡" in dead)
+
+        // THE OWNER'S RULE: 42s of silence — the clocks FREEZE at the last
+        // real event (the elapsed stays 0s) and the silence speaks honestly
+        val frozen = LiveTurn.render(s, nowMs = last + 42_000, spin = 0, channelAlive = true)
+        assertTrue("(42s sin eventos)" in frozen)
+        assertTrue("· 0s (42s sin eventos)" in frozen, "the turn timer froze at the last event")
     }
 
     @Test
