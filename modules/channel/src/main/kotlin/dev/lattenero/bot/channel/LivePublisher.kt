@@ -26,6 +26,9 @@ class LiveHub {
     private val mutex = Mutex()
     private var current: TurnLive? = null
 
+    /** The lane scope (a sa: attach) — null watches the whole task's stream. */
+    private var watchedLane: String? = null
+
     /** One stream event folded in; answers the state after the fold. */
     suspend fun apply(
         frame: ServerFrame.StreamEvent,
@@ -35,11 +38,41 @@ class LiveHub {
         val fresh = when {
             // a new task's event replaces the watched turn (a /task pick or a
             // new subscribe): the old turn's status message stays sealed in the chat
-            current != null && current!!.taskId != frame.taskId -> null
+            current != null && current!!.taskId != frame.taskId -> {
+                watchedLane = null // a task switch is also a lane-switch: scope dies with the task
+                null
+            }
             else -> current
+        }
+        // a lane-scoped card folds ONLY its subagent's events plus the root
+        // tool's own lifecycle (arrival/close — the honest end signal)
+        if (watchedLane != null && fresh != null) {
+            val ev = frame.event
+            val passes = StreamEvents.parentToolUseId(ev) == watchedLane ||
+                StreamEvents.toolId(ev) == watchedLane
+            if (!passes) return@withLock current
         }
         LiveTurn.reduce(fresh, frame, nowMs, differ).also { current = it }
     }
+
+    /** A sa: attach: the card speaks ONLY that subagent's stream (subagent implements task). */
+    suspend fun attachLane(laneId: String) {
+        mutex.withLock {
+            watchedLane = laneId
+            current = current?.copy(watchedLane = laneId)
+        }
+    }
+
+    /** Back to the whole task's stream (a t: attach clears any lane scope). */
+    suspend fun watchTask() {
+        mutex.withLock {
+            watchedLane = null
+            current = current?.copy(watchedLane = null)
+        }
+    }
+
+    /** The current lane scope — the sa: tap's resolution and tests. */
+    suspend fun watchedLaneId(): String? = mutex.withLock { watchedLane }
 
     /** A reconnect's resync: the lost events stay lost, the state re-baselines. */
     suspend fun resync(taskId: String) {

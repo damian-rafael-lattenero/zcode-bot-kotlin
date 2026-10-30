@@ -89,7 +89,7 @@ class BotCommands(
             "nuclear", "nuke" -> nuclear(rest)
             "quota" -> BotReply(quota())
             "help", "start" -> BotReply(help())
-            "subagents", "agents" -> BotReply(subagents())
+            "subagents", "agents" -> subagents(rest)
             "plan" -> plan()
             "last" -> BotReply(lastAnswer())
             "compact" -> compact()
@@ -106,15 +106,22 @@ class BotCommands(
 
     /**
      * A button tap (callback_query): translate by Python's R5 table and
-     * run it as the owner's typed words — a `t:<sid>` tap RE-BINDS via
-     * the same /task machinery the router uses. The F17 pair is the
-     * owner's push-or-enqueue («que me pregunte interrumpir o encolar»):
-     * ⚡ stops the busy turn (the queued text then fires on its own),
-     * ⏳ confirms the natural wait. The tap's toast
+     * run it as the owner's typed words. A `t:<sid>` tap ATTACHES the live
+     * pipe to that task first — a watch needs no ownership and nothing
+     * refuses it — and the bind attempt rides along (the 30/10 rule: he
+     * selects ANY task and reads its stream from that moment, even
+     * mid-turn, even while another task owns the conversation). The F17
+     * pair is the owner's push-or-enqueue («que me pregunte interrumpir o
+     * encolar»): ⚡ stops the busy turn (the queued text then fires on its
+     * own), ⏳ confirms the natural wait. The tap's toast
      * (answerCallbackQuery) is the wiring's effect, not ours.
      */
     suspend fun onCallback(data: String, updateId: Long): BotReply? = when {
         data.startsWith("intr:") -> interruptNow(data.removePrefix("intr:"), updateId)
+
+        data.startsWith("t:") -> taskAttach(data.removePrefix("t:"), updateId)
+
+        data.startsWith("sa:") -> laneAttach(data.removePrefix("sa:"))
 
         data.startsWith("qgo:") -> {
             logger.info { "callback ⏳ qgo: the parked text keeps its natural wait" }
@@ -124,6 +131,12 @@ class BotCommands(
         data.startsWith("ql:") -> queueLaunch(data.removePrefix("ql:"), updateId)
 
         data.startsWith("qd:") -> queueDiscard(data.removePrefix("qd:"), updateId)
+
+        // /subagents's view switch: the ONE button each view offers (fixed
+        // 4-byte datas — Telegram's 64B law never even breathes)
+        data == "sao:" -> subagents("inactivos")
+
+        data == "saa:" -> subagents("activos")
 
         data.startsWith("pl:") || data.startsWith("pm:") || data.startsWith("pe:") || data == "pd:" ->
             planTap(data)
@@ -533,6 +546,58 @@ class BotCommands(
     }
 
     /**
+     * A /tasks row tap: ATTACH to that task's pipe FIRST — the channel's
+     * stream is per-task and a watch is pure reading (no ownership, no
+     * bind, nothing refuses it, even mid-turn of ANOTHER conversation) —
+     * then the old bind semantics ride along via [pickBySid] and may
+     * refuse honestly; the watch already happened. What ran before the
+     * tap stays behind (the fork's continuous delivery has no replay);
+     * /last carries the final answer when the turn ends.
+     */
+    @Suppress("ReturnCount") // one guard per honest miss
+    private suspend fun taskAttach(sid: String, updateId: Long): BotReply {
+        val ctx = contextAnswer() as? ContextAnswer.Ctx
+        val row = history.ctxTasks(SCOPE_FOR_PICK).firstOrNull { it.sid == sid }
+        val ws = row?.ws ?: ctx?.value?.workspacePath
+        if (ws == null) {
+            logger.info { "callback 🟢 t: attach refused: $sid is in no known index/context" }
+            return BotReply("🤷 No encuentro esa task en el índice — /tasks para ver las que hay.")
+        }
+        val live = isRunning(sid, ws)
+        ops.subscribe(sid, ws)
+        hub.watchTask() // a task attach is the WHOLE stream — any lane scope dies here
+        logger.info { "callback 🟢 t: pipe ATTACHED to $sid (running=$live) — bind attempt rides along" }
+        val title = row?.title?.takeIf { it.isNotEmpty() } ?: sid.takeLast(SID_TAIL)
+        val watchLine = if (live) {
+            "👁 «${PyText.esc(title)}» en vivo — la tubería es tuya desde ahora; " +
+                "lo anterior quedó atrás (📄 /last trae la respuesta final)."
+        } else {
+            "👁 «${PyText.esc(title)}» suscripto — la carta en vivo entra cuando arranque su próximo turno."
+        }
+        return BotReply("$watchLine\n${pickBySid(sid, updateId)}")
+    }
+
+    /**
+     * A subagent lane's tap (`sa:<tail>`): the SAME card as a task, scoped
+     * to that lane's stream — subagent implements task (the owner's model,
+     * 30/10: «si yo hago attach a un subagent debo ver la ui exactamente
+     * igual a la de una task»). The keyboard only carries the toolId's
+     * 16-char tail (the 64B law), so the FULL parentToolUseId resolves
+     * against the live state's lanes; a tail with no lane is an honest
+     * miss (the subagent ended and the state moved on).
+     */
+    private suspend fun laneAttach(tail: String): BotReply {
+        val lane = hub.peek()?.tools?.lastOrNull { it.toolId.endsWith(tail) }
+            ?: return BotReply("🤷 Ese subagente ya no está en la tubería — /tasks para re-engancharte.")
+        hub.attachLane(lane.toolId)
+        logger.info { "callback 🔵 sa: lane ATTACHED ${lane.toolId} (${lane.name}) — the card speaks only its stream" }
+        return BotReply(
+            "👁 Subagente «${PyText.esc(lane.name)}» en vivo — la misma carta que una task, " +
+                "mirando solo su stream; se sella cuando cierra.",
+        )
+    }
+
+    /**
      * Python's _task_select_sid: bind + the 🎯 reply (the buttons' and
      * `/task n`'s shared end). The botsService REJECTS switches mid-turn
      * (getContextTaskBlockReason → taskRunning) — pre-checked here with
@@ -852,29 +917,146 @@ class BotCommands(
         return BotReply("🗑 Discarded («${PyText.esc(dropped.text.take(DISCARD_PREVIEW))}…») — $left left.")
     }
 
-    /** /subagents — the live lanes grouped by parentToolUseId (the stream's own grouping). */
-    private suspend fun subagents(): String {
-        val turn = hub.peek() ?: return "📭 No turn is being watched — send text first."
-        val lanes = turn.tools.filter { it.parentToolUseId != null }
-        val thinkers = turn.subagentThought
-        return when {
-            lanes.isEmpty() && thinkers.isEmpty() ->
-                "🤷 No subagents in «${PyText.esc(turn.title)}» — the main agent works alone."
-
-            else -> buildString {
-                append("🤖 <b>subagents of «${PyText.esc(turn.title)}»:</b>\n")
-                lanes.forEach { lane ->
-                    val running = " · running ${LiveTurn.fmtDur(clock() - lane.openedAtMs)}"
-                    val status = lane.status?.let { " · $it" } ?: running
-                    append("• <code>${PyText.esc(lane.toolId.takeLast(SID_TAIL))}</code>")
-                    append(" ${PyText.esc(lane.name)}$status\n")
-                }
-                thinkers.forEach { (parent, chars) ->
-                    append("• parent <code>${PyText.esc(parent.takeLast(SID_TAIL))}</code>")
-                    append(" · 🧠 $chars chars thought\n")
-                }
-            }.trimEnd()
+    /**
+     * /subagents — TWO views, ONE button each (the owner's contract,
+     * 30/10: «/subagents no muestra el subagente activo… y no mezclar los
+     * inactivos»). DEFAULT: ONLY the ACTIVE subagent groups of the watched
+     * turn. THE DIAGNOSED GAP: the live subagent IS the open Agent/Task
+     * DISPATCH lane (parentToolUseId == null — the fork streams
+     * tool_input_start → tool_call the instant the subagent spawns), which
+     * the old `parentToolUseId != null` filter structurally EXCLUDED,
+     * while the nested-lane events it looked for never ride the parent
+     * stream at all (daemon.jsonl 30/10: four /subagents answered «no
+     * subagents» at 15:48/16:48/16:49/16:58 with REAL subagents running —
+     * sessions created 16:47:03 and 16:56:36). Completed lanes never mix
+     * into this view. «inactivos» (the `sao:` tap or the inactivos/old
+     * args) switches to TODAY's ENDED subagents: real rows the cli db's
+     * own session table (parent_id + last_outcome) already holds — no
+     * second journal — max 10, newest first; `activos`/`saa:` comes back.
+     */
+    private suspend fun subagents(rest: String): BotReply {
+        val (inactive, hint) = subagentsView(rest)
+        return if (inactive) {
+            val parentSid = hub.peek()?.taskId
+                ?: (contextAnswer() as? ContextAnswer.Ctx)?.value?.activeTaskId
+            BotReply(
+                renderSubagentsInactive(history.subagentsToday(parentSid, dayStartMs(clock()))) + hint,
+                markup = Keyboards.subagentsViewButtons(inactiveView = true),
+            )
+        } else {
+            val turn = hub.peek()
+            val text = if (turn == null) {
+                "📭 No turn is being watched — send text first."
+            } else {
+                renderSubagentsActive(turn, clock())
+            }
+            BotReply(text + hint, markup = Keyboards.subagentsViewButtons(inactiveView = false))
         }
+    }
+
+    /** The arg half of /subagents: (inactive view?, usage hint) — the words the owner types. */
+    internal fun subagentsView(rest: String): Pair<Boolean, String?> = when (rest.trim().lowercase()) {
+        "", "now", "activos", "active" -> false to null
+        "inactivos", "old", "inactive" -> true to null
+        else -> false to "\n⚠️ Args: /subagents · /subagents inactivos (today's ended) · /subagents activos"
+    }
+
+    /** One ACTIVE subagent: its dispatch lane (when streamed) + open inner lanes + live thought chars. */
+    private data class SubagentGroup(
+        val parentId: String,
+        val dispatch: ToolLive?,
+        val openLanes: List<ToolLive>,
+        val thoughtChars: Int,
+    )
+
+    /**
+     * The ACTIVE groups of the watched turn, pure: an open Agent/Task
+     * dispatch lane (parentToolUseId == null — THE live subagent), plus
+     * the nested-transport paths (open inner lanes, live thought chars)
+     * grouped by their parent, for transports that do stream them.
+     * Completed lanes are NOT groups (the default view never mixes the
+     * inactive ones in).
+     */
+    private fun subagentGroups(turn: TurnLive): List<SubagentGroup> {
+        val dispatches = turn.tools
+            .filter { it.parentToolUseId == null && it.status == null && it.name in SUBAGENT_DISPATCH_NAMES }
+            .associateBy { it.toolId }
+        val openInner = turn.tools
+            .filter { it.parentToolUseId != null && it.status == null }
+            .groupBy { it.parentToolUseId ?: "" }
+        return (dispatches.keys + openInner.keys + turn.subagentThought.keys).distinct().map { id ->
+            SubagentGroup(
+                parentId = id,
+                dispatch = dispatches[id],
+                openLanes = openInner[id].orEmpty(),
+                thoughtChars = turn.subagentThought[id] ?: 0,
+            )
+        }.sortedByDescending { it.dispatch?.openedAtMs ?: 0L }
+    }
+
+    /** The default view's render: active groups only, the live one first. */
+    private fun renderSubagentsActive(turn: TurnLive, nowMs: Long): String {
+        val groups = subagentGroups(turn)
+        if (groups.isEmpty()) {
+            return "🤖 No ACTIVE subagents in «${PyText.esc(turn.title)}» — the main agent works alone."
+        }
+        return buildString {
+            append("🤖 <b>subagents of «${PyText.esc(turn.title)}»</b> — ${groups.size} active:\n")
+            groups.forEach { g ->
+                if (g.dispatch != null) {
+                    append(
+                        "• 🔵 <b>${PyText.esc(g.dispatch.name)}</b> ▶️ · running " +
+                            "${LiveTurn.fmtDur(nowMs - g.dispatch.openedAtMs)}",
+                    )
+                } else {
+                    append("• 🔵 parent <code>${PyText.esc(g.parentId.takeLast(SID_TAIL))}</code>")
+                }
+                if (g.thoughtChars > 0) append(" · 🧠 ${LiveTurn.fmtK(g.thoughtChars)} chars thought")
+                append('\n')
+                g.openLanes.forEach { lane ->
+                    append(
+                        "   ⚡ ${PyText.esc(lane.name)} · ${lane.lines} líneas · " +
+                            LiveTurn.fmtDur(nowMs - lane.openedAtMs) + "\n",
+                    )
+                }
+            }
+        }.trimEnd()
+    }
+
+    /** «inactivos»'s render: today's ENDED subagents, newest first, MAX 10 — real rows only. */
+    private fun renderSubagentsInactive(rows: List<SubagentRow>): String {
+        val capped = rows.sortedByDescending { it.endedMs }.take(SUBAGENTS_INACTIVE_CAP)
+        if (capped.isEmpty()) return "📭 No subagents ended today."
+        return buildString {
+            append("⏹️ <b>subagents ended today</b> (${capped.size}):\n")
+            capped.forEach { r ->
+                append("${subagentStamp(r.outcome)} ${subagentTitle(r.title)}")
+                val dur = LiveTurn.fmtDur((r.endedMs - r.startedMs).coerceAtLeast(0))
+                append(" · ${fmtEndClock(r.endedMs)} · $dur\n")
+            }
+        }.trimEnd()
+    }
+
+    /** The outcome's honest stamp: the fork's own last_outcome word decides. */
+    private fun subagentStamp(outcome: String): String = when (outcome) {
+        "completed" -> "✅"
+        "interrupted" -> "⛔"
+        else -> "❔ ${PyText.esc(outcome.ifEmpty { "ended" })}"
+    }
+
+    /** The row's title: the subagent's real prompt head, one line, capped (preview's own …). */
+    private fun subagentTitle(title: String): String =
+        PyText.esc(PyText.preview(title, SUBAGENT_TITLE_CAP).ifEmpty { "subagent" })
+
+    /** The end's clock stamp — HH:MM local (the row's when, today by construction). */
+    private fun fmtEndClock(epochMs: Long): String =
+        Instant.ofEpochMilli(epochMs).atZone(ZoneId.systemDefault()).format(TIME_FMT)
+
+    /** Today's local midnight — «today» is the daemon's own zone, never UTC's. */
+    private fun dayStartMs(nowMs: Long): Long {
+        val zone = ZoneId.systemDefault()
+        return Instant.ofEpochMilli(nowMs).atZone(zone).toLocalDate().atStartOfDay(zone)
+            .toInstant().toEpochMilli()
     }
 
     /** /help — the MVP's own manual, curated by hand like Python's. */
@@ -1030,7 +1212,7 @@ class BotCommands(
             "stop" to "stops the active task's turn",
             "nuclear" to "emergency: stops EVERYTHING and resets the bot",
             "quota" to "coding plan credits",
-            "subagents" to "the live task's subagents",
+            "subagents" to "the active subagents · «inactivos» shows today's ended",
             "help" to "all commands",
         )
 
@@ -1119,6 +1301,12 @@ class BotCommands(
         /** The K rendering switch: one decimal below, whole K from here up. */
         private const val CTX_K_DECIMAL_LIMIT = 100_000L
         private const val CTX_K_ROUND_HALF = 500L
+
+        /** The dispatch tool names the FORK itself uses (zcodeTaskServiceAdapter's isSubagentDispatchToolName). */
+        internal val SUBAGENT_DISPATCH_NAMES = setOf("Task", "Agent")
+
+        /** The inactive row's title cap — the prompt head, one phone line. */
+        private const val SUBAGENT_TITLE_CAP = 64
 
         /** The discard's one-line preview of what was thrown away. */
         private const val DISCARD_PREVIEW = 40
