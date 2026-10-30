@@ -6,6 +6,7 @@ import java.io.File
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 /**
@@ -70,5 +71,27 @@ class TgConfigTest {
     @Test
     fun theApiBaseMirrorsPythonsDefaultAndEnvOverride() {
         assertEquals("https://api.telegram.org", TgConfig.DEFAULT_API, "config.py: API = os.environ.get('ZT_API_BASE', ...)")
+    }
+
+    @Test
+    fun theFirehoseLaneParsesAndTheViewSwapsOnlyTheToken() {
+        val f = File(dir, "lane.json")
+        f.writeText("""{"token": "MAIN", "chat_id": 555, "firehose_token": "FIRE"}""")
+        val cfg = TgConfig.load(f)
+        assertTrue(cfg.firehoseSplit)
+        assertEquals("FIRE", cfg.firehose.token)
+        assertEquals(JsonPrimitive(555), cfg.firehose.chatId, "same chat — the lane is a throat, not a room")
+        assertEquals("MAIN", cfg.token, "the commands lane is untouched")
+        assertTrue(cfg.firehose.configured)
+    }
+
+    @Test
+    fun noFirehoseTokenMeansNoLane() {
+        val plain = TgConfig(token = "MAIN", chatId = JsonPrimitive(555))
+        assertFalse(plain.firehoseSplit)
+        assertSame(plain, plain.firehose, "the pre-lane behavior, byte for byte")
+        val empty = TgConfig(token = "MAIN", chatId = JsonPrimitive(555), firehoseToken = "")
+        assertFalse(empty.firehoseSplit)
+        assertSame(empty, empty.firehose)
     }
 }
