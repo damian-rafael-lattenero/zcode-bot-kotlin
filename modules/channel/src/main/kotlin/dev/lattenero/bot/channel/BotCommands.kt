@@ -40,7 +40,7 @@ interface ChannelOps {
  * the only effect, behind [ChannelOps] so the suite pins every reply
  * without a socket.
  */
-@Suppress("TooManyFunctions") // the eight + their shared plumbing — one function per command
+@Suppress("TooManyFunctions", "LargeClass") // the nine + their shared plumbing — one function per command
 class BotCommands(
     private val ops: ChannelOps,
     private val hub: LiveHub,
@@ -77,6 +77,7 @@ class BotCommands(
             "quota" -> BotReply(quota())
             "help", "start" -> BotReply(help())
             "subagents", "agents" -> BotReply(subagents())
+            "plan" -> plan()
             else -> BotReply(UNKNOWN)
         }
         logger.info {
@@ -103,10 +104,80 @@ class BotCommands(
             BotReply("📬 Queda encolado — entra cuando el turno termine.")
         }
 
+        data.startsWith("pl:") || data.startsWith("pm:") || data.startsWith("pe:") || data == "pd:" ->
+            planTap(data)
+
         else -> {
             logger.info { "callback \"$data\" -> \"${Keyboards.callbackText(data)}\"" }
             handle(Keyboards.callbackText(data), updateId)
         }
+    }
+
+    /**
+     * A /plan tap: one field per tap (pl: plan, pm: model, pe: effort) or
+     * pd: copying the conversation's selection to the app's default. The
+     * set's OWN result re-renders the menu — the server's word is the truth.
+     */
+    private suspend fun planTap(data: String): BotReply {
+        val scope = "conversation"
+        val ws = (contextAnswer() as? ContextAnswer.Ctx)?.value?.workspacePath
+        val set = when {
+            data == "pd:" -> {
+                val cur = planViews(ws) ?: return BotReply(DEGRADED)
+                ops.query(
+                    ChannelQuery.SetModelSelection(
+                        scope = "default",
+                        plan = cur.plan,
+                        model = cur.model,
+                        effort = cur.effort,
+                        workspacePath = ws,
+                    ),
+                )
+            }
+
+            data.startsWith("pl:") -> ops.query(
+                ChannelQuery.SetModelSelection(scope = scope, plan = data.removePrefix("pl:"), workspacePath = ws),
+            )
+
+            data.startsWith("pm:") -> ops.query(
+                ChannelQuery.SetModelSelection(scope = scope, model = data.removePrefix("pm:"), workspacePath = ws),
+            )
+
+            else -> ops.query(
+                ChannelQuery.SetModelSelection(scope = scope, effort = data.removePrefix("pe:"), workspacePath = ws),
+            )
+        }
+        return when (set) {
+            is QueryAnswer.Ok -> planReplyFrom(set.resultJson, "✅ aplicado")
+            is QueryAnswer.Unavailable -> BotReply(DEGRADED)
+            is QueryAnswer.Failed -> BotReply(
+                "⚠️ No pude aplicar (${set.code}): ${PyText.esc(set.message ?: "?")}",
+            )
+        }
+    }
+
+    /** The channel's modelSelection answer, parsed — null when degraded/unparseable. */
+    private suspend fun planViews(ws: String?): PlanMenu.Views? {
+        val answer = ops.query(ChannelQuery.ModelSelection(workspacePath = ws))
+        return (answer as? QueryAnswer.Ok)?.let { PlanMenu.parse(it.resultJson) }
+    }
+
+    /** /plan — «elegir el plan, el modelo, y la velocidad de effort». */
+    private suspend fun plan(): BotReply {
+        val ws = (contextAnswer() as? ContextAnswer.Ctx)?.value?.workspacePath
+        val title = (contextAnswer() as? ContextAnswer.Ctx)?.value?.activeTaskId?.let {
+            history.ctxTasks(SCOPE_FOR_PICK).firstOrNull { r -> r.sid == it }?.title
+        }
+        val v = planViews(ws) ?: return BotReply(
+            "📡 No pude leer la selección — ¿el fork está deployado con los frames de /plan? " +
+                "(commits 3d07cace+, falta el deploy del fork).",
+        )
+        return BotReply(PlanMenu.statusLine(v, title), markup = PlanMenu.keyboard(v))
+    }
+
+    private fun planReplyFrom(resultJson: String, note: String): BotReply {
+        val v = PlanMenu.parse(resultJson) ?: return BotReply("⚠️ Respuesta de selección ilegible")
+        return BotReply("$note\n${PlanMenu.statusLine(v, null)}", markup = PlanMenu.keyboard(v))
     }
 
     /**
@@ -795,6 +866,7 @@ class BotCommands(
             "tasks" to "conversations by project · /tasks n picks the active one",
             "all_tasks" to "all conversations, loose ones included",
             "status" to "what is running + the active conversation",
+            "plan" to "plan, model and effort — tap to change",
             "stop" to "stops the active task's turn",
             "nuclear" to "emergency: stops EVERYTHING and resets the bot",
             "quota" to "coding plan credits",
@@ -802,7 +874,7 @@ class BotCommands(
             "help" to "all commands",
         )
 
-        internal val HELP = (listOf("📖 <b>The eight</b> (MVP — the rest is hot-fix territory):") +
+        internal val HELP = (listOf("📖 <b>The nine</b> (the owner's MVP — the rest is hot-fix territory):") +
             MENU.map { (cmd, desc) -> "/$cmd — $desc" } +
             listOf(
                 "",

@@ -60,6 +60,28 @@ sealed interface ChannelQuery {
 
     data object BotStatus : ChannelQuery
 
+    /**
+     * The /plan command's read: the CURRENT selection (plan/model/effort)
+     * for the conversation plus the app's global default and the available
+     * plans with their models (the tap-to-change rows' source). Wire shapes
+     * are the fork's 3d07cace (aditivo: servidores viejos dicen
+     * unknown_query — el comando lo habla honesto).
+     */
+    data class ModelSelection(val workspacePath: String? = null) : ChannelQuery
+
+    /**
+     * One field per tap: the server merges the partial update. scope
+     * «conversation» = the focused conversation; «default» = the app's
+     * global default (Z.ai individual BY OWNER ORDER).
+     */
+    data class SetModelSelection(
+        val scope: String, // "conversation" | "default"
+        val plan: String? = null,
+        val model: String? = null,
+        val effort: String? = null,
+        val workspacePath: String? = null,
+    ) : ChannelQuery
+
     data class Stop(val taskId: String) : ChannelQuery
 
     data class StopAll(val workspacePath: String? = null) : ChannelQuery
@@ -190,6 +212,20 @@ private fun encodeQuery(query: ChannelQuery): JsonObject = when (query) {
     is ChannelQuery.Quota -> buildJsonObject {
         put("kind", "quota")
         if (query.invalidateBalanceCache) put("invalidateBalanceCache", true)
+    }
+
+    is ChannelQuery.ModelSelection -> buildJsonObject {
+        put("kind", "modelSelection")
+        query.workspacePath?.let { put("workspacePath", it) }
+    }
+
+    is ChannelQuery.SetModelSelection -> buildJsonObject {
+        put("kind", "setModelSelection")
+        put("scope", query.scope)
+        query.plan?.let { put("plan", it) }
+        query.model?.let { put("model", it) }
+        query.effort?.let { put("effort", it) }
+        query.workspacePath?.let { put("workspacePath", it) }
     }
 
     ChannelQuery.BotStatus -> buildJsonObject { put("kind", "botStatus") }
@@ -338,6 +374,8 @@ fun queryKind(query: ChannelQuery): String = when (query) {
     is ChannelQuery.TaskSnapshot -> "taskSnapshot"
     is ChannelQuery.TaskUsage -> "taskUsage"
     is ChannelQuery.Quota -> "quota"
+    is ChannelQuery.ModelSelection -> "modelSelection"
+    is ChannelQuery.SetModelSelection -> "setModelSelection"
     ChannelQuery.BotStatus -> "botStatus"
     is ChannelQuery.Stop -> "stop"
     is ChannelQuery.StopAll -> "stopAll"
