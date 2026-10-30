@@ -30,8 +30,17 @@ sealed interface InboundUpdate {
     val updateId: Long
     val fromId: Long?
 
-    /** The owner's words. */
-    data class Message(override val updateId: Long, override val fromId: Long?, val text: String) : InboundUpdate
+    /**
+     * The owner's words. `messageId` is Telegram's own message id — the
+     * F23 reactions (👀/✅) answer THE message, not a new one; 0 when a
+     * shape ever arrives without it (the react guard then skips).
+     */
+    data class Message(
+        override val updateId: Long,
+        override val fromId: Long?,
+        val text: String,
+        val messageId: Long = 0,
+    ) : InboundUpdate
 
     /**
      * A button tap (the markup hot-fix): `data` is the callback_data
@@ -164,7 +173,8 @@ class Poller(
             val text = (message["text"] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: return null
             val fromId = from(message)
             if (fromId != owner) return null
-            return InboundUpdate.Message(updateId = updateId, fromId = fromId, text = text)
+            val mid = (message["message_id"] as? JsonPrimitive)?.longOrNull ?: 0L
+            return InboundUpdate.Message(updateId = updateId, fromId = fromId, text = text, messageId = mid)
         }
         val callback = update["callback_query"] as? JsonObject ?: return null
         val callbackId = (callback["id"] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: return null

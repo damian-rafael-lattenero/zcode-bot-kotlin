@@ -1,5 +1,6 @@
 package dev.lattenero.bot.daemon
 
+import dev.lattenero.bot.channel.Ack
 import dev.lattenero.bot.channel.BotCommands
 import dev.lattenero.bot.channel.ChannelClient
 import dev.lattenero.bot.channel.ChannelOps
@@ -263,12 +264,17 @@ private fun buildPoller(
         // the bot explains its own silences: a long mute window ends with the
         // apology (loud — the owner must learn WHY it was quiet, from the bot)
         onReconnected = { window -> speak(window.render(), true, null) },
-        dispatch = { _, update ->
+        dispatch = { cfg, update ->
             // the buttons' dispatch: a tap is answered (the toast) and runs
             // as the owner's typed words; a message is the words themselves
             when (update) {
-                is InboundUpdate.Message ->
+                is InboundUpdate.Message -> {
+                    // F23: 👀 the second the words are in, ✅ once handled —
+                    // feedback on the owner's own message, zero new messages
+                    Ack.react(liveApi, cfg, update.messageId, Ack.RECEIVED)
                     commands.handle(update.text, update.updateId)?.let { speak(it.text, false, it.markup) }
+                    Ack.react(liveApi, cfg, update.messageId, Ack.HANDLED)
+                }
 
                 is InboundUpdate.Callback -> {
                     answerCallback(liveApi, update.callbackId)
