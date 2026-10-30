@@ -9,6 +9,7 @@ import dev.lattenero.bot.channel.ChannelSpec
 import dev.lattenero.bot.channel.InboundReceipt
 import dev.lattenero.bot.channel.InboundUpdate
 import dev.lattenero.bot.channel.LiveHub
+import dev.lattenero.bot.channel.LiveOrphanStore
 import dev.lattenero.bot.channel.LivePublisher
 import dev.lattenero.bot.channel.LiveTelegram
 import dev.lattenero.bot.channel.Poller
@@ -163,21 +164,35 @@ internal fun wireChannel(
         }
     }
 
-    val liveView = buildLiveView(send, lanes, hub, client, fireSpeak)
+    val liveView = buildLiveView(
+        send,
+        lanes,
+        hub,
+        client,
+        fireSpeak,
+        File(File(cfg.homeDir, "state"), LIVE_ORPHAN_FILE),
+    )
     val poller = buildPoller(cfg, lanes.api, pythonState, pollOn, hub, client, speak, remote, queue)
     return ChannelStack(client, liveView, poller, hub)
 }
 
 private const val QUEUE_FILE = "inbound-queue.json"
+private const val LIVE_ORPHAN_FILE = "live-view-active.json"
 private val QUEUE_DRAIN_DELAY = 1.seconds
 
-/** The never-silence view — LIVE-only (its birth message is a send), on the RENDER lane. */
+/**
+ * The never-silence view — LIVE-only (its birth message is a send), on
+ * the RENDER lane. [orphanFile] is the boot-time ORPHAN SEAL's pointer
+ * (the publisher's first tick edits a frozen pre-restart status message
+ * once and dies — a restart never leaves a lying "thinking..." behind).
+ */
 private fun buildLiveView(
     send: DaemonSend,
     lanes: SendLanes,
     hub: LiveHub,
     client: ChannelClient,
     fireSpeak: suspend (String, Boolean, JsonObject?) -> Unit,
+    orphanFile: File,
 ): LivePublisher? {
     val lane = lanes.live
     if (lane == null || !send.ownsSpectator) return null
@@ -201,6 +216,7 @@ private fun buildLiveView(
         },
         // the per-action verbs: the spectator's own classification, injected
         verbs = LIVE_VERBS,
+        orphanStore = LiveOrphanStore(orphanFile),
     )
 }
 
