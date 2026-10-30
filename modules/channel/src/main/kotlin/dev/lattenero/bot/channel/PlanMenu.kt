@@ -67,6 +67,7 @@ object PlanMenu {
                 )
             }
             .orEmpty()
+        if (cur == null && plans.isEmpty()) return null // nothing usable — the caller speaks the degrade
         return Views(
             scope = root.str("scope") ?: "conversation",
             plan = cur?.first,
