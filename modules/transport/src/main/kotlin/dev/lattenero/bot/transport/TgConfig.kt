@@ -21,11 +21,30 @@ data class TgConfig(
     val loudAll: Boolean = true,
     /** from_owner's fail-closed gate (F48): without an owner NOBODY gets through. */
     val ownerUserId: Long? = null,
+    /**
+     * The firehose lane's own token (post-mortem 29/10: Telegram's rate
+     * budget and flood-penalty history are PER BOT — one shared token let
+     * the spectator's render volume mute /stop for 11h). Absent/empty →
+     * there is no separate lane and [firehose] answers `this` (the
+     * pre-lane behavior, byte for byte).
+     */
+    val firehoseToken: String = "",
     val apiBase: String = System.getenv("ZT_API_BASE") ?: DEFAULT_API,
 ) {
     /** config.configured(): enabled AND token AND chat_id (Python truthiness). */
     val configured: Boolean
         get() = enabled && token.isNotEmpty() && PyText.truthy(chatId)
+
+    /**
+     * The high-volume lane's view: same chat, the firehose bot's throat —
+     * its budget and its penalties are its own; the commands lane can
+     * never be muted by render traffic again.
+     */
+    val firehose: TgConfig
+        get() = if (firehoseToken.isEmpty()) this else copy(token = firehoseToken)
+
+    /** The firehose lane is live only when its token says so (for wiring). */
+    val firehoseSplit: Boolean get() = firehoseToken.isNotEmpty()
 
     /**
      * Ktor exception messages embed the request URL and the URL carries
@@ -50,6 +69,7 @@ data class TgConfig(
                 chatId = root?.get("chat_id") ?: JsonNull,
                 loudAll = root?.get("loud_all")?.let(PyText::truthy) ?: true,
                 ownerUserId = (root?.get("owner_user_id") as? JsonPrimitive)?.content?.toLongOrNull(),
+                firehoseToken = (root?.get("firehose_token") as? JsonPrimitive)?.takeIf { it.isString }?.content ?: "",
             )
         }
     }
