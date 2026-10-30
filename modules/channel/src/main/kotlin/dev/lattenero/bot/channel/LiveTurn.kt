@@ -120,6 +120,12 @@ data class TurnLive(
     val tools: List<ToolLive> = emptyList(),
     /** Subagent lanes: parentToolUseId → thought chars (the stream is ONE stream). */
     val subagentThought: Map<String, Int> = emptyMap(),
+    /**
+     * The lane this card is SCOPED to (a sa: attach — subagent implements
+     * task: the identical card, fed only that lane's stream plus its root
+     * tool's lifecycle). Null = the whole task's stream.
+     */
+    val watchedLane: String? = null,
     val doneTools: Int = 0,
     val failedTools: Int = 0,
     val interaction: InteractionPending? = null,
@@ -403,11 +409,14 @@ object LiveTurn {
     private fun openedAt(frame: ServerFrame.StreamEvent, nowMs: Long): Long =
         if (frame.at > 0) frame.at else nowMs
 
-    /** agent_thought_chunk: main agent grows the tail; subagents grow their own lane. */
+    /** agent_thought_chunk: main agent grows the tail; subagents grow their own lane —
+     *  EXCEPT on a lane-scoped card, where the watched lane's thoughts ARE the
+     *  main narration (subagent implements task: the identical UI). */
     private fun reduceThought(state: TurnLive, event: JsonObject, nowMs: Long): TurnLive {
         val delta = StreamEvents.content(event)
         val parent = StreamEvents.parentToolUseId(event)
-        return if (parent == null) {
+        val isMain = parent == null || parent == state.watchedLane
+        return if (isMain) {
             // Replay guard (measured live 30/10: the fork's stream recovery
             // can re-emit the same chunk; the tail already ends with it — a
             // duplicate would double-print the sentence in the cajita).
@@ -493,14 +502,22 @@ object LiveTurn {
         val diff = editDiffOf(existing, event, differ)
         val closed = existing.copy(status = StreamEvents.status(event), added = diff?.first, removed = diff?.second)
         val failed = closed.status == "failed"
+        // a lane-scoped card's OWN root tool closed: the watched subagent is
+        // over — the honest Done seal (its next event never comes; a frozen
+        // "thinking" would be the lie the owner forbade)
+        val laneOver = state.watchedLane != null && toolId == state.watchedLane
         // the next visible thing re-opens the phase; until then keep showing
         // the sealed lane with its own timer frozen
         return state.copy(
             tools = state.tools.map { if (it.toolId == toolId) closed else it },
             doneTools = state.doneTools + 1,
             failedTools = state.failedTools + if (failed) 1 else 0,
-            phase = when (state.phase) {
-                is TurnPhase.Done -> state.phase
+            phase = when {
+                laneOver -> TurnPhase.Done(
+                    stopReason = "subagent ${closed.status ?: "ended"}",
+                    atMs = nowMs,
+                )
+                state.phase is TurnPhase.Done -> state.phase
                 else -> TurnPhase.Thinking(chars = state.thoughtChars, sinceMs = nowMs)
             },
         )

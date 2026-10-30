@@ -1,0 +1,218 @@
+package dev.lattenero.bot.channel
+
+import kotlinx.coroutines.runBlocking
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertTrue
+
+/**
+ * The /tasks row tap (`t:<sid>`): ATTACH to that task's live pipe — the
+ * owner's 30/10 rule («yo quiero seleccionar cualquier task y empezar a
+ * leer la tubería... es el feature principal casi»). The watch is pure
+ * reading: no ownership, refused by nothing, even mid-turn of ANOTHER
+ * conversation; the bind attempt rides along and may refuse honestly.
+ * The subscribe frame is the contract — the fork streams ANY subscribed
+ * task (daemonChannel.ts handleSubscribe has no gate).
+ */
+class TaskAttachTest {
+
+    /** The fake ops: canned answers by query kind + the recorders. */
+    private class FakeOps(startStatus: String) : ChannelOps {
+        var botStatusJson: String = startStatus
+        val answers = mutableMapOf<String, String>()
+        val subscribed = mutableListOf<Pair<String, String>>()
+        val inbound = mutableListOf<String>()
+
+        override suspend fun query(query: ChannelQuery): QueryAnswer {
+            val key = queryKind(query)
+            if (key == "botStatus") return QueryAnswer.Ok(botStatusJson)
+            return answers[key]?.let { QueryAnswer.Ok(it) } ?: QueryAnswer.Failed("internal", "no canned answer")
+        }
+
+        override suspend fun sendInbound(text: String, messageId: String, receivedAt: Long): InboundReceipt {
+            inbound.add(text)
+            return InboundReceipt.FIRED
+        }
+
+        override suspend fun sendInboundAwait(text: String, messageId: String, receivedAt: Long): InboundAnswer {
+            inbound.add(text)
+            // the app's /task bind effect: the conversation now points there
+            if (text.startsWith("/task ")) {
+                botStatusJson = botStatusJson.replace(
+                    "\"activeTaskId\":\"task-02\"",
+                    "\"activeTaskId\":\"${text.removePrefix("/task ")}\"",
+                ).replace("\"activeTaskId\":null", "\"activeTaskId\":\"${text.removePrefix("/task ")}\"")
+            }
+            return InboundAnswer.Answered(duplicate = false, replies = emptyList())
+        }
+
+        override suspend fun enqueueInbound(text: String, messageId: String, receivedAt: Long): Int = 1
+
+        override suspend fun subscribe(taskId: String, workspacePath: String) {
+            subscribed.add(taskId to workspacePath)
+        }
+    }
+
+    private class FakeHistory(private val rows: List<TaskRow>) : TasksHistory {
+        override suspend fun ctxTasks(limit: Int): List<TaskRow> = rows.take(limit)
+        override suspend fun modelSelection(sid: String): ModelSel? = null
+        override suspend fun freshestTask(workspacePath: String): TaskRow? = rows.firstOrNull()
+        override suspend fun taskAlive(sid: String): Boolean = true
+    }
+
+    private val app = "/Users/damian/Projects/app"
+
+    private val rows = listOf(
+        TaskRow(sid = "task-77", title = "unificador", ws = app),
+        TaskRow(sid = "task-02", title = "otra", ws = app),
+    )
+
+    private val boundStatus = """
+        {"bot":{"id":"daemon-local","enabled":true},
+         "context":{"workspacePath":"$app","activeTaskId":"task-02","mode":"full_access"}}
+    """.trimIndent()
+
+    private val draftStatus = """
+        {"bot":{"id":"daemon-local","enabled":true},
+         "context":{"workspacePath":"$app","activeTaskId":null,"mode":"full_access"}}
+    """.trimIndent()
+
+    private val noContextStatus = """
+        {"bot":{"id":"daemon-local","enabled":true},"context":null}
+    """.trimIndent()
+
+    private fun commands(ops: FakeOps): BotCommands = BotCommands(
+        ops = ops,
+        hub = LiveHub(),
+        daemonReset = { "fake ladder" },
+        clock = { 1_000_000L },
+        history = FakeHistory(rows),
+        defaultWorkspacePath = "/Users/damian/.zcode/workspace/default",
+    )
+
+    @Test
+    fun tapAttachesThePipeOfARunningTaskThenBinds() = runBlocking {
+        val ops = FakeOps(boundStatus).apply {
+            botStatusJson = boundStatus.replace("\"task-02\"", "\"task-77\"")
+            answers["activeTaskIds"] = """["task-77"]"""
+        }
+        val reply = commands(ops).onCallback("t:task-77", 5L)!!
+        // THE feature: the pipe attach happened, whatever the bind did
+        assertEquals(listOf("task-77" to app), ops.subscribed)
+        assertTrue("👁" in reply.text)
+        assertTrue("«unificador» en vivo" in reply.text)
+        assertTrue("/last" in reply.text) // the honest history note
+        assertTrue("🎯" in reply.text) // the bind confirmed (it was already the active task)
+    }
+
+    @Test
+    fun tapOnAnIdleTaskSpeaksThePatientWording() = runBlocking {
+        // no conversation bound, nothing running: the watch lands, the bind
+        // re-arms the next text into the freshly watched task
+        val ops = FakeOps(draftStatus).apply { answers["activeTaskIds"] = """[]""" }
+        val reply = commands(ops).onCallback("t:task-77", 5L)!!
+        assertEquals(listOf("task-77" to app), ops.subscribed)
+        assertTrue("«unificador» suscripto" in reply.text)
+        assertTrue("próximo turno" in reply.text)
+        assertTrue("🎯" in reply.text)
+    }
+
+    @Test
+    fun attachHappensEvenWhenTheBindRefuses() = runBlocking {
+        // task-02 owns the conversation and is RUNNING: the old tap died
+        // right here («/stop first») — the watch must survive the refusal
+        val ops = FakeOps(boundStatus).apply { answers["activeTaskIds"] = """["task-02"]""" }
+        val reply = commands(ops).onCallback("t:task-77", 5L)!!
+        assertEquals(listOf("task-77" to app), ops.subscribed)
+        assertTrue("👁" in reply.text)
+        assertTrue("⏳" in reply.text) // the bind's honest refusal rides along
+    }
+
+    @Test
+    fun tapOnAnUnknownSidWithoutContextIsHonest() = runBlocking {
+        val ops = FakeOps(noContextStatus)
+        val reply = commands(ops).onCallback("t:task-99", 5L)!!
+        assertTrue(ops.subscribed.isEmpty()) // nothing to attach to — no silent fake watch
+        assertTrue("🤷" in reply.text)
+        assertTrue("/tasks" in reply.text)
+    }
+
+    // ---- subagent lanes: subagent implements task (the owner's model) -------
+
+    private val laneId = "toolu_aaaabbbbccccdddd" // a Task tool's tool_use_id = the lane key
+    private val laneTail = laneId.takeLast(16) // what the sa: button carries (the 64B law)
+
+    private fun streamEvent(taskId: String, json: String, seq: Long): ServerFrame.StreamEvent =
+        ServerFrame.StreamEvent(
+            taskId = taskId,
+            seq = seq,
+            at = 1_000_000L,
+            event = kotlinx.serialization.json.Json.parseToJsonElement(json)
+                as kotlinx.serialization.json.JsonObject,
+        )
+
+    @Test
+    fun laneScopeFoldsOnlyThatSubagentStream() = runBlocking {
+        val hub = LiveHub()
+        val t = "task-77"
+        hub.apply(streamEvent(t, """{"type":"tool_call","toolId":"$laneId","toolName":"Task"}""", 1), 1_000_000L)
+        hub.attachLane(laneId)
+        // the PARENT's own narration: dropped — the card speaks only the lane
+        hub.apply(
+            streamEvent(t, """{"type":"agent_thought_chunk","content":"soy el padre","parentToolUseId":null}""", 2),
+            1_000_001L,
+        )
+        assertEquals(0, hub.peek()!!.thoughtChars)
+        // the watched lane's thought: the MAIN narration of this card
+        hub.apply(
+            streamEvent(t, """{"type":"agent_thought_chunk","content":"soy el sub","parentToolUseId":"$laneId"}""", 3),
+            1_000_002L,
+        )
+        val after = hub.peek()!!
+        assertEquals(10, after.thoughtChars)
+        assertTrue("soy el sub" in after.cotTail)
+        assertEquals(laneId, hub.watchedLaneId())
+    }
+
+    @Test
+    fun watchedRootToolCloseSealsTheLaneCard() = runBlocking {
+        val hub = LiveHub()
+        val t = "task-77"
+        hub.apply(streamEvent(t, """{"type":"tool_call","toolId":"$laneId","toolName":"Task"}""", 1), 1_000_000L)
+        hub.attachLane(laneId)
+        val sealed = hub.apply(
+            streamEvent(t, """{"type":"tool_call_update","toolId":"$laneId","status":"completed"}""", 2),
+            1_000_003L,
+        )!!
+        assertTrue(sealed.phase is TurnPhase.Done)
+        assertEquals("subagent completed", (sealed.phase as TurnPhase.Done).stopReason)
+    }
+
+    @Test
+    fun laneTapResolvesTheTailAndScopesTheCard() = runBlocking {
+        val ops = FakeOps(boundStatus).apply { answers["activeTaskIds"] = """[]""" }
+        val hub = LiveHub()
+        val bc = BotCommands(
+            ops = ops,
+            hub = hub,
+            daemonReset = { "fake ladder" },
+            clock = { 1_000_000L },
+            history = FakeHistory(rows),
+            defaultWorkspacePath = "/Users/damian/.zcode/workspace/default",
+        )
+        // the parent turn is live with the subagent lane open (the stream's own truth)
+        hub.apply(streamEvent("task-02", """{"type":"tool_call","toolId":"$laneId","toolName":"Task"}""", 1), 1_000_000L)
+        val reply = bc.onCallback("sa:$laneTail", 7L)!!
+        assertEquals(laneId, hub.watchedLaneId())
+        assertTrue("Subagente" in reply.text)
+        assertTrue("misma carta que una task" in reply.text)
+    }
+
+    @Test
+    fun laneTapOnAGoneSubagentIsHonest() = runBlocking {
+        val ops = FakeOps(boundStatus)
+        val reply = commands(ops).onCallback("sa:deadbeefdeadbeef", 7L)!!
+        assertTrue("🤷" in reply.text)
+        assertTrue("/tasks" in reply.text)
+    }
+}
