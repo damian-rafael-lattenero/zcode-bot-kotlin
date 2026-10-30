@@ -93,6 +93,7 @@ class LivePublisher(
     /** the message being edited — the publisher's only mutable cell (§7 escape hatch). */
     @Volatile
     private var statusMessageId: Long? = null
+    private var statusTaskId: String? = null
     private var lastText: String = ""
     private var sealed = false
     private var orphanChecked = false
@@ -135,11 +136,29 @@ class LivePublisher(
         if (statusMessageId == null && state.phase != TurnPhase.Idle) {
             statusMessageId = telegram.birth(cfg, LiveTurn.birthText(state))
             sealed = false
+            statusTaskId = state.taskId
             lastText = ""
             orphanStore?.save(statusMessageId ?: 0, state.taskId) // the boot seal's pointer
             logger.info { "live view born: taskId=${state.taskId} message_id=$statusMessageId" }
         }
         val mid = statusMessageId ?: return
+        // the hub replaces a watched turn with a new task's events: the old
+        // status message would freeze with its last "thinking..." — a corpse
+        // (measured 30/10: the owner watched a thinking tick while the app
+        // was DOWN). Seal the old one honestly; the new turn births its own.
+        if (statusTaskId != null && statusTaskId != state.taskId) {
+            telegram.edit(
+                cfg,
+                mid,
+                "⛓️ turno reemplazado — esta vista era de otra tarea; la nueva tiene su propio cartel.",
+            )
+            logger.info { "live view REPLACED: old taskId=$statusTaskId message_id=$mid -> new=${state.taskId}" }
+            statusMessageId = null
+            statusTaskId = null
+            lastText = ""
+            sealed = false
+            return
+        }
         if (state.phase is TurnPhase.Done && !sealed) {
             seal(cfg, mid, state, now)
             return
@@ -164,6 +183,7 @@ class LivePublisher(
         hub.clear()
         orphanStore?.clear()
         statusMessageId = null
+        statusTaskId = null
     }
 
     private fun spin(): Int {
