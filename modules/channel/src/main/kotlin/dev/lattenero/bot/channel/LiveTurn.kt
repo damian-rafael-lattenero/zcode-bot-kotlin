@@ -69,10 +69,26 @@ sealed interface TurnPhase {
     val status: String? = null,
     /** The MCP flag (pluginMetadata.component == "mcp" or an mcp__ name) — the 🔌 verb. */
     val isMcp: Boolean = false,
-    /** An edit's final +N/−M (the SequenceMatcher differ's verdict, at close). */
+    /**
+     * The edit's +N/−M — LIVE while the input streams (the differ runs per
+     * delta on the growing old/new pair); the final close keeps the
+     * authoritative verdict (the same differ on the complete input).
+     */
     val added: Int? = null,
     val removed: Int? = null,
-)
+    /**
+     * The tool's output at close, in lines. The fork streams NO live tool
+     * output (the adapter's projection carries `content` only on the result
+     * tool_call_update — zcodeTaskServiceAdapter's mapToolUpdated), so the
+     * output lands HERE, counted once, never faked as live.
+     */
+    val outputLines: Int? = null,
+    /** The lane's last real event — the frozen lane's clock derives from it. */
+    val lastUpdateAtMs: Long? = null,
+) {
+    /** The moment the lane last moved — openedAtMs when nothing touched it since. */
+    val touchedAtMs: Long get() = lastUpdateAtMs ?: openedAtMs
+}
 
 /**
  * The fork's TYPED terminal error (ZCodeTaskError: error, code?, detail?,
@@ -235,6 +251,17 @@ internal object StreamEvents {
     fun isMcp(event: JsonObject, name: String): Boolean =
         event.obj("pluginMetadata")?.str("component") == "mcp" || name.startsWith("mcp__")
 
+    /**
+     * The tool's OUTPUT at close, in lines, from the result update's
+     * `content`. Only string content counts — a structured payload's
+     * compact JSON would be one meaningless line, so the lane invents no
+     * count for it (the close boxes render the real thing).
+     */
+    fun outputLines(event: JsonObject): Int? {
+        val content = event["content"] as? JsonPrimitive ?: return null
+        return if (content.isString) lineCount(content.content) else null
+    }
+
     /** raw.streamingRawInputLength — the chars the model actually emitted for the input. */
     fun streamingRawInputLength(event: JsonObject): Int? =
         event.obj("raw")?.int("streamingRawInputLength")
@@ -355,10 +382,10 @@ object LiveTurn {
                 )
             }
 
-            StreamEvents.TOOL_CALL -> reduceToolArrival(refreshed, event, nowMs, final = true)
+            StreamEvents.TOOL_CALL -> reduceToolArrival(refreshed, event, nowMs, differ, final = true)
 
             StreamEvents.TOOL_UPDATE -> when (StreamEvents.status(event)) {
-                "pending" -> reduceToolArrival(refreshed, event, nowMs, final = false)
+                "pending" -> reduceToolArrival(refreshed, event, nowMs, differ, final = false)
 
                 "completed", "failed", "denied", "stopped" -> reduceToolClose(refreshed, event, nowMs, differ)
 
@@ -453,12 +480,15 @@ object LiveTurn {
      * tool_call (final, input complete) opens-or-fills the lane with the
      * authority input; tool_call_update/pending streams the partial input
      * (lines from content/new_string, raw chars from raw.streamingRawInputLength).
+     * The +N/−M breathe: the differ runs per delta on the growing old/new
+     * pair; the close recomputes it on the complete input (the authority).
      */
     @Suppress("CyclomaticComplexMethod") // the tool lane lifecycle, one guard per field
     private fun reduceToolArrival(
         state: TurnLive,
         event: JsonObject,
         nowMs: Long,
+        differ: LineDiffer,
         final: Boolean,
     ): TurnLive {
         val toolId = StreamEvents.toolId(event) ?: return state
@@ -472,6 +502,8 @@ object LiveTurn {
             streamed > 0 -> streamed
             else -> existing?.lines ?: 0
         }
+        val input = StreamEvents.input(event) ?: existing?.input
+        val liveDiff = liveEditDiff(input, differ)
         val lane = ToolLive(
             toolId = toolId,
             name = name,
@@ -481,9 +513,12 @@ object LiveTurn {
             openedAtMs = existing?.openedAtMs ?: nowMs,
             lines = lines,
             rawChars = StreamEvents.streamingRawInputLength(event) ?: existing?.rawChars ?: 0,
-            input = StreamEvents.input(event) ?: existing?.input,
+            input = input,
             status = existing?.status, // a closed lane does not reopen
             isMcp = existing?.isMcp ?: StreamEvents.isMcp(event, name),
+            added = liveDiff?.first,
+            removed = liveDiff?.second,
+            lastUpdateAtMs = nowMs,
         )
         val tools = state.tools.filterNot { it.toolId == toolId } + lane
         return state.copy(
@@ -510,9 +545,21 @@ object LiveTurn {
     ): TurnLive {
         val toolId = StreamEvents.toolId(event) ?: return state
         val existing = state.tools.firstOrNull { it.toolId == toolId } ?: return state
-        val diff = editDiffOf(existing, event, differ)
-        val closed = existing.copy(status = StreamEvents.status(event), added = diff?.first, removed = diff?.second)
+        val diff = liveEditDiff(existing.input ?: StreamEvents.input(event), differ)
+        val closed = existing.copy(
+            status = StreamEvents.status(event),
+            added = diff?.first,
+            removed = diff?.second,
+            outputLines = StreamEvents.outputLines(event) ?: existing.outputLines,
+            lastUpdateAtMs = nowMs,
+        )
         val failed = closed.status == "failed"
+        // a dispatch lane's close folds its world: the child's inner lanes
+        // and its thought counter leave the card with it (the owner's 30/10
+        // corpse card kept orphan lanes ticking forever)
+        val dispatch = closed.name in DISPATCH_TOOLS
+        val tools = (if (dispatch) state.tools.filterNot { it.parentToolUseId == toolId } else state.tools)
+            .map { if (it.toolId == toolId) closed else it }
         // a lane-scoped card's OWN root tool closed: the watched subagent is
         // over — the honest Done seal (its next event never comes; a frozen
         // "thinking" would be the lie the owner forbade)
@@ -520,9 +567,10 @@ object LiveTurn {
         // the next visible thing re-opens the phase; until then keep showing
         // the sealed lane with its own timer frozen
         return state.copy(
-            tools = state.tools.map { if (it.toolId == toolId) closed else it },
+            tools = tools,
             doneTools = state.doneTools + 1,
             failedTools = state.failedTools + if (failed) 1 else 0,
+            subagentThought = if (dispatch) state.subagentThought - toolId else state.subagentThought,
             phase = when {
                 laneOver -> TurnPhase.Done(
                     stopReason = "subagent ${closed.status ?: "ended"}",
@@ -534,11 +582,14 @@ object LiveTurn {
         )
     }
 
-    /** An edit's final +N/−M: the lane's own old_string/new_string through the differ. */
+    /**
+     * An edit's +N/−M: the input's old_string/new_string through the
+     * differ. Called per delta on the PARTIAL input (the counts grow live)
+     * and once more at close on the complete input (the authority).
+     */
     @Suppress("ReturnCount") // one guard per absent side of the edit pair
-    private fun editDiffOf(lane: ToolLive, event: JsonObject, differ: LineDiffer): Pair<Int, Int>? {
-        val input = lane.input ?: StreamEvents.input(event) ?: return null
-        val old = input.str("old_string") ?: return null
+    private fun liveEditDiff(input: JsonObject?, differ: LineDiffer): Pair<Int, Int>? {
+        val old = input?.str("old_string") ?: return null
         val new = input.str("new_string") ?: return null
         return differ.of(old, new)
     }
@@ -605,7 +656,7 @@ object LiveTurn {
                 } else {
                     lines.add("${verb.emoji} <b>«$head»</b>")
                     lines.add(
-                        verbLine(verb, lane, phase, nowMs, silence, channelAlive),
+                        verbLine(verb, lane, phase, clockNow, silence, channelAlive),
                     )
                 }
             }
@@ -624,22 +675,22 @@ object LiveTurn {
             val quota = if (pill.isQuota) " · 💳 CUOTA" else ""
             lines.add("💀 <b>error:</b> ${pill.line()}$quota")
         }
-        // open tool lanes (the live action beyond the phase line)
-        state.tools.asSequence().filter { it.status == null }.take(OPEN_LANES).forEach {
-            val verb = verbs.of(it.name, it.input, it.isMcp)
-            val counts = "${it.lines} líneas"
-            lines.add(
-                "${verb.emoji} ${PyText.esc(it.name)} · $counts · ${fmtDur(nowMs - it.openedAtMs)}",
-            )
-        }
-        // sealed edits carry their +N/−M (the SequenceMatcher verdict)
-        state.tools.filter { it.status != null && (it.added != null || it.removed != null) }
-            .takeLast(EDIT_STAMPS)
-            .forEach { lane ->
-                lines.add(
-                    "✏️ ${PyText.esc(lane.name)}: 🟢 +${lane.added ?: 0} · 🔴 −${lane.removed ?: 0}",
-                )
-            }
+        // the lanes, BOUNDED (the owner's 30/10 corpse card: a dead
+        // subagent's bash lane ticked «43m23s» forever): only the most
+        // recent open lanes, plus the last verdict stamps. A lane with no
+        // event for [LANE_FROZEN_MS] renders FROZEN — dimmed, its clock
+        // stopped at its last real event («los segundos no deben correr»).
+        state.tools.asSequence()
+            .filter { it.status == null }
+            .sortedByDescending { it.touchedAtMs }
+            .take(LANE_OPEN_CAP)
+            .forEach { lines.add(laneLine(it, verbs, clockNow, nowMs)) }
+        // sealed lanes carry their verdict — the edit's +N/−M, the shell's
+        // output lines (the fork's stream carries NO live tool output; the
+        // output lands at close, counted once) — most recent last
+        state.tools.filter { it.status != null && (it.added != null || it.removed != null || it.outputLines != null) }
+            .takeLast(LANE_STAMP_CAP)
+            .forEach { lines.add(stampLine(it, verbs)) }
         state.subagentThought.forEach { (parent, chars) ->
             lines.add("🤖 subagente ${parent.takeLast(SUBAGENT_ID_TAIL)} · $chars caracteres pensando")
         }
@@ -650,25 +701,86 @@ object LiveTurn {
             lines.add("⚠️ ${PyText.esc(ApiRetryText.line(pill, nowMs))}$suffix")
         }
         cotBlock(state)?.let(lines::add)
-        val beat = if (channelAlive) "💓" else "📡"
-        lines.add("$beat en vivo · último evento hace ${fmtDur(silence)} · ${state.doneTools} listos")
+        // THE HEART IS DEAD (the owner's 30/10 verdict on the 💓): liveness
+        // is the per-box counters themselves plus this sober line — «en
+        // vivo» with the honest silence while the stream moves or waits;
+        // «frozen» when the channel is down, the turn errored, the retry
+        // pill holds or the stream is cut (the clocks above already froze).
+        val live = channelAlive && state.typedError == null && state.apiRetry == null &&
+            silence < STALE_HARD_MS
+        lines.add(
+            if (live) "en vivo · último evento hace ${fmtDur(silence)} · ${state.doneTools} listos"
+            else "frozen · ${fmtDur(silence)} sin eventos · ${state.doneTools} listos",
+        )
         return lines.joinToString("\n")
     }
 
-    /** The lane's line: verb + detail + honest counters + the staleness word. */
+    /**
+     * One open lane's line: the verb + its detail (the shell's command, the
+     * file), the growing counts, the timer — FROZEN and dimmed when the
+     * lane died. The fork streams no tool output while a tool runs (the
+     * adapter's projection carries `content` only on the result update),
+     * so the line shows the command + elapsed, never a fake output tail.
+     */
+    private fun laneLine(lane: ToolLive, verbs: ToolVerbifier, clockNow: Long, nowMs: Long): String {
+        val verb = verbs.of(lane.name, lane.input, lane.isMcp)
+        val clipped = PyText.preview(verb.detail, DETAIL_CP)
+        val detail = if (clipped.isNotEmpty()) " <code>${PyText.esc(clipped)}</code>" else ""
+        // a dispatch lane whose child was ACKed never freezes: the child runs
+        // as its OWN session (the sa: attach's card is the honest view) and
+        // the parent stream carries nothing until the dispatch result — a
+        // frozen claim we cannot verify would be a lie in the other direction
+        val frozenLane = lane.subagentAgentId == null && nowMs - lane.touchedAtMs >= LANE_FROZEN_MS
+        return if (frozenLane) {
+            "❄️ <i>${verb.head()}$detail${laneCounts(lane)} · ${fmtDur(lane.touchedAtMs - lane.openedAtMs)} · " +
+                "frozen · ${fmtDur(nowMs - lane.touchedAtMs)} sin eventos</i>"
+        } else {
+            "${verb.head()}$detail${laneCounts(lane)} · ${fmtDur(clockNow - lane.openedAtMs)}"
+        }
+    }
+
+    /**
+     * The lane's counts: the live +N/−M for edits, the streamed lines
+     * otherwise. «0 líneas» is an INVENTED number (the fork streams no
+     * tool output while a tool runs) — when nothing streams the box says
+     * honestly where the output will appear: at close.
+     */
+    private fun laneCounts(lane: ToolLive): String = when {
+        lane.added != null || lane.removed != null -> " · 🟢 +${lane.added ?: 0} · 🔴 −${lane.removed ?: 0}"
+        lane.lines > 0 -> " · ${lane.lines} líneas"
+        else -> " · salida al cerrar"
+    }
+
+    /** One closed lane's verdict line: the edit's diff, the output's lines. */
+    private fun stampLine(lane: ToolLive, verbs: ToolVerbifier): String {
+        val mark = when (lane.status) {
+            "failed" -> " ❌"
+            "denied", "stopped" -> " ⏹️"
+            else -> ""
+        }
+        val verdict = when {
+            lane.added != null || lane.removed != null -> "🟢 +${lane.added ?: 0} · 🔴 −${lane.removed ?: 0}"
+            lane.outputLines != null -> "${lane.outputLines} líneas de salida"
+            else -> PyText.esc(lane.status ?: "listo")
+        }
+        return "${verbs.of(lane.name, lane.input, lane.isMcp).emoji} ${PyText.esc(lane.name)}: $verdict$mark"
+    }
+
+    /** The phase's line: verb + detail + honest counters + the staleness word.
+     *  The timer runs on [clockNow] — the frozen clock, never the present. */
     @Suppress("CyclomaticComplexMethod") // one shape per verb family
     private fun verbLine(
         verb: ToolVerb,
         lane: ToolLive?,
         phase: TurnPhase.Writing,
-        nowMs: Long,
+        clockNow: Long,
         silence: Long,
         channelAlive: Boolean,
     ): String {
         val clipped = PyText.preview(verb.detail, DETAIL_CP)
         val detail = if (clipped.isNotEmpty()) " <code>${PyText.esc(clipped)}</code>" else ""
         val stale = stalenessWord(silence, channelAlive)
-        val timer = fmtDur(nowMs - phase.sinceMs)
+        val timer = fmtDur(clockNow - phase.sinceMs)
         return when {
             lane != null && (lane.added != null || lane.removed != null) ->
                 "${verb.head()}$detail · 🟢 +${lane.added ?: 0} · 🔴 −${lane.removed ?: 0} · $timer"
@@ -735,6 +847,14 @@ object LiveTurn {
     fun birthText(state: TurnLive): String =
         "🖥️ <b>«${PyText.esc(state.title)}»</b> — turn live (channel)\n${PyText.esc(state.taskId)}"
 
+    /**
+     * True when the card still wears the fallback title — the sid's tail
+     * («644150daf013», the owner's 30/10 verdict): the stream's
+     * session_info_update title never arrives for some sessions, so the
+     * history's tasks-index is resolved instead ([LivePublisher]).
+     */
+    fun isFallbackTitle(taskId: String, title: String): Boolean = title == taskId.takeLast(TITLE_TAIL)
+
     /** The seal of the status message at Done — one line, the record of the turn. */
     fun sealText(state: TurnLive, nowMs: Long): String {
         val phase = state.phase as? TurnPhase.Done ?: return render(state, nowMs, 0, true)
@@ -768,9 +888,23 @@ object LiveTurn {
 
     private fun pad2(n: Long): String = if (n < TEN) "0$n" else "$n"
 
-    private const val OPEN_LANES = 3
-    private const val EDIT_STAMPS = 2
+    private const val LANE_OPEN_CAP = 5
+    private const val LANE_STAMP_CAP = 2
     private const val DETAIL_CP = 60
+
+    /**
+     * A plain lane with no event for this long renders FROZEN — its clock
+     * stops (the doctrine) and the line dims. 10 minutes: a pending
+     * elicitation or a slow legit run stays live well under it; the
+     * owner's corpse («Bash · 0 líneas · 43m23s») is far past it.
+     */
+    const val LANE_FROZEN_MS = 600_000L
+
+    /**
+     * The dispatch tool names (the channel-side law — the same set the
+     * /tasks keyboard filters by): closing one folds its inner lanes away.
+     */
+    private val DISPATCH_TOOLS = setOf("Task", "Agent")
 
     /**
      * The replay guard's floor: only sentence-sized re-emissions count as

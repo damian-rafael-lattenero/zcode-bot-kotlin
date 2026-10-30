@@ -1237,7 +1237,14 @@ class BotCommands(
         /** Python's caps: /task lists 10, /all_tasks 20, picks resolve against 30. */
         private const val TASKS_CAP = 10
         private const val ALL_CAP = 20
-        internal const val SCOPE_FOR_PICK = 30
+
+        /**
+         * The pick-resolution scope — PUBLIC because the daemon's live view
+         * resolves the card's real title against the SAME window (one
+         * constant, no drift): the 30 freshest rows are where a live task's
+         * row lives.
+         */
+        const val SCOPE_FOR_PICK = 30
 
         /** The bind confirmation loop: the server does NOT serialize inbounds (§3.2). */
         internal const val BIND_CONFIRM_TRIES = 10
