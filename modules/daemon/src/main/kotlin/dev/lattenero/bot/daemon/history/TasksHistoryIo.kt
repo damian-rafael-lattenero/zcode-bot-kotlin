@@ -43,6 +43,45 @@ internal class TasksHistoryIo(private val baseDir: File) : TasksHistory {
         }.getOrNull()
     }
 
+    /** The open-conversation resolver: freshest alive task of the bot's workspace. */
+    override suspend fun freshestTask(workspacePath: String): TaskRow? {
+        val index = tasksIndex()
+        if (!index.exists()) return null
+        return runCatching {
+            DriverManager.getConnection("jdbc:sqlite:${index.absolutePath}", roProps()).use { conn ->
+                conn.prepareStatement(FRESHEST_QUERY).use { ps ->
+                    ps.setString(1, workspacePath)
+                    ps.executeQuery().use { rs ->
+                        if (!rs.next()) {
+                            null
+                        } else {
+                            TaskRow(
+                                sid = rs.getString(TID_COL),
+                                title = rs.getString(TITLE_COL).orEmpty(),
+                                ws = rs.getString(WS_COL).orEmpty(),
+                                whenMs = rs.getLong(UPD_COL),
+                            )
+                        }
+                    }
+                }
+            }
+        }.getOrNull()
+    }
+
+    /** The tombstone guard: a deleted/archived task must never be aimed at again. */
+    override suspend fun taskAlive(sid: String): Boolean {
+        val index = tasksIndex()
+        if (!index.exists()) return false
+        return runCatching {
+            DriverManager.getConnection("jdbc:sqlite:${index.absolutePath}", roProps()).use { conn ->
+                conn.prepareStatement(ALIVE_QUERY).use { ps ->
+                    ps.setString(1, sid)
+                    ps.executeQuery().use { rs -> rs.next() && rs.getLong(1) > 0 }
+                }
+            }
+        }.getOrDefault(false)
+    }
+
     /** Latest model_usage per session, subagents excluded — Python's usage dict. */
     private fun usageBySession(db: File): Map<String, Usage> {
         if (!db.exists()) return emptyMap()
@@ -129,6 +168,7 @@ internal class TasksHistoryIo(private val baseDir: File) : TasksHistory {
         const val TID_COL = 1
         const val TITLE_COL = 2
         const val WS_COL = 3
+        const val UPD_COL = 4
 
         /** Python's frozen SQL — the app's sidebar order depends on it. */
         const val USAGE_QUERY =
@@ -145,5 +185,15 @@ internal class TasksHistoryIo(private val baseDir: File) : TasksHistory {
         const val SELECTION_QUERY =
             "SELECT data FROM session_entry WHERE session_id=? " +
                 "AND type='runtime/model_selection' ORDER BY time_created DESC LIMIT 1"
+
+        /** The router's target: the workspace's freshest alive conversation (updated_at = "in front"). */
+        const val FRESHEST_QUERY =
+            "SELECT task_id, title, workspace_path, updated_at FROM tasks " +
+                "WHERE deleted=0 AND archived=0 AND workspace_path=? " +
+                "ORDER BY updated_at DESC LIMIT 1"
+
+        /** The tombstone guard's count: alive ⇔ a row exists with deleted=0 AND archived=0. */
+        const val ALIVE_QUERY =
+            "SELECT COUNT(*) FROM tasks WHERE task_id=? AND deleted=0 AND archived=0"
     }
 }

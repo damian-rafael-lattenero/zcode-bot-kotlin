@@ -14,6 +14,17 @@ interface TasksHistory {
 
     /** The conversation's persisted model selection — Python's model_selection payload. */
     suspend fun modelSelection(sid: String): ModelSel?
+
+    /**
+     * The app's OPEN conversation: the freshest alive (not deleted, not
+     * archived) task of the workspace — the router's target (29/10's
+     * hot-fix: `activeTaskIds` only lists RUNNING tasks, so an idle open
+     * conversation is invisible to the channel; the tasks-index sees it).
+     */
+    suspend fun freshestTask(workspacePath: String): TaskRow?
+
+    /** True when the task exists alive in the index — the tombstone guard (deleted ≠ aimable). */
+    suspend fun taskAlive(sid: String): Boolean
 }
 
 /** One row of Python's `Task` dataclass (reporting.py) — sid/title/ws carry the list. */
@@ -37,4 +48,6 @@ fun scopeRows(rows: List<TaskRow>, all: Boolean, defaultWs: String): List<TaskRo
 val noHistory: TasksHistory = object : TasksHistory {
     override suspend fun ctxTasks(limit: Int): List<TaskRow> = emptyList()
     override suspend fun modelSelection(sid: String): ModelSel? = null
+    override suspend fun freshestTask(workspacePath: String): TaskRow? = null
+    override suspend fun taskAlive(sid: String): Boolean = false
 }

@@ -43,6 +43,24 @@ sealed interface QueryAnswer {
 /** The receipt of an inbound send (fire-and-forget: the turn's truth is the stream). */
 enum class InboundReceipt { FIRED, UNAVAILABLE }
 
+/**
+ * The AWAITED inbound's answer — the bind machinery's truth: the
+ * botsService's own replies (taskRunning, taskMissing, the status card)
+ * come back on the inbound_result, correlated by id (§3.2: it may arrive
+ * "much later" for PROMPTS; for COMMANDS it is the answer).
+ */
+sealed interface InboundAnswer {
+    data class Answered(
+        val duplicate: Boolean,
+        /** The system replies verbatim — the router classifies on them. */
+        val replies: List<String>,
+    ) : InboundAnswer
+
+    data object Unavailable : InboundAnswer
+
+    data class TimedOut(val waitedMs: Long) : InboundAnswer
+}
+
 /** One live connection: serialized writes + the pending-request table, correlated by id. */
 private class Session(val transport: ChannelTransport) {
     val write = Mutex()
@@ -265,7 +283,11 @@ class ChannelClient(
         when (frame) {
             is ServerFrame.StreamEvent -> onStreamEvent(frame)
 
-            is ServerFrame.InboundResult -> onInboundResult(frame)
+            // an AWAITED inbound_result belongs to its waiter (the bind reads
+            // the replies itself and speaks its own summary); unawaited ones
+            // keep the old fire-and-forget callback
+            is ServerFrame.InboundResult ->
+                if (live.pending.remove(frame.id)?.complete(frame) != true) onInboundResult(frame)
 
             is ServerFrame.ChannelError -> {
                 logger.warn { "channel error id=${frame.id} code=${frame.code}: ${frame.message ?: ""}" }
@@ -327,6 +349,42 @@ class ChannelClient(
         }
     }
 
+    /**
+     * The bind's send: fire the inbound and AWAIT its result — the
+     * botsService answers commands with system replies (taskRunning,
+     * taskMissing, the status card) and the router's every decision must
+     * read them, not guess at them.
+     */
+    @Suppress("TooGenericExceptionCaught", "SwallowedException") // best-effort for its caller, never for the daemon
+    suspend fun sendInboundAwait(
+        text: String,
+        messageId: String,
+        receivedAt: Long,
+        timeout: Duration = INBOUND_ANSWER_TIMEOUT,
+    ): InboundAnswer {
+        val live = session ?: return InboundAnswer.Unavailable
+        val id = "r${ids.incrementAndGet()}"
+        return try {
+            when (val frame = live.request(ClientFrame.Inbound(id, text, messageId, receivedAt), id, timeout)) {
+                is ServerFrame.InboundResult ->
+                    InboundAnswer.Answered(duplicate = frame.duplicate, replies = frame.replies)
+
+                is ServerFrame.ChannelError ->
+                    InboundAnswer.Answered(duplicate = false, replies = listOf("${frame.code}: ${frame.message ?: ""}"))
+
+                else -> InboundAnswer.Answered(duplicate = false, emptyList())
+            }
+        } catch (e: ChannelDown) {
+            InboundAnswer.Unavailable
+        } catch (e: TimeoutCancellationException) {
+            InboundAnswer.TimedOut(timeout.inWholeMilliseconds)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            InboundAnswer.Unavailable
+        }
+    }
+
     /** Remembers a subscription (replayed on every reconnect) and fires it now if a session is live. */
     suspend fun subscribe(taskId: String, workspacePath: String) {
         synchronized(subscriptions) { subscriptions[taskId] = workspacePath }
@@ -352,5 +410,8 @@ class ChannelClient(
         val HANDSHAKE_TIMEOUT = 10.seconds
         val ACK_TIMEOUT = 15.seconds
         val PONG_TIMEOUT = 10.seconds
+
+        /** The bind command's answer budget: commands answer fast (prompts may not). */
+        val INBOUND_ANSWER_TIMEOUT = 8.seconds
     }
 }
