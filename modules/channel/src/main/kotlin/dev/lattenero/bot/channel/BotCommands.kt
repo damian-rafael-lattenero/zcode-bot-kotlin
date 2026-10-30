@@ -15,6 +15,12 @@ import java.util.Locale
 
 private val logger = KotlinLogging.logger {}
 
+/**
+ * One parked text of the F17 queue, as /queue shows it — the daemon's
+ * own store mirrored here so the channel module never leans on it.
+ */
+data class QueuedText(val text: String, val messageId: String, val receivedAt: Long)
+
 /** The dispatcher's data source — the client's queries behind one interface (tests fake it). */
 interface ChannelOps {
     suspend fun query(query: ChannelQuery): QueryAnswer
@@ -26,6 +32,12 @@ interface ChannelOps {
 
     /** Python's F17: park a text while its conversation is mid-turn — the queue size after, or -1. */
     suspend fun enqueueInbound(text: String, messageId: String, receivedAt: Long): Int
+
+    /** The queue's current rows (/queue's peek) — empty when this wiring keeps no queue. */
+    suspend fun queueEntries(): List<QueuedText> = emptyList()
+
+    /** Removes ONE parked text — null when the drain already took it (the honest answer, not an error). */
+    suspend fun queueTake(messageId: String): QueuedText? = null
 
     suspend fun subscribe(taskId: String, workspacePath: String)
 }
@@ -66,6 +78,7 @@ class BotCommands(
     private var newIntent = false
 
     /** One incoming line. Null = not a command (the router sends it as inbound). */
+    @Suppress("CyclomaticComplexMethod") // one branch per command — the dispatcher's own shape
     suspend fun handle(text: String, updateId: Long): BotReply? {
         val (base, rest) = parseCommand(text) ?: return route(text, updateId)
         val reply: BotReply = when (base) {
@@ -78,6 +91,9 @@ class BotCommands(
             "help", "start" -> BotReply(help())
             "subagents", "agents" -> BotReply(subagents())
             "plan" -> plan()
+            "last" -> BotReply(lastAnswer())
+            "compact" -> compact()
+            "queue" -> queue()
             else -> BotReply(UNKNOWN)
         }
         logger.info {
@@ -103,6 +119,10 @@ class BotCommands(
             logger.info { "callback ⏳ qgo: the parked text keeps its natural wait" }
             BotReply("📬 Queda encolado — entra cuando el turno termine.")
         }
+
+        data.startsWith("ql:") -> queueLaunch(data.removePrefix("ql:"), updateId)
+
+        data.startsWith("qd:") -> queueDiscard(data.removePrefix("qd:"), updateId)
 
         data.startsWith("pl:") || data.startsWith("pm:") || data.startsWith("pe:") || data == "pd:" ->
             planTap(data)
@@ -450,7 +470,7 @@ class BotCommands(
         return BindOutcome.Failed("botStatus never said activeTaskId=$taskId")
     }
 
-    // ---- the eight ---------------------------------------------------------
+    // ---- the commands -------------------------------------------------------
 
     /**
      * /tasks — Python's `/task`: the projects-scope history (usage-backed
@@ -696,6 +716,109 @@ class BotCommands(
         }
     }
 
+    /**
+     * /last — re-sends the active conversation's LAST assistant answer
+     * (the missed one: a restart, a flood window, a scroll past). The
+     * same taskSnapshot the final shower uses; the body rides raw like
+     * the shower's own speak — the pipe's htmlTruncate is the cap, and
+     * MY take adds the honest ✂️ note before the pipe cuts silently.
+     */
+    @Suppress("ReturnCount") // one guard per query outcome — the commands' shared shape
+    private suspend fun lastAnswer(): String {
+        val ctx = contextAnswer() as? ContextAnswer.Ctx ?: return noConversationOrDown()
+        val taskId = ctx.value.activeTaskId
+            ?: return "📭 No active conversation — /tasks n picks one; its answers come back here."
+        val title = history.ctxTasks(SCOPE_FOR_PICK).firstOrNull { it.sid == taskId }
+            ?.title?.takeIf { it.isNotEmpty() } ?: taskId.takeLast(SID_TAIL)
+        return when (val answer = ops.query(ChannelQuery.TaskSnapshot(taskId, ctx.value.workspacePath))) {
+            is QueryAnswer.Ok -> renderLast(snapshotLastAnswer(answer.resultJson), title)
+            is QueryAnswer.Unavailable -> DEGRADED
+            is QueryAnswer.Failed -> "⚠️ /last failed (${answer.code}): ${PyText.esc(answer.message ?: "?")}"
+        }
+    }
+
+    /** The context's two shapes speak differently: no conversation ≠ channel down. */
+    private suspend fun noConversationOrDown(): String = when (contextAnswer()) {
+        ContextAnswer.None -> "📭 No active conversation — /tasks n picks one; its answers come back here."
+        else -> DEGRADED
+    }
+
+    /** The last answer's render: an honest header + the text, ✂️ when the cap eats the tail. */
+    private fun renderLast(text: String?, title: String): String {
+        if (text.isNullOrBlank()) {
+            return "📭 «${PyText.esc(title)}» has no answer yet — the turn never completed one."
+        }
+        val body = if (PyText.cpLength(text) > LAST_BODY_CAP) {
+            PyText.take(text, LAST_BODY_CAP) + "\n\n✂️ …the tail was cut — the full answer lives in the app."
+        } else {
+            text
+        }
+        return "📬 <b>Last answer of «${PyText.esc(title)}»</b>\n$body"
+    }
+
+    /**
+     * /compact — the active conversation's context shrinks (the fork's
+     * compact query; additive protocol: an old host refuses by name and
+     * the refusal is spoken, never swallowed).
+     */
+    @Suppress("ReturnCount") // one guard per query outcome — the commands' shared shape
+    private suspend fun compact(): BotReply {
+        val ctx = contextAnswer() as? ContextAnswer.Ctx ?: return BotReply(noConversationOrDown())
+        val taskId = ctx.value.activeTaskId
+            ?: return BotReply("🤷 No active conversation to compact — /tasks n picks one.")
+        return when (val answer = ops.query(ChannelQuery.Compact(taskId))) {
+            is QueryAnswer.Ok -> BotReply(
+                "🗜 Compact sent to <code>${PyText.esc(taskId.takeLast(SID_TAIL))}</code> — " +
+                    "the conversation's context shrinks; the work stays.",
+            )
+            is QueryAnswer.Unavailable -> BotReply(DEGRADED)
+            is QueryAnswer.Failed -> BotReply(
+                "⚠️ Compact failed (${answer.code}): ${PyText.esc(answer.message ?: "?")}",
+            )
+        }
+    }
+
+    /** /queue — the F17 queue's honest peek: what is parked, 🚀 launch or 🗑 discard per row. */
+    private suspend fun queue(): BotReply {
+        val entries = ops.queueEntries()
+        if (entries.isEmpty()) return BotReply("📭 The queue is empty — nothing parked.")
+        return BotReply(
+            "📬 <b>Parked texts</b> (${entries.size}) — 🚀 fires it now · 🗑 discards it:",
+            markup = Keyboards.queueKeyboard(entries),
+        )
+    }
+
+    /**
+     * 🚀 ql: — one parked text fires NOW at the active conversation (the
+     * drain's twin, by hand). A channel-down send goes back to the queue:
+     * a manual launch never LOSES the text.
+     */
+    private suspend fun queueLaunch(messageId: String, updateId: Long): BotReply {
+        val item = ops.queueTake(messageId)
+            ?: return BotReply("🤷 Ya no está — el drenaje del turno se la llevó (o se descartó antes).")
+        return when (ops.sendInbound(item.text, "$messageId-manual", clock())) {
+            InboundReceipt.FIRED -> {
+                logger.info { "queue: $messageId fired BY HAND (update=$updateId)" }
+                watchContext() // the turn this text starts is the one to stream
+                BotReply("🚀 Fired — the text runs in the active conversation.")
+            }
+
+            InboundReceipt.UNAVAILABLE -> {
+                ops.enqueueInbound(item.text, item.messageId, item.receivedAt)
+                BotReply("📡 The channel is down — the text went back to the queue.")
+            }
+        }
+    }
+
+    /** 🗑 qd: — one parked text is dropped, honestly counted. */
+    private suspend fun queueDiscard(messageId: String, updateId: Long): BotReply {
+        val dropped = ops.queueTake(messageId)
+            ?: return BotReply("🤷 Ya no está — nada que descartar.")
+        val left = ops.queueEntries().size
+        logger.info { "queue: $messageId DISCARDED by hand (update=$updateId) — $left left" }
+        return BotReply("🗑 Discarded («${PyText.esc(dropped.text.take(DISCARD_PREVIEW))}…») — $left left.")
+    }
+
     /** /subagents — the live lanes grouped by parentToolUseId (the stream's own grouping). */
     private suspend fun subagents(): String {
         val turn = hub.peek() ?: return "📭 No turn is being watched — send text first."
@@ -829,7 +952,7 @@ class BotCommands(
 
     companion object {
         internal const val UNKNOWN =
-            "🤷 Unknown command — /help lists the eight this bot speaks."
+            "🤷 Unknown command — /help lists the twelve this bot speaks."
         internal const val DEGRADED =
             "📡 The channel to the app is down — the fork's host is not running? " +
                 "Commands that need it wait for the app."
@@ -867,6 +990,9 @@ class BotCommands(
             "all_tasks" to "all conversations, loose ones included",
             "status" to "what is running + the active conversation",
             "plan" to "plan, model and effort — tap to change",
+            "last" to "re-sends the active conversation's last answer",
+            "compact" to "shrinks the active conversation's context",
+            "queue" to "the parked texts — launch or discard",
             "stop" to "stops the active task's turn",
             "nuclear" to "emergency: stops EVERYTHING and resets the bot",
             "quota" to "coding plan credits",
@@ -874,7 +1000,7 @@ class BotCommands(
             "help" to "all commands",
         )
 
-        internal val HELP = (listOf("📖 <b>The nine</b> (the owner's MVP — the rest is hot-fix territory):") +
+        internal val HELP = (listOf("📖 <b>The twelve</b> (the owner's MVP — the rest is hot-fix territory):") +
             MENU.map { (cmd, desc) -> "/$cmd — $desc" } +
             listOf(
                 "",
@@ -882,6 +1008,28 @@ class BotCommands(
                     "and the live view shows every thought, tool and line as it happens. " +
                     "Free text never opens a new one — /tasks new does.",
             )).joinToString("\n")
+
+        /**
+         * taskSnapshot → the last ASSISTANT message — /last's answer AND
+         * the live view's final shower (the daemon's own parser is this
+         * one, injected), so both renders can never drift.
+         */
+        fun snapshotLastAnswer(resultJson: String): String? = runCatching {
+            val root = Json.parseToJsonElement(resultJson) as? JsonObject ?: return null
+            val messages = root["messages"] as? JsonArray ?: return null
+            messages.asSequence()
+                .mapNotNull { it as? JsonObject }
+                .filter { (it["role"] as? JsonPrimitive)?.content == "assistant" }
+                .lastOrNull()
+                ?.let { (it["content"] as? JsonPrimitive)?.content }
+                ?.takeIf { it.isNotBlank() }
+        }.getOrNull()
+
+        /** /last's body cap: the header + the ✂️ note must fit inside the pipe's CH_REPLY. */
+        internal const val LAST_BODY_CAP = 3600
+
+        /** The discard's one-line preview of what was thrown away. */
+        private const val DISCARD_PREVIEW = 40
 
         /** (base, rest) of a /command line, with @botname stripped — null when not a command. */
         @Suppress("ReturnCount") // one guard per non-command shape

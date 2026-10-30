@@ -17,6 +17,7 @@ import dev.lattenero.bot.channel.QueryAnswer
 import dev.lattenero.bot.channel.ServerFrame
 import dev.lattenero.bot.channel.ToolLive
 import dev.lattenero.bot.channel.UnixSocketTransport
+import dev.lattenero.bot.channel.QueuedText
 import dev.lattenero.bot.contracts.ShadowDecision
 import dev.lattenero.bot.daemon.history.LIVE_VERBS
 import dev.lattenero.bot.daemon.history.SEQUENCE_LINE_DIFFER
@@ -249,21 +250,27 @@ private fun buildPoller(
         helloOk = { client.connected },
         announce = { text -> speak(text, true, null) },
     )
-    val commands = BotCommands(
-        ops = object : ChannelOps {
-            override suspend fun query(query: ChannelQuery) = client.query(query)
-            override suspend fun sendInbound(text: String, messageId: String, receivedAt: Long) =
-                client.sendInbound(text, messageId, receivedAt)
+        val commands = BotCommands(
+            ops = object : ChannelOps {
+                override suspend fun query(query: ChannelQuery) = client.query(query)
+                override suspend fun sendInbound(text: String, messageId: String, receivedAt: Long) =
+                    client.sendInbound(text, messageId, receivedAt)
 
-            override suspend fun sendInboundAwait(text: String, messageId: String, receivedAt: Long) =
-                client.sendInboundAwait(text, messageId, receivedAt)
+                override suspend fun sendInboundAwait(text: String, messageId: String, receivedAt: Long) =
+                    client.sendInboundAwait(text, messageId, receivedAt)
 
-            override suspend fun enqueueInbound(text: String, messageId: String, receivedAt: Long) =
-                queue.add(text, messageId, receivedAt)
+                override suspend fun enqueueInbound(text: String, messageId: String, receivedAt: Long) =
+                    queue.add(text, messageId, receivedAt)
 
-            override suspend fun subscribe(taskId: String, workspacePath: String) =
-                client.subscribe(taskId, workspacePath)
-        },
+                override suspend fun queueEntries(): List<QueuedText> =
+                    queue.entries().map { QueuedText(it.text, it.messageId, it.receivedAt) }
+
+                override suspend fun queueTake(messageId: String): QueuedText? =
+                    queue.take(messageId)?.let { QueuedText(it.text, it.messageId, it.receivedAt) }
+
+                override suspend fun subscribe(taskId: String, workspacePath: String) =
+                    client.subscribe(taskId, workspacePath)
+            },
         hub = hub,
         daemonReset = {
             // The cross-restart single-flight (the 08:42 loop's lesson: each
@@ -349,16 +356,7 @@ internal fun finalBoxesOf(tools: List<ToolLive>): String =
         }
 
 /** taskSnapshot → the last ASSISTANT message (the turn's answer, from the store). */
-internal fun snapshotAnswerOf(resultJson: String): String? = runCatching {
-    val root = Json.parseToJsonElement(resultJson) as? JsonObject ?: return null
-    val messages = root["messages"] as? JsonArray ?: return null
-    messages.asSequence()
-        .mapNotNull { it as? JsonObject }
-        .filter { (it["role"] as? JsonPrimitive)?.content == "assistant" }
-        .lastOrNull()
-        ?.let { (it["content"] as? JsonPrimitive)?.content }
-        ?.takeIf { it.isNotBlank() }
-}.getOrNull()
+internal fun snapshotAnswerOf(resultJson: String): String? = BotCommands.snapshotLastAnswer(resultJson)
 
 private const val FINAL_BOXES = 6
 

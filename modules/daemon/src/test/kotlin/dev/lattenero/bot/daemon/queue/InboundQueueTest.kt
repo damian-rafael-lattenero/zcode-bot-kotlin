@@ -34,4 +34,26 @@ class InboundQueueTest {
         assertTrue(q.drain().isEmpty())
         assertEquals(1, q.add("de nuevo", "tg-9", 1L))
     }
+
+    @Test
+    fun entriesPeeksWithoutDraining() {
+        val q = InboundQueue(queueFile)
+        assertTrue(q.entries().isEmpty())
+        q.add("hola", "tg-1", 100L)
+        q.add("cha", "tg-2", 200L)
+        assertEquals(listOf("hola" to "tg-1", "cha" to "tg-2"), q.entries().map { it.text to it.messageId })
+        assertEquals(2, q.entries().size) // the peek is repeatable — nothing was taken
+    }
+
+    @Test
+    fun takeRemovesOneByUpdateIdentity() {
+        val q = InboundQueue(queueFile)
+        q.add("hola", "tg-1", 100L)
+        q.add("cha", "tg-2", 200L)
+        val hit = q.take("tg-2")
+        assertEquals("cha", hit?.text)
+        assertEquals(listOf("hola" to "tg-1"), q.entries().map { it.text to it.messageId })
+        assertEquals(null, q.take("tg-2")) // already gone: the honest null, not an error
+        assertEquals(null, q.take("tg-404"))
+    }
 }

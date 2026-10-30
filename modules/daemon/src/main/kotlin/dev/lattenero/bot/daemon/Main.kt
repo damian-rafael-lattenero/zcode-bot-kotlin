@@ -246,9 +246,9 @@ private suspend fun registerTelegramMenu(
     val menuApi = api ?: dev.lattenero.bot.transport.TgApi({ tgCfg })
     val ok = dev.lattenero.bot.channel.BotMenu.register(menuApi, tgCfg)
     logger.info {
-        "telegram menu ${if (ok) "registered" else "FAILED to register"}: the eight " +
-            "(/tasks /all_tasks /status /stop /nuclear /quota /subagents /help) — " +
-            "${BotCommands.MENU.size} commands"
+        "telegram menu ${if (ok) "registered" else "FAILED to register"}: " +
+            BotCommands.MENU.joinToString(" ") { "/${it.first}" } +
+            " — ${BotCommands.MENU.size} commands"
     }
     if (api == null) menuApi.close()
 }

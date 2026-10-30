@@ -482,7 +482,7 @@ class BotCommandsTest {
     @Test
     fun helpListsExactlyTheMenu() {
         assertNotNull(BotCommands.HELP)
-        assertEquals(9, BotCommands.MENU.size)
+        assertEquals(12, BotCommands.MENU.size)
         BotCommands.MENU.forEach { (cmd, desc) ->
             assertTrue("/$cmd — $desc" in BotCommands.HELP, "$cmd missing from /help")
         }
@@ -596,8 +596,8 @@ class BotCommandsTest {
     @Test
     fun startAliasSpeaksTheHelp() = runBlocking {
         val (bc, _) = commands(ops())
-        assertTrue("The nine" in bc.reply("/start", 1L)!!)
-        assertTrue("The nine" in bc.reply("/help", 2L)!!)
+        assertTrue("The twelve" in bc.reply("/start", 1L)!!)
+        assertTrue("The twelve" in bc.reply("/help", 2L)!!)
     }
 
     @Test
