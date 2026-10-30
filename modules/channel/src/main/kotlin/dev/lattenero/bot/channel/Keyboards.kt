@@ -108,6 +108,24 @@ object Keyboards {
     }
 
     /**
+     * The CoT cajita's open/fold buttons (Python's ct:/cr: vocabulary):
+     * collapsed shows «🧠 cot 1.2K», expanded shows the fold ⤴️.
+     */
+    fun cotButtons(expanded: Boolean): JsonObject = buildJsonObject {
+        putJsonArray("inline_keyboard") {
+            add(
+                buildJsonArray {
+                    if (expanded) {
+                        add(button("⤴️ plegar", "cotr:x"))
+                    } else {
+                        add(button("🧠 cot", "cot:x"))
+                    }
+                },
+            )
+        }
+    }
+
+    /**
      * Python's callback_text (R5's table, our subset): callback_data →
      * the text the owner «typed». Default: the data itself as free text
      * (the historical behavior — unknown buttons stay owner words).
