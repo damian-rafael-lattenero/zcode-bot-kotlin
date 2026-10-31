@@ -25,7 +25,12 @@ data class QueuedText(val text: String, val messageId: String, val receivedAt: L
 interface ChannelOps {
     suspend fun query(query: ChannelQuery): QueryAnswer
 
-    suspend fun sendInbound(text: String, messageId: String, receivedAt: Long): InboundReceipt
+    suspend fun sendInbound(
+        text: String,
+        messageId: String,
+        receivedAt: Long,
+        attachments: List<InboundAttachment> = emptyList(),
+    ): InboundReceipt
 
     /**
      * An ORDER direct to one session (the fork's inbound taskId — the ✍️
@@ -86,6 +91,12 @@ class BotCommands(
     private val history: TasksHistory = noHistory,
     /** Python's config.DEFAULT_WS — the loose-tasks workspace the /tasks scope excludes. */
     private val defaultWorkspacePath: String = "",
+    /**
+     * The transcript feed's level (the /verbosity knob): WRITTEN here,
+     * read PER TICK by the publisher — the daemon injects ONE shared
+     * instance (the file-backed store), tests the in-memory default.
+     */
+    private val verbosity: VerbositySetting = VolatileVerbosity(),
 ) {
 
     /** /nuclear's single-flight companion: the in-process half (the wiring adds the cross-restart mtime gate). */
@@ -113,6 +124,7 @@ class BotCommands(
             "context_window" -> contextWindow()
             "queue" -> queue()
             "steer" -> steer(rest)
+            "verbosity" -> verbosityCmd(rest)
             else -> BotReply(UNKNOWN)
         }
         logger.info {
@@ -152,6 +164,10 @@ class BotCommands(
         data.startsWith("ql:") -> queueLaunch(data.removePrefix("ql:"), updateId)
 
         data.startsWith("qd:") -> queueDiscard(data.removePrefix("qd:"), updateId)
+
+        // /verbosity's picker tap: set the level (the write lands in the
+        // injected setting — the publisher's very next tick obeys)
+        data.startsWith("vb:") -> verbosityTap(data.removePrefix("vb:"))
 
         // /subagents's view switch: the ONE button each view offers (fixed
         // 4-byte datas — Telegram's 64B law never even breathes)
@@ -1141,6 +1157,58 @@ class BotCommands(
     }
 
     /**
+     * /verbosity — the transcript feed's knob (the owner's 30/10 order:
+     * the feed VERBOSE by default, his choice persists): bare → the
+     * picker (the 3 levels, the current marked); an arg →
+     * [FeedVerbosity.of] (the Spanish aliases included), unknown → the
+     * picker with the honest note. The write lands in the injected
+     * [VerbositySetting] — the daemon's file-backed store — and the
+     * publisher reads it PER TICK: the very next feed message obeys.
+     */
+    private fun verbosityCmd(rest: String): BotReply {
+        val arg = rest.trim()
+        if (arg.isNotEmpty()) {
+            val level = FeedVerbosity.of(arg)
+            if (level != null) {
+                verbosity.set(level)
+                logger.info { "verbosity: ${level.name} set via /verbosity $arg" }
+                return BotReply(verbosityLine(level) + "\n✅ Aplicado.")
+            }
+            return BotReply(
+                "🤷 «${PyText.esc(arg)}» no es un nivel — elegilo de la lista:",
+                markup = Keyboards.verbosityPicker(verbosity.current()),
+            )
+        }
+        return BotReply(
+            verbosityLine(verbosity.current()) + "\nElegí el nivel:",
+            markup = Keyboards.verbosityPicker(verbosity.current()),
+        )
+    }
+
+    /** The vb: tap: set the level — the toast's reply is the confirmation. */
+    private fun verbosityTap(arg: String): BotReply {
+        val level = FeedVerbosity.of(arg) ?: return BotReply("🤷 Ese nivel no existe — /verbosity.")
+        verbosity.set(level)
+        logger.info { "callback 📣 vb:$arg — level=${level.name}" }
+        return BotReply(verbosityLine(level) + "\n✅ Aplicado — el próximo mensaje del feed ya obedece.")
+    }
+
+    /** The command's one line: the level's word + what it lets through. */
+    private fun verbosityLine(level: FeedVerbosity): String {
+        val word = when (level) {
+            FeedVerbosity.SUMMARY -> "🔈 summary"
+            FeedVerbosity.NORMAL -> "🔉 normal"
+            FeedVerbosity.VERBOSE -> "🔊 verbose"
+        }
+        val meaning = when (level) {
+            FeedVerbosity.SUMMARY -> "solo el cartel de estado y la respuesta final"
+            FeedVerbosity.NORMAL -> "cada bloque CoT sellado y cada cierre de tool, en mensajes separados"
+            FeedVerbosity.VERBOSE -> "todo lo anterior, más el aviso de cada tool al abrirse"
+        }
+        return "📣 Feed en vivo: <b>$word</b> — $meaning"
+    }
+
+    /**
      * /subagents — TWO views, ONE button each (the owner's contract,
      * 30/10: «/subagents no muestra el subagente activo… y no mezclar los
      * inactivos»). DEFAULT: ONLY the ACTIVE subagent groups of the watched
@@ -1464,6 +1532,7 @@ class BotCommands(
             "nuclear" to "emergency: stops EVERYTHING and resets the bot",
             "quota" to "coding plan credits",
             "subagents" to "the active subagents · «inactivos» shows today's ended",
+            "verbosity" to "cuánto habla el feed en vivo — summary / normal / verbose",
             "help" to "all commands",
         )
 
@@ -1550,7 +1619,7 @@ class BotCommands(
                 "(no se estaciona en la cola)."
         internal const val STEER_OLD_FORK =
             "⚠️ La app conectada no conoce el frame «steer» — falta deployar el fork actualizado " +
-                "(ZCode damian, el commit steer del daemon-channel); el bot ya lo habla."
+                "(ZCode damian, commit 7ae1a972+); el bot ya lo habla."
         internal const val CTX_WINDOW_UNPARSEABLE =
             "⚠️ No pude leer la respuesta de la ventana de contexto"
 
