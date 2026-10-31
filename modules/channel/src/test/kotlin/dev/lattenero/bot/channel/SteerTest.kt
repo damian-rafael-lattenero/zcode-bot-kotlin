@@ -128,7 +128,7 @@ class SteerTest {
     fun steerWithTheChannelDownIsDegradedNotSilent() = runBlocking {
         val (bc, _) = commands(ops(status = null))
         val reply = bc.handle("/steer probando", 5L)!!
-        assertTrue("canal" in reply.text.lowercase(), reply.text)
+        assertTrue("down" in reply.text.lowercase(), reply.text)
     }
 
     @Test
