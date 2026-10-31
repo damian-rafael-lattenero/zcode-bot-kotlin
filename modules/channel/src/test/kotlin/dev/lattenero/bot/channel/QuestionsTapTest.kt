@@ -24,9 +24,22 @@ class QuestionsTapTest {
         var answer: RespondAnswer = RespondAnswer.Resolved
         val inbound = mutableListOf<String>()
 
-        override suspend fun query(query: ChannelQuery): QueryAnswer = QueryAnswer.Failed("internal", "unused")
+        override suspend fun query(query: ChannelQuery): QueryAnswer =
+            if (query == ChannelQuery.BotStatus) {
+                QueryAnswer.Ok(
+                    """{"bot":{"enabled":true},""" +
+                        """"context":{"workspacePath":"/ws/test","activeTaskId":"task-77","mode":"task"}}""",
+                )
+            } else {
+                QueryAnswer.Failed("internal", "unused")
+            }
 
-        override suspend fun sendInbound(text: String, messageId: String, receivedAt: Long): InboundReceipt {
+        override suspend fun sendInbound(
+            text: String,
+            messageId: String,
+            receivedAt: Long,
+            attachments: List<InboundAttachment>,
+        ): InboundReceipt {
             inbound.add(text)
             return InboundReceipt.FIRED
         }
@@ -69,12 +82,25 @@ class QuestionsTapTest {
     """.trimIndent()
 
     private fun commands(ops: FakeOps, board: QuestionBoard): BotCommands =
-        BotCommands(ops, LiveHub(), daemonReset = { "" }, board = board)
+        BotCommands(
+            ops,
+            LiveHub(),
+            daemonReset = { "" },
+            history = object : TasksHistory {
+                override suspend fun ctxTasks(limit: Int) = emptyList<TaskRow>()
+                override suspend fun modelSelection(sid: String): ModelSel? = null
+                override suspend fun freshestTask(workspacePath: String): TaskRow? = null
+                override suspend fun taskAlive(sid: String) = true
+            },
+            board = board,
+        )
 
     private fun feed(board: QuestionBoard, json: String) {
-        board.onStreamEvent(
-            ServerFrame.StreamEvent("task-q", 1, 0, Json.parseToJsonElement(json).jsonObject),
-        )
+        kotlinx.coroutines.runBlocking {
+            board.onStreamEvent(
+                ServerFrame.StreamEvent("task-q", 1, 0, Json.parseToJsonElement(json).jsonObject),
+            )
+        }
     }
 
     @Test

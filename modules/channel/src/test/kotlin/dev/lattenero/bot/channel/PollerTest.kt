@@ -156,6 +156,7 @@ class PollerTest {
             when (m) {
                 is InboundUpdate.Message -> seen.add(m.text)
                 is InboundUpdate.Callback -> seen.add("cb:${m.data}")
+                is InboundUpdate.Attachment -> {} // photos never dispatch (the unit's own law)
             }
         }
         val outcome = poller.cycle(cfg)

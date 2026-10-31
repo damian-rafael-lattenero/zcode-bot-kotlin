@@ -37,7 +37,12 @@ class SubagentsCommandTest {
             else -> QueryAnswer.Failed("internal", "unused in subagents tests")
         }
 
-        override suspend fun sendInbound(text: String, messageId: String, receivedAt: Long) =
+        override suspend fun sendInbound(
+            text: String,
+            messageId: String,
+            receivedAt: Long,
+            attachments: List<InboundAttachment>,
+        ) =
             InboundReceipt.FIRED
 
         override suspend fun sendInboundAwait(text: String, messageId: String, receivedAt: Long) =

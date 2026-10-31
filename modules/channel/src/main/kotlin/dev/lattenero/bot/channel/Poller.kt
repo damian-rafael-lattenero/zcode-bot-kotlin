@@ -259,16 +259,6 @@ class Poller(
         )
     }
 
-    /** The photo's LARGEST size row (the one the Bot API serves whole) — null when none carries a file_id. */
-    internal fun largestPhoto(sizes: kotlinx.serialization.json.JsonArray): JsonObject? =
-        sizes.mapNotNull { it as? JsonObject }
-            .filter { it.str("file_id") != null }
-            .maxByOrNull { size ->
-                val w = size.long("width") ?: 0L
-                val h = size.long("height") ?: 0L
-                maxOf(w, h, size.long("file_size") ?: 0L)
-            }
-
     /** The poller Process: one cycle per iteration, the long-poll inside the body is the pacing. */
     fun asProcess(
         config: () -> TgConfig,
@@ -291,3 +281,14 @@ class Poller(
         const val CONFLICT = 409
     }
 }
+
+/** The photo's LARGEST size row — PIXELS first (area), bytes only break the tie. */
+internal fun largestPhoto(sizes: kotlinx.serialization.json.JsonArray): JsonObject? =
+    sizes.mapNotNull { it as? JsonObject }
+        .filter { it.str("file_id") != null }
+        .maxWithOrNull(
+            compareBy(
+                { (it.long("width") ?: 0L) * (it.long("height") ?: 0L) },
+                { it.long("file_size") ?: 0L },
+            ),
+        )

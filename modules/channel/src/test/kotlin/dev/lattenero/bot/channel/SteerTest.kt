@@ -35,7 +35,12 @@ class SteerTest {
             else -> QueryAnswer.Failed("internal", "no canned answer")
         }
 
-        override suspend fun sendInbound(text: String, messageId: String, receivedAt: Long) = InboundReceipt.UNAVAILABLE
+        override suspend fun sendInbound(
+            text: String,
+            messageId: String,
+            receivedAt: Long,
+            attachments: List<InboundAttachment>,
+        ) = InboundReceipt.UNAVAILABLE
 
         override suspend fun sendInboundAwait(text: String, messageId: String, receivedAt: Long) =
             InboundAnswer.Unavailable
