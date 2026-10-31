@@ -233,7 +233,10 @@ private fun buildLiveView(
             if (ws != null) client.subscribe(taskId, ws)
         },
         speak = { text -> fireSpeak(text, false, null) },
-        finalBoxes = { tools -> finalBoxesOf(tools) },
+        // the NEW LivePublisher's per-tool renderer: one tool per close
+        // message — finalBoxesOf's list body renders exactly that one box
+        // (blank for an input-less lane: the feed's honest one-liner takes over)
+        toolBox = { tool -> finalBoxesOf(listOf(tool)) },
         finalAnswer = { taskId ->
             when (val answer = client.query(ChannelQuery.TaskSnapshot(taskId))) {
                 is QueryAnswer.Ok -> snapshotAnswerOf(answer.resultJson)
@@ -289,7 +292,7 @@ private fun buildPoller(
                     messageId: String,
                     receivedAt: Long,
                     attachments: List<InboundAttachment>,
-                ) = client.sendInbound(text, messageId, receivedAt, attachments)
+                ) = client.sendInbound(text, messageId, receivedAt, attachments = attachments)
 
                 // the ✍️ armed order: direct to the named session (the fork's inbound taskId)
                 override suspend fun sendOrder(
