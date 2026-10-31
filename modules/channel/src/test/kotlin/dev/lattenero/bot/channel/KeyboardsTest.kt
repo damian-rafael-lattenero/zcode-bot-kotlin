@@ -99,38 +99,21 @@ class KeyboardsTest {
     }
 
     @Test
-    fun cotBlocksButtonsAreTheBlockRow() {
-        // Python's box_buttons reborn as cb:: one «📖 CoT N» per sealed
-        // block, the EXPANDED one wearing ⤴️ (the SAME tap folds it)
-        val kb = Keyboards.cotBlocksButtons(count = 2, expanded = null)!!
-        val keyboard = kb.jsonObject["inline_keyboard"]!!.jsonArray
-        assertEquals(1, keyboard.size) // 2 blocks: one row of 2
-        val b1 = keyboard[0].jsonArray[0].jsonObject
-        assertEquals("📖 CoT 1", b1["text"]!!.jsonPrimitive.content)
-        assertEquals("cb:1", b1["callback_data"]!!.jsonPrimitive.content)
-        val expanded = Keyboards.cotBlocksButtons(count = 2, expanded = 2)!!
-        val row = expanded.jsonObject["inline_keyboard"]!!.jsonArray[0].jsonArray
-        assertEquals("📖 CoT 1", row[0].jsonObject["text"]!!.jsonPrimitive.content)
-        assertEquals("⤴️ CoT 2", row[1].jsonObject["text"]!!.jsonPrimitive.content)
-        assertEquals("cb:2", row[1].jsonObject["callback_data"]!!.jsonPrimitive.content)
-    }
-
-    @Test
-    fun cotBlocksKeyboardShowsOnlyTheMostRecent8InRowsOf4() {
-        val kb = Keyboards.cotBlocksButtons(count = 10, expanded = null)!!
-        val keyboard = kb.jsonObject["inline_keyboard"]!!.jsonArray
-        assertEquals(2, keyboard.size) // 8 buttons in rows of 4
-        assertEquals(4, keyboard[0].jsonArray.size)
-        assertEquals(4, keyboard[1].jsonArray.size)
-        assertEquals("📖 CoT 3", keyboard[0].jsonArray[0].jsonObject["text"]!!.jsonPrimitive.content)
-        assertEquals("cb:3", keyboard[0].jsonArray[0].jsonObject["callback_data"]!!.jsonPrimitive.content)
-        assertEquals("cb:10", keyboard[1].jsonArray[3].jsonObject["callback_data"]!!.jsonPrimitive.content)
+    fun theVerbosityPickerIsOneRowPerLevelWithTheCurrentMarked() {
+        // the /verbosity picker: one row per level, the CURRENT one wearing
+        // ✅ — tap = set (the vb: data is the level's canonical lowercase)
+        val kb = Keyboards.verbosityPicker(FeedVerbosity.NORMAL)
+        val rows = kb.jsonObject["inline_keyboard"]!!.jsonArray
+        assertEquals(3, rows.size)
+        assertEquals(
+            "✅ 🔉 normal — bloques CoT + cierres de tools",
+            rows[1].jsonArray[0].jsonObject["text"]!!.jsonPrimitive.content,
+        )
+        assertEquals("vb:normal", rows[1].jsonArray[0].jsonObject["callback_data"]!!.jsonPrimitive.content)
+        assertEquals("vb:summary", rows[0].jsonArray[0].jsonObject["callback_data"]!!.jsonPrimitive.content)
+        assertEquals("vb:verbose", rows[2].jsonArray[0].jsonObject["callback_data"]!!.jsonPrimitive.content)
         // the datas are tiny — the 64-byte law never breathes
-        assertTrue(Keyboards.callbackDataValid("cb:10"))
-    }
-
-    @Test
-    fun cotBlocksKeyboardIsNullWhileNothingSealed() {
-        assertNull(Keyboards.cotBlocksButtons(count = 0, expanded = null))
+        assertTrue(Keyboards.callbackDataValid("vb:summary"))
+        assertTrue(Keyboards.callbackDataValid("vb:verbose"))
     }
 }

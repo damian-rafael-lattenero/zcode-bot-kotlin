@@ -6,17 +6,16 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
  * The tap vocabulary's reply contract, ON the dispatcher (KeyboardsTest
  * pins the pure table, BotCommandsTest the t: re-bind): the F17 pair
  * (intr:/qgo:), the ☢️ pair and the 💀 hard stop — every tap arrives as
- * the owner's typed words (R5's table) and answers its own promise.
- * The CoT BLOCK taps (cb:) DO reach the dispatcher: they toggle the hub's
- * expanded-block pointer and answer NULL — the card edits itself in
- * place (never a new message; the wiring nudges the immediate tick).
+ * the owner's typed words (R5's table) and answers its own promise. The
+ * OLD CoT block tap (cb:) reaches the dispatcher only to answer the
+ * RETIRED note honestly — the transcript feed carries the blocks as
+ * their own messages now.
  */
 class CallbackTapsTest {
 
@@ -64,7 +63,7 @@ class CallbackTapsTest {
     )
 
     @Test
-    fun theBlockTapExpandsAndTheSameTapFoldsWithoutAReply() = runBlocking {
+    fun theOldBlockTapAnswersTheRetiredNoteHonestly() = runBlocking {
         val hub = LiveHub()
         val o = FakeOps()
         val cmds = BotCommands(
@@ -86,19 +85,14 @@ class CallbackTapsTest {
             ),
             100L,
         )
-        // the tap EXPANDS: null reply (the card edits itself — never a new
-        // message), no channel query, the pointer rides the hub
-        assertNull(cmds.onCallback("cb:1", 1L))
-        assertEquals(1, hub.peek()!!.cotExpandedBlock)
+        // the OLD block tap is RETIRED (the transcript feed carries the
+        // blocks as their own messages): the stale button answers honestly,
+        // no channel query, the hub untouched
+        val reply = cmds.onCallback("cb:1", 1L)!!
+        assertTrue("mensajes propios" in reply.text)
         assertTrue(o.queries.isEmpty())
-        // the SAME tap folds
-        assertNull(cmds.onCallback("cb:1", 2L))
-        assertNull(hub.peek()!!.cotExpandedBlock)
-        // a stale/out-of-range tap folds silently, honestly
-        assertNull(cmds.onCallback("cb:9", 3L))
-        assertNull(hub.peek()!!.cotExpandedBlock)
+        assertEquals("x".repeat(3000), hub.peek()!!.cotBlocks[0])
     }
-
     @Test
     fun thePushTapStopsTheTurnAndPromisesTheFire() = runBlocking {
         val o = FakeOps().apply {
