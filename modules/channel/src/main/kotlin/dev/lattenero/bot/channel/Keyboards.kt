@@ -53,6 +53,10 @@ object Keyboards {
                                     callbackData = "t:${t.sid}",
                                 ),
                             )
+                            // the ✍️ arms the next free text as an ORDER direct
+                            // to that task — the bind is workspace-scoped (the
+                            // fork's project boundary), the order is not
+                            add(button("✍️", "so:${t.sid}"))
                         },
                     )
                     if (t.sid == watchedTaskId) {

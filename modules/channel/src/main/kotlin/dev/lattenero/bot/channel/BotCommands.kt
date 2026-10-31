@@ -650,6 +650,7 @@ class BotCommands(
      * next free text as an order direct to that session. One tap, one shot:
      * the order flies, the arm disarms, the card keeps streaming.
      */
+    @Suppress("ReturnCount") // two attach paths, one guard each
     private suspend fun orderArm(tail: String): BotReply {
         val attachReply = laneAttach(tail)
         val lane = hub.peek()?.tools?.lastOrNull { it.toolId.endsWith(tail) }
@@ -663,6 +664,23 @@ class BotCommands(
                 "👁 ${attachReply.text}\n" +
                     "✍️ Armado: tu PRÓXIMO texto va como orden a «${PyText.esc(Keyboards.subagentName(lane))}».",
             )
+        }
+        // not a subagent tail: a TASK's own sid (the /tasks ✍️) — the bind is
+        // workspace-scoped (the fork's project boundary), the ORDER is not:
+        // attach the pipe + arm, and the text flies direct to that session
+        val row = history.ctxTasks(SCOPE_FOR_PICK).firstOrNull { it.sid == tail }
+        if (row != null) {
+            val ws = (contextAnswer() as? ContextAnswer.Ctx)?.value?.workspacePath
+            if (ws != null) {
+                ops.subscribe(row.sid, ws)
+                hub.watchTask()
+                armedOrder = ArmedOrder(sessionId = row.sid, title = row.title.ifEmpty { row.sid.takeLast(SID_TAIL) })
+                logger.info { "callback ✍️ so: TASK ORDER ARMED for ${row.sid} (attached)" }
+                return BotReply(
+                    "👁 «${PyText.esc(armedOrder?.title ?: "?")}» en vivo — la tubería es tuya.\n" +
+                        "✍️ Armado: tu PRÓXIMO texto va como orden directo a esa task (sin bind).",
+                )
+            }
         }
         return attachReply // the honest miss — nothing armed
     }

@@ -190,6 +190,13 @@ class LivePublisher(
      * the honest fallback stays (nothing invented).
      */
     private val resolveTitle: suspend (taskId: String) -> String? = { null },
+    /**
+     * The stream watchdog's tooth (injected): re-issues the task's
+     * subscription — the fork's continuous bus dies mid-run (measured 30/10
+     * twice: burst on subscribe, then silence on a LIVE turn) and the
+     * resubscribe flushes a fresh burst that re-lights the card.
+     */
+    private val resubscribe: suspend (taskId: String) -> Unit = {},
     /** The durable message id — the boot-time ORPHAN SEAL reads it (LiveOrphanStore). */
     private val orphanStore: LiveOrphanStore? = null,
 ) {
@@ -202,6 +209,8 @@ class LivePublisher(
     private var sealed = false
     private var orphanChecked = false
     private var titleResolvedFor: String? = null
+    /** The watchdog's last bark — one resubscribe per silence episode. */
+    private var lastWatchdogAtMs: Long = 0
 
     /**
      * The ORPHAN SEAL — this process's FIRST tick after a restart edits
@@ -263,6 +272,26 @@ class LivePublisher(
                 }
             }
             tryBirth(cfg, state)
+        }
+        // THE STREAM WATCHDOG: a live turn with a long silence is the fork's
+        // dead bus, not a quiet model (measured 30/10 twice — burst on
+        // subscribe, then silence on a LIVE turn). One resubscribe per
+        // silence episode flushes a fresh burst and the card moves again; a
+        // legitimately quiet stretch re-subscribes harmlessly (same task,
+        // same stream); Done cards never bark.
+        val silenceMs = now - (state.lastEventAtMs ?: 0)
+        if (
+            state.phase !is TurnPhase.Done &&
+            silenceMs > STREAM_WATCHDOG_SILENCE_MS &&
+            now - lastWatchdogAtMs > STREAM_WATCHDOG_SILENCE_MS
+        ) {
+            lastWatchdogAtMs = now
+            resubscribe(state.taskId)
+            val silenceSecs = silenceMs / MS_PER_SEC
+            logger.info {
+                "stream watchdog: ${silenceSecs}s of silence on a live turn — " +
+                    "re-subscribed ${state.taskId.takeLast(TASK_ID_TAIL)}"
+            }
         }
         val mid = statusMessageId ?: return
         // the hub replaces a watched turn with a new task's events: the old
@@ -374,5 +403,10 @@ class LivePublisher(
 
         /** A blocked birth retries every ~30s (10 ticks × 3s), not every tick. */
         const val BIRTH_RETRY_TICKS = 10
+
+        /** The silence that counts as the fork's dead bus, not a quiet model. */
+        const val STREAM_WATCHDOG_SILENCE_MS = 60_000L
+        const val MS_PER_SEC = 1000L
+        const val TASK_ID_TAIL = 8
     }
 }
