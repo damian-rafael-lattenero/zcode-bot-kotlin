@@ -78,6 +78,28 @@ class LiveTelegram(
         }
     }
 
+    /**
+     * The QUESTION's send — the dedicated message with its buttons (the
+     * answer round-trip's birth). A hanging question is CRITICAL: the
+     * cooldown does not gate it (the card's throttle is the feed's
+     * back-pressure, not the owner's answer — the turn blocks until the
+     * owner speaks), but a 429 still widens the window. loud=true: the
+     * phone must buzz — a question the owner never sees is a hung turn.
+     */
+    @Suppress("TooGenericExceptionCaught") // the live view never raises (Python's bare except)
+    suspend fun ask(cfg: TgConfig, text: String, markup: JsonObject): Long? = try {
+        messageIdOf(api.call("sendMessage", SendRequest.compose(cfg, text, loud = true, markup = markup)))
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: TgHttpException) {
+        retryAfterOf(e)?.let { cooldown.extend(it) }
+        logger.warn { "question send failed: ${e.message}" }
+        null
+    } catch (e: Exception) {
+        logger.warn { "question send failed: ${e.message}" }
+        null
+    }
+
     /** Best-effort editMessageText; false when skipped or failed. The markup rides when present. */
     @Suppress("TooGenericExceptionCaught", "ReturnCount") // the live view never raises (Python's bare except)
     suspend fun edit(cfg: TgConfig, messageId: Long, text: String, markup: JsonObject? = null): Boolean {
@@ -99,10 +121,22 @@ class LiveTelegram(
     }
 
     /**
-     * Best-effort deleteMessage — the card swap's other half (the redraw
-     * births the new card FIRST, so a lost delete only leaves a stale
-     * corpse, never a cardless chat). A delete is not a message send: the
-     * cooldown does not gate it, but a 429 still widens the window.
+     * The shared cooldown window's state — the TRANSCRIPT FEED's
+     * back-pressure: while a 429 window lasts the feed's swap skips
+     * ITSELF whole (the seen pointer holds, the next tick re-speaks the
+     * same diff when the window lifts) — a parked outbox and a re-born
+     * card must never race for the chat's order.
+     */
+    fun throttled(): Boolean = cooldown.active()
+
+    /**
+     * Best-effort deleteMessage — the card swap's other half. The swap's
+     * order is delete → feed → re-birth (the owner's rule: the thinking
+     * box is ALWAYS the last message — a card born first would be buried
+     * by the feed), so a lost delete leaves a stale corpse ABOVE the
+     * re-born card until the next swap eats it — noisy, never lying. A
+     * delete is not a message send: the cooldown does not gate it, but a
+     * 429 still widens the window.
      */
     @Suppress("TooGenericExceptionCaught") // the live view never raises (Python's bare except)
     suspend fun delete(cfg: TgConfig, messageId: Long): Boolean {

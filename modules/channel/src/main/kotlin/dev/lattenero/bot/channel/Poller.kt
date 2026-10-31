@@ -220,6 +220,7 @@ class Poller(
      * is skipped — the cursor already advanced, the honest silence is the
      * log's. Photos carry no name: the wire's filename is the update's own.
      */
+    @Suppress("ReturnCount") // the attachment ladder: one guard per photo/document shape — Python's normalize shape
     private fun normalizeAttachment(
         message: JsonObject,
         updateId: Long,
