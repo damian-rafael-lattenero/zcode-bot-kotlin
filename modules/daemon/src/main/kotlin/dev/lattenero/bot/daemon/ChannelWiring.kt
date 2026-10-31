@@ -233,7 +233,6 @@ private fun buildLiveView(
             if (ws != null) client.subscribe(taskId, ws)
         },
         speak = { text -> fireSpeak(text, false, null) },
-        finalBoxes = { tools -> finalBoxesOf(tools) },
         finalAnswer = { taskId ->
             when (val answer = client.query(ChannelQuery.TaskSnapshot(taskId))) {
                 is QueryAnswer.Ok -> snapshotAnswerOf(answer.resultJson)
@@ -289,7 +288,7 @@ private fun buildPoller(
                     messageId: String,
                     receivedAt: Long,
                     attachments: List<InboundAttachment>,
-                ) = client.sendInbound(text, messageId, receivedAt, attachments)
+                ) = client.sendInbound(text, messageId, receivedAt, attachments = attachments)
 
                 // the ✍️ armed order: direct to the named session (the fork's inbound taskId)
                 override suspend fun sendOrder(
@@ -461,7 +460,8 @@ internal fun attachmentFilename(filename: String): String =
     filename.map { c -> if (c in FILENAME_SAFE) c else '_' }
         .joinToString("")
         .take(FILENAME_CAP)
-        .ifEmpty { "attachment" }
+        .takeIf { mapped -> mapped.any { it.isLetterOrDigit() } } // a name with no alphanumeric is garbage («///»)
+        ?: "attachment"
 
 private const val ATTACHMENTS_DIR = "attachments"
 private const val MB = 1024L * 1024L
@@ -483,23 +483,8 @@ internal fun stoppedCountOf(resultJson: String): Int = runCatching {
     ((Json.parseToJsonElement(resultJson) as? JsonObject)?.get("stopped") as? JsonArray)?.size ?: 0
 }.getOrDefault(0)
 
-/** The final render's boxes: the spectator's renderer, one box per completed tool. */
-internal fun finalBoxesOf(tools: List<ToolLive>): String =
-    tools.filter { it.input != null }
-        .takeLast(FINAL_BOXES)
-        .joinToString("\n") { tool ->
-            val mark = when (tool.status) {
-                "failed" -> " ❌"
-                "denied", "stopped" -> " ⏹️"
-                else -> " ✅"
-            }
-            ToolBox.box(tool.name, tool.input ?: JsonObject(emptyMap())).replaceFirst("</b>", "</b>$mark")
-        }
-
 /** taskSnapshot → the last ASSISTANT message (the turn's answer, from the store). */
 internal fun snapshotAnswerOf(resultJson: String): String? = BotCommands.snapshotLastAnswer(resultJson)
-
-private const val FINAL_BOXES = 6
 
 /** The nuclear gate's file (mtime = the last start) and its double-trigger window. */
 private const val NUCLEAR_GATE = "nuclear-last"

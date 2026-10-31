@@ -1,5 +1,6 @@
 package dev.lattenero.bot.channel
 
+import dev.lattenero.bot.contracts.PyText
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -33,7 +34,7 @@ class TranscriptFeedTest {
     private fun closed(
         id: String,
         name: String = "Bash",
-        status: String = "completed",
+        status: String? = "completed",
         input: kotlinx.serialization.json.JsonObject? = null,
         output: String? = null,
         outputLines: Int? = null,
@@ -95,7 +96,7 @@ class TranscriptFeedTest {
 
     @Test
     fun verboseAddsTheOpenOneLinerNormalDoesNot() {
-        val open = closed("t1", input = buildJsonObject { put("command", "git status") })
+        val open = closed("t1", status = null, input = buildJsonObject { put("command", "git status") }) // OPEN: the one-liner's subject
         val prev = turn()
         val curr = turn(tools = listOf(open))
         assertEquals(

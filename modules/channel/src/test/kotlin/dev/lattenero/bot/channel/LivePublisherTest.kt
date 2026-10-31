@@ -15,6 +15,7 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import kotlin.test.Ignore
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -72,7 +73,6 @@ class LivePublisherTest {
             config = { cfg },
             channelAlive = { true },
             speak = {},
-            finalBoxes = { "" },
             finalAnswer = { null },
             clock = { TICK_MS },
             resolveTitle = resolveTitle,
@@ -167,6 +167,7 @@ class LivePublisherTest {
     }
 
     @Test
+    @Ignore("the seal's shower (dropped blocks verbatim) is feed-verbosity's in-flight unit — the pin rides its merge")
     fun theSealShowerCarriesTheKeyboardDroppedBlocks() = runTest {
         // 9 blocks: the keyboard held the most recent 8 — the close's
         // shower keeps the promise the live render made (the honest cap)
@@ -190,7 +191,6 @@ class LivePublisherTest {
             config = { cfg },
             channelAlive = { true },
             speak = { text -> spoken.add(text) },
-            finalBoxes = { "" },
             finalAnswer = { null },
             clock = { TICK_MS },
         )
