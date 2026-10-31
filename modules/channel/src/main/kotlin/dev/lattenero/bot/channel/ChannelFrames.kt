@@ -160,6 +160,7 @@ sealed interface ClientFrame {
 }
 
 /** Pure: the exact JSONL line for a client frame (the wire is `line + '\n'`). */
+@Suppress("CyclomaticComplexMethod") // one branch per frame kind — the wire table's own shape, as the query's
 fun encodeClient(frame: ClientFrame): String = when (frame) {
     is ClientFrame.Hello -> buildJsonObject {
         put("type", "hello")
