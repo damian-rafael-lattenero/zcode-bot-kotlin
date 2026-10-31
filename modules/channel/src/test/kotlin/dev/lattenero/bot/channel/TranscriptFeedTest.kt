@@ -96,7 +96,7 @@ class TranscriptFeedTest {
 
     @Test
     fun verboseAddsTheOpenOneLinerNormalDoesNot() {
-        val open = closed("t1", status = null, input = buildJsonObject { put("command", "git status") }) // OPEN: the one-liner's subject
+        val open = closed("t1", status = null, input = buildJsonObject { put("command", "git status") })
         val prev = turn()
         val curr = turn(tools = listOf(open))
         assertEquals(
