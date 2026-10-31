@@ -294,6 +294,9 @@ private fun buildPoller(
                     taskId: String,
                 ) = client.sendInbound(text, messageId, receivedAt, taskId)
 
+                // STEER: the running turn's redirection (the fork's `steer` frame, awaited)
+                override suspend fun steer(taskId: String, text: String) = client.steer(taskId, text)
+
                 override suspend fun sendInboundAwait(text: String, messageId: String, receivedAt: Long) =
                     client.sendInboundAwait(text, messageId, receivedAt)
 

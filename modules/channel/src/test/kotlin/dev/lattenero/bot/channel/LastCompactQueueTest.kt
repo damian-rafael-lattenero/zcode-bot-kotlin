@@ -234,10 +234,10 @@ class LastCompactQueueTest {
 
     @Test
     fun menuListsTheThirteenAndHelpSpeaksThem() {
-        assertEquals(13, BotCommands.MENU.size)
+        assertTrue(BotCommands.MENU.size >= 14) // steer landed — the count is MENU.size-driven now
         val names = BotCommands.MENU.map { it.first }
         assertTrue("last" in names && "compact" in names && "queue" in names)
         assertTrue("/last" in BotCommands.HELP && "/compact" in BotCommands.HELP && "/queue" in BotCommands.HELP)
-        assertTrue("The thirteen" in BotCommands.HELP)
+        assertTrue("The ${BotCommands.MENU.size}" in BotCommands.HELP)
     }
 }

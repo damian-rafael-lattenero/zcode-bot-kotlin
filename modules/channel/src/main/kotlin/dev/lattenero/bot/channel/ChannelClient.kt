@@ -44,6 +44,37 @@ sealed interface QueryAnswer {
 enum class InboundReceipt { FIRED, UNAVAILABLE }
 
 /**
+ * The awaited steer's answer — honest by construction: [Delivered] only
+ * when the host acked the frame; [Failed] carries the host's own word
+ * (bad_request, unknown_request of an old fork, internal); [Unavailable]
+ * is the channel being down. A steer NEVER rides as free text.
+ */
+sealed interface SteerAnswer {
+    data object Delivered : SteerAnswer
+
+    data object Unavailable : SteerAnswer
+
+    data class Failed(val code: String, val message: String?) : SteerAnswer
+}
+
+/**
+ * The awaited respond's answer — the question tap's truth: [Resolved] ONLY
+ * when the host's respond_result said ok (the v4 command acked — the fork's
+ * own honest gate); [Failed] carries the host's error verbatim (an unknown
+ * interactionId, an already-resolved question, a stale turn — the fork
+ * never lies ok) and the tap must EDIT the question message with it;
+ * [Unavailable] is the channel being down (the question stays armed — the
+ * owner can retry).
+ */
+sealed interface RespondAnswer {
+    data object Resolved : RespondAnswer
+
+    data object Unavailable : RespondAnswer
+
+    data class Failed(val code: String, val message: String?) : RespondAnswer
+}
+
+/**
  * The AWAITED inbound's answer — the bind machinery's truth: the
  * botsService's own replies (taskRunning, taskMissing, the status card)
  * come back on the inbound_result, correlated by id (§3.2: it may arrive
@@ -308,6 +339,7 @@ class ChannelClient(
         is ServerFrame.Pong -> frame.id
         is ServerFrame.Subscribed -> frame.id
         is ServerFrame.Unsubscribed -> frame.id
+        is ServerFrame.RespondResult -> frame.id
         else -> null
     }
 
@@ -330,6 +362,70 @@ class ChannelClient(
             throw e
         } catch (e: Exception) {
             QueryAnswer.Failed("internal", e.message)
+        }
+    }
+
+    /**
+     * STEER: the running turn's redirection — the `steer` frame, AWAITED
+     * (the ack IS the truth: the host answers inbound_result once the
+     * delivery is in, an error when the fork predates the frame or the
+     * task is gone). The ack says NOTHING about the turn's fate — an idle
+     * conversation admits the guide as a fresh turn (the CLI's own
+     * admission); the caller renders that honestly from its own facts.
+     */
+    @Suppress("TooGenericExceptionCaught", "SwallowedException") // best-effort for its caller, never for the daemon
+    suspend fun steer(taskId: String, text: String, timeout: Duration = ACK_TIMEOUT): SteerAnswer {
+        val live = session ?: return SteerAnswer.Unavailable
+        val id = "t${ids.incrementAndGet()}"
+        return try {
+            when (val frame = live.request(ClientFrame.Steer(id, taskId, text), id, timeout)) {
+                is ServerFrame.InboundResult -> SteerAnswer.Delivered
+
+                is ServerFrame.ChannelError -> SteerAnswer.Failed(frame.code, frame.message)
+
+                else -> SteerAnswer.Failed("internal", "steer answered ${frame::class.simpleName}")
+            }
+        } catch (e: ChannelDown) {
+            SteerAnswer.Unavailable
+        } catch (e: TimeoutCancellationException) {
+            SteerAnswer.Failed("timeout", "no answer in $timeout")
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            SteerAnswer.Failed("internal", e.message)
+        }
+    }
+
+    /**
+     * EL RESPOND del dueño (el loop cerrado, el fork's respond frame —
+     * 6993d7e8): AWAITED — respond_result ok:true SOLO tras el ACK del v4
+     * command; el fallo (interactionId desconocido, interacción ya
+     * resuelta, turno sellado) llega COMO ChannelError con el mensaje del
+     * CLI verbatim — el tap edita el mensaje de la pregunta con esa
+     * verdad. Un fork viejo dice unknown_request: Failed honesta.
+     */
+    @Suppress("TooGenericExceptionCaught", "SwallowedException") // best-effort for its caller, never for the daemon
+    suspend fun respond(frame: ClientFrame.Respond, timeout: Duration = ACK_TIMEOUT): RespondAnswer {
+        val live = session ?: return RespondAnswer.Unavailable
+        val id = "p${ids.incrementAndGet()}"
+        return try {
+            when (val answer = live.request(frame.copy(id = id), id, timeout)) {
+                is ServerFrame.RespondResult ->
+                    if (answer.ok) RespondAnswer.Resolved
+                    else RespondAnswer.Failed("internal", "respond_result ok=false")
+
+                is ServerFrame.ChannelError -> RespondAnswer.Failed(answer.code, answer.message)
+
+                else -> RespondAnswer.Failed("internal", "respond answered ${answer::class.simpleName}")
+            }
+        } catch (e: ChannelDown) {
+            RespondAnswer.Unavailable
+        } catch (e: TimeoutCancellationException) {
+            RespondAnswer.Failed("timeout", "no answer in $timeout")
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            RespondAnswer.Failed("internal", e.message)
         }
     }
 
