@@ -596,7 +596,8 @@ object LiveTurn {
         )
     }
 
-    @Suppress("ReturnCount", "CyclomaticComplexMethod") // the close ladder: one guard per early exit; one branch per close shape — the reducer's own table
+    // the close ladder: one guard per early exit, one branch per close shape — the reducer's own table
+    @Suppress("ReturnCount", "CyclomaticComplexMethod")
     private fun reduceToolClose(
         state: TurnLive,
         event: JsonObject,
