@@ -31,7 +31,12 @@ class LastCompactQueueTest {
                 ?: QueryAnswer.Failed("internal", "no canned answer")
         }
 
-        override suspend fun sendInbound(text: String, messageId: String, receivedAt: Long): InboundReceipt {
+        override suspend fun sendInbound(
+            text: String,
+            messageId: String,
+            receivedAt: Long,
+            attachments: List<InboundAttachment>,
+        ): InboundReceipt {
             if (!available) return InboundReceipt.UNAVAILABLE
             inbound.add(text to messageId)
             return InboundReceipt.FIRED

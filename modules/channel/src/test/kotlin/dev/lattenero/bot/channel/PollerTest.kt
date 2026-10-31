@@ -156,6 +156,7 @@ class PollerTest {
             when (m) {
                 is InboundUpdate.Message -> seen.add(m.text)
                 is InboundUpdate.Callback -> seen.add("cb:${m.data}")
+                is InboundUpdate.Attachment -> seen.add("att:${m.fileId}") // a real attachment dispatches (this test's junk photo never does)
             }
         }
         val outcome = poller.cycle(cfg)

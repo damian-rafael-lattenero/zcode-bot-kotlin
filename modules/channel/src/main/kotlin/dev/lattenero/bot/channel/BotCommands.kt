@@ -313,7 +313,8 @@ class BotCommands(
     private suspend fun route(text: String, updateId: Long): BotReply? {
         pendingAnswerFor?.let { shortId ->
             pendingAnswerFor = null
-            answerWithFreeText(shortId, text, updateId)?.let { return it }
+            val (consumed, reply) = answerWithFreeText(shortId, text, updateId)
+            if (consumed) return reply
             // the question died while armed: the text rides the normal route
         }
         val facts = routeFacts()
@@ -693,6 +694,7 @@ class BotCommands(
      * keeps the question armed (the owner retries). Null = the edit IS the
      * feedback (a second message would only bury it).
      */
+    @Suppress("ReturnCount") // one guard per outcome — the tap's honest shapes
     private suspend fun questionTap(arg: String, updateId: Long): BotReply? {
         val active = board ?: return null
         val shortId = arg.substringBeforeLast(':')
@@ -729,21 +731,21 @@ class BotCommands(
                 messageId = "tg-$updateId-qa",
             )
         }
-        logger.info { "question tap: ${q.kind} «${option.label}» → ${q.requestId.take(12)}…" }
+        logger.info { "question tap: ${q.kind} «${option.label}» → ${q.requestId.take(REQUEST_ID_LOG)}…" }
         return when (val answer = ops.respondQuestion(frame)) {
             RespondAnswer.Resolved -> {
                 active.resolve(shortId, "✅ Respondido: <b>${PyText.esc(option.label)}</b>")
                 null
             }
 
-            RespondAnswer.Unavailable -> BotReply("📡 El canal está caído — la pregunta sigue esperando, probá de nuevo.")
+            RespondAnswer.Unavailable ->
+                BotReply("📡 El canal está caído — la pregunta sigue esperando, probá de nuevo.")
 
             is RespondAnswer.Failed -> {
                 val detail = answer.message?.takeIf { it.isNotBlank() } ?: answer.code
-                active.resolve(
-                    shortId,
-                    "⚠️ El tap no entró (${PyText.esc(answer.code)}): ${PyText.esc(PyText.take(detail, ORDER_LOG_PREVIEW))}",
-                )
+                val seal = "⚠️ El tap no entró (${PyText.esc(answer.code)}): " +
+                    PyText.esc(PyText.take(detail, ORDER_LOG_PREVIEW))
+                active.resolve(shortId, seal)
                 null
             }
         }
@@ -760,15 +762,17 @@ class BotCommands(
      * The armed answer's flight: the elicitation content carries the owner's
      * words verbatim (buildBotElicitationContent's shape — the answers keyed
      * by the QUESTION text, the bots' own precedent for accepting a
-     * questionnaire). Null = the question died while armed: the caller
-     * routes the text normally. Unavailable RE-ARMS — the words are still
-     * the answer once the channel returns.
+     * questionnaire). The pair's FIRST leg is the consumption law: true =
+     * the line WAS the answer (whatever the outcome — the caller stops
+     * routing it), false = the question died while armed (the line rides
+     * the normal route). Unavailable RE-ARMS — the words are still the
+     * answer once the channel returns.
      */
-    @Suppress("ReturnCount") // one guard per outcome — the armed order's own shape
-    private suspend fun answerWithFreeText(shortId: String, text: String, updateId: Long): BotReply? {
-        val active = board ?: return null
-        val q = active.byShortId(shortId) ?: return null
-        if (q.kind != "elicitation") return null // plans and permissions answer by button only
+    @Suppress("ReturnCount") // one guard per outcome — the armed answer's shapes
+    private suspend fun answerWithFreeText(shortId: String, text: String, updateId: Long): Pair<Boolean, BotReply?> {
+        val active = board ?: return false to null
+        val q = active.byShortId(shortId) ?: return false to null
+        if (q.kind != "elicitation") return false to null // plans and permissions answer by button only
         val frame = ClientFrame.Respond(
             id = "",
             taskId = q.taskId,
@@ -778,25 +782,28 @@ class BotCommands(
             content = elicitationContent(q.title, text, q.questionCount),
             messageId = "tg-$updateId-qf",
         )
-        logger.info { "question answer (free text) → ${q.requestId.take(12)}…: ${text.take(ORDER_LOG_PREVIEW)}" }
+        logger.info {
+            "question answer (free text) → ${q.requestId.take(REQUEST_ID_LOG)}…: ${text.take(ORDER_LOG_PREVIEW)}"
+        }
         return when (val answer = ops.respondQuestion(frame)) {
             RespondAnswer.Resolved -> {
                 active.resolve(shortId, "✅ Tu respuesta entró.")
-                null
+                true to null
             }
 
             RespondAnswer.Unavailable -> {
                 pendingAnswerFor = shortId
-                BotReply(RouteTexts.CHANNEL_DOWN + "\nLa respuesta sigue armada — reintentá con tu próxima línea.")
+                true to BotReply(
+                    RouteTexts.CHANNEL_DOWN + "\nLa respuesta sigue armada — reintentá con tu próxima línea.",
+                )
             }
 
             is RespondAnswer.Failed -> {
                 val detail = answer.message?.takeIf { it.isNotBlank() } ?: answer.code
-                active.resolve(
-                    shortId,
-                    "⚠️ La respuesta no entró (${PyText.esc(answer.code)}): ${PyText.esc(PyText.take(detail, ORDER_LOG_PREVIEW))}",
-                )
-                null
+                val seal = "⚠️ La respuesta no entró (${PyText.esc(answer.code)}): " +
+                    PyText.esc(PyText.take(detail, ORDER_LOG_PREVIEW))
+                active.resolve(shortId, seal)
+                true to null
             }
         }
     }
@@ -1625,6 +1632,9 @@ class BotCommands(
         /** Python's status: «🎯 Active: none (/task n to pick one)». */
         internal const val ACTIVE_NONE = "🎯 Active: none (/tasks n to pick one)"
         internal const val SID_TAIL = 8
+
+        /** The requestId's log tail (the full wire id is noise in the daemon log). */
+        private const val REQUEST_ID_LOG = 12
 
         /** The CLI session store's child-session convention — measured live 30/10 in the db rows. */
         internal const val SUBAGENT_SESSION_PREFIX = "sess_subagent_"

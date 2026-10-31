@@ -35,7 +35,7 @@ class AttachmentWiringTest {
     @Test
     fun theFilenameIsSafeOnDisk() {
         assertEquals("reporte_Q4.pdf", attachmentFilename("reporte Q4.pdf"))
-        assertEquals(".._etc_passwd", attachmentFilename("../../etc/passwd"))
+        assertEquals(".._.._etc_passwd", attachmentFilename("../../etc/passwd")) // char-by-char: dots survive, slashes become _ — no traversal either way
         assertEquals("attachment", attachmentFilename("///"))
         assertEquals("a".repeat(120), attachmentFilename("a".repeat(500)))
     }

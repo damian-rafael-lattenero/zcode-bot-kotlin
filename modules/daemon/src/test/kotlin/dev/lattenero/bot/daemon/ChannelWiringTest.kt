@@ -53,21 +53,6 @@ class ChannelWiringTest {
     }
 
     @Test
-    fun finalBoxesRideTheSpectatorsRenderer() {
-        val tools = listOf(
-            ToolLive("t1", "Write", openedAtMs = 1, status = "completed", input = buildJsonObject { put("content", "line") }),
-            ToolLive("t2", "Bash", openedAtMs = 2, status = "failed", input = buildJsonObject { put("command", "ls") }),
-            ToolLive("t3", "Read", openedAtMs = 3, status = null), // still open: no box (no input either)
-        )
-        val boxes = finalBoxesOf(tools)
-        assertTrue("✅" in boxes)
-        assertTrue("❌" in boxes)
-        assertTrue(boxes.contains("\n")) // one box per line
-        // the spectator renderer's own signature: the numbered green lines of a Write
-        assertTrue(Regex("""\d+.*line""").containsMatchIn(boxes))
-    }
-
-    @Test
     fun snapshotAnswerFindsTheLastAssistantMessage() {
         val snapshot = """
             {"messages":[

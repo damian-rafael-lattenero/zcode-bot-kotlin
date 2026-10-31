@@ -74,6 +74,7 @@ data class PendingQuestion(
  * ZCodeElicitationRequest (questions[] or message+options, value+label),
  * plan approval by schema.interaction.
  */
+@Suppress("CyclomaticComplexMethod", "LongMethod", "ReturnCount") // one branch per wire shape — the parser's own map
 internal fun parseQuestionEvent(event: JsonObject): PendingQuestion? {
     val type = event.str("type") ?: return null
     val requestId = event.str("requestId")?.takeIf { it.isNotEmpty() } ?: return null
@@ -99,7 +100,12 @@ internal fun parseQuestionEvent(event: JsonObject): PendingQuestion? {
             val opts = options.ifEmpty {
                 listOf(
                     QuestionOption("allow", "Permitir", response = buildJsonObject { put("decision", "allow") }),
-                    QuestionOption("deny", "Denegar", response = buildJsonObject { put("decision", "deny") }, isDeny = true),
+                    QuestionOption(
+                        "deny",
+                        "Denegar",
+                        response = buildJsonObject { put("decision", "deny") },
+                        isDeny = true,
+                    ),
                 )
             }
             PendingQuestion(
@@ -199,7 +205,12 @@ private fun buildQuestionRows(shortId: String, q: PendingQuestion): JsonArray {
             }
             add(
                 buildJsonArray {
-                    add(Keyboards.button("$mark${option.label.take(QuestionBoard.QUESTION_LABEL_CAP)}", "qa:$shortId:$i"))
+                    add(
+                        Keyboards.button(
+                            "$mark${option.label.take(QuestionBoard.QUESTION_LABEL_CAP)}",
+                            "qa:$shortId:$i",
+                        ),
+                    )
                 },
             )
         }
@@ -249,6 +260,7 @@ class QuestionBoard(
      * Returns the question when a NEW one went out (null = not a question
      * or already pending).
      */
+    @Suppress("ReturnCount") // the dedupe's guards ARE the law
     suspend fun onStreamEvent(frame: ServerFrame.StreamEvent): PendingQuestion? {
         val parsed = parseQuestionEvent(frame.event) ?: return null
         val shortId = synchronized(lock) {

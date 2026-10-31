@@ -67,7 +67,7 @@ class TgApi(
      * Every failure passes the redactor — the download URL carries the
      * token, exactly like the POST's.
      */
-    @Suppress("TooGenericExceptionCaught") // the same redactor law as call()
+    @Suppress("TooGenericExceptionCaught", "ThrowsCount") // the redactor law + each refusal its own honest failure
     suspend fun downloadFile(fileId: String, target: File): Long {
         val cfg = configProvider()
         val info = call("getFile", buildJsonObject { put("file_id", fileId) })

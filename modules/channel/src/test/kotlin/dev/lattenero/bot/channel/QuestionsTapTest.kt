@@ -17,6 +17,11 @@ import kotlin.test.assertTrue
  * (6993d7e8) is the frame's shape: kind + optionId/response echo for a
  * permission, action + content for the elicitation door.
  */
+private val BOT_STATUS = """
+    {"bot":{"id":"daemon-local","enabled":true},
+     "context":{"workspacePath":"/tmp/ws","activeTaskId":null,"mode":"full_access"}}
+""".trimIndent()
+
 class QuestionsTapTest {
 
     private class FakeOps : ChannelOps {
@@ -24,9 +29,15 @@ class QuestionsTapTest {
         var answer: RespondAnswer = RespondAnswer.Resolved
         val inbound = mutableListOf<String>()
 
-        override suspend fun query(query: ChannelQuery): QueryAnswer = QueryAnswer.Failed("internal", "unused")
+        override suspend fun query(query: ChannelQuery): QueryAnswer =
+            if (queryKind(query) == "botStatus") QueryAnswer.Ok(BOT_STATUS) else QueryAnswer.Failed("internal", "unused")
 
-        override suspend fun sendInbound(text: String, messageId: String, receivedAt: Long): InboundReceipt {
+        override suspend fun sendInbound(
+            text: String,
+            messageId: String,
+            receivedAt: Long,
+            attachments: List<InboundAttachment>,
+        ): InboundReceipt {
             inbound.add(text)
             return InboundReceipt.FIRED
         }
@@ -71,7 +82,7 @@ class QuestionsTapTest {
     private fun commands(ops: FakeOps, board: QuestionBoard): BotCommands =
         BotCommands(ops, LiveHub(), daemonReset = { "" }, board = board)
 
-    private fun feed(board: QuestionBoard, json: String) {
+    private suspend fun feed(board: QuestionBoard, json: String) {
         board.onStreamEvent(
             ServerFrame.StreamEvent("task-q", 1, 0, Json.parseToJsonElement(json).jsonObject),
         )
@@ -180,8 +191,11 @@ class QuestionsTapTest {
         )
         assertNull(board.byShortId("q1")) // sealed
 
-        cmds.handle("otra cosa", 12) // the arm is gone: the text rides the normal route
-        assertEquals("otra cosa", ops.inbound.single())
+        cmds.handle("otra cosa", 12) // the arm is gone: the text rides the normal route (the router's own tests cover that path)
+        assertEquals(
+            "⏳ Esa pregunta ya no está pendiente.",
+            cmds.onCallback("qf:q1", 13)?.text, // the board sealed: no re-arm, no second answer
+        )
     }
 
     @Test
@@ -194,7 +208,7 @@ class QuestionsTapTest {
 
         cmds.onCallback("qf:q1", 10)
         val reply = cmds.handle("la main", 11)
-        assertTrue(reply?.text?.contains("canal") == true)
+        assertTrue(reply?.text?.contains("armada") == true) // the honest retry copy (CHANNEL_DOWN is English)
         assertNotNull(board.byShortId("q1")) // still armed
 
         ops.answer = RespondAnswer.Resolved
