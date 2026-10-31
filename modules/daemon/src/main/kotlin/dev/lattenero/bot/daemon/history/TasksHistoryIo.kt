@@ -157,7 +157,13 @@ internal class TasksHistoryIo(private val baseDir: File) : TasksHistory {
                     ps.executeQuery().use { rs ->
                         val rows = mutableListOf<RunningSubagent>()
                         while (rs.next()) {
-                            rows.add(RunningSubagent(rs.getString(1).orEmpty(), rs.getString(2).orEmpty()))
+                            rows.add(
+                                RunningSubagent(
+                                    sid = rs.getString(1).orEmpty(),
+                                    title = rs.getString(2).orEmpty(),
+                                    lastMs = rs.getLong(RUNNING_SUB_UPDATED_COL),
+                                ),
+                            )
                         }
                         rows
                     }
@@ -304,10 +310,12 @@ internal class TasksHistoryIo(private val baseDir: File) : TasksHistory {
         const val RUNNING_SUBS_QUERY =
             "SELECT id FROM session WHERE parent_id = ? AND COALESCE(last_outcome,'') = ''"
         const val RUNNING_SUB_ID_COL = 1
+        const val RUNNING_SUB_TITLE_COL = 2
+        const val RUNNING_SUB_UPDATED_COL = 3
 
         /** The ACTIVE view's titled read: the same running children, with the prompt's first words. */
         const val RUNNING_SUBS_TITLED_QUERY =
-            "SELECT id, title FROM session WHERE parent_id = ? AND COALESCE(last_outcome,'') = '' " +
+            "SELECT id, title, time_updated FROM session WHERE parent_id = ? AND COALESCE(last_outcome,'') = '' " +
                 "ORDER BY time_created DESC LIMIT 10"
     }
 }

@@ -114,6 +114,7 @@ object Keyboards {
         lanes: List<ToolLive>,
         dbRunning: List<RunningSubagent> = emptyList(),
         inactiveView: Boolean,
+        nowMs: Long = 0,
     ): JsonObject = buildJsonObject {
         putJsonArray("inline_keyboard") {
             lanes.forEach { lane ->
@@ -131,7 +132,11 @@ object Keyboards {
                 add(
                     buildJsonArray {
                         val label = r.title.takeIf { it.isNotBlank() }?.take(TITLE_CAP) ?: r.sid.takeLast(LANE_TAIL)
-                        add(button("$SUBAGENT_MARK $label ▶️", "sa:${r.sid.takeLast(LANE_TAIL)}"))
+                        // the store never closes a KILLED agent's row: its
+                        // frozen lastMs is the ghost marker — rendered honest
+                        val staleMin = (nowMs - r.lastMs) / 60000
+                        val mark = if (r.lastMs <= 0 || staleMin < SUB_STALE_MIN) "▶️" else "⏸️ hace ${staleMin}m"
+                        add(button("$SUBAGENT_MARK $label $mark", "sa:${r.sid.takeLast(LANE_TAIL)}"))
                         add(button("✍️", "so:${r.sid.takeLast(LANE_TAIL)}"))
                     },
                 )
@@ -286,6 +291,9 @@ object Keyboards {
     private const val MARK_RUNNING_LANE = "▶️"
     private const val MARK_STOPPED_LANE = "⏹️"
     private const val TITLE_CAP = 34
+
+    /** A store row untouched this long renders ⏸️ (a killed agent's ghost), not ▶️. */
+    private const val SUB_STALE_MIN = 15L
     internal const val LANE_TAIL = 16
     private const val CALLBACK_BYTES = 64
     private const val CALLBACK_TEXT_CAP = 64
