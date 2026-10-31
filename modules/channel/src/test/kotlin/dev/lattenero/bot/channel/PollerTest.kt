@@ -155,6 +155,7 @@ class PollerTest {
         ) { _, m ->
             when (m) {
                 is InboundUpdate.Message -> seen.add(m.text)
+                is InboundUpdate.Attachment -> seen.add("att:${m.fileId}")
                 is InboundUpdate.Callback -> seen.add("cb:${m.data}")
             }
         }

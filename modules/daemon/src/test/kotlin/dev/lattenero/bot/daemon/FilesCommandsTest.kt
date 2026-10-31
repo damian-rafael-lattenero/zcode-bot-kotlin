@@ -113,7 +113,7 @@ class FilesCommandsTest {
 
     @Test
     fun aBigDiffPointsAtFileInsteadOfLying() {
-        val big = ChangedFile("/big/x.txt", (1..500).joinToString("\n") { "line $it" }, (1..500).joinToString("\n") { "line $it" } + "\nextra", 1)
+        val big = FilesCommands.ChangedFile("/big/x.txt", (1..500).joinToString("\n") { "line $it" }, (1..500).joinToString("\n") { "line $it" } + "\nextra", 1)
         val text = FilesCommands.renderDiff(listOf(big), all = false, maxReplyChars = 3500)
         assertTrue("✂️" in text, text)
         assertTrue("/file /big/x.txt" in text, text)
