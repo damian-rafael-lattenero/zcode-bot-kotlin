@@ -436,11 +436,12 @@ class ChannelClient(
         messageId: String,
         receivedAt: Long,
         taskId: String? = null,
+        attachments: List<InboundAttachment> = emptyList(),
     ): InboundReceipt {
         val live = session ?: return InboundReceipt.UNAVAILABLE
         val id = "r${ids.incrementAndGet()}"
         return try {
-            live.fire(ClientFrame.Inbound(id, text, messageId, receivedAt, taskId))
+            live.fire(ClientFrame.Inbound(id, text, messageId, receivedAt, taskId, attachments))
             InboundReceipt.FIRED
         } catch (e: CancellationException) {
             throw e

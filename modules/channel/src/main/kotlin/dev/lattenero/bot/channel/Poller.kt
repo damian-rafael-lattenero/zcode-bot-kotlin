@@ -52,6 +52,28 @@ sealed interface InboundUpdate {
         val callbackId: String,
         val data: String,
     ) : InboundUpdate
+
+    /**
+     * ATTACHMENTS IN (30/10): the owner's photo or document, headed for
+     * the agent — the wiring downloads it (the bot's own token, the Bot
+     * API's getFile) into the daemon's state and rides the inbound frame's
+     * attachments (localPath; the caption is the prompt's text). The SIZE
+     * is Telegram's word (absent = unknown — the gate treats unknown as
+     * passable; the honest refusals happen at the wiring).
+     */
+    data class Attachment(
+        override val updateId: Long,
+        override val fromId: Long?,
+        val messageId: Long = 0,
+        /** The wire's kind: «image» (photos) or «file» (documents). */
+        val kind: String,
+        val fileId: String,
+        val filename: String,
+        val mimeType: String,
+        val sizeBytes: Long?,
+        /** The photo/document caption — the prompt's text (empty when absent). */
+        val caption: String,
+    ) : InboundUpdate
 }
 
 /** One poll cycle's outcome — the offset to confirm POST-dispatch (F2d's at-least-once). */
@@ -170,11 +192,17 @@ class Poller(
         }
         val message = update["message"] as? JsonObject ?: update["edited_message"] as? JsonObject
         if (message != null) {
-            val text = (message["text"] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: return null
             val fromId = from(message)
             if (fromId != owner) return null
             val mid = (message["message_id"] as? JsonPrimitive)?.longOrNull ?: 0L
-            return InboundUpdate.Message(updateId = updateId, fromId = fromId, text = text, messageId = mid)
+            val text = (message["text"] as? JsonPrimitive)?.takeIf { it.isString }?.content
+            if (text != null) {
+                return InboundUpdate.Message(updateId = updateId, fromId = fromId, text = text, messageId = mid)
+            }
+            // ATTACHMENTS IN (30/10): the owner's photo or document — an
+            // attachment update, downloaded and delivered by the wiring
+            normalizeAttachment(message, updateId, fromId, mid)?.let { return it }
+            return null
         }
         val callback = update["callback_query"] as? JsonObject ?: return null
         val callbackId = (callback["id"] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: return null
@@ -183,6 +211,62 @@ class Poller(
         if (fromId != owner) return null
         return InboundUpdate.Callback(updateId = updateId, fromId = fromId, callbackId = callbackId, data = data)
     }
+
+    /**
+     * The photo/document ladder (ATTACHMENTS IN): a well-formed photo (an
+     * ARRAY of sizes — the largest is the one worth downloading) or a
+     * document ({file_name, mime_type, file_size?, file_id}). A malformed
+     * shape (Telegram's `"photo":"x"` degenerate or an unnamed document)
+     * is skipped — the cursor already advanced, the honest silence is the
+     * log's. Photos carry no name: the wire's filename is the update's own.
+     */
+    private fun normalizeAttachment(
+        message: JsonObject,
+        updateId: Long,
+        fromId: Long?,
+        mid: Long,
+    ): InboundUpdate.Attachment? {
+        val caption = (message["caption"] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: ""
+        (message["photo"] as? kotlinx.serialization.json.JsonArray)?.let { sizes ->
+            val largest = largestPhoto(sizes) ?: return null
+            val fileId = largest.str("file_id") ?: return null
+            return InboundUpdate.Attachment(
+                updateId = updateId,
+                fromId = fromId,
+                messageId = mid,
+                kind = "image",
+                fileId = fileId,
+                filename = "photo-$updateId.jpg",
+                mimeType = "image/jpeg",
+                sizeBytes = largest.long("file_size"),
+                caption = caption,
+            )
+        }
+        val document = message["document"] as? JsonObject ?: return null
+        val fileId = document.str("file_id") ?: return null
+        return InboundUpdate.Attachment(
+            updateId = updateId,
+            fromId = fromId,
+            messageId = mid,
+            kind = "file",
+            fileId = fileId,
+            filename = document.str("file_name")?.takeIf { it.isNotBlank() }
+                ?: "document-$updateId",
+            mimeType = document.str("mime_type") ?: "application/octet-stream",
+            sizeBytes = document.long("file_size"),
+            caption = caption,
+        )
+    }
+
+    /** The photo's LARGEST size row (the one the Bot API serves whole) — null when none carries a file_id. */
+    internal fun largestPhoto(sizes: kotlinx.serialization.json.JsonArray): JsonObject? =
+        sizes.mapNotNull { it as? JsonObject }
+            .filter { it.str("file_id") != null }
+            .maxByOrNull { size ->
+                val w = size.long("width") ?: 0L
+                val h = size.long("height") ?: 0L
+                maxOf(w, h, size.long("file_size") ?: 0L)
+            }
 
     /** The poller Process: one cycle per iteration, the long-poll inside the body is the pacing. */
     fun asProcess(

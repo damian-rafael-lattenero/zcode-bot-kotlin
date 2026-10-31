@@ -4,8 +4,10 @@ import io.ktor.client.HttpClient
 import io.ktor.client.engine.HttpClientEngineFactory
 import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.HttpTimeout
+import io.ktor.client.request.get
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
+import io.ktor.client.statement.bodyAsBytes
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
@@ -14,6 +16,9 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import java.io.File
 import java.io.IOException
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
@@ -52,6 +57,33 @@ class TgApi(
         val body = resp.bodyAsText()
         if (!resp.status.isSuccess()) throw TgHttpException(resp.status.value, body)
         return Json.parseToJsonElement(body)
+    }
+
+    /**
+     * ATTACHMENTS IN (30/10): the Bot API's own download leg — getFile
+     * names the file, then a GET on file/bot<token>/<file_path> brings the
+     * bytes home (the bot's token, the 20 MB bot law upstream). The target
+     * file's parent must exist; the written byte count is the receipt.
+     * Every failure passes the redactor — the download URL carries the
+     * token, exactly like the POST's.
+     */
+    @Suppress("TooGenericExceptionCaught") // the same redactor law as call()
+    suspend fun downloadFile(fileId: String, target: File): Long {
+        val cfg = configProvider()
+        val info = call("getFile", buildJsonObject { put("file_id", fileId) })
+        val filePath = ((info as? JsonObject)?.get("result") as? JsonObject)
+            ?.get("file_path")?.let { it as? JsonPrimitive }?.takeIf { it.isString }?.content
+            ?: throw IOException(cfg.redact("getFile answered no file_path for the download"))
+        val url = "${cfg.apiBase}/file/bot${cfg.token}/$filePath"
+        val resp = try {
+            client.get(url)
+        } catch (e: Exception) {
+            throw IOException(cfg.redact(e.message ?: e::class.simpleName.orEmpty()), e)
+        }
+        if (!resp.status.isSuccess()) throw TgHttpException(resp.status.value, resp.bodyAsText())
+        val bytes = resp.bodyAsBytes()
+        target.writeBytes(bytes)
+        return bytes.size.toLong()
     }
 
     override fun close() = client.close()

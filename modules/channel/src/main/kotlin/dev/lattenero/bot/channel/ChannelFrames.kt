@@ -2,6 +2,7 @@ package dev.lattenero.bot.channel
 
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -109,6 +110,22 @@ data class WorkspaceScope(val workspacePath: String, val workspaceIdentity: Stri
 
 // ---- client → server --------------------------------------------------------
 
+/**
+ * One attachment of an inbound — the fork's DaemonChannelInboundAttachment
+ * shape (localPath preferred over dataBase64; the host materializes the
+ * file into bot-attachments/ and the agent reads it from disk).
+ */
+data class InboundAttachment(
+    val id: String,
+    /** «image» | «audio» | «video» | «file» — the fork's own vocabulary. */
+    val kind: String,
+    val filename: String,
+    val mimeType: String,
+    val sizeBytes: Long? = null,
+    /** Absolute path readable by the host — how this daemon always ships. */
+    val localPath: String? = null,
+)
+
 /** What the daemon sends. The hello carries the token — [describe] keeps it out of every log. */
 sealed interface ClientFrame {
     data class Hello(val token: String, val clientId: String = ChannelSpec.CLIENT_ID) : ClientFrame
@@ -120,6 +137,8 @@ sealed interface ClientFrame {
         val receivedAt: Long?,
         /** La sesión DESTINO (una ORDEN del dueño a un subagente attachado) — null = el routing de siempre. */
         val taskId: String? = null,
+        /** ATTACHMENTS IN (30/10): the owner's photo/document, already on the daemon's disk. */
+        val attachments: List<InboundAttachment> = emptyList(),
     ) : ClientFrame
 
     data class Subscribe(val id: String, val taskId: String, val workspacePath: String) : ClientFrame
@@ -176,6 +195,25 @@ fun encodeClient(frame: ClientFrame): String = when (frame) {
         if (frame.messageId != null) put("messageId", frame.messageId)
         if (frame.receivedAt != null) put("receivedAt", frame.receivedAt)
         if (frame.taskId != null) put("taskId", frame.taskId)
+        if (frame.attachments.isNotEmpty()) {
+            put(
+                "attachments",
+                buildJsonArray {
+                    frame.attachments.forEach { att ->
+                        add(
+                            buildJsonObject {
+                                put("id", att.id)
+                                put("kind", att.kind)
+                                put("filename", att.filename)
+                                put("mimeType", att.mimeType)
+                                if (att.sizeBytes != null) put("sizeBytes", att.sizeBytes)
+                                if (att.localPath != null) put("localPath", att.localPath)
+                            },
+                        )
+                    }
+                },
+            )
+        }
     }
 
     is ClientFrame.Subscribe -> buildJsonObject {
@@ -453,7 +491,8 @@ fun decodeServerLine(line: String): ServerFrame? {
  */
 fun describe(frame: ClientFrame): String = when (frame) {
     is ClientFrame.Hello -> "hello(clientId=${frame.clientId}, token=***)"
-    is ClientFrame.Inbound -> "inbound(id=${frame.id}, messageId=${frame.messageId}, ${frame.text.length} chars)"
+    is ClientFrame.Inbound -> "inbound(id=${frame.id}, messageId=${frame.messageId}, ${frame.text.length} chars" +
+        (if (frame.attachments.isEmpty()) "" else ", ${frame.attachments.size} attachment(s)") + ")"
     is ClientFrame.Subscribe -> "subscribe(id=${frame.id}, taskId=${frame.taskId})"
     is ClientFrame.Unsubscribe -> "unsubscribe(id=${frame.id}, taskId=${frame.taskId})"
     is ClientFrame.Steer -> "steer(id=${frame.id}, taskId=${frame.taskId}, ${frame.text.length} chars)"
