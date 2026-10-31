@@ -188,9 +188,7 @@ internal fun wireChannel(
         verbosity,
     )
     val poller =
-        buildPoller(
-            cfg, lanes.api, pythonState, pollOn, hub, client, speak, remote, queue, history, liveView, verbosity,
-        )
+        buildPoller(cfg, lanes.api, pythonState, pollOn, hub, client, speak, remote, queue, history, liveView, verbosity)
     return ChannelStack(client, liveView, poller, hub)
 }
 
