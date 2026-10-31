@@ -151,17 +151,13 @@ data class TurnLive(
      * per [LiveTurn.COT_BLOCK_CP] code points of REAL streamed thinking.
      * The full accumulation lives here — the tail above is just the live
      * preview window; a block's text is never summarized, never invented.
+     * The TRANSCRIPT FEED speaks each one as its own Telegram message the
+     * moment it seals (the old in-card cb: toggle is retired — the owner
+     * reads the blocks one under the other, /verbosity adjusts the flow).
      */
     val cotBlocks: List<String> = emptyList(),
     /** The block currently filling: seals into [cotBlocks] at the cap. */
     val cotPending: String = "",
-    /**
-     * The EXPANDED block's 1-based index — the cb:<n> tap's VIEW flag (the
-     * cotExpanded precedent): the block's full text opens IN the card,
-     * above its button row; the same tap folds it. One at a time (the
-     * single pointer); null = everything folded.
-     */
-    val cotExpandedBlock: Int? = null,
     val tools: List<ToolLive> = emptyList(),
     /** Subagent lanes: parentToolUseId → thought chars (the stream is ONE stream). */
     val subagentThought: Map<String, Int> = emptyMap(),
@@ -353,18 +349,15 @@ object LiveTurn {
      * The CoT BLOCK's cap — Python's COT_BOX_CAP (reasoning.py, the
      * owner's F43 model verbatim: «a box has a size; when the CoT reaches
      * the cap the box is full and is sent with its number»). A block seals
-     * at 3000 CODE POINTS of streamed thinking and its button travels.
+     * at 3000 CODE POINTS of streamed thinking and the feed speaks it.
      */
     const val COT_BLOCK_CP = 3000
 
     /** How much of the tail the STATUS message shows while it fits (the cajita's window). */
     const val COT_PREVIEW_CP = 1100
 
-    /** The expanded block's window (Telegram's 4096-char message law minus the rest of the line). */
-    const val COT_EXPANDED_CP = 3400
-
     /**
-     * The close shower's chunk size (RAW code points before esc()) — a
+     * The transcript feed's chunk size (RAW code points before esc()) — a
      * prose chunk escapes to ≈ itself, under the transport's CH_REPLY;
      * esc() is per-char, so a chunk-then-escape never splits an entity.
      */
@@ -763,9 +756,6 @@ object LiveTurn {
             lines.add("⚠️ ${PyText.esc(ApiRetryText.line(pill, nowMs))}$suffix")
         }
         cotBlock(state)?.let(lines::add)
-        // the honest cap: the keyboard holds only the most recent blocks —
-        // the promise the close's shower keeps (the dropped ones travel)
-        cotOverflowNote(state)?.let(lines::add)
         // THE HEART IS DEAD (the owner's 30/10 verdict on the 💓): liveness
         // is the per-box counters themselves plus this sober line — «en
         // vivo» with the honest silence while the stream moves or waits;
@@ -777,12 +767,6 @@ object LiveTurn {
             if (live) "en vivo · último evento hace ${fmtDur(silence)} · ${state.doneTools} listos"
             else "frozen · ${fmtDur(silence)} sin eventos · ${state.doneTools} listos",
         )
-        // THE READING (the owner's 30/10 refinement: «el lugar para que
-        // aparezca el texto ES EN EL BOTON del CoT»): the tapped block opens
-        // WHOLE as the card's LAST body element — right above its button
-        // row — and stays while the model keeps working (the blocks are
-        // sealed; the card's noise keeps churning above, the reading doesn't)
-        expandedBlockSection(state)?.let(lines::add)
         return lines.joinToString("\n")
     }
 
@@ -876,79 +860,13 @@ object LiveTurn {
 
     /**
      * The CoT's LIVE preview: the tail as a quote block while the model
-     * streams (what is being thought RIGHT NOW). A tapped block's reading
-     * replaces it (one surface at a time — the budget is the block's). The
-     * tail is a window, never the reading: the blocks' buttons carry that.
+     * streams (what is being thought RIGHT NOW). The tail is a window,
+     * never the reading: the SEALED blocks travel as their own messages
+     * (the transcript feed), the unsealed rest flushes at the seal.
      */
-    @Suppress("ReturnCount") // one shape per preview state: not-thinking, expanded, folded
     internal fun cotBlock(state: TurnLive): String? {
         if (state.phase !is TurnPhase.Thinking || state.cotTail.isEmpty()) return null
-        if (state.cotExpandedBlock != null) return null
         return "<blockquote>${PyText.esc(takeLastCodePoints(state.cotTail, COT_PREVIEW_CP))}</blockquote>"
-    }
-
-    /**
-     * The TAPPED block opens WHOLE (the owner reads the COMPLETE CoT, the
-     * Python bot's F43c in-place edit reborn as the card's own edit): its
-     * real streamed text, htmlClip'd only when esc() would inflate it past
-     * the message law (the audit-20/10 lesson) — and the cut says so.
-     * Out-of-range pointers render nothing (a stale tap after a resync
-     * folds silently — the honest no-op).
-     */
-    @Suppress("ReturnCount") // one guard per early exit: no pointer, stale pointer, the whole block
-    internal fun expandedBlockSection(state: TurnLive): String? {
-        val n = state.cotExpandedBlock ?: return null
-        val text = state.cotBlocks.getOrNull(n - 1) ?: return null
-        val clipped = PyText.htmlClip(text, COT_EXPANDED_CP)
-        val cut = when {
-            PyText.cpLength(PyText.esc(text)) > COT_EXPANDED_CP ->
-                "\n<i>… (bloque de ${PyText.cpLength(text)} chars, recortado para el presupuesto de Telegram)</i>"
-            else -> ""
-        }
-        return "📖 <b>CoT $n</b> · ${PyText.cpLength(text)} chars\n" +
-            "<blockquote>${PyText.esc(clipped)}</blockquote>$cut"
-    }
-
-    /**
-     * The honest cap's note: the keyboard holds the most recent
-     * [Keyboards.COT_BUTTONS_CAP] blocks; the older ones travel with the
-     * close's shower ([overflowShower]) — the render says so, never
-     * silently.
-     */
-    @Suppress("ReturnCount") // one shape per note state: absent, dropped
-    internal fun cotOverflowNote(state: TurnLive): String? {
-        val dropped = state.cotBlocks.size - Keyboards.COT_BUTTONS_CAP
-        if (dropped <= 0) return null
-        val plural = if (dropped == 1) "" else "s"
-        return "🧠 hay $dropped bloque$plural CoT fuera del teclado — viajan con el cierre del turno"
-    }
-
-    /** The card's keyboard: one «📖 CoT N» per sealed block, the expanded one folded by the same tap. */
-    fun cotMarkup(state: TurnLive): kotlinx.serialization.json.JsonObject? =
-        Keyboards.cotBlocksButtons(state.cotBlocks.size, state.cotExpandedBlock)
-
-    /**
-     * The keyboard-dropped blocks' shower text — the promise
-     * [cotOverflowNote] makes: blocks beyond the keyboard cap travel with
-     * the close, chunked under the message law, the REAL streamed text
-     * (never summarized). Empty when the keyboard held everything.
-     */
-    fun overflowShower(state: TurnLive): List<String> {
-        val dropped = state.cotBlocks.size - Keyboards.COT_BUTTONS_CAP
-        if (dropped <= 0) return emptyList()
-        val joined = state.cotBlocks.take(dropped).joinToString("\n\n")
-        val chunks = mutableListOf<String>()
-        var rest = joined
-        while (rest.isNotEmpty()) {
-            val chunk = PyText.take(rest, COT_SHOWER_CHUNK_CP)
-            chunks.add(chunk)
-            rest = rest.substring(chunk.length)
-        }
-        return chunks.mapIndexed { i, chunk ->
-            val head = if (i == 0) "🧠 <b>CoT</b> — los primeros $dropped bloque" +
-                (if (dropped == 1) "" else "s") + " (fuera del teclado en vivo):\n" else ""
-            head + PyText.esc(chunk)
-        }
     }
 
     /** Python's «cot 1.2K» — thousands with one decimal. */

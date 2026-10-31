@@ -434,47 +434,22 @@ class LiveTurnTest {
     }
 
     @Test
-    fun theTapExpandsTheBlockWholeAboveItsRowAndTheSameTapFolds() {
+    fun theCardKeepsTheLivePreviewWhileTheFeedCarriesTheBlocks() {
         var s: TurnLive? = null
         repeat(300) { s = reduce(s, thought("0123456789")) } // block 1 sealed
         s = reduce(s, thought("y sigue la segunda parte del pensamiento"))
-
-        // folded: the keyboard carries the block's button, the live preview shows
-        val kb = LiveTurn.cotMarkup(s!!)
-        assertTrue(kb.toString().contains("cb:1"))
-        assertTrue(kb.toString().contains("📖 CoT 1"))
-        assertTrue("<blockquote>" in LiveTurn.render(s!!, nowMs = 1L, spin = 0, channelAlive = true))
-
-        // EXPANDED (the owner's refinement: the text opens IN the card,
-        // above the button row — the block WHOLE, never a summary)
-        val open = s!!.copy(cotExpandedBlock = 1)
-        val text = LiveTurn.render(open, nowMs = 1L, spin = 0, channelAlive = true)
-        assertTrue("📖 <b>CoT 1</b>" in text)
-        assertTrue("<blockquote>${"0123456789".repeat(300)}</blockquote>" in text) // the COMPLETE block
-        assertTrue("⤴️ CoT 1" in LiveTurn.cotMarkup(open).toString()) // the fold mark on the same button
-        assertTrue("📖 CoT 1" !in LiveTurn.cotMarkup(open).toString()) // …replacing the open mark
-        // the live preview yields the surface to the reading (the budget
-        // is the block's) — the LAST body element is the block, right
-        // above the row
-        assertTrue(text.trimEnd().endsWith("</blockquote>"))
-        val preview = LiveTurn.cotBlock(open)
-        assertNull(preview)
-
-        // the SAME tap folds: the hub's toggle cycle
-        runBlocking {
-            val hub = LiveHub()
-            hub.apply(thought("x".repeat(3000)), nowMs = 1L)
-            hub.toggleCotBlock(1)
-            assertEquals(1, hub.peek()!!.cotExpandedBlock)
-            hub.toggleCotBlock(1)
-            assertNull(hub.peek()!!.cotExpandedBlock)
-        }
+        // the card's preview is the LIVE window only; the SEALED blocks
+        // travel as their own Telegram messages (the transcript feed —
+        // TranscriptFeedTest pins the diff), never as card buttons
+        val text = LiveTurn.render(s!!, nowMs = 1L, spin = 0, channelAlive = true)
+        assertTrue("<blockquote>" in text, "the live preview still shows")
+        assertTrue("cb:" !in text, "no block buttons on the card")
     }
 
     @Test
-    fun theTailPreviewCoexistsWithTheBlocks() {
+    fun theTailPreviewKeepsFlowingBesideTheSealedBlocks() {
         // two blocks sealed, the third filling: the preview keeps flowing
-        // (the LIVE window) while the buttons carry the reading
+        // (the LIVE window) while the sealed blocks ride the feed
         var s: TurnLive? = null
         repeat(650) { s = reduce(s, thought("0123456789")) } // 6500 cp: 2 blocks + 500
         assertEquals(2, s!!.cotBlocks.size)
@@ -482,66 +457,21 @@ class LiveTurnTest {
         val text = LiveTurn.render(s!!, nowMs = 1L, spin = 0, channelAlive = true)
         assertTrue("<blockquote>" in text) // the preview lives
         assertTrue("tocá el botón para abrirlo" !in text) // the old collapsed line is GONE
-        val kb = LiveTurn.cotMarkup(s!!).toString()
-        assertTrue("cb:1" in kb && "cb:2" in kb)
-        // a block tap during the ANSWER (Writing) still shows the row — the
-        // blocks are sealed, the reading does not die with the phase
-        s = reduce(s, ev("agent_message_chunk", "content" to str("la respuesta")))
-        assertTrue("cb:1" in LiveTurn.cotMarkup(s!!).toString())
-    }
-
-    @Test
-    fun theKeyboardCapsAt8BlocksAndTheRenderSaysSo() {
-        var s: TurnLive? = null
-        repeat(10) { _ ->
-            repeat(300) { s = reduce(s, thought("0123456789")) } // one block per pass
-        }
-        assertEquals(10, s!!.cotBlocks.size)
-        val datas = LiveTurn.cotMarkup(s!!)!!["inline_keyboard"]!!.jsonArray
-            .flatMap { it.jsonArray }
-            .map { it.jsonObject["callback_data"]!!.jsonPrimitive.content }
-        assertEquals((3..10).map { "cb:$it" }, datas) // the most recent 8, in order
-        assertTrue("hay 2 bloques CoT fuera del teclado" in LiveTurn.render(s!!, nowMs = 1L, spin = 0, channelAlive = true))
-
-        // the shower keeps the promise: blocks 1..2 travel with the close,
-        // the REAL text, chunked under the message law
-        val shower = LiveTurn.overflowShower(s!!)
-        assertTrue(shower.isNotEmpty())
-        assertTrue("los primeros 2 bloques" in shower.first()) // the honest header
-        assertTrue(shower.joinToString("").contains("0123456789".repeat(300))) // a WHOLE block, verbatim
-        shower.forEach { chunk ->
-            assertTrue(chunk.codePointCount(0, chunk.length) <= LiveTurn.COT_SHOWER_CHUNK_CP + 120)
-        }
-    }
-
-    @Test
-    fun anOutOfRangeTapFoldsSilently() {
-        runBlocking {
-            val hub = LiveHub()
-            hub.apply(thought("x".repeat(3000)), nowMs = 1L) // one block
-            hub.toggleCotBlock(7) // a stale button of a past card
-            assertNull(hub.peek()!!.cotExpandedBlock)
-            hub.toggleCotBlock(1)
-            hub.toggleCotBlock(99)
-            assertNull(hub.peek()!!.cotExpandedBlock)
-        }
     }
 
     @Test
     fun sealedBlocksSurviveASeqGapResync() {
         // the resync re-baselines the LIVE windows (the tail dies) but the
         // sealed blocks are complete real text — a gap cuts the seam,
-        // never a sealed box
+        // never a sealed box (and the feed already spoke them)
         runBlocking {
             val hub = LiveHub()
             hub.apply(thought("x".repeat(3000)), nowMs = 1L)
-            hub.toggleCotBlock(1)
             hub.resync("task-9")
             val after = hub.peek()!!
             assertEquals(listOf("x".repeat(3000)), after.cotBlocks)
             assertEquals("", after.cotTail)
             assertEquals("", after.cotPending)
-            assertNull(after.cotExpandedBlock) // the tap's view folds with the window
         }
     }
 
@@ -553,27 +483,6 @@ class LiveTurnTest {
         s = reduce(s, ev("task_complete", "stopReason" to str("end_turn")))
         val seal = LiveTurn.sealText(s!!, nowMs = 61_000)
         assertTrue("1 bloque CoT" in seal)
-    }
-
-    @Test
-    fun theExpandedBlockClipsOnlyUnderEscInflationAndSaysSo() {
-        // a prose block opens WHOLE (3000 cp fit the 3400 window)
-        var s: TurnLive? = null
-        s = reduce(s, thought("palabra ".repeat(500))) // 3500 cp → block 1 = 3000 cp of prose
-        val open = s!!.copy(cotExpandedBlock = 1)
-        val text = LiveTurn.expandedBlockSection(open)!!
-        assertTrue("3000 chars" in text)
-        assertTrue("recortado" !in text)
-        // an HTML-heavy block: esc() would inflate it past the law — the
-        // clip happens and SAYS so (the transport must never silently cut)
-        var h: TurnLive? = null
-        h = reduce(h, thought("&".repeat(3000))) // esc → 15000 chars
-        val clipped = LiveTurn.expandedBlockSection(h!!.copy(cotExpandedBlock = 1))!!
-        assertTrue("recortado" in clipped)
-        assertTrue("bloque de 3000 chars" in clipped)
-        // the escaped text stays inside the budget (the 4096 law)
-        val escapedLen = clipped.codePointCount(0, clipped.length)
-        assertTrue(escapedLen < 4096)
     }
 
     @Test
