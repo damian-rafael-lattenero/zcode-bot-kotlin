@@ -145,6 +145,10 @@ class ChannelClient(
     private val onStreamEvent: suspend (ServerFrame.StreamEvent) -> Unit,
     private val onInboundResult: suspend (ServerFrame.InboundResult) -> Unit = {},
     private val onResubscribed: suspend (taskId: String) -> Unit = {},
+    /** The stream heartbeat (f94af960): the seq accounting + the future
+     * watchdog's tooth (a missing heartbeat is a dead bus, not a quiet
+     * model — the silence law keyed on REAL proof of life). */
+    private val onKeepalive: suspend (ServerFrame.KeepAlive) -> Unit = {},
 ) : AutoCloseable {
 
     private val ids = AtomicLong(0)
@@ -313,6 +317,8 @@ class ChannelClient(
     private suspend fun dispatch(live: Session, frame: ServerFrame) {
         when (frame) {
             is ServerFrame.StreamEvent -> onStreamEvent(frame)
+
+            is ServerFrame.KeepAlive -> onKeepalive(frame)
 
             // an AWAITED inbound_result belongs to its waiter (the bind reads
             // the replies itself and speaks its own summary); unawaited ones

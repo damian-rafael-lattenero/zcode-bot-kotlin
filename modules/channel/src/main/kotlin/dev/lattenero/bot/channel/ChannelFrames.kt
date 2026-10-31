@@ -403,6 +403,16 @@ sealed interface ServerFrame {
 
     data class StreamEvent(val taskId: String, val seq: Long, val at: Long, val event: JsonObject) : ServerFrame
 
+    /**
+     * The fork's stream heartbeat (f94af960): one per live subscription
+     * every ~15s. ITS SEQ CONSUMES THE CONNECTION'S COUNTER — the daemon
+     * must account it or every heartbeat in a quiet stretch reads as a
+     * +2 seq jump = a FALSE gap = the pending CoT wiped (measured live
+     * 31/10: the blocks never reached 3000). The bus's proof of life, NOT
+     * the model's: lastEventAtMs never moves on it.
+     */
+    data class KeepAlive(val taskId: String, val seq: Long, val at: Long) : ServerFrame
+
     data class Bye(val reason: String) : ServerFrame
 }
 
@@ -412,7 +422,7 @@ sealed interface ServerFrame {
  * says the reader IGNORES what it does not understand — a broken line is
  * counted by the caller, never fatal (§3.5: line errors do not close).
  */
-@Suppress("ReturnCount", "CyclomaticComplexMethod") // one guard per frame — the additive rule is the shape
+@Suppress("ReturnCount", "CyclomaticComplexMethod", "LongMethod") // one branch per wire type — the additive table's own shape
 fun decodeServerLine(line: String): ServerFrame? {
     val root = runCatching { Json.parseToJsonElement(line) }.getOrNull() as? JsonObject ?: return null
     return when (val type = (root["type"] as? JsonPrimitive)?.takeIf { it.isString }?.content) {
@@ -475,6 +485,12 @@ fun decodeServerLine(line: String): ServerFrame? {
                 event = event,
             )
         }
+
+        "stream_keepalive" -> ServerFrame.KeepAlive(
+            taskId = root.str("taskId") ?: return null,
+            seq = root.long("seq") ?: return null,
+            at = root.long("at") ?: 0L,
+        )
 
         "bye" -> ServerFrame.Bye(reason = root.str("reason") ?: "unspecified")
 

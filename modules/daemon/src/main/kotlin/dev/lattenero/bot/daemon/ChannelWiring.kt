@@ -197,6 +197,12 @@ internal fun wireChannel(
             logger.info { "channel resync after reconnect: $taskId re-baselined (lost events stay lost)" }
             hub.resync(taskId)
         },
+        // THE HEARTBEAT'S SEQ ACCOUNTING: the keepalive consumes the
+        // connection's counter — without this every quiet stretch reads as
+        // a lost-event gap and the resync wipes the accumulating CoT
+        // (measured live 31/10: the blocks never reached 3000). The
+        // future watchdog keys HERE: a missing heartbeat is a dead bus.
+        onKeepalive = { frame -> hub.keepalive(frame.taskId, frame.seq) },
     )
     drainQueue = {
         val pending = queue.drain()

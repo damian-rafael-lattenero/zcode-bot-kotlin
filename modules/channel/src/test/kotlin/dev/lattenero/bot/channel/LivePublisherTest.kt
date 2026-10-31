@@ -414,4 +414,23 @@ class LivePublisherTest {
     private companion object {
         const val TICK_MS = 2_000L
     }
+
+    @Test
+    fun theKeepaliveAdvancesTheSeqAndNothingElse() = runTest {
+        val hub = LiveHub()
+        hub.apply(
+            ServerFrame.StreamEvent("t1", 77, 1_000, buildJsonObject { put("type", "agent_thought_chunk"); put("delta", "pensando") }),
+            nowMs = 1_000,
+        )
+        val before = hub.peek()!!
+        hub.keepalive("t1", 79)
+        val after = hub.peek()!!
+        assertEquals(79L, after.lastSeq)
+        assertEquals(before.cotPending, after.cotPending) // the accumulation SURVIVES the heartbeat
+        assertEquals(before.lastEventAtMs, after.lastEventAtMs) // a quiet model stays honestly quiet
+        hub.keepalive("other", 100) // a foreign task's heartbeat moves nothing
+        assertEquals(79L, hub.peek()!!.lastSeq)
+        hub.keepalive("t1", 5) // an old seq never rewinds the counter
+        assertEquals(79L, hub.peek()!!.lastSeq)
+    }
 }

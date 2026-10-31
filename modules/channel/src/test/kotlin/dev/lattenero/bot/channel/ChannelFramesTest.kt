@@ -3,6 +3,7 @@ package dev.lattenero.bot.channel
 import kotlinx.serialization.json.Json
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -189,5 +190,15 @@ class ChannelFramesTest {
         assertEquals(24 * 1024 * 1024, ChannelSpec.MAX_LINE_BYTES)
         assertEquals(10_000L, ChannelSpec.HANDSHAKE_TIMEOUT_MS)
         assertEquals(2 * 60_000L, ChannelSpec.INBOUND_DEDUPE_TTL_MS)
+    }
+
+    @Test
+    fun theKeepaliveDecodesAndAccountsItsSeq() {
+        val frame = decodeServerLine(
+            """{"type":"stream_keepalive","taskId":"t1","seq":78,"at":1000}""",
+        ) as? ServerFrame.KeepAlive
+        assertNotNull(frame)
+        assertEquals(78L, frame.seq)
+        assertEquals("t1", frame.taskId)
     }
 }
