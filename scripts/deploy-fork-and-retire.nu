@@ -175,6 +175,24 @@ def run-script [st: RunState, dir: string, script: string, ...args: string]: not
     $r.exit_code
 }
 
+# La ventana de cooldown COMPARTIDA (Cooldown.kt, utils/http.py F8/F83): la
+# 429 de Telegram nombra una ventana del CHAT, no del proceso que la pisó —
+# el mtime del archivo ES el epoch de expiración y toda lane la lee con un
+# stat. Si cualquiera de las dos lanes tiene ventana viva, el anuncio se
+# SUPRIME: un curl directo aquí no pasa por ningún throttler propio y mandar
+# dentro de la ventana agrava la penalización (la 4ª: 10465s). La verdad
+# queda en el log; cuando la ventana expira, los canales del bot vuelven solos.
+def cooldown-active []: nothing -> bool {
+    let files = [
+        $"($env.HOME)/.zcode/hooks/state/tg-cooldown"
+        $"($env.HOME)/.zcode/hooks/state/tg-cooldown-firehose"
+    ]
+    let now = (date now | format date "%s" | into int)
+    $files | any {|f|
+        ($f | path exists) and ((ls $f | get 0.modified | format date "%s" | into int) > $now)
+    }
+}
+
 def announce [st: RunState, msg: string]: nothing -> nothing {
     if $st.mode == "real" {
         if not ($st.tg_cfg | path exists) {
@@ -184,6 +202,10 @@ def announce [st: RunState, msg: string]: nothing -> nothing {
         try {
             let cfg: TgCfg = (open $st.tg_cfg)
             if ($cfg.token | is-empty) or ($cfg.chat_id | is-empty) { return }
+            if (cooldown-active) {
+                log $st $"🔇 cooldown de Telegram activo — anuncio suprimido, queda en este log: ($msg)"
+                return
+            }
             let body = ({chat_id: $cfg.chat_id, text: $msg} | to json)
             do -i { http post -m 10sec -t application/json $"https://api.telegram.org/bot($cfg.token)/sendMessage" $body -r | ignore }
         } catch {|_err| }   # el anuncio NUNCA rompe el run (doctrina del .sh)
