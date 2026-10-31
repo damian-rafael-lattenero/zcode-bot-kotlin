@@ -31,7 +31,12 @@ class ContextWindowTest {
             return QueryAnswer.Failed("internal", "no canned answer")
         }
 
-        override suspend fun sendInbound(text: String, messageId: String, receivedAt: Long): InboundReceipt {
+        override suspend fun sendInbound(
+            text: String,
+            messageId: String,
+            receivedAt: Long,
+            attachments: List<InboundAttachment>,
+        ): InboundReceipt {
             if (!available) return InboundReceipt.UNAVAILABLE
             return InboundReceipt.FIRED
         }

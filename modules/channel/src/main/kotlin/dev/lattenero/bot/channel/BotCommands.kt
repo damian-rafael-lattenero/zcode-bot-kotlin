@@ -313,7 +313,12 @@ class BotCommands(
     private suspend fun route(text: String, updateId: Long): BotReply? {
         pendingAnswerFor?.let { shortId ->
             pendingAnswerFor = null
-            answerWithFreeText(shortId, text, updateId)?.let { return it }
+            val alive = board?.byShortId(shortId)?.takeIf { it.kind == "elicitation" }
+            if (alive != null) {
+                // the armed answer flew (or honestly failed): the board's own
+                // edit is the feedback — the text never rides the normal route
+                return answerWithFreeText(shortId, text, updateId)
+            }
             // the question died while armed: the text rides the normal route
         }
         val facts = routeFacts()
@@ -693,6 +698,8 @@ class BotCommands(
      * keeps the question armed (the owner retries). Null = the edit IS the
      * feedback (a second message would only bury it).
      */
+    // one guard per honest outcome (stale, failed, unavailable) — the tap's own shape
+    @Suppress("ReturnCount")
     private suspend fun questionTap(arg: String, updateId: Long): BotReply? {
         val active = board ?: return null
         val shortId = arg.substringBeforeLast(':')
@@ -729,20 +736,22 @@ class BotCommands(
                 messageId = "tg-$updateId-qa",
             )
         }
-        logger.info { "question tap: ${q.kind} «${option.label}» → ${q.requestId.take(12)}…" }
+        logger.info { "question tap: ${q.kind} «${option.label}» → ${q.requestId.take(ORDER_LOG_PREVIEW)}…" }
         return when (val answer = ops.respondQuestion(frame)) {
             RespondAnswer.Resolved -> {
                 active.resolve(shortId, "✅ Respondido: <b>${PyText.esc(option.label)}</b>")
                 null
             }
 
-            RespondAnswer.Unavailable -> BotReply("📡 El canal está caído — la pregunta sigue esperando, probá de nuevo.")
+            RespondAnswer.Unavailable ->
+                BotReply("📡 El canal está caído — la pregunta sigue esperando, probá de nuevo.")
 
             is RespondAnswer.Failed -> {
                 val detail = answer.message?.takeIf { it.isNotBlank() } ?: answer.code
                 active.resolve(
                     shortId,
-                    "⚠️ El tap no entró (${PyText.esc(answer.code)}): ${PyText.esc(PyText.take(detail, ORDER_LOG_PREVIEW))}",
+                    "⚠️ El tap no entró (${PyText.esc(answer.code)}): " +
+                        PyText.esc(PyText.take(detail, ORDER_LOG_PREVIEW)),
                 )
                 null
             }
@@ -778,7 +787,10 @@ class BotCommands(
             content = elicitationContent(q.title, text, q.questionCount),
             messageId = "tg-$updateId-qf",
         )
-        logger.info { "question answer (free text) → ${q.requestId.take(12)}…: ${text.take(ORDER_LOG_PREVIEW)}" }
+        logger.info {
+            "question answer (free text) → ${q.requestId.take(ORDER_LOG_PREVIEW)}…: "
+                "${text.take(ORDER_LOG_PREVIEW)}"
+        }
         return when (val answer = ops.respondQuestion(frame)) {
             RespondAnswer.Resolved -> {
                 active.resolve(shortId, "✅ Tu respuesta entró.")
@@ -787,14 +799,15 @@ class BotCommands(
 
             RespondAnswer.Unavailable -> {
                 pendingAnswerFor = shortId
-                BotReply(RouteTexts.CHANNEL_DOWN + "\nLa respuesta sigue armada — reintentá con tu próxima línea.")
+                BotReply("📡 El canal está caído — tu respuesta SIGUE ARMADA, reintentá con tu próxima línea.")
             }
 
             is RespondAnswer.Failed -> {
                 val detail = answer.message?.takeIf { it.isNotBlank() } ?: answer.code
                 active.resolve(
                     shortId,
-                    "⚠️ La respuesta no entró (${PyText.esc(answer.code)}): ${PyText.esc(PyText.take(detail, ORDER_LOG_PREVIEW))}",
+                    "⚠️ La respuesta no entró (${PyText.esc(answer.code)}): " +
+                        PyText.esc(PyText.take(detail, ORDER_LOG_PREVIEW)),
                 )
                 null
             }

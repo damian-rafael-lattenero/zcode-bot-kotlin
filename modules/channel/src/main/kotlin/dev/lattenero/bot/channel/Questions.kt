@@ -74,6 +74,8 @@ data class PendingQuestion(
  * ZCodeElicitationRequest (questions[] or message+options, value+label),
  * plan approval by schema.interaction.
  */
+// one branch per event shape — the union IS the shape (BusEvents precedent)
+@Suppress("CyclomaticComplexMethod", "LongMethod", "ReturnCount")
 internal fun parseQuestionEvent(event: JsonObject): PendingQuestion? {
     val type = event.str("type") ?: return null
     val requestId = event.str("requestId")?.takeIf { it.isNotEmpty() } ?: return null
@@ -98,8 +100,17 @@ internal fun parseQuestionEvent(event: JsonObject): PendingQuestion? {
             // allow/deny the fork's own deny command answers with)
             val opts = options.ifEmpty {
                 listOf(
-                    QuestionOption("allow", "Permitir", response = buildJsonObject { put("decision", "allow") }),
-                    QuestionOption("deny", "Denegar", response = buildJsonObject { put("decision", "deny") }, isDeny = true),
+                    QuestionOption(
+                        "allow",
+                        "Permitir",
+                        response = buildJsonObject { put("decision", "allow") },
+                    ),
+                    QuestionOption(
+                        "deny",
+                        "Denegar",
+                        response = buildJsonObject { put("decision", "deny") },
+                        isDeny = true,
+                    ),
                 )
             }
             PendingQuestion(
@@ -199,7 +210,12 @@ private fun buildQuestionRows(shortId: String, q: PendingQuestion): JsonArray {
             }
             add(
                 buildJsonArray {
-                    add(Keyboards.button("$mark${option.label.take(QuestionBoard.QUESTION_LABEL_CAP)}", "qa:$shortId:$i"))
+                    add(
+                        Keyboards.button(
+                            "$mark${option.label.take(QuestionBoard.QUESTION_LABEL_CAP)}",
+                            "qa:$shortId:$i",
+                        ),
+                    )
                 },
             )
         }
@@ -249,6 +265,8 @@ class QuestionBoard(
      * Returns the question when a NEW one went out (null = not a question
      * or already pending).
      */
+    // one guard per early exit (unparseable, duplicate) — the registry's own shape
+    @Suppress("ReturnCount")
     suspend fun onStreamEvent(frame: ServerFrame.StreamEvent): PendingQuestion? {
         val parsed = parseQuestionEvent(frame.event) ?: return null
         val shortId = synchronized(lock) {

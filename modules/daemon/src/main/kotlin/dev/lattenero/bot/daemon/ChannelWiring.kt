@@ -20,6 +20,9 @@ import dev.lattenero.bot.channel.TasksHistory
 import dev.lattenero.bot.channel.ToolLive
 import dev.lattenero.bot.channel.UnixSocketTransport
 import dev.lattenero.bot.channel.QueuedText
+import dev.lattenero.bot.channel.QuestionBoard
+import dev.lattenero.bot.channel.VerbositySetting
+import dev.lattenero.bot.contracts.PyText
 import dev.lattenero.bot.contracts.ShadowDecision
 import dev.lattenero.bot.daemon.history.LIVE_VERBS
 import dev.lattenero.bot.daemon.history.SEQUENCE_LINE_DIFFER
@@ -171,6 +174,11 @@ internal fun wireChannel(
     // share it — the poller's commands AND the live view's title resolution
     val history: TasksHistory = TasksHistoryIo(cfg.baseDir)
 
+    // the /verbosity level's store, built ONCE, SHARED: the commands WRITE
+    // it, the publisher READS it per tick — one instance, one truth (the
+    // file-backed store: the owner's choice survives the restarts)
+    val verbosity: VerbositySetting = FileVerbositySetting(File(File(cfg.homeDir, "state"), VERBOSITY_FILE))
+
     val liveView = buildLiveView(
         send,
         lanes,
@@ -179,13 +187,29 @@ internal fun wireChannel(
         fireSpeak,
         File(File(cfg.homeDir, "state"), LIVE_ORPHAN_FILE),
         history,
+        verbosity,
     )
-    val poller = buildPoller(cfg, lanes.api, pythonState, pollOn, hub, client, speak, remote, queue, history, liveView)
+    val poller = buildPoller(
+        cfg,
+        lanes.api,
+        pythonState,
+        pollOn,
+        hub,
+        client,
+        speak,
+        remote,
+        queue,
+        history,
+        verbosity,
+    )
     return ChannelStack(client, liveView, poller, hub)
 }
 
 private const val QUEUE_FILE = "inbound-queue.json"
 private const val LIVE_ORPHAN_FILE = "live-view-active.json"
+
+/** The /verbosity level's persisted line (FileVerbositySetting's file). */
+private const val VERBOSITY_FILE = "verbosity.txt"
 private val QUEUE_DRAIN_DELAY = 1.seconds
 
 /**
@@ -206,6 +230,7 @@ private fun buildLiveView(
     fireSpeak: suspend (String, Boolean, JsonObject?) -> Unit,
     orphanFile: File,
     history: TasksHistory,
+    verbosity: VerbositySetting,
 ): LivePublisher? {
     val lane = lanes.live
     if (lane == null || !send.ownsSpectator) return null
@@ -233,7 +258,10 @@ private fun buildLiveView(
             if (ws != null) client.subscribe(taskId, ws)
         },
         speak = { text -> fireSpeak(text, false, null) },
-        finalBoxes = { tools -> finalBoxesOf(tools) },
+        // the transcript feed's per-tool CLOSE box: the spectator renderer
+        // (the final transcript's own), status mark inside the head + the
+        // VERBATIM output tail (the owner's «leer los commands de bash»)
+        toolBox = { tool -> feedBoxOf(tool) },
         finalAnswer = { taskId ->
             when (val answer = client.query(ChannelQuery.TaskSnapshot(taskId))) {
                 is QueryAnswer.Ok -> snapshotAnswerOf(answer.resultJson)
@@ -248,6 +276,8 @@ private fun buildLiveView(
             history.ctxTasks(BotCommands.SCOPE_FOR_PICK).firstOrNull { it.sid == taskId }?.title
         },
         orphanStore = LiveOrphanStore(orphanFile),
+        // the transcript feed's level — the SAME store the commands write
+        verbosity = verbosity,
     )
 }
 
@@ -263,7 +293,11 @@ private fun buildPoller(
     remote: File,
     queue: InboundQueue,
     history: TasksHistory,
-    liveView: LivePublisher?,
+    // the /verbosity store (the commands WRITE it — the publisher reads it
+    // per tick) and the questions' board: the answer round-trip (default
+    // constructed — the send-less board registers and seals quietly)
+    verbosity: VerbositySetting,
+    board: QuestionBoard = QuestionBoard(),
 ): Poller? {
     if (!pollOn) return null
     val liveApi = api ?: TgApi({ TgConfig.load(remote) })
@@ -289,7 +323,12 @@ private fun buildPoller(
                     messageId: String,
                     receivedAt: Long,
                     attachments: List<InboundAttachment>,
-                ) = client.sendInbound(text, messageId, receivedAt, attachments)
+                ) = client.sendInbound(
+                    text = text,
+                    messageId = messageId,
+                    receivedAt = receivedAt,
+                    attachments = attachments,
+                )
 
                 // the ✍️ armed order: direct to the named session (the fork's inbound taskId)
                 override suspend fun sendOrder(
@@ -339,6 +378,8 @@ private fun buildPoller(
         // Python's ctx_tasks + model_selection — the same two sqlite files the spectator reads
         history = history,
         defaultWorkspacePath = File(File(cfg.baseDir, "workspace"), "default").absolutePath,
+        verbosity = verbosity,
+        board = board,
     )
     return Poller(
         api = liveApi,
@@ -365,12 +406,6 @@ private fun buildPoller(
                     answerCallback(liveApi, update.callbackId)
                     commands.onCallback(update.data, update.updateId)
                         ?.let { speak(it.text, false, it.markup) }
-                    // THE BLOCK TAP'S EDIT IS IMMEDIATE (the owner taps «📖
-                    // CoT N» and reads it right there — the ~3s cadence
-                    // continues after): the tick re-renders the card with
-                    // the toggled block; the publisher's tick mutex
-                    // serializes it with the scheduled clock
-                    if (update.data.startsWith("cb:")) liveView?.tick()
                 }
             }
         },
@@ -456,12 +491,17 @@ internal fun attachmentRefusal(sizeBytes: Long?): String? =
 
 private val FILENAME_SAFE = ('a'..'z') + ('A'..'Z') + ('0'..'9') + listOf('.', '_', '-')
 
-/** The wire's filename reduced to a safe on-disk name (no paths, no separators). */
+/**
+ * The wire's filename reduced to a safe on-disk name (no paths, no
+ * separators) — a name with no safe character at all («///») is no
+ * filename: the honest fallback.
+ */
 internal fun attachmentFilename(filename: String): String =
     filename.map { c -> if (c in FILENAME_SAFE) c else '_' }
         .joinToString("")
         .take(FILENAME_CAP)
-        .ifEmpty { "attachment" }
+        .takeIf { mapped -> mapped.any { it.isLetterOrDigit() } }
+        ?: "attachment"
 
 private const val ATTACHMENTS_DIR = "attachments"
 private const val MB = 1024L * 1024L
@@ -483,23 +523,39 @@ internal fun stoppedCountOf(resultJson: String): Int = runCatching {
     ((Json.parseToJsonElement(resultJson) as? JsonObject)?.get("stopped") as? JsonArray)?.size ?: 0
 }.getOrDefault(0)
 
-/** The final render's boxes: the spectator's renderer, one box per completed tool. */
-internal fun finalBoxesOf(tools: List<ToolLive>): String =
-    tools.filter { it.input != null }
-        .takeLast(FINAL_BOXES)
-        .joinToString("\n") { tool ->
-            val mark = when (tool.status) {
-                "failed" -> " ❌"
-                "denied", "stopped" -> " ⏹️"
-                else -> " ✅"
-            }
-            ToolBox.box(tool.name, tool.input ?: JsonObject(emptyMap())).replaceFirst("</b>", "</b>$mark")
-        }
+/**
+ * The transcript feed's per-tool CLOSE box (the old finalBoxesOf, ONE tool
+ * at a time — the feed speaks each close as its own message): the
+ * spectator's renderer with the status mark inside the head, plus the
+ * tool's VERBATIM output as the tail (the fork's result-update content —
+ * the box's own output/result keys are the spectator-era shape and the
+ * tail only rides when the content came OUT of band, never doubled).
+ */
+internal fun feedBoxOf(tool: ToolLive): String {
+    val mark = when (tool.status) {
+        "failed" -> " ❌"
+        "denied", "stopped" -> " ⏹️"
+        else -> " ✅"
+    }
+    val input = tool.input
+    val box = if (input == null) "" else ToolBox.box(tool.name, input).replaceFirst("</b>", "</b>$mark")
+    val alreadyShown = input != null && listOf("output", "result").any { k ->
+        (input[k] as? JsonPrimitive)?.takeIf { it.isString }?.content?.isNotBlank() == true
+    }
+    val out = tool.output
+    val tail = if (out.isNullOrBlank() || alreadyShown) {
+        ""
+    } else {
+        "\n↳ <pre>${PyText.esc(PyText.htmlClip(out, OUTPUT_TAIL_CP))}</pre>"
+    }
+    return box + tail
+}
+
+/** The output tail's cap — the box's own output budget (ToolBox.OUTPUT_CAP's sense). */
+private const val OUTPUT_TAIL_CP = 800
 
 /** taskSnapshot → the last ASSISTANT message (the turn's answer, from the store). */
 internal fun snapshotAnswerOf(resultJson: String): String? = BotCommands.snapshotLastAnswer(resultJson)
-
-private const val FINAL_BOXES = 6
 
 /** The nuclear gate's file (mtime = the last start) and its double-trigger window. */
 private const val NUCLEAR_GATE = "nuclear-last"
