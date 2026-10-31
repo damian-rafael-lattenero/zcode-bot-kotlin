@@ -6,6 +6,7 @@ import dev.lattenero.bot.channel.ChannelClient
 import dev.lattenero.bot.channel.ChannelOps
 import dev.lattenero.bot.channel.ChannelQuery
 import dev.lattenero.bot.channel.ChannelSpec
+import dev.lattenero.bot.channel.InboundAttachment
 import dev.lattenero.bot.channel.InboundReceipt
 import dev.lattenero.bot.channel.InboundUpdate
 import dev.lattenero.bot.channel.LiveHub
@@ -19,8 +20,6 @@ import dev.lattenero.bot.channel.TasksHistory
 import dev.lattenero.bot.channel.ToolLive
 import dev.lattenero.bot.channel.UnixSocketTransport
 import dev.lattenero.bot.channel.QueuedText
-import dev.lattenero.bot.channel.VerbositySetting
-import dev.lattenero.bot.contracts.PyText
 import dev.lattenero.bot.contracts.ShadowDecision
 import dev.lattenero.bot.daemon.history.LIVE_VERBS
 import dev.lattenero.bot.daemon.history.SEQUENCE_LINE_DIFFER
@@ -172,11 +171,6 @@ internal fun wireChannel(
     // share it — the poller's commands AND the live view's title resolution
     val history: TasksHistory = TasksHistoryIo(cfg.baseDir)
 
-    // the /verbosity level's store, built ONCE, SHARED: the commands WRITE
-    // it, the publisher READS it per tick — one instance, one truth (the
-    // file-backed store: the owner's choice survives the restarts)
-    val verbosity: VerbositySetting = FileVerbositySetting(File(File(cfg.homeDir, "state"), VERBOSITY_FILE))
-
     val liveView = buildLiveView(
         send,
         lanes,
@@ -185,30 +179,203 @@ internal fun wireChannel(
         fireSpeak,
         File(File(cfg.homeDir, "state"), LIVE_ORPHAN_FILE),
         history,
-        verbosity,
     )
-    val poller =
-        buildPoller(cfg, lanes.api, pythonState, pollOn, hub, client, speak, remote, queue, history, liveView, verbosity)
+    val poller = buildPoller(cfg, lanes.api, pythonState, pollOn, hub, client, speak, remote, queue, history, liveView)
     return ChannelStack(client, liveView, poller, hub)
 }
 
 private const val QUEUE_FILE = "inbound-queue.json"
-private const val ATTACHMENTS_DIR = "attachments"
+private const val LIVE_ORPHAN_FILE = "live-view-active.json"
+private val QUEUE_DRAIN_DELAY = 1.seconds
 
 /**
- * ATTACHMENTS IN's gate: the Bot API's own download law — the bot's token
- * cannot fetch a file bigger than 20 MB (Telegram answers with «file is
- * too big»). The refusal is SPOKEN, never silent. Absent size (Telegram
- * omits file_size on some photos) passes: the honest failure then happens
- * at the download itself, where the truth is.
+ * The never-silence view — LIVE-only (its birth message is a send), on
+ * the RENDER lane. [orphanFile] is the boot-time ORPHAN SEAL's pointer
+ * (the publisher's first tick edits a frozen pre-restart status message
+ * once and dies — a restart never leaves a lying "thinking..." behind).
+ * [history] is the REAL TITLE's source: the stream's
+ * session_info_update title never arrives for some sessions and the
+ * card wore the sid's tail — the resolution window is the SAME constant
+ * the commands resolve picks against (no drift).
  */
-internal fun attachmentRefusal(sizeBytes: Long?): String? =
-    if (sizeBytes != null && sizeBytes > MAX_ATTACHMENT_BYTES) {
-        "⚠️ «file is too big» — Telegram no deja bajar más de ${MAX_ATTACHMENT_BYTES / MB} MB " +
-            "con el token del bot (${sizeBytes / MB} MB los tuyos). Pasalo por la Mac de otro modo."
-    } else {
-        null
-    }
+private fun buildLiveView(
+    send: DaemonSend,
+    lanes: SendLanes,
+    hub: LiveHub,
+    client: ChannelClient,
+    fireSpeak: suspend (String, Boolean, JsonObject?) -> Unit,
+    orphanFile: File,
+    history: TasksHistory,
+): LivePublisher? {
+    val lane = lanes.live
+    if (lane == null || !send.ownsSpectator) return null
+    val telegram = LiveTelegram(
+        api = lane.api,
+        cooldown = lane.cooldown,
+        lastPh = lane.lastPh,
+    )
+    return LivePublisher(
+        hub = hub,
+        telegram = telegram,
+        config = lane.config,
+        channelAlive = { client.connected }, // 💓 vs 📡 in the status line: "channel healthy" vs "channel dead"
+        resubscribe = { taskId ->
+            // the stream watchdog's tooth: the fork's continuous bus dies
+            // mid-run (measured 30/10 twice) — re-issue the subscription with
+            // the bot conversation's CURRENT workspace
+            val ws = when (val answer = client.query(ChannelQuery.BotStatus)) {
+                is QueryAnswer.Ok ->
+                    ((Json.parseToJsonElement(answer.resultJson) as? JsonObject)
+                        ?.get("context") as? JsonObject)
+                        ?.get("workspacePath")?.let { it as? JsonPrimitive }?.content
+                else -> null
+            }
+            if (ws != null) client.subscribe(taskId, ws)
+        },
+        speak = { text -> fireSpeak(text, false, null) },
+        finalBoxes = { tools -> finalBoxesOf(tools) },
+        finalAnswer = { taskId ->
+            when (val answer = client.query(ChannelQuery.TaskSnapshot(taskId))) {
+                is QueryAnswer.Ok -> snapshotAnswerOf(answer.resultJson)
+                else -> null
+            }
+        },
+        // the per-action verbs: the spectator's own classification, injected
+        verbs = LIVE_VERBS,
+        // the card's head: the history's honest name for the live task
+        // (null → the fallback stays — nothing invented)
+        resolveTitle = { taskId ->
+            history.ctxTasks(BotCommands.SCOPE_FOR_PICK).firstOrNull { it.sid == taskId }?.title
+        },
+        orphanStore = LiveOrphanStore(orphanFile),
+    )
+}
+
+/** The single reader — knob-gated (retire-python.sh turns it on). */
+private fun buildPoller(
+    cfg: DaemonConfig,
+    api: TgApi?,
+    pythonState: File,
+    pollOn: Boolean,
+    hub: LiveHub,
+    client: ChannelClient,
+    speak: suspend (String, Boolean, JsonObject?) -> Unit,
+    remote: File,
+    queue: InboundQueue,
+    history: TasksHistory,
+    liveView: LivePublisher?,
+): Poller? {
+    if (!pollOn) return null
+    val liveApi = api ?: TgApi({ TgConfig.load(remote) })
+    // ☢️ the nuclear ladder — the daemon-side restart of EVERYTHING (the
+    // owner's order overrides the old «never kill the app» rule; the
+    // channel protocol stays clean — this speaks macOS directly)
+    val ladder = NuclearLadder(
+        edge = MacProcessEdge(),
+        stopAll = {
+            when (val answer = client.query(ChannelQuery.StopAll(null), timeout = 10.seconds)) {
+                is QueryAnswer.Ok -> stoppedCountOf(answer.resultJson)
+                else -> 0
+            }
+        },
+        helloOk = { client.connected },
+        announce = { text -> speak(text, true, null) },
+    )
+        val commands = BotCommands(
+            ops = object : ChannelOps {
+                override suspend fun query(query: ChannelQuery) = client.query(query)
+                override suspend fun sendInbound(
+                    text: String,
+                    messageId: String,
+                    receivedAt: Long,
+                    attachments: List<InboundAttachment>,
+                ) = client.sendInbound(text, messageId, receivedAt, attachments)
+
+                // the ✍️ armed order: direct to the named session (the fork's inbound taskId)
+                override suspend fun sendOrder(
+                    text: String,
+                    messageId: String,
+                    receivedAt: Long,
+                    taskId: String,
+                ) = client.sendInbound(text, messageId, receivedAt, taskId)
+
+                // STEER: the running turn's redirection (the fork's `steer` frame, awaited)
+                override suspend fun steer(taskId: String, text: String) = client.steer(taskId, text)
+
+                override suspend fun sendInboundAwait(text: String, messageId: String, receivedAt: Long) =
+                    client.sendInboundAwait(text, messageId, receivedAt)
+
+                override suspend fun enqueueInbound(text: String, messageId: String, receivedAt: Long) =
+                    queue.add(text, messageId, receivedAt)
+
+                override suspend fun queueEntries(): List<QueuedText> =
+                    queue.entries().map { QueuedText(it.text, it.messageId, it.receivedAt) }
+
+                override suspend fun queueTake(messageId: String): QueuedText? =
+                    queue.take(messageId)?.let { QueuedText(it.text, it.messageId, it.receivedAt) }
+
+                override suspend fun subscribe(taskId: String, workspacePath: String) =
+                    client.subscribe(taskId, workspacePath)
+            },
+        hub = hub,
+        daemonReset = {
+            // The cross-restart single-flight (the 08:42 loop's lesson: each
+            // extra ☢️ tap ran a FULL ladder, and the ladder's own kickstart
+            // resets any in-memory gate): the gate file's MTIME is the clock
+            // — a start younger than the debounce is a double-trigger,
+            // honestly refused; a crash leaves it stale and the next pass.
+            val gate = File(pythonState, NUCLEAR_GATE)
+            val ageMs = System.currentTimeMillis() - gate.lastModified()
+            if (gate.exists() && ageMs in 0 until NUCLEAR_DEBOUNCE_MS) {
+                "REFUSED: otro nuclear arrancó hace ${ageMs / 1000}s — esperá su resumen " +
+                    "(single-flight; sobrevive al kickstart del propio nuclear)"
+            } else {
+                gate.writeText("started") // the write IS the mtime stamp
+                hub.clear()
+                client.reset() // subscriptions die with the socket — the reconnect replays nothing stale
+                ladder.run().summary()
+            }
+        },
+        // Python's ctx_tasks + model_selection — the same two sqlite files the spectator reads
+        history = history,
+        defaultWorkspacePath = File(File(cfg.baseDir, "workspace"), "default").absolutePath,
+    )
+    return Poller(
+        api = liveApi,
+        offsetFile = File(pythonState, "tg-offset"), // Python's own cursor — the torch passes at retirement
+        // the bot explains its own silences: a long mute window ends with the
+        // apology (loud — the owner must learn WHY it was quiet, from the bot)
+        onReconnected = { window -> speak(window.render(), true, null) },
+        dispatch = { cfg, update ->
+            // the buttons' dispatch: a tap is answered (the toast) and runs
+            // as the owner's typed words; a message is the words themselves
+            when (update) {
+                is InboundUpdate.Message -> {
+                    // F23: 👀 the second the words are in, ✅ once handled —
+                    // feedback on the owner's own message, zero new messages
+                    Ack.react(liveApi, cfg, update.messageId, Ack.RECEIVED)
+                    commands.handle(update.text, update.updateId)?.let { speak(it.text, false, it.markup) }
+                    Ack.react(liveApi, cfg, update.messageId, Ack.HANDLED)
+                }
+
+                is InboundUpdate.Attachment ->
+                    dispatchAttachment(liveApi, cfg, pythonState, client, speak, update)
+
+                is InboundUpdate.Callback -> {
+                    answerCallback(liveApi, update.callbackId)
+                    commands.onCallback(update.data, update.updateId)
+                        ?.let { speak(it.text, false, it.markup) }
+                    // THE BLOCK TAP'S EDIT IS IMMEDIATE (the owner taps «📖
+                    // CoT N» and reads it right there — the ~3s cadence
+                    // continues after): the tick re-renders the card with
+                    // the toggled block; the publisher's tick mutex
+                    // serializes it with the scheduled clock
+                    if (update.data.startsWith("cb:")) liveView?.tick()
+                }
+            }
+        },
+    )
+}
 
 /**
  * ATTACHMENTS IN (30/10): the owner's photo/document — downloaded with the
@@ -272,216 +439,34 @@ private suspend fun dispatchAttachment(
     Ack.react(api, cfg, update.messageId, Ack.HANDLED)
 }
 
-/** The wire's filename reduced to a safe on-disk name (no paths, no separators). */
+/**
+ * ATTACHMENTS IN's gate: the Bot API's own download law — the bot's token
+ * cannot fetch a file bigger than 20 MB (Telegram answers with «file is
+ * too big»). The refusal is SPOKEN, never silent. Absent size (Telegram
+ * omits file_size on some photos) passes: the honest failure then happens
+ * at the download itself, where the truth is.
+ */
+internal fun attachmentRefusal(sizeBytes: Long?): String? =
+    if (sizeBytes != null && sizeBytes > MAX_ATTACHMENT_BYTES) {
+        "⚠️ «file is too big» — Telegram no deja bajar más de ${MAX_ATTACHMENT_BYTES / MB} MB " +
+            "con el token del bot (${sizeBytes / MB} MB los tuyos). Pasalo por la Mac de otro modo."
+    } else {
+        null
+    }
+
 private val FILENAME_SAFE = ('a'..'z') + ('A'..'Z') + ('0'..'9') + listOf('.', '_', '-')
 
+/** The wire's filename reduced to a safe on-disk name (no paths, no separators). */
 internal fun attachmentFilename(filename: String): String =
     filename.map { c -> if (c in FILENAME_SAFE) c else '_' }
         .joinToString("")
         .take(FILENAME_CAP)
         .ifEmpty { "attachment" }
 
+private const val ATTACHMENTS_DIR = "attachments"
 private const val MB = 1024L * 1024L
 private const val MAX_ATTACHMENT_BYTES = 20L * MB
 private const val FILENAME_CAP = 120
-private const val LIVE_ORPHAN_FILE = "live-view-active.json"
-
-/** The /verbosity level's persisted line (FileVerbositySetting's file). */
-private const val VERBOSITY_FILE = "verbosity.txt"
-private val QUEUE_DRAIN_DELAY = 1.seconds
-
-/**
- * The never-silence view — LIVE-only (its birth message is a send), on
- * the RENDER lane. [orphanFile] is the boot-time ORPHAN SEAL's pointer
- * (the publisher's first tick edits a frozen pre-restart status message
- * once and dies — a restart never leaves a lying "thinking..." behind).
- * [history] is the REAL TITLE's source: the stream's
- * session_info_update title never arrives for some sessions and the
- * card wore the sid's tail — the resolution window is the SAME constant
- * the commands resolve picks against (no drift).
- */
-private fun buildLiveView(
-    send: DaemonSend,
-    lanes: SendLanes,
-    hub: LiveHub,
-    client: ChannelClient,
-    fireSpeak: suspend (String, Boolean, JsonObject?) -> Unit,
-    orphanFile: File,
-    history: TasksHistory,
-    verbosity: VerbositySetting,
-): LivePublisher? {
-    val lane = lanes.live
-    if (lane == null || !send.ownsSpectator) return null
-    val telegram = LiveTelegram(
-        api = lane.api,
-        cooldown = lane.cooldown,
-        lastPh = lane.lastPh,
-    )
-    return LivePublisher(
-        hub = hub,
-        telegram = telegram,
-        config = lane.config,
-        channelAlive = { client.connected }, // 💓 vs 📡 in the status line: "channel healthy" vs "channel dead"
-        resubscribe = { taskId ->
-            // the stream watchdog's tooth: the fork's continuous bus dies
-            // mid-run (measured 30/10 twice) — re-issue the subscription with
-            // the bot conversation's CURRENT workspace
-            val ws = when (val answer = client.query(ChannelQuery.BotStatus)) {
-                is QueryAnswer.Ok ->
-                    ((Json.parseToJsonElement(answer.resultJson) as? JsonObject)
-                        ?.get("context") as? JsonObject)
-                        ?.get("workspacePath")?.let { it as? JsonPrimitive }?.content
-                else -> null
-            }
-            if (ws != null) client.subscribe(taskId, ws)
-        },
-        speak = { text -> fireSpeak(text, false, null) },
-        // the transcript feed's per-tool CLOSE box: the spectator renderer
-        // (the final transcript's own), status mark inside the head + the
-        // VERBATIM output tail (the owner's «leer los commands de bash»)
-        toolBox = { tool -> feedBoxOf(tool) },
-        finalAnswer = { taskId ->
-            when (val answer = client.query(ChannelQuery.TaskSnapshot(taskId))) {
-                is QueryAnswer.Ok -> snapshotAnswerOf(answer.resultJson)
-                else -> null
-            }
-        },
-        // the per-action verbs: the spectator's own classification, injected
-        verbs = LIVE_VERBS,
-        // the card's head: the history's honest name for the live task
-        // (null → the fallback stays — nothing invented)
-        resolveTitle = { taskId ->
-            history.ctxTasks(BotCommands.SCOPE_FOR_PICK).firstOrNull { it.sid == taskId }?.title
-        },
-        orphanStore = LiveOrphanStore(orphanFile),
-        // the transcript feed's level — the SAME store the commands write
-        verbosity = verbosity,
-    )
-}
-
-/** The single reader — knob-gated (retire-python.sh turns it on). */
-private fun buildPoller(
-    cfg: DaemonConfig,
-    api: TgApi?,
-    pythonState: File,
-    pollOn: Boolean,
-    hub: LiveHub,
-    client: ChannelClient,
-    speak: suspend (String, Boolean, JsonObject?) -> Unit,
-    remote: File,
-    queue: InboundQueue,
-    history: TasksHistory,
-    liveView: LivePublisher?,
-    verbosity: VerbositySetting,
-): Poller? {
-    if (!pollOn) return null
-    val liveApi = api ?: TgApi({ TgConfig.load(remote) })
-    // ☢️ the nuclear ladder — the daemon-side restart of EVERYTHING (the
-    // owner's order overrides the old «never kill the app» rule; the
-    // channel protocol stays clean — this speaks macOS directly)
-    val ladder = NuclearLadder(
-        edge = MacProcessEdge(),
-        stopAll = {
-            when (val answer = client.query(ChannelQuery.StopAll(null), timeout = 10.seconds)) {
-                is QueryAnswer.Ok -> stoppedCountOf(answer.resultJson)
-                else -> 0
-            }
-        },
-        helloOk = { client.connected },
-        announce = { text -> speak(text, true, null) },
-    )
-        val commands = BotCommands(
-            ops = object : ChannelOps {
-                override suspend fun query(query: ChannelQuery) = client.query(query)
-                override suspend fun sendInbound(text: String, messageId: String, receivedAt: Long) =
-                    client.sendInbound(text, messageId, receivedAt)
-
-                // the ✍️ armed order: direct to the named session (the fork's inbound taskId)
-                override suspend fun sendOrder(
-                    text: String,
-                    messageId: String,
-                    receivedAt: Long,
-                    taskId: String,
-                ) = client.sendInbound(text, messageId, receivedAt, taskId)
-
-                // STEER: the running turn's redirection (the fork's `steer` frame, awaited)
-                override suspend fun steer(taskId: String, text: String) = client.steer(taskId, text)
-
-                override suspend fun sendInboundAwait(text: String, messageId: String, receivedAt: Long) =
-                    client.sendInboundAwait(text, messageId, receivedAt)
-
-                override suspend fun enqueueInbound(text: String, messageId: String, receivedAt: Long) =
-                    queue.add(text, messageId, receivedAt)
-
-                override suspend fun queueEntries(): List<QueuedText> =
-                    queue.entries().map { QueuedText(it.text, it.messageId, it.receivedAt) }
-
-                override suspend fun queueTake(messageId: String): QueuedText? =
-                    queue.take(messageId)?.let { QueuedText(it.text, it.messageId, it.receivedAt) }
-
-                override suspend fun subscribe(taskId: String, workspacePath: String) =
-                    client.subscribe(taskId, workspacePath)
-            },
-        hub = hub,
-        daemonReset = {
-            // The cross-restart single-flight (the 08:42 loop's lesson: each
-            // extra ☢️ tap ran a FULL ladder, and the ladder's own kickstart
-            // resets any in-memory gate): the gate file's MTIME is the clock
-            // — a start younger than the debounce is a double-trigger,
-            // honestly refused; a crash leaves it stale and the next pass.
-            val gate = File(pythonState, NUCLEAR_GATE)
-            val ageMs = System.currentTimeMillis() - gate.lastModified()
-            if (gate.exists() && ageMs in 0 until NUCLEAR_DEBOUNCE_MS) {
-                "REFUSED: otro nuclear arrancó hace ${ageMs / 1000}s — esperá su resumen " +
-                    "(single-flight; sobrevive al kickstart del propio nuclear)"
-            } else {
-                gate.writeText("started") // the write IS the mtime stamp
-                hub.clear()
-                client.reset() // subscriptions die with the socket — the reconnect replays nothing stale
-                ladder.run().summary()
-            }
-        },
-        // Python's ctx_tasks + model_selection — the same two sqlite files the spectator reads
-        history = history,
-        defaultWorkspacePath = File(File(cfg.baseDir, "workspace"), "default").absolutePath,
-        verbosity = verbosity,
-    )
-    return Poller(
-        api = liveApi,
-        offsetFile = File(pythonState, "tg-offset"), // Python's own cursor — the torch passes at retirement
-        // the bot explains its own silences: a long mute window ends with the
-        // apology (loud — the owner must learn WHY it was quiet, from the bot)
-        onReconnected = { window -> speak(window.render(), true, null) },
-        dispatch = { cfg, update ->
-            // the buttons' dispatch: a tap is answered (the toast) and runs
-            // as the owner's typed words; a message is the words themselves
-            when (update) {
-                is InboundUpdate.Message -> {
-                    // F23: 👀 the second the words are in, ✅ once handled —
-                    // feedback on the owner's own message, zero new messages
-                    Ack.react(liveApi, cfg, update.messageId, Ack.RECEIVED)
-                    commands.handle(update.text, update.updateId)?.let { speak(it.text, false, it.markup) }
-                    Ack.react(liveApi, cfg, update.messageId, Ack.HANDLED)
-                }
-
-                is InboundUpdate.Attachment ->
-                    dispatchAttachment(liveApi, cfg, pythonState, client, speak, update)
-
-                is InboundUpdate.Callback -> {
-                    answerCallback(liveApi, update.callbackId)
-                    commands.onCallback(update.data, update.updateId)
-                        ?.let { speak(it.text, false, it.markup) }
-                    // THE BLOCK TAP'S EDIT IS IMMEDIATE (the owner taps «📖
-                    // CoT N» and reads it right there — the ~3s cadence
-                    // continues after): the tick re-renders the card with
-                    // the toggled block; the publisher's tick mutex
-                    // serializes it with the scheduled clock
-                    if (update.data.startsWith("cb:")) liveView?.tick()
-                }
-            }
-        },
-    )
-}
 
 /** The tap's toast — best-effort by design (Python's bare except; the action itself already ran). */
 @Suppress("TooGenericExceptionCaught") // Python's bare except: a failed toast never fails the tap
@@ -498,39 +483,23 @@ internal fun stoppedCountOf(resultJson: String): Int = runCatching {
     ((Json.parseToJsonElement(resultJson) as? JsonObject)?.get("stopped") as? JsonArray)?.size ?: 0
 }.getOrDefault(0)
 
-/**
- * The transcript feed's per-tool CLOSE box (the old finalBoxesOf, ONE tool
- * at a time — the feed speaks each close as its own message): the
- * spectator's renderer with the status mark inside the head, plus the
- * tool's VERBATIM output as the tail (the fork's result-update content —
- * the box's own output/result keys are the spectator-era shape and the
- * tail only rides when the content came OUT of band, never doubled).
- */
-internal fun feedBoxOf(tool: ToolLive): String {
-    val mark = when (tool.status) {
-        "failed" -> " ❌"
-        "denied", "stopped" -> " ⏹️"
-        else -> " ✅"
-    }
-    val input = tool.input
-    val box = if (input == null) "" else ToolBox.box(tool.name, input).replaceFirst("</b>", "</b>$mark")
-    val alreadyShown = input != null && listOf("output", "result").any { k ->
-        (input[k] as? JsonPrimitive)?.takeIf { it.isString }?.content?.isNotBlank() == true
-    }
-    val out = tool.output
-    val tail = if (out.isNullOrBlank() || alreadyShown) {
-        ""
-    } else {
-        "\n↳ <pre>${PyText.esc(PyText.htmlClip(out, OUTPUT_TAIL_CP))}</pre>"
-    }
-    return box + tail
-}
-
-/** The output tail's cap — the box's own output budget (ToolBox.OUTPUT_CAP's sense). */
-private const val OUTPUT_TAIL_CP = 800
+/** The final render's boxes: the spectator's renderer, one box per completed tool. */
+internal fun finalBoxesOf(tools: List<ToolLive>): String =
+    tools.filter { it.input != null }
+        .takeLast(FINAL_BOXES)
+        .joinToString("\n") { tool ->
+            val mark = when (tool.status) {
+                "failed" -> " ❌"
+                "denied", "stopped" -> " ⏹️"
+                else -> " ✅"
+            }
+            ToolBox.box(tool.name, tool.input ?: JsonObject(emptyMap())).replaceFirst("</b>", "</b>$mark")
+        }
 
 /** taskSnapshot → the last ASSISTANT message (the turn's answer, from the store). */
 internal fun snapshotAnswerOf(resultJson: String): String? = BotCommands.snapshotLastAnswer(resultJson)
+
+private const val FINAL_BOXES = 6
 
 /** The nuclear gate's file (mtime = the last start) and its double-trigger window. */
 private const val NUCLEAR_GATE = "nuclear-last"
