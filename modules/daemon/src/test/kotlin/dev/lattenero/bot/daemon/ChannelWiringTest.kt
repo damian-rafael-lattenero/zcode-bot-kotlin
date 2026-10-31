@@ -53,6 +53,39 @@ class ChannelWiringTest {
     }
 
     @Test
+    fun feedBoxesRideTheSpectatorsRendererWithTheVerbatimTail() {
+        val closed = ToolLive(
+            "t1",
+            "Write",
+            openedAtMs = 1,
+            status = "completed",
+            input = buildJsonObject { put("content", "line") },
+            output = "the stream's verbatim tail",
+        )
+        val box = feedBoxOf(closed)
+        assertTrue("✅" in box)
+        // the spectator renderer's own signature: the numbered green lines of a Write
+        assertTrue(Regex("""\d+.*line""").containsMatchIn(box))
+        // the transcript's REAL content: the result update's tail rides
+        assertTrue("the stream's verbatim tail" in box)
+        // the input's own output/result keys are the box's — the tail never doubles
+        val selfContained = feedBoxOf(
+            ToolLive(
+                "t2",
+                "Bash",
+                openedAtMs = 2,
+                status = "failed",
+                input = buildJsonObject { put("command", "ls"); put("output", "file") },
+                output = "file",
+            ),
+        )
+        assertTrue("❌" in selfContained)
+        assertEquals(1, Regex("file").findAll(selfContained).count(), "the output appears exactly once")
+        // an input-less lane renders nothing (the feed falls back to its own line)
+        assertEquals("", feedBoxOf(ToolLive("t3", "Read", openedAtMs = 3, status = "completed")))
+    }
+
+    @Test
     fun snapshotAnswerFindsTheLastAssistantMessage() {
         val snapshot = """
             {"messages":[

@@ -80,7 +80,18 @@ class QuestionsTapTest {
     """.trimIndent()
 
     private fun commands(ops: FakeOps, board: QuestionBoard): BotCommands =
-        BotCommands(ops, LiveHub(), daemonReset = { "" }, board = board)
+        BotCommands(
+            ops,
+            LiveHub(),
+            daemonReset = { "" },
+            history = object : TasksHistory {
+                override suspend fun ctxTasks(limit: Int) = emptyList<TaskRow>()
+                override suspend fun modelSelection(sid: String): ModelSel? = null
+                override suspend fun freshestTask(workspacePath: String): TaskRow? = null
+                override suspend fun taskAlive(sid: String) = true
+            },
+            board = board,
+        )
 
     private suspend fun feed(board: QuestionBoard, json: String) {
         board.onStreamEvent(

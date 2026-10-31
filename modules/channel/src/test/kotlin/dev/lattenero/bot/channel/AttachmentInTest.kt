@@ -129,8 +129,8 @@ class AttachmentInTest {
             add(row("a", 90, 90, 900_000)) // more bytes, fewer pixels
             add(row("b", 1280, 720, 204_800))
         }
-        assertEquals("b", Poller.largestPhoto(sizes)?.str("file_id"))
-        assertNull(Poller.largestPhoto(kotlinx.serialization.json.buildJsonArray { }))
+        assertEquals("b", largestPhoto(sizes)?.str("file_id"))
+        assertNull(largestPhoto(kotlinx.serialization.json.buildJsonArray { }))
     }
 
     // ---- the wire -----------------------------------------------------------
