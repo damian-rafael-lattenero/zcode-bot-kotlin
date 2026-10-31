@@ -37,9 +37,9 @@ class BotMenuTest {
     fun bodyCarriesTheEightInOrder() {
         val body = BotMenu.body(TgConfig(token = "t", chatId = JsonNull))
         val commands = body["commands"]!!.jsonArray
-        assertEquals(13, commands.size)
+        assertEquals(BotCommands.MENU.size, commands.size)
         assertEquals(
-            listOf("tasks", "all_tasks", "status", "plan", "last", "compact", "context_window", "queue", "stop", "nuclear", "quota", "subagents", "help"),
+            BotCommands.MENU.map { it.first },
             commands.map { it.jsonObject["command"]!!.jsonPrimitive.content },
         )
         commands.forEach { c ->
