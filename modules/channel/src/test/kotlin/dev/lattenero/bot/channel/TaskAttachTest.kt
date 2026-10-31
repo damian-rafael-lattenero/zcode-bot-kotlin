@@ -70,11 +70,15 @@ class TaskAttachTest {
         /** The store's running children — the sa: attach's verification set. */
         var runningSubs: List<String> = emptyList()
 
+        /** The store's TITLED running children — the ACTIVE view's stream-independent rows. */
+        var runningTitled: List<RunningSubagent> = emptyList()
+
         override suspend fun ctxTasks(limit: Int): List<TaskRow> = rows.take(limit)
         override suspend fun modelSelection(sid: String): ModelSel? = null
         override suspend fun freshestTask(workspacePath: String): TaskRow? = rows.firstOrNull()
         override suspend fun taskAlive(sid: String): Boolean = true
         override suspend fun subagentSessionIds(parentSid: String): List<String> = runningSubs
+        override suspend fun subagentsRunning(parentSid: String): List<RunningSubagent> = runningTitled
     }
 
     private val app = "/Users/damian/Projects/app"
@@ -398,6 +402,49 @@ class TaskAttachTest {
         val second = bc.handle("esto ya va a la conversación", 11L)
         assertEquals(1, ops.orders.size)
         assertTrue("Orden entregada" !in (second?.text ?: ""))
+    }
+
+    @Test
+    fun theStoreRunningSubagentsAreVisibleAndAttachable() = runBlocking {
+        // the bus died before the lane streamed: the ACTIVE view still shows
+        // the running subagent FROM THE STORE and its tap attaches the session
+        val ops = FakeOps(boundStatus).apply { answers["activeTaskIds"] = """[]""" }
+        val sess = "sess_subagent_agent_2e587e61"
+        val history = FakeHistory(rows).apply {
+            runningSubs = listOf(sess)
+            runningTitled = listOf(RunningSubagent(sess, "cazar la causa raíz del bus"))
+        }
+        val hub = LiveHub() // an EMPTY hub — the stream never saw the lane
+        val bc = BotCommands(
+            ops = ops,
+            hub = hub,
+            daemonReset = { "fake ladder" },
+            clock = { 1_000_000L },
+            history = history,
+            defaultWorkspacePath = "/Users/damian/.zcode/workspace/default",
+        )
+        val reply = bc.handle("/subagents", 3L)!!
+        val data = reply.markup.toString()
+        assertTrue("cazar la causa raíz" in data, "the store's row must render: $data")
+        assertTrue("sa:${sess.takeLast(16)}" in data) // the attach tap carries the session tail
+        // the tap: subscribed to the CHILD session + pinned, no lane needed
+        val attach = bc.onCallback("sa:${sess.takeLast(16)}", 4L)!!
+        assertEquals(listOf(sess to app), ops.subscribed)
+        assertEquals(sess, hub.peekPin())
+        assertTrue("attachado" in attach.text)
+    }
+
+    @Test
+    fun taskRowOrderTapArmsTheTaskSession() = runBlocking {
+        val ops = FakeOps(boundStatus).apply { answers["activeTaskIds"] = """[]""" }
+        val bc = commands(ops)
+        val arm = bc.onCallback("so:task-77", 8L)!!
+        // the task's OWN session: subscribed (the pipe) + armed (the order)
+        assertEquals(listOf("task-77" to app), ops.subscribed)
+        assertTrue("sin bind" in arm.text)
+        val ack = bc.handle("la orden directa", 9L)!!
+        assertTrue("Orden entregada" in ack.text)
+        assertEquals(listOf("la orden directa" to "task-77"), ops.orders)
     }
 
     @Test

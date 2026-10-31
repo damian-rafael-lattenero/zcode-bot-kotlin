@@ -1,6 +1,7 @@
 package dev.lattenero.bot.daemon.history
 
 import dev.lattenero.bot.channel.ModelSel
+import dev.lattenero.bot.channel.RunningSubagent
 import dev.lattenero.bot.channel.SubagentRow
 import dev.lattenero.bot.channel.TaskRow
 import dev.lattenero.bot.channel.TasksHistory
@@ -145,6 +146,26 @@ internal class TasksHistoryIo(private val baseDir: File) : TasksHistory {
         }.getOrDefault(emptyList())
     }
 
+    /** The /subagents ACTIVE view's stream-independent half: the parent's RUNNING children, titled, newest first. */
+    override suspend fun subagentsRunning(parentSid: String): List<RunningSubagent> {
+        val db = cliDb()
+        if (!db.exists()) return emptyList()
+        return runCatching {
+            DriverManager.getConnection("jdbc:sqlite:${db.absolutePath}", roProps()).use { conn ->
+                conn.prepareStatement(RUNNING_SUBS_TITLED_QUERY).use { ps ->
+                    ps.setString(1, parentSid)
+                    ps.executeQuery().use { rs ->
+                        val rows = mutableListOf<RunningSubagent>()
+                        while (rs.next()) {
+                            rows.add(RunningSubagent(rs.getString(1).orEmpty(), rs.getString(2).orEmpty()))
+                        }
+                        rows
+                    }
+                }
+            }
+        }.getOrDefault(emptyList())
+    }
+
     /** Latest model_usage per session, subagents excluded — Python's usage dict. */
     private fun usageBySession(db: File): Map<String, Usage> {
         if (!db.exists()) return emptyMap()
@@ -283,5 +304,10 @@ internal class TasksHistoryIo(private val baseDir: File) : TasksHistory {
         const val RUNNING_SUBS_QUERY =
             "SELECT id FROM session WHERE parent_id = ? AND COALESCE(last_outcome,'') = ''"
         const val RUNNING_SUB_ID_COL = 1
+
+        /** The ACTIVE view's titled read: the same running children, with the prompt's first words. */
+        const val RUNNING_SUBS_TITLED_QUERY =
+            "SELECT id, title FROM session WHERE parent_id = ? AND COALESCE(last_outcome,'') = '' " +
+                "ORDER BY time_created DESC LIMIT 10"
     }
 }

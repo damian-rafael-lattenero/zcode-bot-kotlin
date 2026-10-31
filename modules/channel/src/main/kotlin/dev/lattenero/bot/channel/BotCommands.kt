@@ -654,35 +654,48 @@ class BotCommands(
     private suspend fun orderArm(tail: String): BotReply {
         val attachReply = laneAttach(tail)
         val lane = hub.peek()?.tools?.lastOrNull { it.toolId.endsWith(tail) }
-        if (lane != null) {
-            armedOrder = ArmedOrder(
-                sessionId = hub.peekPin() ?: lane.toolId,
-                title = Keyboards.subagentName(lane),
+        val pin = hub.peekPin()
+        // an order flies ONLY to a REAL session id (the fork's inbound
+        // taskId) — the lane-scope fallback has none and is honestly refused
+        val (sessionId, title) = when {
+            lane != null && pin != null -> pin to Keyboards.subagentName(lane)
+            lane != null -> return BotReply(
+                "👁 «${PyText.esc(Keyboards.subagentName(lane))}» attachada por lane, pero el fork no nombra su " +
+                    "sesión — la orden directa no puede ir (fork viejo).",
             )
-            logger.info { "callback ✍️ so: ORDER ARMED for ${armedOrder?.sessionId} (${lane.name})" }
-            return BotReply(
-                "👁 ${attachReply.text}\n" +
-                    "✍️ Armado: tu PRÓXIMO texto va como orden a «${PyText.esc(Keyboards.subagentName(lane))}».",
-            )
-        }
-        // not a subagent tail: a TASK's own sid (the /tasks ✍️) — the bind is
-        // workspace-scoped (the fork's project boundary), the ORDER is not:
-        // attach the pipe + arm, and the text flies direct to that session
-        val row = history.ctxTasks(SCOPE_FOR_PICK).firstOrNull { it.sid == tail }
-        if (row != null) {
-            val ws = (contextAnswer() as? ContextAnswer.Ctx)?.value?.workspacePath
-            if (ws != null) {
+
+            pin != null -> {
+                val t = hub.peek()?.taskId
+                    ?.let { history.subagentsRunning(it) }
+                    ?.firstOrNull { it.sid == pin }?.title
+                pin to (t?.takeIf { it.isNotBlank() } ?: pin.takeLast(SID_TAIL))
+            }
+
+            else -> {
+                // a TASK's own sid (the /tasks ✍️): the bind is workspace-
+                // scoped (the fork's project boundary), the ORDER is not —
+                // attach the pipe + arm direct to that session
+                val row = history.ctxTasks(SCOPE_FOR_PICK).firstOrNull { it.sid == tail }
+                    ?: return attachReply // the honest miss — nothing armed
+                val ws = (contextAnswer() as? ContextAnswer.Ctx)?.value?.workspacePath
+                    ?: return attachReply
                 ops.subscribe(row.sid, ws)
                 hub.watchTask()
-                armedOrder = ArmedOrder(sessionId = row.sid, title = row.title.ifEmpty { row.sid.takeLast(SID_TAIL) })
-                logger.info { "callback ✍️ so: TASK ORDER ARMED for ${row.sid} (attached)" }
+                val title = row.title.ifEmpty { row.sid.takeLast(SID_TAIL) }
+                armedOrder = ArmedOrder(row.sid, title)
+                logger.info { "callback ✍️ so: TASK ORDER ARMED for ${row.sid}" }
                 return BotReply(
-                    "👁 «${PyText.esc(armedOrder?.title ?: "?")}» en vivo — la tubería es tuya.\n" +
+                    "👁 «${PyText.esc(title)}» en vivo — la tubería es tuya.\n" +
                         "✍️ Armado: tu PRÓXIMO texto va como orden directo a esa task (sin bind).",
                 )
             }
         }
-        return attachReply // the honest miss — nothing armed
+        armedOrder = ArmedOrder(sessionId, title)
+        logger.info { "callback ✍️ so: ORDER ARMED for $sessionId («$title»)" }
+        return BotReply(
+            "👁 ${attachReply.text}\n" +
+                "✍️ Armado: tu PRÓXIMO texto va como orden a «${PyText.esc(title)}».",
+        )
     }
 
     /**
@@ -701,12 +714,34 @@ class BotCommands(
     private suspend fun laneAttach(tail: String): BotReply {
         val state = hub.peek()
         val lane = state?.tools?.lastOrNull { it.toolId.endsWith(tail) }
-            ?: return BotReply("🤷 Ese subagente ya no está en la tubería — /tasks para re-engancharte.")
+        if (lane == null) {
+            // not a stream lane: a STORED running session (the ACTIVE view's
+            // stream-independent rows) — its session id IS the attach target
+            val parentSid = state?.taskId
+                ?: (contextAnswer() as? ContextAnswer.Ctx)?.value?.activeTaskId
+            val sess = parentSid?.let { parent ->
+                history.subagentSessionIds(parent).firstOrNull { it.endsWith(tail) }
+            }
+            if (sess != null) {
+                val ws = (contextAnswer() as? ContextAnswer.Ctx)?.value?.workspacePath
+                if (ws != null) {
+                    ops.subscribe(sess, ws)
+                    hub.pin(sess)
+                    logger.info { "callback 🔵 sa: STORED session ATTACHED $sess — pinned" }
+                    return BotReply("👁 Subagente attachado — su turno completo fluye acá; se sella cuando cierra.")
+                }
+            }
+            return BotReply("🤷 Ese subagente ya no está en la tubería — /tasks para re-engancharte.")
+        }
+        return laneAttachLane(lane)
+    }
+
+    private suspend fun laneAttachLane(lane: ToolLive): BotReply {
         val agentId = lane.subagentAgentId
         val ws = (contextAnswer() as? ContextAnswer.Ctx)?.value?.workspacePath
         if (agentId != null && ws != null) {
             val sessId = "$SUBAGENT_SESSION_PREFIX$agentId"
-            if (sessId in history.subagentSessionIds(state.taskId)) {
+            if (sessId in history.subagentSessionIds(hub.peek()?.taskId ?: "")) {
                 ops.subscribe(sessId, ws)
                 hub.pin(sessId)
                 logger.info {
@@ -1083,11 +1118,17 @@ class BotCommands(
             } else {
                 renderSubagentsActive(turn, clock())
             }
-            // one row per live dispatch lane — the tap ATTACHES its stream
+            // one row per live dispatch lane — the tap ATTACHES its stream —
+            // PLUS the store's own running sessions (stream-independent: the
+            // bus can die mid-run, the store cannot — a running subagent is
+            // visible even when its lane never reached the watcher)
             val lanes = turn?.tools.orEmpty().filter {
                 it.parentToolUseId == null && it.status == null && it.name in SUBAGENT_DISPATCH_NAMES
             }
-            BotReply(text + hint, markup = Keyboards.subagentsKeyboard(lanes, inactiveView = false))
+            val parentSid = turn?.taskId
+                ?: (contextAnswer() as? ContextAnswer.Ctx)?.value?.activeTaskId
+            val dbRunning = if (parentSid != null) history.subagentsRunning(parentSid) else emptyList()
+            BotReply(text + hint, markup = Keyboards.subagentsKeyboard(lanes, dbRunning, inactiveView = false))
         }
     }
 
