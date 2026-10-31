@@ -218,6 +218,19 @@ private fun buildLiveView(
         telegram = telegram,
         config = lane.config,
         channelAlive = { client.connected }, // 💓 vs 📡 in the status line: "channel healthy" vs "channel dead"
+        resubscribe = { taskId ->
+            // the stream watchdog's tooth: the fork's continuous bus dies
+            // mid-run (measured 30/10 twice) — re-issue the subscription with
+            // the bot conversation's CURRENT workspace
+            val ws = when (val answer = client.query(ChannelQuery.BotStatus)) {
+                is QueryAnswer.Ok ->
+                    ((Json.parseToJsonElement(answer.resultJson) as? JsonObject)
+                        ?.get("context") as? JsonObject)
+                        ?.get("workspacePath")?.let { it as? JsonPrimitive }?.content
+                else -> null
+            }
+            if (ws != null) client.subscribe(taskId, ws)
+        },
         speak = { text -> fireSpeak(text, false, null) },
         finalBoxes = { tools -> finalBoxesOf(tools) },
         finalAnswer = { taskId ->
