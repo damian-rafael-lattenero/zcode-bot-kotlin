@@ -45,7 +45,20 @@ interface TasksHistory {
      * is only trusted when the store itself holds it.
      */
     suspend fun subagentSessionIds(parentSid: String): List<String> = emptyList()
+
+    /**
+     * The RUNNING subagent sessions of one parent, WITH their titles — the
+     * stream-independent truth (the cli db's own session rows, last_outcome
+     * empty = running). The /subagents ACTIVE view unions these with the
+     * stream's dispatch lanes: the bus can die mid-run (measured), the
+     * store cannot — a running subagent is visible even when its events
+     * never reached the watcher.
+     */
+    suspend fun subagentsRunning(parentSid: String): List<RunningSubagent> = emptyList()
 }
+
+/** One RUNNING subagent from the store — its session id IS the attach target. */
+data class RunningSubagent(val sid: String, val title: String)
 
 /**
  * One ENDED subagent of today — /subagents «inactivos»'s row. `outcome`

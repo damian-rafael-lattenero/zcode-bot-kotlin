@@ -110,7 +110,11 @@ object Keyboards {
      * view-switch row. The «inactivos» view stays text-only: ended
      * sessions have no stream to attach to, no ear to hear an order.
      */
-    fun subagentsKeyboard(lanes: List<ToolLive>, inactiveView: Boolean): JsonObject = buildJsonObject {
+    fun subagentsKeyboard(
+        lanes: List<ToolLive>,
+        dbRunning: List<RunningSubagent> = emptyList(),
+        inactiveView: Boolean,
+    ): JsonObject = buildJsonObject {
         putJsonArray("inline_keyboard") {
             lanes.forEach { lane ->
                 add(
@@ -118,6 +122,17 @@ object Keyboards {
                         add(button(subagentLabel(lane), "sa:${lane.toolId.takeLast(LANE_TAIL)}"))
                         // the ✍️ arms the next free text as an ORDER to that subagent
                         add(button("✍️", "so:${lane.toolId.takeLast(LANE_TAIL)}"))
+                    },
+                )
+            }
+            // the store's running sessions — visible even when the bus died
+            // before their lane streamed (each sid tail IS the attach target)
+            dbRunning.forEach { r ->
+                add(
+                    buildJsonArray {
+                        val label = r.title.takeIf { it.isNotBlank() }?.take(TITLE_CAP) ?: r.sid.takeLast(LANE_TAIL)
+                        add(button("$SUBAGENT_MARK $label ▶️", "sa:${r.sid.takeLast(LANE_TAIL)}"))
+                        add(button("✍️", "so:${r.sid.takeLast(LANE_TAIL)}"))
                     },
                 )
             }
