@@ -130,6 +130,23 @@ class LiveHub {
         }
     }
 
+    /**
+     * The stream heartbeat's seq accounting — NOTHING else moves. The
+     * keepalive consumes the connection's seq counter (the fork's own
+     * law), so without this every quiet stretch reads as a lost-event gap
+     * and the resync wipes the accumulating CoT (measured live 31/10: the
+     * blocks never reached 3000). lastEventAtMs NEVER moves: the heartbeat
+     * proves the BUS, not the model — a quiet model stays honestly quiet.
+     */
+    suspend fun keepalive(taskId: String, seq: Long) {
+        mutex.withLock {
+            val cur = current ?: return@withLock
+            if (cur.taskId != taskId) return@withLock
+            val base = cur.lastSeq ?: return@withLock
+            if (seq > base) current = cur.copy(lastSeq = seq)
+        }
+    }
+
     suspend fun peek(): TurnLive? = mutex.withLock { current }
 
     /** After the seal is published the turn is spent; /nuclear also lands here.
