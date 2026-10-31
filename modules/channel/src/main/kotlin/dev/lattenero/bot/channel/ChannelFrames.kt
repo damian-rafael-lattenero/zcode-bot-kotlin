@@ -198,23 +198,6 @@ fun encodeClient(frame: ClientFrame): String = when (frame) {
         if (frame.attachments.isNotEmpty()) put("attachments", encodeAttachments(frame.attachments))
     }
 
-/** The inbound's attachment rows — the fork's DaemonChannelInboundAttachment, one object per file. */
-private fun encodeAttachments(attachments: List<InboundAttachment>): kotlinx.serialization.json.JsonArray =
-    buildJsonArray {
-        attachments.forEach { att ->
-            add(
-                buildJsonObject {
-                    put("id", att.id)
-                    put("kind", att.kind)
-                    put("filename", att.filename)
-                    put("mimeType", att.mimeType)
-                    if (att.sizeBytes != null) put("sizeBytes", att.sizeBytes)
-                    if (att.localPath != null) put("localPath", att.localPath)
-                },
-            )
-        }
-    }
-
     is ClientFrame.Subscribe -> buildJsonObject {
         put("type", "subscribe")
         put("id", frame.id)
@@ -356,6 +339,23 @@ private fun encodeQuery(query: ChannelQuery): JsonObject = when (query) {
         put("taskId", query.taskId)
     }
 }
+
+/** The inbound's attachment rows — the fork's DaemonChannelInboundAttachment, one object per file. */
+private fun encodeAttachments(attachments: List<InboundAttachment>): kotlinx.serialization.json.JsonArray =
+    buildJsonArray {
+        attachments.forEach { att ->
+            add(
+                buildJsonObject {
+                    put("id", att.id)
+                    put("kind", att.kind)
+                    put("filename", att.filename)
+                    put("mimeType", att.mimeType)
+                    if (att.sizeBytes != null) put("sizeBytes", att.sizeBytes)
+                    if (att.localPath != null) put("localPath", att.localPath)
+                },
+            )
+        }
+    }
 
 // ---- server → client --------------------------------------------------------
 
