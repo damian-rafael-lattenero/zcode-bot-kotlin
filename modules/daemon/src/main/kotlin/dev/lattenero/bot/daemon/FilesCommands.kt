@@ -20,6 +20,7 @@ internal object FilesCommands {
     /** /file <path> — the plan: absolute only, exists, a file, 20 MB. */
     internal data class FilePlan(val file: File?, val refusal: String?)
 
+    @Suppress("ReturnCount") // one guard per honest refusal — the plan's own shape
     internal fun planFileSend(rest: String): FilePlan {
         val path = rest.trim()
         if (path.isEmpty()) {
@@ -33,7 +34,9 @@ internal object FilesCommands {
         }
         val f = File(path)
         if (!f.exists()) return FilePlan(null, "⚠️ No existe: «$path» — revisá la ruta (el /file no lista ni adivina).")
-        if (!f.isFile) return FilePlan(null, "⚠️ No es un archivo: «$path» (¿un directorio?) — mando archivos, no carpetas.")
+        if (!f.isFile) {
+            return FilePlan(null, "⚠️ No es un archivo: «$path» (¿un directorio?) — mando archivos, no carpetas.")
+        }
         if (f.length() > MAX_FILE_BYTES) {
             return FilePlan(
                 null,
@@ -95,7 +98,7 @@ internal object FilesCommands {
             val (added, removed) = MiniDiff.stats(f.before, f.after)
             val origin = if (f.before == null) " (nuevo)" else ""
             val head = "• <code>${esc(f.path)}</code>$origin +$added/−$removed"
-            val hunks = MiniDiff.render(f.before, f.after, PER_FILE_DIFF_LINES)
+            val hunks = MiniDiff.render(f.before, f.after, PER_FILE_DIFF_LINES, path = f.path)
             val body = buildString {
                 if (hunks.size >= PER_FILE_DIFF_LINES) {
                     append("\n   ✂️ el diff completo no entra — /file ${f.path}")
@@ -131,7 +134,7 @@ internal object FilesCommands {
  */
 internal object MiniDiff {
 
-    private const val LINE_CAP = 4000
+    private const val LINE_CAP = 400 // above this the file points at /file — a phone never reads a 500-line diff inline
 
     /** (added, removed) line counts — before null means every after line is added. */
     internal fun stats(before: String?, after: String): Pair<Int, Int> {
@@ -141,11 +144,12 @@ internal object MiniDiff {
     }
 
     /** The diff as phone-friendly lines: "@@ a→b @@" markers, "+ " / "− " bodies, capped. */
-    internal fun render(before: String?, after: String, maxLines: Int): List<String> {
+    @Suppress("ReturnCount") // the before/after/empty trio — the render's own shapes
+    internal fun render(before: String?, after: String, maxLines: Int, path: String = "<path>"): List<String> {
         val beforeLines = before?.lines()
         val afterLines = after.lines()
         if ((beforeLines?.size ?: 0) > LINE_CAP || afterLines.size > LINE_CAP) {
-            return listOf("✂️ archivo demasiado grande para diff inline — /file <path>")
+            return listOf("✂️ archivo demasiado grande para diff inline — /file $path")
         }
         val ops = ops(beforeLines ?: emptyList(), afterLines)
         val out = mutableListOf<String>()
