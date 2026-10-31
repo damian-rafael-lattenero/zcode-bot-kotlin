@@ -72,7 +72,7 @@ class LivePublisherTest {
             config = { cfg },
             channelAlive = { true },
             speak = {},
-            finalBoxes = { "" },
+            toolBox = { "" },
             finalAnswer = { null },
             clock = { TICK_MS },
             resolveTitle = resolveTitle,
@@ -190,7 +190,7 @@ class LivePublisherTest {
             config = { cfg },
             channelAlive = { true },
             speak = { text -> spoken.add(text) },
-            finalBoxes = { "" },
+            toolBox = { "" },
             finalAnswer = { null },
             clock = { TICK_MS },
         )
