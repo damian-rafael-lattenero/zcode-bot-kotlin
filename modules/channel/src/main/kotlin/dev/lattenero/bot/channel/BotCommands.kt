@@ -49,13 +49,6 @@ interface ChannelOps {
      */
     suspend fun steer(taskId: String, text: String): SteerAnswer = SteerAnswer.Unavailable
 
-    /**
-     * LA RESPUESTA del dueño a una pregunta (el fork's respond frame —
-     * 6993d7e8): awaited, la verdad del host. Default UNAVAILABLE: un tap
-     * sin wiring deja la pregunta armada y lo dice — nunca un tap mudo.
-     */
-    suspend fun respondQuestion(frame: ClientFrame.Respond): RespondAnswer = RespondAnswer.Unavailable
-
     /** The bind's send: the inbound's own answer (replies = the botsService's words). */
     suspend fun sendInboundAwait(text: String, messageId: String, receivedAt: Long): InboundAnswer
 
@@ -104,8 +97,6 @@ class BotCommands(
      * instance (the file-backed store), tests the in-memory default.
      */
     private val verbosity: VerbositySetting = VolatileVerbosity(),
-    /** The questions' board (the answer round-trip) — null = unwired: the taps answer honestly. */
-    private val board: QuestionBoard? = null,
 ) {
 
     /** /nuclear's single-flight companion: the in-process half (the wiring adds the cross-restart mtime gate). */
@@ -113,9 +104,6 @@ class BotCommands(
 
     /** /tasks new's pending intent: the NEXT free text skips the bind and CREATES (Python's /task new). */
     private var newIntent = false
-
-    /** The question's free-text arm: the shortId whose question eats the NEXT line (the qf: tap). */
-    private var pendingAnswerFor: String? = null
 
     /** One incoming line. Null = not a command (the router sends it as inbound). */
     @Suppress("CyclomaticComplexMethod") // one branch per command — the dispatcher's own shape
@@ -167,12 +155,6 @@ class BotCommands(
         data.startsWith("sa:") -> laneAttach(data.removePrefix("sa:"))
 
         data.startsWith("so:") -> orderArm(data.removePrefix("so:"))
-
-        // LA PREGUNTA's taps (the answer round-trip): qa:<sid>:<i> answers
-        // the option; qf:<sid> arms the next line as the free-text answer.
-        data.startsWith("qa:") -> questionTap(data.removePrefix("qa:"), updateId)
-
-        data.startsWith("qf:") -> answerArm(data.removePrefix("qf:"))
 
         data.startsWith("qgo:") -> {
             logger.info { "callback ⏳ qgo: the parked text keeps its natural wait" }
@@ -314,11 +296,6 @@ class BotCommands(
      */
     @Suppress("ReturnCount") // one branch per plan — the router's honest outcomes
     private suspend fun route(text: String, updateId: Long): BotReply? {
-        pendingAnswerFor?.let { shortId ->
-            pendingAnswerFor = null
-            answerWithFreeText(shortId, text, updateId)?.let { return it }
-            // the question died while armed: the text rides the normal route
-        }
         val facts = routeFacts()
         val plan = planRoute(facts, newIntent)
         logger.info {
@@ -687,122 +664,6 @@ class BotCommands(
 
     /** One armed order: the next free text flies to this session. The §7 escape hatch. */
     private data class ArmedOrder(val sessionId: String, val title: String)
-
-    /**
-     * LA RESPUESTA por botón (the answer round-trip's flight): the option's
-     * respond frame flies AWAITED and the question message's edit tells the
-     * truth — Resolved seals with the option's label, Failed seals with the
-     * host's verbatim error (a stale question never lies ok), Unavailable
-     * keeps the question armed (the owner retries). Null = the edit IS the
-     * feedback (a second message would only bury it).
-     */
-    private suspend fun questionTap(arg: String, updateId: Long): BotReply? {
-        val active = board ?: return null
-        val shortId = arg.substringBeforeLast(':')
-        val index = arg.substringAfterLast(':').toIntOrNull() ?: return null
-        val q = active.byShortId(shortId) ?: return BotReply("⏳ Esa pregunta ya no está pendiente.")
-        val option = q.options.getOrNull(index) ?: return null
-        val frame = when (q.kind) {
-            "permission" -> ClientFrame.Respond(
-                id = "",
-                taskId = q.taskId,
-                requestId = q.requestId,
-                kind = "permission",
-                optionId = option.optionId,
-                response = option.response,
-                messageId = "tg-$updateId-qa",
-            )
-
-            "plan" -> ClientFrame.Respond(
-                id = "",
-                taskId = q.taskId,
-                requestId = q.requestId,
-                kind = "plan",
-                action = if (option.isDeny || option.optionId == "decline") "decline" else "accept",
-                messageId = "tg-$updateId-qa",
-            )
-
-            else -> ClientFrame.Respond(
-                id = "",
-                taskId = q.taskId,
-                requestId = q.requestId,
-                kind = "elicitation",
-                action = "accept",
-                content = elicitationContent(q.title, option.optionId, q.questionCount),
-                messageId = "tg-$updateId-qa",
-            )
-        }
-        logger.info { "question tap: ${q.kind} «${option.label}» → ${q.requestId.take(12)}…" }
-        return when (val answer = ops.respondQuestion(frame)) {
-            RespondAnswer.Resolved -> {
-                active.resolve(shortId, "✅ Respondido: <b>${PyText.esc(option.label)}</b>")
-                null
-            }
-
-            RespondAnswer.Unavailable -> BotReply("📡 El canal está caído — la pregunta sigue esperando, probá de nuevo.")
-
-            is RespondAnswer.Failed -> {
-                val detail = answer.message?.takeIf { it.isNotBlank() } ?: answer.code
-                active.resolve(
-                    shortId,
-                    "⚠️ El tap no entró (${PyText.esc(answer.code)}): ${PyText.esc(PyText.take(detail, ORDER_LOG_PREVIEW))}",
-                )
-                null
-            }
-        }
-    }
-
-    /** The ✍️ arm: the NEXT free text IS the elicitation's answer (one shot, ArmedOrder's mechanics). */
-    private suspend fun answerArm(shortId: String): BotReply {
-        val q = board?.byShortId(shortId) ?: return BotReply("⏳ Esa pregunta ya no está pendiente.")
-        pendingAnswerFor = shortId
-        return BotReply("✍️ Escribí la respuesta — tu próxima línea vuela como respuesta a «${PyText.esc(q.header)}».")
-    }
-
-    /**
-     * The armed answer's flight: the elicitation content carries the owner's
-     * words verbatim (buildBotElicitationContent's shape — the answers keyed
-     * by the QUESTION text, the bots' own precedent for accepting a
-     * questionnaire). Null = the question died while armed: the caller
-     * routes the text normally. Unavailable RE-ARMS — the words are still
-     * the answer once the channel returns.
-     */
-    @Suppress("ReturnCount") // one guard per outcome — the armed order's own shape
-    private suspend fun answerWithFreeText(shortId: String, text: String, updateId: Long): BotReply? {
-        val active = board ?: return null
-        val q = active.byShortId(shortId) ?: return null
-        if (q.kind != "elicitation") return null // plans and permissions answer by button only
-        val frame = ClientFrame.Respond(
-            id = "",
-            taskId = q.taskId,
-            requestId = q.requestId,
-            kind = "elicitation",
-            action = "accept",
-            content = elicitationContent(q.title, text, q.questionCount),
-            messageId = "tg-$updateId-qf",
-        )
-        logger.info { "question answer (free text) → ${q.requestId.take(12)}…: ${text.take(ORDER_LOG_PREVIEW)}" }
-        return when (val answer = ops.respondQuestion(frame)) {
-            RespondAnswer.Resolved -> {
-                active.resolve(shortId, "✅ Tu respuesta entró.")
-                null
-            }
-
-            RespondAnswer.Unavailable -> {
-                pendingAnswerFor = shortId
-                BotReply(RouteTexts.CHANNEL_DOWN + "\nLa respuesta sigue armada — reintentá con tu próxima línea.")
-            }
-
-            is RespondAnswer.Failed -> {
-                val detail = answer.message?.takeIf { it.isNotBlank() } ?: answer.code
-                active.resolve(
-                    shortId,
-                    "⚠️ La respuesta no entró (${PyText.esc(answer.code)}): ${PyText.esc(PyText.take(detail, ORDER_LOG_PREVIEW))}",
-                )
-                null
-            }
-        }
-    }
 
     @Volatile
     private var armedOrder: ArmedOrder? = null
