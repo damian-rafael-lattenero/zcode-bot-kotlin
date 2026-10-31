@@ -31,7 +31,7 @@ class CallbackTapsTest {
                 ?: QueryAnswer.Failed("internal", "no canned answer")
         }
 
-        override suspend fun sendInbound(text: String, messageId: String, receivedAt: Long) = InboundReceipt.FIRED
+        override suspend fun sendInbound(text: String, messageId: String, receivedAt: Long, attachments: List<InboundAttachment>): InboundReceipt = InboundReceipt.FIRED
 
         override suspend fun sendInboundAwait(
             text: String,

@@ -40,7 +40,7 @@ class BotCommandsTest {
             return answers[key]?.let { QueryAnswer.Ok(it) } ?: QueryAnswer.Failed("internal", "no canned answer")
         }
 
-        override suspend fun sendInbound(text: String, messageId: String, receivedAt: Long): InboundReceipt {
+        override suspend fun sendInbound(text: String, messageId: String, receivedAt: Long, attachments: List<InboundAttachment>): InboundReceipt {
             if (!available) return InboundReceipt.UNAVAILABLE
             inbound.add(text to messageId)
             onInbound(text)

@@ -20,7 +20,7 @@ class VerbosityCommandTest {
     private class FakeOps : ChannelOps {
         override suspend fun query(query: ChannelQuery) = QueryAnswer.Failed("internal", "not needed here")
 
-        override suspend fun sendInbound(text: String, messageId: String, receivedAt: Long) = InboundReceipt.FIRED
+        override suspend fun sendInbound(text: String, messageId: String, receivedAt: Long, attachments: List<InboundAttachment>): InboundReceipt = InboundReceipt.FIRED
 
         override suspend fun sendInboundAwait(
             text: String,
