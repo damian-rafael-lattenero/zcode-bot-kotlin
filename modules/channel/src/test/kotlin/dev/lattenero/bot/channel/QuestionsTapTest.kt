@@ -26,7 +26,7 @@ class QuestionsTapTest {
 
         override suspend fun query(query: ChannelQuery): QueryAnswer = QueryAnswer.Failed("internal", "unused")
 
-        override suspend fun sendInbound(text: String, messageId: String, receivedAt: Long): InboundReceipt {
+        override suspend fun sendInbound(text: String, messageId: String, receivedAt: Long, attachments: List<InboundAttachment>): InboundReceipt {
             inbound.add(text)
             return InboundReceipt.FIRED
         }
