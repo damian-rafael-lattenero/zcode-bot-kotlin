@@ -137,6 +137,21 @@ def bootout-app [st: RunState]: nothing -> nothing {
     }
 }
 
+def plist-autorun [path: string]: nothing -> bool {
+    if not ($path | path exists) { return false }
+    let rows = (open --raw $path | lines)
+    # la LÍNEA de la clave exacta (el comentario del repo también dice
+    # «RunAtLoad» — sin el tag <key> no cuenta)
+    let hit = ($rows | enumerate | where {|r|
+        ($r.item | str contains "<key>RunAtLoad</key>")
+    } | get -o 0)
+    if $hit == null { return false }
+    # el valor puede vivir en la misma línea o en la siguiente
+    if ($hit.item | str contains "<true/>") { return true }
+    let tail = ($rows | skip ($hit.index + 1) | first 1 | str join " ")
+    ($tail | str contains "<true/>")
+}
+
 def is-exec [p: string]: nothing -> bool {
     (do { ^test -x $p } | complete | get exit_code) == 0
 }
@@ -296,33 +311,39 @@ def phase0-sanity [st: RunState]: nothing -> PhaseResult {
     # el deploy queda disparable por kickstart, jamás por un bootstrap.
     let plist_repo = ($st.repo + "/scripts/com.zcode.deploy-fork.plist")
     let plist_loaded = ($env.HOME + "/Library/LaunchAgents/com.zcode.deploy-fork.plist")
-    if ($env.HOME | is-empty) or not ($plist_repo | path exists) {
-        log $st "WARN: no pude verificar el plist del cutover (repo o HOME ausentes)"
-    } else {
-        let repo_autorun = (open $plist_repo | get -o "RunAtLoad" | default false)
-        let loaded_autorun = if ($plist_loaded | path exists) {
-            open $plist_loaded | get -o "RunAtLoad" | default false
+    # LA CONVERGENCIA ES UN EFECTO SECUNDARIO: jamás puede matar un deploy
+    # (30/10: un cell-path sobre el XML del plist reventó el sanity entero —
+    # medido y corregido; ahora todo el bloque va en try y lee texto crudo).
+    let convergence = (try {
+        if ($env.HOME | is-empty) or not ($plist_repo | path exists) {
+            "WARN: no pude verificar el plist del cutover (repo o HOME ausentes)"
         } else {
-            false
-        }
-        if $loaded_autorun != $repo_autorun {
-            log $st $"plist del cutover diverge (cargado RunAtLoad=($loaded_autorun), repo=($repo_autorun)) — re-armando desde el repo"
-            let dst_dir = ($plist_loaded | path dirname)
-            mkdir $dst_dir
-            cp $plist_repo $plist_loaded
-            let uid = (id -u)
-            do { ^launchctl bootout $"gui/($uid)/com.zcode.deploy-fork" } | complete
-            sleep 1sec
-            let bs = (do { ^launchctl bootstrap $"gui/($uid)" $plist_loaded } | complete)
-            if $bs.exit_code == 0 {
-                log $st "plist del cutover re-armado desde el repo (RunAtLoad=false — kickstart-only) ✓"
+            # el plist es XML: el RunAtLoad se lee por LÍNEAS (un cell path
+            # estructural sobre el XML parseado revienta — medido; y el
+            # str contains de esta nu no tiene -r)
+            let repo_autorun = (plist-autorun $plist_repo)
+            let loaded_autorun = (plist-autorun $plist_loaded)
+            if $loaded_autorun != $repo_autorun {
+                let note = $"plist del cutover diverge (cargado RunAtLoad=($loaded_autorun), repo=($repo_autorun)) — re-armando desde el repo"
+                let dst_dir = ($plist_loaded | path dirname)
+                mkdir $dst_dir
+                cp $plist_repo $plist_loaded
+                let uid = (^id -u | str trim)
+                do { ^launchctl bootout $"gui/($uid)/com.zcode.deploy-fork" } | complete
+                sleep 1sec
+                let bs = (do { ^launchctl bootstrap $"gui/($uid)" $plist_loaded } | complete)
+                if $bs.exit_code == 0 {
+                    $"plist del cutover re-armado desde el repo (RunAtLoad=($repo_autorun) — kickstart-only) ✓"
+                } else {
+                    $"WARN: bootstrap del plist falló ($bs.stderr | str trim) — el deploy continúa; revisar a mano"
+                }
             } else {
-                log $st $"WARN: bootstrap del plist falló ($bs.stderr | str trim) — el deploy continúa; revisar a mano"
+                "plist del cutover: copia cargada == repo ✓"
             }
-        } else {
-            log $st "plist del cutover: copia cargada == repo (kickstart-only) ✓"
         }
-    }
+    } catch {|err|
+        $"WARN: la convergencia del plist falló y NO detiene el deploy: ($err | to json -r)"
+    })
     {state: $st, outcome: {ok: true, note: ""}}
 }
 
