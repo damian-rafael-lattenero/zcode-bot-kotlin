@@ -126,6 +126,34 @@ sealed interface ClientFrame {
 
     data class Unsubscribe(val id: String, val taskId: String) : ClientFrame
 
+    /**
+     * STEER (aditivo, 30/10): redirigir el turno EN CURSO — el texto entra
+     * al CLI con delivery «guide» (v4 sendText requestedDelivery=guide) y
+     * el admission lo inyecta DENTRO del turno vivo (turn.steerQueued →
+     * turn.steerDrained en el próximo límite de herramienta). El servidor
+     * responde con el MISMO ack que el inbound (inbound_result / error).
+     */
+    data class Steer(val id: String, val taskId: String, val text: String) : ClientFrame
+
+    /**
+     * LA RESPUESTA del dueño a una pregunta pendiente (el loop cerrado, el
+     * fork's respond frame — 6993d7e8): permission lleva el optionId de la
+     * opción del evento (+ su response devuelta tal cual); elicitation lleva
+     * action+content; plan (ExitPlanMode) viaja sin action — el fork la
+     * toma como accept. El messageId arma el dedupe del lado del host.
+     */
+    data class Respond(
+        val id: String,
+        val taskId: String,
+        val requestId: String,
+        val kind: String, // "permission" | "elicitation" | "plan"
+        val optionId: String? = null,
+        val response: JsonObject? = null,
+        val action: String? = null,
+        val content: JsonObject? = null,
+        val messageId: String? = null,
+    ) : ClientFrame
+
     data class Query(val id: String, val query: ChannelQuery) : ClientFrame
 
     data class Ping(val id: String) : ClientFrame
@@ -160,6 +188,26 @@ fun encodeClient(frame: ClientFrame): String = when (frame) {
         put("type", "unsubscribe")
         put("id", frame.id)
         put("taskId", frame.taskId)
+    }
+
+    is ClientFrame.Steer -> buildJsonObject {
+        put("type", "steer")
+        put("id", frame.id)
+        put("taskId", frame.taskId)
+        put("text", frame.text)
+    }
+
+    is ClientFrame.Respond -> buildJsonObject {
+        put("type", "respond")
+        put("id", frame.id)
+        put("taskId", frame.taskId)
+        put("requestId", frame.requestId)
+        put("kind", frame.kind)
+        if (frame.optionId != null) put("optionId", frame.optionId)
+        if (frame.response != null) put("response", frame.response)
+        if (frame.action != null) put("action", frame.action)
+        if (frame.content != null) put("content", frame.content)
+        if (frame.messageId != null) put("messageId", frame.messageId)
     }
 
     is ClientFrame.Query -> buildJsonObject {
@@ -287,6 +335,19 @@ sealed interface ServerFrame {
 
     data class InboundResult(val id: String, val duplicate: Boolean, val replies: List<String>) : ServerFrame
 
+    /**
+     * El ACK honesto del respond (el fork's 6993d7e8): ok=true SOLO tras el
+     * ACK del v4 command del host; el fallo viaja COMO ChannelError (con el
+     * mismo id) — el tap edita el mensaje de la pregunta con la verdad.
+     */
+    data class RespondResult(
+        val id: String,
+        val taskId: String,
+        val requestId: String,
+        val kind: String,
+        val ok: Boolean,
+    ) : ServerFrame
+
     data class Subscribed(val id: String, val taskId: String) : ServerFrame
 
     data class Unsubscribed(val id: String, val taskId: String) : ServerFrame
@@ -335,6 +396,14 @@ fun decodeServerLine(line: String): ServerFrame? {
             replies = (root["replies"] as? JsonArray)
                 ?.mapNotNull { reply -> (reply as? JsonObject)?.str("text") }
                 .orEmpty(),
+        )
+
+        "respond_result" -> ServerFrame.RespondResult(
+            id = root.str("id") ?: return null,
+            taskId = root.str("taskId") ?: return null,
+            requestId = root.str("requestId") ?: return null,
+            kind = root.str("kind") ?: "unknown",
+            ok = root.bool("ok") ?: false,
         )
 
         "subscribed" -> ServerFrame.Subscribed(
@@ -386,6 +455,9 @@ fun describe(frame: ClientFrame): String = when (frame) {
     is ClientFrame.Inbound -> "inbound(id=${frame.id}, messageId=${frame.messageId}, ${frame.text.length} chars)"
     is ClientFrame.Subscribe -> "subscribe(id=${frame.id}, taskId=${frame.taskId})"
     is ClientFrame.Unsubscribe -> "unsubscribe(id=${frame.id}, taskId=${frame.taskId})"
+    is ClientFrame.Steer -> "steer(id=${frame.id}, taskId=${frame.taskId}, ${frame.text.length} chars)"
+    is ClientFrame.Respond ->
+        "respond(id=${frame.id}, taskId=${frame.taskId}, kind=${frame.kind}, request=${frame.requestId})"
     is ClientFrame.Query -> "query(id=${frame.id}, kind=${queryKind(frame.query)})"
     is ClientFrame.Ping -> "ping(id=${frame.id})"
 }

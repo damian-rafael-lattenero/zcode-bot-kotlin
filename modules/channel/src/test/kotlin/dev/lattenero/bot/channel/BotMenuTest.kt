@@ -71,7 +71,7 @@ class BotMenuTest {
         }
         assertEquals(listOf("setMyCommands"), methods)
         val posted = Json.parseToJsonElement(bodies.single()).jsonObject
-        assertEquals(13, posted["commands"]!!.jsonArray.size) // the exact thirteen on the wire
+        assertEquals(BotCommands.MENU.size, posted["commands"]!!.jsonArray.size) // the exact menu on the wire
     }
 
     @Test

@@ -630,8 +630,8 @@ class BotCommandsTest {
     @Test
     fun startAliasSpeaksTheHelp() = runBlocking {
         val (bc, _) = commands(ops())
-        assertTrue("The thirteen" in bc.reply("/start", 1L)!!)
-        assertTrue("The thirteen" in bc.reply("/help", 2L)!!)
+        assertTrue("The ${BotCommands.MENU.size}" in bc.reply("/start", 1L)!!)
+        assertTrue("The ${BotCommands.MENU.size}" in bc.reply("/help", 2L)!!)
     }
 
     @Test

@@ -36,6 +36,14 @@ interface ChannelOps {
     suspend fun sendOrder(text: String, messageId: String, receivedAt: Long, taskId: String): InboundReceipt =
         InboundReceipt.UNAVAILABLE
 
+    /**
+     * STEER: redirigir el turno EN CURSO (la frame `steer` del canal —
+     * delivery guide del CLI). Default UNAVAILABLE: un steer jamás viaja
+     * como texto libre ni como orden — sin wiring que lo hable, el
+     * comando dice la verdad y nada más.
+     */
+    suspend fun steer(taskId: String, text: String): SteerAnswer = SteerAnswer.Unavailable
+
     /** The bind's send: the inbound's own answer (replies = the botsService's words). */
     suspend fun sendInboundAwait(text: String, messageId: String, receivedAt: Long): InboundAnswer
 
@@ -104,6 +112,7 @@ class BotCommands(
             "compact" -> compact()
             "context_window" -> contextWindow()
             "queue" -> queue()
+            "steer" -> steer(rest)
             else -> BotReply(UNKNOWN)
         }
         logger.info {
@@ -1086,6 +1095,52 @@ class BotCommands(
     }
 
     /**
+     * /steer <texto> — redirigí el turno que corre (STEER, la frame
+     * aditiva del canal): el texto entra con delivery guide y el CLI lo
+     * inyecta DENTRO del turno vivo en el próximo límite de herramienta
+     * (turn.steerQueued → turn.steerDrained). Es OTRO intento que el
+     * texto libre (ese se ESTACIONA en la F17 cuando hay turno). Honesto
+     * por contrato: idle → el texto arranca un turno normal (la guía no
+     * se pierde — y se lo decimos); fork viejo → el nombre del fix; canal
+     * caído → degradado; nada inventado.
+     */
+    @Suppress("ReturnCount") // one guard per honest outcome
+    private suspend fun steer(rest: String): BotReply {
+        val text = rest.trim()
+        if (text.isEmpty()) return BotReply(STEER_USAGE)
+        val ctx = contextAnswer() as? ContextAnswer.Ctx ?: return BotReply(noConversationOrDown())
+        val taskId = ctx.value.activeTaskId
+            ?: return BotReply("📭 No active conversation — /tasks n picks one; its answers come back here.")
+        val title = history.ctxTasks(SCOPE_FOR_PICK).firstOrNull { it.sid == taskId }
+            ?.title?.takeIf { it.isNotEmpty() } ?: taskId.takeLast(SID_TAIL)
+        val running = isRunning(taskId, ctx.value.workspacePath)
+        return when (val answer = ops.steer(taskId, text)) {
+            SteerAnswer.Delivered -> {
+                logger.info { "steer: ${text.length} chars to $taskId (was running=$running)" }
+                if (running) {
+                    BotReply(
+                        "🌀 Steer entregado a «${PyText.esc(title)}» — entra DENTRO del turno que corre " +
+                            "(se inyecta en el próximo límite de herramienta).",
+                    )
+                } else {
+                    BotReply(
+                        "🌀 «${PyText.esc(title)}» no tenía turno corriendo — el texto arrancó un turno normal.",
+                    )
+                }
+            }
+
+            is SteerAnswer.Failed ->
+                if (answer.code == UNKNOWN_REQUEST_CODE) {
+                    BotReply(STEER_OLD_FORK)
+                } else {
+                    BotReply("⚠️ Steer falló (${answer.code}): ${PyText.esc(answer.message ?: "?")}")
+                }
+
+            SteerAnswer.Unavailable -> BotReply(DEGRADED)
+        }
+    }
+
+    /**
      * /subagents — TWO views, ONE button each (the owner's contract,
      * 30/10: «/subagents no muestra el subagente activo… y no mezclar los
      * inactivos»). DEFAULT: ONLY the ACTIVE subagent groups of the watched
@@ -1347,8 +1402,9 @@ class BotCommands(
         }.orEmpty()
 
     companion object {
-        internal const val UNKNOWN =
-            "🤷 Unknown command — /help lists the thirteen this bot speaks."
+        /** Lazy: MENU.size can never drift from the dispatcher's real vocabulary. */
+        internal val UNKNOWN: String
+            get() = "🤷 Unknown command — /help lists the ${MENU.size} this bot speaks."
         internal const val DEGRADED =
             "📡 The channel to the app is down — the fork's host is not running? " +
                 "Commands that need it wait for the app."
@@ -1403,6 +1459,7 @@ class BotCommands(
             "compact" to "shrinks the active conversation's context",
             "context_window" to "context window used — tokens, model window and percent",
             "queue" to "the parked texts — launch or discard",
+            "steer" to "steers the RUNNING turn — the text enters the live turn",
             "stop" to "stops the active task's turn",
             "nuclear" to "emergency: stops EVERYTHING and resets the bot",
             "quota" to "coding plan credits",
@@ -1410,7 +1467,9 @@ class BotCommands(
             "help" to "all commands",
         )
 
-        internal val HELP = (listOf("📖 <b>The thirteen</b> (the owner's MVP — the rest is hot-fix territory):") +
+        internal val HELP = (listOf(
+            "📖 <b>The ${MENU.size}</b> (the owner's MVP — the rest is hot-fix territory):",
+        ) +
             MENU.map { (cmd, desc) -> "/$cmd — $desc" } +
             listOf(
                 "",
@@ -1480,6 +1539,18 @@ class BotCommands(
 
         /** The fork's refusal code for a query the connected host predates. */
         internal const val UNKNOWN_QUERY_CODE = "unknown_query"
+
+        /**
+         * The fork's refusal code for a REQUEST TYPE the connected host
+         * predates (steer is a request, not a query — same additive law).
+         */
+        internal const val UNKNOWN_REQUEST_CODE = "unknown_request"
+        internal const val STEER_USAGE =
+            "🌀 /steer <texto> — redirigí el turno que corre: el texto entra DENTRO del turno vivo " +
+                "(no se estaciona en la cola)."
+        internal const val STEER_OLD_FORK =
+            "⚠️ La app conectada no conoce el frame «steer» — falta deployar el fork actualizado " +
+                "(ZCode damian, el commit steer del daemon-channel); el bot ya lo habla."
         internal const val CTX_WINDOW_UNPARSEABLE =
             "⚠️ No pude leer la respuesta de la ventana de contexto"
 
