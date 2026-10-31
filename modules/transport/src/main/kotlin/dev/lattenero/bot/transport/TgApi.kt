@@ -11,6 +11,10 @@ import io.ktor.client.statement.bodyAsBytes
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
+import io.ktor.client.request.forms.formData
+import io.ktor.client.request.forms.submitFormWithBinaryData
+import io.ktor.http.Headers
+import io.ktor.http.HttpHeaders
 import io.ktor.http.isSuccess
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
@@ -84,6 +88,49 @@ class TgApi(
         val bytes = resp.bodyAsBytes()
         target.writeBytes(bytes)
         return bytes.size.toLong()
+    }
+
+    /**
+     * FILES OUT (30/10): the upload leg — sendDocument/sendPhoto need
+     * multipart/form-data (a local file rides as binary, JSON can only
+     * carry URLs and file_ids). `fields` are the plain text parts (chat_id,
+     * caption); `fileField` + `file` is the binary part. The same redactor
+     * law: the URL carries the token, no exception flies raw.
+     */
+    @Suppress("TooGenericExceptionCaught") // the same redactor law as call()
+    suspend fun upload(
+        method: String,
+        fields: Map<String, String>,
+        fileField: String,
+        file: File,
+    ): JsonElement {
+        val cfg = configProvider()
+        val url = "${cfg.apiBase}/bot${cfg.token}/$method"
+        val resp = try {
+            client.submitFormWithBinaryData(
+                url = url,
+                formData = formData {
+                    fields.forEach { (name, value) -> append(name, value) }
+                    // The ByteArray part (ktor 3's public append): one ≤20 MB
+                    // file at a time in RAM is the bot's own scale; octet-stream
+                    // content type, the filename rides the disposition (Telegram
+                    // reads it for the document card)
+                    append(
+                        fileField,
+                        file.readBytes(),
+                        Headers.build {
+                            append(HttpHeaders.ContentType, "application/octet-stream")
+                            append(HttpHeaders.ContentDisposition, "filename=\"${file.name}\"")
+                        },
+                    )
+                },
+            )
+        } catch (e: Exception) {
+            throw IOException(cfg.redact(e.message ?: e::class.simpleName.orEmpty()), e)
+        }
+        val body = resp.bodyAsText()
+        if (!resp.status.isSuccess()) throw TgHttpException(resp.status.value, body)
+        return Json.parseToJsonElement(body)
     }
 
     override fun close() = client.close()

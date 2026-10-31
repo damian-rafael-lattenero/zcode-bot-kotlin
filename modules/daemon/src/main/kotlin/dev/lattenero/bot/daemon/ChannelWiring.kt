@@ -390,7 +390,11 @@ private fun buildPoller(
                     // F23: 👀 the second the words are in, ✅ once handled —
                     // feedback on the owner's own message, zero new messages
                     Ack.react(liveApi, cfg, update.messageId, Ack.RECEIVED)
-                    commands.handle(update.text, update.updateId)?.let { speak(it.text, false, it.markup) }
+                    // FILES OUT + /diff (30/10): the two commands that need
+                    // the wiring's own throats (the multipart upload; the
+                    // snapshot query + the mini-diff render) — intercepted
+                    // BEFORE the text dispatcher, which never sees them
+                    dispatchMessage(liveApi, cfg, client, history, commands, speak, update)
                     Ack.react(liveApi, cfg, update.messageId, Ack.HANDLED)
                 }
 
@@ -502,6 +506,97 @@ private const val ATTACHMENTS_DIR = "attachments"
 private const val MB = 1024L * 1024L
 private const val MAX_ATTACHMENT_BYTES = 20L * MB
 private const val FILENAME_CAP = 120
+
+/**
+ * The free-text dispatch: /file and /diff take the wiring's own throats
+ * (the multipart upload; the snapshot query + the mini-diff render) —
+ * everything else is the dispatcher's (the commands, then the route).
+ */
+private suspend fun dispatchMessage(
+    api: TgApi,
+    cfg: TgConfig,
+    client: ChannelClient,
+    history: TasksHistory,
+    commands: BotCommands,
+    speak: suspend (String, Boolean, JsonObject?) -> Unit,
+    update: InboundUpdate.Message,
+) {
+    when {
+        update.text.startsWith("/file") ->
+            speak(filesOut(api, cfg, update.text.removePrefix("/file")), false, null)
+
+        update.text == "/diff" || update.text.startsWith("/diff ") ->
+            speak(diffNow(client, history, update.text.removePrefix("/diff")), false, null)
+
+        else -> commands.handle(update.text, update.updateId)?.let { speak(it.text, false, it.markup) }
+    }
+}
+
+/**
+ * FILES OUT (30/10): /file <ruta-absoluta> — the file flies as a Telegram
+ * DOCUMENT (the transport's multipart sendDocument leg). The plan's honest
+ * ladder: not absolute → said; missing → said; a directory → said; over
+ * 20 MB → the cap named. The upload failing speaks its error. The bot's
+ * own chat is the destination (the owner's phone).
+ */
+@Suppress("TooGenericExceptionCaught") // the upload leg: any failure speaks honestly, never crashes the poller
+private suspend fun filesOut(api: TgApi, cfg: TgConfig, rest: String): String {
+    val plan = FilesCommands.planFileSend(rest)
+    val file = plan.file ?: return plan.refusal ?: "🤷 /file: nada que mandar"
+    return try {
+        api.upload(
+            "sendDocument",
+            mapOf("chat_id" to cfg.chatId.toString().trim('"')),
+            "document",
+            file,
+        )
+        logger.info { "file OUT: ${file.absolutePath} (${file.length()} bytes) → sendDocument" }
+        "📎 <code>${file.name}</code> (${file.length() / BYTES_K}K) salió como documento."
+    } catch (e: Exception) {
+        logger.warn(e) { "file OUT failed: ${file.absolutePath}: ${e.message}" }
+        "⚠️ No pude mandar «${file.name}»: ${e.message}"
+    }
+}
+
+/**
+ * /diff — the CURRENT turn's file changes, straight from the taskSnapshot's
+ * own fileChanges (the fork's fileChangeTracker serialized form). Bare =
+ * the last turn; `/diff all` = the whole session. The reply rides the
+ * commands lane (text only): big files point at /file.
+ */
+@Suppress("ReturnCount") // the honesty ladder: down, no conversation, answered, failed — one exit each
+private suspend fun diffNow(client: ChannelClient, history: TasksHistory, rest: String): String {
+    val ctx = when (val answer = client.query(ChannelQuery.BotStatus)) {
+        is QueryAnswer.Ok -> (runCatching {
+            Json.parseToJsonElement(answer.resultJson) as? JsonObject
+        }.getOrNull()?.get("context") as? JsonObject) ?: return DIFF_DOWN
+        else -> return DIFF_DOWN
+    }
+    val taskId = (ctx.get("activeTaskId") as? JsonPrimitive)?.content
+        ?: return "📭 No active conversation — /tasks n picks one; /diff reads the files it changed."
+    val ws = (ctx.get("workspacePath") as? JsonPrimitive)?.content
+    return when (val answer = client.query(ChannelQuery.TaskSnapshot(taskId, ws))) {
+        is QueryAnswer.Ok -> {
+            val all = rest.trim().equals("all", ignoreCase = true)
+            val files = FilesCommands.changedFilesOf(answer.resultJson, all)
+            val title = runCatching { history.ctxTasks(BotCommands.SCOPE_FOR_PICK) }.getOrDefault(emptyList())
+                .firstOrNull { it.sid == taskId }?.title?.takeIf { it.isNotEmpty() }
+                ?: taskId.takeLast(SID_TAIL)
+            "📄 «$title»\n" + FilesCommands.renderDiff(files, all, DIFF_REPLY_CAP)
+        }
+
+        is QueryAnswer.Unavailable -> DIFF_DOWN
+
+        is QueryAnswer.Failed -> "⚠️ /diff falló (${answer.code}): ${answer.message ?: "?"}"
+    }
+}
+
+private const val DIFF_DOWN =
+    "📡 The channel to the app is down — /diff needs the conversation's snapshot."
+
+private const val DIFF_REPLY_CAP = 3500
+private const val BYTES_K = 1024L
+private const val SID_TAIL = 8
 
 /** The tap's toast — best-effort by design (Python's bare except; the action itself already ran). */
 @Suppress("TooGenericExceptionCaught") // Python's bare except: a failed toast never fails the tap
