@@ -6,6 +6,7 @@ import dev.lattenero.bot.channel.ChannelClient
 import dev.lattenero.bot.channel.ChannelOps
 import dev.lattenero.bot.channel.ChannelQuery
 import dev.lattenero.bot.channel.ChannelSpec
+import dev.lattenero.bot.channel.ClientFrame
 import dev.lattenero.bot.channel.InboundReceipt
 import dev.lattenero.bot.channel.InboundUpdate
 import dev.lattenero.bot.channel.LiveHub
@@ -13,6 +14,7 @@ import dev.lattenero.bot.channel.LiveOrphanStore
 import dev.lattenero.bot.channel.LivePublisher
 import dev.lattenero.bot.channel.LiveTelegram
 import dev.lattenero.bot.channel.Poller
+import dev.lattenero.bot.channel.QuestionBoard
 import dev.lattenero.bot.channel.QueryAnswer
 import dev.lattenero.bot.channel.ServerFrame
 import dev.lattenero.bot.channel.TasksHistory
@@ -29,6 +31,7 @@ import dev.lattenero.bot.daemon.nuclear.MacProcessEdge
 import dev.lattenero.bot.daemon.nuclear.NuclearLadder
 import dev.lattenero.bot.daemon.queue.InboundQueue
 import dev.lattenero.bot.daemon.send.DaemonSend
+import dev.lattenero.bot.daemon.send.LaneFiles
 import dev.lattenero.bot.daemon.send.SendLanes
 import dev.lattenero.bot.daemon.shadow.TimeIso
 import dev.lattenero.bot.daemon.spectator.ToolBox
@@ -99,6 +102,24 @@ internal fun wireChannel(
     val socketFile = File(cfg.baseDir, ChannelSpec.SOCKET_FILENAME)
     val remote = File(cfg.baseDir, "telegram-remote.json")
 
+    // THE QUESTIONS' throat (the answer round-trip): the commands lane's
+    // OWN files — the chat the owner's taps already ride. A hanging
+    // question is critical: the live-view law applies (the cooldown never
+    // gates it, a 429 widens the window). Without a live api (SHADOW /
+    // DRY-RUN) the board still REGISTERS — the stream's laws hold, only
+    // the phone's message is missing. Declared BEFORE the client: the
+    // stream callback below captures it.
+    val board: QuestionBoard = lanes.api?.let { api ->
+        val questionTelegram = LiveTelegram(
+            api = api,
+            cooldown = Cooldown(readFile = { File(pythonState, LaneFiles.COOLDOWN).takeIf { it.exists() } }),
+        )
+        QuestionBoard(
+            sendQuestion = { text, markup -> questionTelegram.ask(TgConfig.load(remote), text, markup) ?: 0L },
+            editQuestion = { mid, text, markup -> questionTelegram.edit(TgConfig.load(remote), mid, text, markup) },
+        )
+    } ?: QuestionBoard()
+
     // one send path for everything the channel says: the knob's leg (shadow
     // logs, dry-run composes+logs, LIVE posts with cooldown/outbox/last-ph);
     // the markup (the buttons) rides deliverMarkup — live posts it, the
@@ -141,7 +162,25 @@ internal fun wireChannel(
         tokenReader = { tokenFile.takeIf { it.exists() }?.readText() },
         onStreamEvent = { frame ->
             feedAndResync(hub, frame, System.currentTimeMillis())
-            if ((frame.event["type"] as? JsonPrimitive)?.content == "task_complete") drainQueue()
+            // THE ANSWER ROUND-TRIP: the stream carries the questions AND
+            // their resolutions — the board messages the owner on the
+            // former (dedupe inside), seals honestly on the latter (the
+            // tap, the app's own answer, or the turn's own end).
+            board.onStreamEvent(frame)
+            when ((frame.event["type"] as? JsonPrimitive)?.content) {
+                "task_complete" -> {
+                    drainQueue()
+                    board.resolveTask(frame.taskId, "⌛ El turno terminó — la pregunta quedó sin responder.")
+                }
+
+                "task_error" ->
+                    board.resolveTask(frame.taskId, "⌛ El turno terminó — la pregunta quedó sin responder.")
+
+                "permission_response", "elicitation_response" ->
+                    (frame.event["requestId"] as? JsonPrimitive)?.content?.let {
+                        board.resolveByRequestId(it, "✅ Respondido desde la app.")
+                    }
+            }
         },
         onInboundResult = { result ->
             when {
@@ -188,7 +227,9 @@ internal fun wireChannel(
         verbosity,
     )
     val poller =
-        buildPoller(cfg, lanes.api, pythonState, pollOn, hub, client, speak, remote, queue, history, liveView, verbosity)
+        buildPoller(
+            cfg, lanes.api, pythonState, pollOn, hub, client, speak, remote, queue, history, liveView, verbosity, board,
+        )
     return ChannelStack(client, liveView, poller, hub)
 }
 
@@ -210,9 +251,73 @@ internal fun attachmentRefusal(sizeBytes: Long?): String? =
         null
     }
 
+/**
+ * ATTACHMENTS IN (30/10): the owner's photo/document — downloaded with the
+ * bot's own token into the daemon's state, then the inbound frame rides it
+ * (localPath; the caption is the prompt). Honest per outcome: too big → the
+ * 20 MB law named; the download failing → the error said; the channel down
+ * → downloaded-but-NOT-delivered; the busy conversation → the server's own
+ * refusal (the F17 queue is TEXT-only by design).
+ */
+@Suppress("TooGenericExceptionCaught") // the download leg: any failure speaks honestly, never crashes the poller
+private suspend fun dispatchAttachment(
+    api: TgApi,
+    cfg: TgConfig,
+    pythonState: File,
+    client: ChannelClient,
+    speak: suspend (String, Boolean, JsonObject?) -> Unit,
+    update: InboundUpdate.Attachment,
+) {
+    Ack.react(api, cfg, update.messageId, Ack.RECEIVED)
+    val refusal = attachmentRefusal(update.sizeBytes)
+    if (refusal != null) {
+        logger.info { "attachment ${update.updateId}: REFUSED — ${update.filename} ${update.sizeBytes ?: 0} bytes" }
+        speak(refusal, false, null)
+        Ack.react(api, cfg, update.messageId, Ack.HANDLED)
+        return
+    }
+    try {
+        val dir = File(pythonState, ATTACHMENTS_DIR).apply { mkdirs() }
+        val target = File(dir, "${update.updateId}-${attachmentFilename(update.filename)}")
+        val bytes = api.downloadFile(update.fileId, target)
+        val att = InboundAttachment(
+            id = "att-${update.updateId}",
+            kind = update.kind,
+            filename = update.filename,
+            mimeType = update.mimeType,
+            sizeBytes = bytes,
+            localPath = target.absolutePath,
+        )
+        val fired = client.sendInbound(
+            update.caption,
+            "tg-${update.updateId}-att",
+            System.currentTimeMillis(),
+            attachments = listOf(att),
+        )
+        logger.info {
+            "attachment ${update.updateId}: ${update.filename} ($bytes bytes) " +
+                "${if (fired == InboundReceipt.FIRED) "delivered" else "NOT delivered (channel down)"}"
+        }
+        if (fired != InboundReceipt.FIRED) {
+            speak(
+                "📡 The channel to the app is down — «${update.filename}» was downloaded but " +
+                    "NOT delivered; retry in a moment.",
+                false,
+                null,
+            )
+        }
+    } catch (e: Exception) {
+        logger.warn(e) { "attachment ${update.updateId} failed: ${e.message}" }
+        speak("⚠️ No pude bajar «${update.filename}» (${e.message}) — mandalo de nuevo.", false, null)
+    }
+    Ack.react(api, cfg, update.messageId, Ack.HANDLED)
+}
+
 /** The wire's filename reduced to a safe on-disk name (no paths, no separators). */
+private val FILENAME_SAFE = ('a'..'z') + ('A'..'Z') + ('0'..'9') + listOf('.', '_', '-')
+
 internal fun attachmentFilename(filename: String): String =
-    filename.map { c -> if (c.isLetterOrDigit() || c == '.' || c == '_' || c == '-') c else '_' }
+    filename.map { c -> if (c in FILENAME_SAFE) c else '_' }
         .joinToString("")
         .take(FILENAME_CAP)
         .ifEmpty { "attachment" }
@@ -308,7 +413,8 @@ private fun buildPoller(
     queue: InboundQueue,
     history: TasksHistory,
     liveView: LivePublisher?,
-    verbosity: VerbositySetting,
+        verbosity: VerbositySetting,
+        board: QuestionBoard,
 ): Poller? {
     if (!pollOn) return null
     val liveApi = api ?: TgApi({ TgConfig.load(remote) })
@@ -342,6 +448,10 @@ private fun buildPoller(
 
                 // STEER: the running turn's redirection (the fork's `steer` frame, awaited)
                 override suspend fun steer(taskId: String, text: String) = client.steer(taskId, text)
+
+                // LA RESPUESTA del dueño: the fork's respond frame, awaited —
+                // the host's own truth comes back as the tap's answer
+                override suspend fun respondQuestion(frame: ClientFrame.Respond) = client.respond(frame)
 
                 override suspend fun sendInboundAwait(text: String, messageId: String, receivedAt: Long) =
                     client.sendInboundAwait(text, messageId, receivedAt)
@@ -381,6 +491,7 @@ private fun buildPoller(
         history = history,
         defaultWorkspacePath = File(File(cfg.baseDir, "workspace"), "default").absolutePath,
         verbosity = verbosity,
+        board = board,
     )
     return Poller(
         api = liveApi,
@@ -400,72 +511,13 @@ private fun buildPoller(
                     Ack.react(liveApi, cfg, update.messageId, Ack.HANDLED)
                 }
 
-                is InboundUpdate.Attachment -> {
-                    // ATTACHMENTS IN (30/10): the owner's photo/document —
-                    // downloaded with the bot's own token into the daemon's
-                    // state, then the inbound frame rides it (localPath; the
-                    // caption is the prompt). Honest per outcome: too big →
-                    // the 20 MB law named; the download failing → the error
-                    // said; the busy conversation → the server's own refusal
-                    // (the F17 queue is TEXT-only by design).
-                    Ack.react(liveApi, cfg, update.messageId, Ack.RECEIVED)
-                    val refusal = attachmentRefusal(update.sizeBytes)
-                    if (refusal != null) {
-                        logger.info { "attachment ${update.updateId}: REFUSED — ${update.filename} ${update.sizeBytes ?: 0} bytes" }
-                        speak(refusal, false, null)
-                    } else {
-                        try {
-                            val dir = File(pythonState, ATTACHMENTS_DIR).apply { mkdirs() }
-                            val target = File(dir, "${update.updateId}-${attachmentFilename(update.filename)}")
-                            val bytes = liveApi.downloadFile(update.fileId, target)
-                            val att = InboundAttachment(
-                                id = "att-${update.updateId}",
-                                kind = update.kind,
-                                filename = update.filename,
-                                mimeType = update.mimeType,
-                                sizeBytes = bytes,
-                                localPath = target.absolutePath,
-                            )
-                            val fired = client.sendInbound(
-                                update.caption,
-                                "tg-${update.updateId}-att",
-                                System.currentTimeMillis(),
-                                attachments = listOf(att),
-                            )
-                            logger.info {
-                                "attachment ${update.updateId}: ${update.filename} ($bytes bytes) " +
-                                    "${if (fired == InboundReceipt.FIRED) "delivered" else "NOT delivered (channel down)"}"
-                            }
-                            if (fired != InboundReceipt.FIRED) {
-                                speak(
-                                    "📡 The channel to the app is down — «${update.filename}» was downloaded but " +
-                                        "NOT delivered; retry in a moment.",
-                                    false,
-                                    null,
-                                )
-                            }
-                        } catch (e: Exception) {
-                            logger.warn(e) { "attachment ${update.updateId} failed: ${e.message}" }
-                            speak(
-                                "⚠️ No pude bajar «${update.filename}» (${e.message}) — mandalo de nuevo.",
-                                false,
-                                null,
-                            )
-                        }
-                    }
-                    Ack.react(liveApi, cfg, update.messageId, Ack.HANDLED)
-                }
+                is InboundUpdate.Attachment ->
+                    dispatchAttachment(liveApi, cfg, pythonState, client, speak, update)
 
                 is InboundUpdate.Callback -> {
                     answerCallback(liveApi, update.callbackId)
                     commands.onCallback(update.data, update.updateId)
                         ?.let { speak(it.text, false, it.markup) }
-                    // THE BLOCK TAP'S EDIT IS IMMEDIATE (the owner taps «📖
-                    // CoT N» and reads it right there — the ~3s cadence
-                    // continues after): the tick re-renders the card with
-                    // the toggled block; the publisher's tick mutex
-                    // serializes it with the scheduled clock
-                    if (update.data.startsWith("cb:")) liveView?.tick()
                 }
             }
         },
