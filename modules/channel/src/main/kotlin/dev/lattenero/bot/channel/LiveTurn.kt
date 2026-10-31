@@ -83,6 +83,14 @@ sealed interface TurnPhase {
      * output lands HERE, counted once, never faked as live.
      */
     val outputLines: Int? = null,
+    /**
+     * The tool's output at close, VERBATIM (the result update's `content`
+     * string). The transcript feed carries the real thing — a Bash's
+     * output lines, a failed tool's error text; the count above is for the
+     * card's stamp. Null = no string content arrived (a structured payload
+     * invents nothing).
+     */
+    val output: String? = null,
     /** The lane's last real event — the frozen lane's clock derives from it. */
     val lastUpdateAtMs: Long? = null,
 ) {
@@ -274,6 +282,17 @@ internal object StreamEvents {
     fun outputLines(event: JsonObject): Int? {
         val content = event["content"] as? JsonPrimitive ?: return null
         return if (content.isString) lineCount(content.content) else null
+    }
+
+    /**
+     * The tool's OUTPUT at close, VERBATIM — the same string `content`
+     * [outputLines] counts, uncut (the feed's honest payload; the
+     * renderer caps it under the message law). Null for structured
+     * payloads and empty strings (nothing real to carry).
+     */
+    fun outputText(event: JsonObject): String? {
+        val content = event["content"] as? JsonPrimitive ?: return null
+        return content.content.takeIf { it.isNotEmpty() }
     }
 
     /** raw.streamingRawInputLength — the chars the model actually emitted for the input. */
@@ -592,6 +611,7 @@ object LiveTurn {
             added = diff?.first,
             removed = diff?.second,
             outputLines = StreamEvents.outputLines(event) ?: existing.outputLines,
+            output = StreamEvents.outputText(event) ?: existing.output,
             lastUpdateAtMs = nowMs,
         )
         val failed = closed.status == "failed"

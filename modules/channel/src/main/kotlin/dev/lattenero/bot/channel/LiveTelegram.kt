@@ -38,6 +38,18 @@ object EditRequest {
 }
 
 /**
+ * Pure: the deleteMessage request — the TRANSCRIPT FEED's card swap: the
+ * status card is redrawn as a new last message and the previous one dies.
+ * One composition, pinnable like [EditRequest].
+ */
+object DeleteRequest {
+    fun compose(cfg: TgConfig, messageId: Long): JsonObject = buildJsonObject {
+        put("chat_id", cfg.chatId)
+        put("message_id", messageId)
+    }
+}
+
+/**
  * The live view's Telegram side — Python's `_live_send`/`_live_edit`
  * (F4d): the live view is OPTIONAL, a failure never breaks anything.
  * On a 429 the cooldown window WIDENS (the shared file — the same chat,
@@ -82,6 +94,30 @@ class LiveTelegram(
             false
         } catch (e: Exception) {
             logger.warn { "live edit failed: ${e.message}" }
+            false
+        }
+    }
+
+    /**
+     * Best-effort deleteMessage — the card swap's other half (the redraw
+     * births the new card FIRST, so a lost delete only leaves a stale
+     * corpse, never a cardless chat). A delete is not a message send: the
+     * cooldown does not gate it, but a 429 still widens the window.
+     */
+    @Suppress("TooGenericExceptionCaught") // the live view never raises (Python's bare except)
+    suspend fun delete(cfg: TgConfig, messageId: Long): Boolean {
+        if (messageId <= 0) return false
+        return try {
+            api.call("deleteMessage", DeleteRequest.compose(cfg, messageId))
+            true
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: TgHttpException) {
+            retryAfterOf(e)?.let { cooldown.extend(it) }
+            logger.warn { "live delete failed: ${e.message}" }
+            false
+        } catch (e: Exception) {
+            logger.warn { "live delete failed: ${e.message}" }
             false
         }
     }
