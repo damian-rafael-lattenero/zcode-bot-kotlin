@@ -1,5 +1,6 @@
 package dev.lattenero.bot.channel
 
+import dev.lattenero.bot.contracts.PyText
 import dev.lattenero.bot.transport.TgConfig
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kap.Kap
@@ -392,7 +393,10 @@ class LivePublisher(
             speak(LiveTurn.sealText(state, now))
         }
         val answer = finalAnswer(state.taskId)?.takeIf { it.isNotBlank() }
-        if (answer != null) speak(answer)
+        // the store's answer is RAW markdown/content — Telegram's HTML law
+        // requires the escape (measured 31/10: a literal tag in the content
+        // 400'd the send every tick until the breaker opened)
+        if (answer != null) speak(PyText.esc(answer))
         logger.info {
             "live view sealed: taskId=${state.taskId} reason=${(state.phase as TurnPhase.Done).stopReason} " +
                 "thought=${state.thoughtChars} tools=${state.doneTools} answer=${answer?.length ?: 0} chars " +

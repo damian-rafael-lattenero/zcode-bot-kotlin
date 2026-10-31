@@ -169,10 +169,13 @@ internal fun wireChannel(
             // tap, the app's own answer, or the turn's own end).
             board.onStreamEvent(frame)
             when ((frame.event["type"] as? JsonPrimitive)?.content) {
-                "task_complete" -> {
-                    drainQueue()
-                    board.resolveTask(frame.taskId, "⌛ El turno terminó — la pregunta quedó sin responder.")
-                }
+                // LA LEY DEL SELLO (medida en vivo 31/10): task_complete NO mata
+                // preguntas — un turno cancelado/moved-on deja la interacción
+                // VIVA en el broker del CLI (la pregunta del dueño se respondió
+                // por la app DESPUÉS del cancel), y el elicitation_response que
+                // llega al resolverse sella solo. task_error SÍ: el broker murió
+                // con el turno.
+                "task_complete" -> drainQueue()
 
                 "task_error" ->
                     board.resolveTask(frame.taskId, "⌛ El turno terminó — la pregunta quedó sin responder.")
