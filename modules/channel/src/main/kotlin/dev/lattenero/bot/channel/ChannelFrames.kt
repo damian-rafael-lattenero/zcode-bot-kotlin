@@ -408,8 +408,8 @@ sealed interface ServerFrame {
      * every ~15s. ITS SEQ CONSUMES THE CONNECTION'S COUNTER — the daemon
      * must account it or every heartbeat in a quiet stretch reads as a
      * +2 seq jump = a FALSE gap = the pending CoT wiped (measured live
-     * 31/10: the blocks never reached 3000). The bus's proof of life, NOT
-     * the model's: lastEventAtMs never moves on it.
+     * 31/10: the blocks never reached 3000). The bus's proof of life,
+     * NOT the model's: lastEventAtMs never moves on it.
      */
     data class KeepAlive(val taskId: String, val seq: Long, val at: Long) : ServerFrame
 
@@ -422,7 +422,8 @@ sealed interface ServerFrame {
  * says the reader IGNORES what it does not understand — a broken line is
  * counted by the caller, never fatal (§3.5: line errors do not close).
  */
-@Suppress("ReturnCount", "CyclomaticComplexMethod", "LongMethod") // one branch per wire type — the additive table's own shape
+// one branch per wire type — the additive table's own shape
+@Suppress("ReturnCount", "CyclomaticComplexMethod", "LongMethod")
 fun decodeServerLine(line: String): ServerFrame? {
     val root = runCatching { Json.parseToJsonElement(line) }.getOrNull() as? JsonObject ?: return null
     return when (val type = (root["type"] as? JsonPrimitive)?.takeIf { it.isString }?.content) {
