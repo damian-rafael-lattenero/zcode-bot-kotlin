@@ -167,10 +167,19 @@ class LiveHub {
  * the difference between "thinking" and "dead" the owner asked to SEE.
  *
  * At `task_complete` the seal replaces the status text and the FINAL
- * render travels as its own message: the turn's tool boxes through the
- * SPECTATOR's renderer (injected — `ToolBox.box` from the daemon side)
- * and the turn's answer through the injected snapshot reader
- * (`taskSnapshot` query in the wiring).
+ * render travels as its own message: the turn's answer through the
+ * injected snapshot reader (`taskSnapshot` query in the wiring).
+ *
+ * THE TRANSCRIPT FEED (the owner's 30/10 order: «quiero VER los archivos,
+ * leer los commands de bash, leer los cots uno debajo del otro en
+ * mensajes separados»): every tick drains [TranscriptFeed]'s diff — each
+ * sealed CoT block and each tool CLOSE becomes its own message through
+ * the render lane, and the status card SWAPS (delete → feed → re-birth)
+ * so the thinking box is ALWAYS the last message of everything. The
+ * level ([FeedVerbosity], read PER TICK from the injected setting —
+ * policy §7: the publisher never reads files) gates: SUMMARY speaks
+ * nothing, NORMAL blocks + closes, VERBOSE adds the tool OPEN
+ * one-liners. Verbose is the DEFAULT.
  */
 class LivePublisher(
     private val hub: LiveHub,
@@ -178,7 +187,13 @@ class LivePublisher(
     private val config: () -> TgConfig,
     private val channelAlive: () -> Boolean,
     private val speak: suspend (text: String) -> Unit,
-    private val finalBoxes: suspend (List<ToolLive>) -> String,
+    /**
+     * The per-tool CLOSE renderer (injected — the daemon passes the
+     * SPECTATOR's ToolBox, the same renderer the final transcript uses):
+     * the feed's tool-close message's real content. A blank render (or
+     * an input-less lane) falls back to the feed's honest one-liner.
+     */
+    private val toolBox: (ToolLive) -> String = { "" },
     private val finalAnswer: suspend (taskId: String) -> String?,
     private val clock: () -> Long = System::currentTimeMillis,
     /** The per-action verbs — the wiring injects the spectator's classification map. */
@@ -199,6 +214,11 @@ class LivePublisher(
     private val resubscribe: suspend (taskId: String) -> Unit = {},
     /** The durable message id — the boot-time ORPHAN SEAL reads it (LiveOrphanStore). */
     private val orphanStore: LiveOrphanStore? = null,
+    /**
+     * The transcript feed's level — read PER TICK (the daemon injects the
+     * file-backed store; tests and unwired daemons the in-memory default).
+     */
+    private val verbosity: VerbositySetting = VolatileVerbosity(),
 ) {
 
     /** the message being edited — the publisher's only mutable cell (§7 escape hatch). */
@@ -211,6 +231,8 @@ class LivePublisher(
     private var titleResolvedFor: String? = null
     /** The watchdog's last bark — one resubscribe per silence episode. */
     private var lastWatchdogAtMs: Long = 0
+    /** The feed's seen pointer — the last turn snapshot the transcript already spoke. */
+    private var feedSeen: TurnLive? = null
 
     /**
      * The ORPHAN SEAL — this process's FIRST tick after a restart edits
@@ -310,36 +332,91 @@ class LivePublisher(
             lastText = ""
             sealed = false
             titleResolvedFor = null // the new task's card resolves its own title
+            feedSeen = null // the new turn's transcript starts clean — history is never replayed
             return
         }
         if (state.phase is TurnPhase.Done && !sealed) {
             seal(cfg, mid, state, now)
             return
         }
+        drainFeed(cfg, state)
+        val liveMid = statusMessageId ?: return // the swap's re-birth is throttled: the card returns next tick
         val text = LiveTurn.render(state, now, spin(), channelAlive(), verbs)
         if (text == lastText) return // nothing visible changed: no edit (the 429 budget is shared)
-        if (telegram.edit(cfg, mid, text, LiveTurn.cotMarkup(state))) lastText = text
+        if (telegram.edit(cfg, liveMid, text, LiveTurn.cotMarkup(state))) lastText = text
     }
 
+    /**
+     * The TRANSCRIPT FEED's drain: [TranscriptFeed]'s diff between the
+     * seen pointer and this tick's state, spoken through the render lane.
+     * When it speaks, THE CARD SWAPS — delete, the feed goes out, the
+     * card is REBORN as the last message (the owner's rule: «el thinking
+     * box siempre se tiene que redibujar como último mensaje de todo» — a
+     * feed message may never bury the thinking box). Back-pressure: a
+     * cooldown window skips the whole drain WITHOUT advancing the seen
+     * pointer — the next tick re-speaks the same diff when it lifts; the
+     * parked outbox and the re-born card never race for the chat's order.
+     */
+    private suspend fun drainFeed(cfg: TgConfig, state: TurnLive) {
+        val level = verbosity.current()
+        if (level == FeedVerbosity.SUMMARY) {
+            feedSeen = state // the level speaks nothing — but history stays history
+            return
+        }
+        if (telegram.throttled()) return
+        val feed = TranscriptFeed.messages(feedSeen, state, level, toolBox, verbs)
+        feedSeen = state
+        if (feed.isEmpty()) return
+        val mid = statusMessageId
+        if (mid == null) {
+            feed.forEach { speak(it) } // no card yet: the feed speaks, the birth lands below it
+        } else {
+            telegram.delete(cfg, mid)
+            statusMessageId = null
+            lastText = ""
+            feed.forEach { speak(it) }
+            tryBirth(cfg, state) // the card re-born LAST — above nothing, below everything
+        }
+        logger.info { "transcript feed: ${feed.size} message(s) spoken (card=${if (mid != null) "swapped" else "absent"})" }
+    }
+
+    /**
+     * The seal: the turn's record, the transcript's REMAINDER (closes and
+     * blocks folded after the last drain — a late attach's history, the
+     * events between two ticks), the unsealed thought tail, then the
+     * answer. SUMMARY keeps the old shape: the record edits the card in
+     * place and only the answer speaks. Otherwise the card dies and the
+     * record is born as the LAST message (the owner's rule holds to the
+     * end); the remainder rides the outbox — the order holds even if a
+     * window opens mid-loop. Back-pressure: with a remainder pending and
+     * a cooldown window alive the seal WAITS (unsealed, retried next
+     * tick) — the transcript loses nothing, the chat never floods.
+     */
     private suspend fun seal(cfg: TgConfig, mid: Long, state: TurnLive, now: Long) {
+        val level = verbosity.current()
+        val feed = TranscriptFeed.messages(feedSeen, state, level, toolBox, verbs) +
+            if (level == FeedVerbosity.SUMMARY) emptyList() else TranscriptFeed.pendingFlush(state)
+        if (feed.isNotEmpty() && telegram.throttled()) return
         sealed = true
-        telegram.edit(cfg, mid, LiveTurn.sealText(state, now))
-        // the final shower: the keyboard-dropped CoT blocks FIRST (the
-        // honest cap's promise — the live render told him they'd travel),
-        // then the spectator renderer's boxes + the turn's answer
-        LiveTurn.overflowShower(state).forEach { speak(it) }
-        val boxes = finalBoxes(state.tools)
+        if (feed.isEmpty()) {
+            telegram.edit(cfg, mid, LiveTurn.sealText(state, now))
+        } else {
+            telegram.delete(cfg, mid)
+            feed.forEach { speak(it) }
+            speak(LiveTurn.sealText(state, now))
+        }
         val answer = finalAnswer(state.taskId)?.takeIf { it.isNotBlank() }
         if (answer != null) speak(answer)
-        if (boxes.isNotBlank()) speak(boxes)
         logger.info {
             "live view sealed: taskId=${state.taskId} reason=${(state.phase as TurnPhase.Done).stopReason} " +
-                "thought=${state.thoughtChars} tools=${state.doneTools} answer=${answer?.length ?: 0} chars"
+                "thought=${state.thoughtChars} tools=${state.doneTools} answer=${answer?.length ?: 0} chars " +
+                "feed=${feed.size}"
         }
         hub.clear()
         orphanStore?.clear()
         statusMessageId = null
         statusTaskId = null
+        feedSeen = null
     }
 
     private fun spin(): Int {

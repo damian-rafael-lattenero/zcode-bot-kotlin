@@ -3,7 +3,6 @@ package dev.lattenero.bot.channel
 import dev.lattenero.bot.transport.Cooldown
 import dev.lattenero.bot.transport.TgApi
 import dev.lattenero.bot.transport.TgConfig
-import io.ktor.client.engine.HttpClientEngine
 import io.ktor.client.engine.HttpClientEngineFactory
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.MockEngineConfig
@@ -21,10 +20,10 @@ import kotlin.test.assertTrue
 
 /**
  * The publisher's TICK against a MockEngine (PollerTest's pattern, ZERO
- * network): the REAL TITLE resolution — the owner's 30/10 verdict, his
- * card's head wore the sid's tail «644150daf013». The birth carries the
- * history's honest name, the attempt is ONE per turn, the fallback stays
- * when the history knows nothing, and an Idle turn burns nothing.
+ * network): the REAL TITLE resolution, and the TRANSCRIPT FEED — the
+ * owner's 30/10 order (each sealed CoT block and each tool close its own
+ * message, the card ALWAYS re-born last, verbose by default, the level
+ * read per tick, the cooldown window as back-pressure).
  */
 class LivePublisherTest {
 
@@ -62,19 +61,29 @@ class LivePublisherTest {
         )
     }
 
-    private fun publisher(wire: Wire, hub: LiveHub, resolveTitle: suspend (String) -> String?): LivePublisher =
+    private fun publisher(
+        wire: Wire,
+        hub: LiveHub,
+        spoken: MutableList<String> = mutableListOf(),
+        toolBox: (ToolLive) -> String = { "" },
+        verbosity: VerbositySetting = VolatileVerbosity(),
+        cooldown: Cooldown = Cooldown(readFile = { null }),
+        resolveTitle: suspend (String) -> String? = { null },
+        finalAnswer: suspend (String) -> String? = { null },
+    ): LivePublisher =
         LivePublisher(
             hub = hub,
             telegram = LiveTelegram(
                 api = TgApi({ cfg }, engineFactory = wire.factory),
-                cooldown = Cooldown(readFile = { null }),
+                cooldown = cooldown,
             ),
             config = { cfg },
             channelAlive = { true },
-            speak = {},
-            finalBoxes = { "" },
-            finalAnswer = { null },
+            speak = { text -> spoken.add(text) },
+            toolBox = toolBox,
+            finalAnswer = finalAnswer,
             clock = { TICK_MS },
+            verbosity = verbosity,
             resolveTitle = resolveTitle,
         )
 
@@ -114,27 +123,6 @@ class LivePublisherTest {
     }
 
     @Test
-    fun aStreamRealTitleSkipsTheHistoryResolution() = runTest {
-        val taskId = "sess_abcd644150daf013"
-        val hub = LiveHub()
-        hub.apply(
-            frame(taskId, "session_info_update", at = 1_000, "title" to JsonPrimitive("título del stream")),
-            nowMs = 1_000,
-        )
-        hub.apply(frame(taskId, "agent_thought_chunk", at = 1_100, "content" to JsonPrimitive("pensando")), nowMs = 1_100)
-        val wire = Wire()
-        var calls = 0
-        val publisher = publisher(wire, hub) { _ ->
-            calls += 1
-            error("the stream already titled this turn")
-        }
-        publisher.tick()
-        assertEquals(0, calls) // a REAL title needs no history read
-        val birth = wire.bodies.first { it.second == "sendMessage" }.first
-        assertTrue("título del stream" in birth)
-    }
-
-    @Test
     fun anIdleTurnDoesNotBurnTheOneShotAttempt() = runTest {
         val taskId = "sess_abcd644150daf013"
         val hub = LiveHub()
@@ -166,40 +154,247 @@ class LivePublisherTest {
         assertEquals("arreglá el login", hub.peek()?.title)
     }
 
+    // ---- the transcript feed -------------------------------------------------
+
     @Test
-    fun theSealShowerCarriesTheKeyboardDroppedBlocks() = runTest {
-        // 9 blocks: the keyboard held the most recent 8 — the close's
-        // shower keeps the promise the live render made (the honest cap)
+    fun aSealedBlockBecomesItsOwnMessageAndTheCardIsRebornLast() = runTest {
         val taskId = "task-9"
         val hub = LiveHub()
-        repeat(9) { pass ->
-            hub.apply(
-                frame(taskId, "agent_thought_chunk", at = 1_000L + pass, "content" to JsonPrimitive(pass.toString().repeat(3000))),
-                nowMs = 1_000L + pass,
-            )
-        }
-        hub.apply(frame(taskId, "task_complete", at = 9_999, "stopReason" to JsonPrimitive("end_turn")), nowMs = 9_999)
+        hub.apply(frame(taskId, "task_run_started", at = 1_000), nowMs = 1_000)
+        hub.apply(frame(taskId, "agent_thought_chunk", at = 1_050, "content" to JsonPrimitive("arranco")), nowMs = 1_050)
         val wire = Wire()
         val spoken = mutableListOf<String>()
-        val publisher = LivePublisher(
-            hub = hub,
-            telegram = LiveTelegram(
-                api = TgApi({ cfg }, engineFactory = wire.factory),
-                cooldown = Cooldown(readFile = { null }),
-            ),
-            config = { cfg },
-            channelAlive = { true },
-            speak = { text -> spoken.add(text) },
-            finalBoxes = { "" },
-            finalAnswer = { null },
-            clock = { TICK_MS },
+        val publisher = publisher(wire, hub, spoken)
+        publisher.tick() // the birth — feedSeen snapshots here
+        val afterBirth = wire.bodies.size
+        hub.apply(
+            frame(taskId, "agent_thought_chunk", at = 1_100, "content" to JsonPrimitive("p".repeat(3000))),
+            nowMs = 1_100,
         )
+        publisher.tick() // the block sealed → the feed speaks, the card swaps
+        assertTrue(spoken.any { "<b>CoT 1</b>" in it && "<blockquote>" in it }, "the block travels WHOLE")
+        // the swap's order: the card dies, the feed speaks (the speak lane),
+        // the card is REBORN — deleteMessage then the birth sendMessage
+        val methods = wire.bodies.drop(afterBirth).map { it.second }
+        assertEquals("deleteMessage", methods.first())
+        assertEquals("sendMessage", methods[1])
+        assertTrue("turn live" in wire.bodies.last { it.second == "sendMessage" }.first)
+    }
+
+    @Test
+    fun verboseAnnouncesTheToolOpen() = runTest {
+        val taskId = "task-9"
+        val hub = LiveHub()
+        hub.apply(frame(taskId, "task_run_started", at = 1_000), nowMs = 1_000)
+        hub.apply(frame(taskId, "agent_thought_chunk", at = 1_050, "content" to JsonPrimitive("arranco")), nowMs = 1_050)
+        val wire = Wire()
+        val spoken = mutableListOf<String>()
+        val publisher = publisher(wire, hub, spoken)
+        publisher.tick() // the birth — feedSeen snapshots here
+        spoken.clear()
+        hub.apply(
+            frame(
+                taskId,
+                "tool_call_update",
+                at = 1_500,
+                "status" to JsonPrimitive("pending"),
+                "toolId" to JsonPrimitive("t1"),
+                "toolName" to JsonPrimitive("Bash"),
+                "input" to buildJsonObject { put("command", "git status") },
+            ),
+            nowMs = 1_500,
+        )
+        publisher.tick()
+        assertTrue(spoken.any { "▶️" in it && "Bash" in it }, "VERBOSE: the open one-liner rides")
+    }
+
+    @Test
+    fun normalKeepsTheOpensQuietButSpeaksTheClose() = runTest {
+        val taskId = "task-9"
+        val hub = LiveHub()
+        hub.apply(frame(taskId, "task_run_started", at = 1_000), nowMs = 1_000)
+        hub.apply(frame(taskId, "agent_thought_chunk", at = 1_050, "content" to JsonPrimitive("arranco")), nowMs = 1_050)
+        val wire = Wire()
+        val spoken = mutableListOf<String>()
+        val publisher = publisher(
+            wire,
+            hub,
+            spoken,
+            toolBox = { "BOX(${it.name})" },
+            verbosity = VolatileVerbosity().apply { set(FeedVerbosity.NORMAL) },
+        )
+        publisher.tick() // the birth — feedSeen snapshots here
+        hub.apply(
+            frame(
+                taskId,
+                "tool_call_update",
+                at = 1_500,
+                "status" to JsonPrimitive("pending"),
+                "toolId" to JsonPrimitive("t1"),
+                "toolName" to JsonPrimitive("Bash"),
+                "input" to buildJsonObject { put("command", "git status") },
+            ),
+            nowMs = 1_500,
+        )
+        publisher.tick()
+        assertTrue(spoken.none { "▶️" in it }, "NORMAL: no open one-liners")
+        spoken.clear()
+        hub.apply(
+            frame(
+                taskId,
+                "tool_call_update",
+                at = 1_600,
+                "status" to JsonPrimitive("completed"),
+                "toolId" to JsonPrimitive("t1"),
+                "content" to JsonPrimitive("on branch master"),
+            ),
+            nowMs = 1_600,
+        )
+        publisher.tick()
+        assertTrue(spoken.any { it == "BOX(Bash)" }, "NORMAL: the close speaks the injected box")
+    }
+
+    @Test
+    fun summarySpeaksNothingAndNeverSwapsTheCard() = runTest {
+        val taskId = "task-9"
+        val hub = LiveHub()
+        hub.apply(frame(taskId, "task_run_started", at = 1_000), nowMs = 1_000)
+        hub.apply(frame(taskId, "agent_thought_chunk", at = 1_050, "content" to JsonPrimitive("arranco")), nowMs = 1_050)
+        val wire = Wire()
+        val spoken = mutableListOf<String>()
+        val publisher = publisher(
+            wire,
+            hub,
+            spoken,
+            verbosity = VolatileVerbosity().apply { set(FeedVerbosity.SUMMARY) },
+        )
+        publisher.tick() // birth
+        val afterBirth = wire.bodies.size
+        hub.apply(
+            frame(taskId, "agent_thought_chunk", at = 1_100, "content" to JsonPrimitive("p".repeat(3000))),
+            nowMs = 1_100,
+        )
+        hub.apply(
+            frame(
+                taskId,
+                "tool_call_update",
+                at = 1_200,
+                "status" to JsonPrimitive("completed"),
+                "toolId" to JsonPrimitive("t1"),
+                "toolName" to JsonPrimitive("Bash"),
+                "input" to buildJsonObject { put("command", "git status") },
+                "content" to JsonPrimitive("out"),
+            ),
+            nowMs = 1_200,
+        )
+        publisher.tick()
+        assertEquals(emptyList(), spoken.toList(), "SUMMARY: the feed is silent")
+        assertTrue(wire.bodies.drop(afterBirth).none { it.second == "deleteMessage" }, "no swap at SUMMARY")
+        assertTrue(wire.bodies.drop(afterBirth).any { it.second == "editMessageText" }, "the card still ticks")
+    }
+
+    @Test
+    fun aCooldownWindowIsTheFeedBackPressureNothingLost() = runTest {
+        val taskId = "task-9"
+        val hub = LiveHub()
+        hub.apply(frame(taskId, "task_run_started", at = 1_000), nowMs = 1_000)
+        hub.apply(frame(taskId, "agent_thought_chunk", at = 1_050, "content" to JsonPrimitive("arranco")), nowMs = 1_050)
+        val wire = Wire()
+        val spoken = mutableListOf<String>()
+        var nowSec = 2.0
+        val cooldown = Cooldown(now = { nowSec }, readFile = { null })
+        val publisher = publisher(wire, hub, spoken, cooldown = cooldown)
+        publisher.tick() // birth — feedSeen snapshots here
+        spoken.clear()
+        hub.apply(
+            frame(taskId, "agent_thought_chunk", at = 1_100, "content" to JsonPrimitive("q".repeat(3000))),
+            nowMs = 1_100,
+        )
+        cooldown.extend(raSeconds = 60) // Telegram named the window
+        publisher.tick()
+        assertTrue(spoken.isEmpty(), "the swap skips itself whole while the window lasts")
+        assertTrue(wire.bodies.none { it.second == "deleteMessage" }, "no delete under throttle")
+        nowSec = 5_000.0 // the window lifted
+        publisher.tick()
+        assertTrue(spoken.any { "<b>CoT 1</b>" in it }, "the same diff speaks when the window lifts — nothing lost")
+    }
+
+    @Test
+    fun theSealSpeaksTheRemainderTheTailThenTheRecordAndTheAnswer() = runTest {
+        val taskId = "task-9"
+        val hub = LiveHub()
+        hub.apply(frame(taskId, "task_run_started", at = 1_000), nowMs = 1_000)
+        hub.apply(frame(taskId, "agent_thought_chunk", at = 1_100, "content" to JsonPrimitive("pensando")), nowMs = 1_100)
+        val wire = Wire()
+        val spoken = mutableListOf<String>()
+        val publisher = publisher(
+            wire,
+            hub,
+            spoken,
+            toolBox = { "BOX(${it.name})" },
+            finalAnswer = { "LA RESPUESTA" },
+        )
+        publisher.tick() // birth — feedSeen snapshots (no tools yet)
+        spoken.clear()
+        // the close + the complete fold BETWEEN ticks: the seal's remainder
+        hub.apply(
+            frame(
+                taskId,
+                "tool_call_update",
+                at = 1_500,
+                "status" to JsonPrimitive("completed"),
+                "toolId" to JsonPrimitive("t1"),
+                "toolName" to JsonPrimitive("Bash"),
+                "input" to buildJsonObject { put("command", "git status") },
+                "content" to JsonPrimitive("on branch master"),
+            ),
+            nowMs = 1_500,
+        )
+        hub.apply(frame(taskId, "task_complete", at = 9_999, "stopReason" to JsonPrimitive("end_turn")), nowMs = 9_999)
         publisher.tick() // the seal tick
-        // the seal's record counts the blocks; the shower speaks the
-        // dropped block's REAL text (verbatim — never a summary)
-        val seal = wire.bodies.last { it.second == "editMessageText" }.first
-        assertTrue("9 bloques CoT" in seal)
-        assertTrue(spoken.any { "los primeros 1 bloque" in it && "000" in it })
+        // the remainder first (the unseen close + the unsealed thought tail),
+        // then the record, then the answer LAST
+        assertTrue(spoken.any { it == "BOX(Bash)" }, "the unseen close speaks at the seal")
+        assertTrue(spoken.any { "sin sellar" in it && "pensando" in it }, "the unsealed tail loses nothing")
+        assertTrue("end_turn" in spoken[spoken.size - 2], "the record is second-to-last")
+        assertEquals("LA RESPUESTA", spoken.last(), "the answer is the last word")
+        assertEquals("deleteMessage", wire.bodies.last { it.second != "editMessageText" }.second)
+    }
+
+    @Test
+    fun theSummarySealEditsTheCardInPlaceWithTheAnswerOnly() = runTest {
+        val taskId = "task-9"
+        val hub = LiveHub()
+        hub.apply(frame(taskId, "task_run_started", at = 1_000), nowMs = 1_000)
+        hub.apply(
+            frame(
+                taskId,
+                "tool_call_update",
+                at = 1_100,
+                "status" to JsonPrimitive("completed"),
+                "toolId" to JsonPrimitive("t1"),
+                "toolName" to JsonPrimitive("Bash"),
+                "input" to buildJsonObject { put("command", "git status") },
+                "content" to JsonPrimitive("out"),
+            ),
+            nowMs = 1_100,
+        )
+        val wire = Wire()
+        val spoken = mutableListOf<String>()
+        val publisher = publisher(
+            wire,
+            hub,
+            spoken,
+            verbosity = VolatileVerbosity().apply { set(FeedVerbosity.SUMMARY) },
+            finalAnswer = { "LA RESPUESTA" },
+        )
+        publisher.tick() // birth
+        spoken.clear()
+        hub.apply(frame(taskId, "task_complete", at = 9_999, "stopReason" to JsonPrimitive("end_turn")), nowMs = 9_999)
+        publisher.tick()
+        assertEquals(listOf("LA RESPUESTA"), spoken.toList(), "SUMMARY: the answer is the only word")
+        assertTrue(wire.bodies.none { it.second == "deleteMessage" }, "no swap at the SUMMARY seal")
+        assertTrue("end_turn" in wire.bodies.last { it.second == "editMessageText" }.first, "the record edits in place")
     }
 
     private companion object {

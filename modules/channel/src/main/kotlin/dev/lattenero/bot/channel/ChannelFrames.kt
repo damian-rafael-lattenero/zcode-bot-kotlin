@@ -195,22 +195,21 @@ fun encodeClient(frame: ClientFrame): String = when (frame) {
         if (frame.messageId != null) put("messageId", frame.messageId)
         if (frame.receivedAt != null) put("receivedAt", frame.receivedAt)
         if (frame.taskId != null) put("taskId", frame.taskId)
-        if (frame.attachments.isNotEmpty()) {
-            put(
-                "attachments",
-                buildJsonArray {
-                    frame.attachments.forEach { att ->
-                        add(
-                            buildJsonObject {
-                                put("id", att.id)
-                                put("kind", att.kind)
-                                put("filename", att.filename)
-                                put("mimeType", att.mimeType)
-                                if (att.sizeBytes != null) put("sizeBytes", att.sizeBytes)
-                                if (att.localPath != null) put("localPath", att.localPath)
-                            },
-                        )
-                    }
+        if (frame.attachments.isNotEmpty()) put("attachments", encodeAttachments(frame.attachments))
+    }
+
+/** The inbound's attachment rows — the fork's DaemonChannelInboundAttachment, one object per file. */
+private fun encodeAttachments(attachments: List<InboundAttachment>): kotlinx.serialization.json.JsonArray =
+    buildJsonArray {
+        attachments.forEach { att ->
+            add(
+                buildJsonObject {
+                    put("id", att.id)
+                    put("kind", att.kind)
+                    put("filename", att.filename)
+                    put("mimeType", att.mimeType)
+                    if (att.sizeBytes != null) put("sizeBytes", att.sizeBytes)
+                    if (att.localPath != null) put("localPath", att.localPath)
                 },
             )
         }

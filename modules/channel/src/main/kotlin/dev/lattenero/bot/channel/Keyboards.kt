@@ -222,6 +222,33 @@ object Keyboards {
     }
 
     /**
+     * /verbosity's PICKER (the owner's knob, 30/10): one row per level —
+     * the current one wears ✅ — tap = set. `vb:<level>` worst case ≈ 12
+     * bytes — Telegram's 64-byte law never even breathes.
+     */
+    fun verbosityPicker(current: FeedVerbosity): JsonObject = buildJsonObject {
+        putJsonArray("inline_keyboard") {
+            FeedVerbosity.entries.forEach { level ->
+                add(
+                    buildJsonArray {
+                        add(button(verbosityLabel(level, level == current), "vb:${level.name.lowercase()}"))
+                    },
+                )
+            }
+        }
+    }
+
+    /** The picker's one label: the level's Spanish word + its meaning, the current one marked. */
+    fun verbosityLabel(level: FeedVerbosity, current: Boolean): String {
+        val word = when (level) {
+            FeedVerbosity.SUMMARY -> "🔈 summary — solo el cartel y la respuesta"
+            FeedVerbosity.NORMAL -> "🔉 normal — bloques CoT + cierres de tools"
+            FeedVerbosity.VERBOSE -> "🔊 verbose — todo, en vivo"
+        }
+        return if (current) "✅ $word" else word
+    }
+
+    /**
      * /subagents's ONE view-switch button: the active view offers
      * «inactivos» (`sao:` — today's ended subagents), the inactive view
      * offers the way back, «activos» (`saa:`). Both datas are fixed 4-byte
