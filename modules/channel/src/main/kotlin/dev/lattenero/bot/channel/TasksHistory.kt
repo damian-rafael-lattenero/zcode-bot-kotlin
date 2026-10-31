@@ -57,8 +57,13 @@ interface TasksHistory {
     suspend fun subagentsRunning(parentSid: String): List<RunningSubagent> = emptyList()
 }
 
-/** One RUNNING subagent from the store — its session id IS the attach target. */
-data class RunningSubagent(val sid: String, val title: String)
+/**
+ * One RUNNING subagent from the store — its session id IS the attach target.
+ * [lastMs] is the store's own time_updated: a killed agent's row never
+ * closes, so its frozen lastMs is the GHOST marker (the honest render marks
+ * it instead of showing a living lie).
+ */
+data class RunningSubagent(val sid: String, val title: String, val lastMs: Long = 0)
 
 /**
  * One ENDED subagent of today — /subagents «inactivos»'s row. `outcome`

@@ -1128,7 +1128,10 @@ class BotCommands(
             val parentSid = turn?.taskId
                 ?: (contextAnswer() as? ContextAnswer.Ctx)?.value?.activeTaskId
             val dbRunning = if (parentSid != null) history.subagentsRunning(parentSid) else emptyList()
-            BotReply(text + hint, markup = Keyboards.subagentsKeyboard(lanes, dbRunning, inactiveView = false))
+            BotReply(
+                text + hint,
+                markup = Keyboards.subagentsKeyboard(lanes, dbRunning, inactiveView = false, nowMs = clock()),
+            )
         }
     }
 
