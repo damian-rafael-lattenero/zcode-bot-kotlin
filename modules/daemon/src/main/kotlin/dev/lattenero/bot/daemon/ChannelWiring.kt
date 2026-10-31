@@ -6,7 +6,6 @@ import dev.lattenero.bot.channel.ChannelClient
 import dev.lattenero.bot.channel.ChannelOps
 import dev.lattenero.bot.channel.ChannelQuery
 import dev.lattenero.bot.channel.ChannelSpec
-import dev.lattenero.bot.channel.ClientFrame
 import dev.lattenero.bot.channel.InboundReceipt
 import dev.lattenero.bot.channel.InboundUpdate
 import dev.lattenero.bot.channel.LiveHub
@@ -14,7 +13,6 @@ import dev.lattenero.bot.channel.LiveOrphanStore
 import dev.lattenero.bot.channel.LivePublisher
 import dev.lattenero.bot.channel.LiveTelegram
 import dev.lattenero.bot.channel.Poller
-import dev.lattenero.bot.channel.QuestionBoard
 import dev.lattenero.bot.channel.QueryAnswer
 import dev.lattenero.bot.channel.ServerFrame
 import dev.lattenero.bot.channel.TasksHistory
@@ -31,7 +29,6 @@ import dev.lattenero.bot.daemon.nuclear.MacProcessEdge
 import dev.lattenero.bot.daemon.nuclear.NuclearLadder
 import dev.lattenero.bot.daemon.queue.InboundQueue
 import dev.lattenero.bot.daemon.send.DaemonSend
-import dev.lattenero.bot.daemon.send.LaneFiles
 import dev.lattenero.bot.daemon.send.SendLanes
 import dev.lattenero.bot.daemon.shadow.TimeIso
 import dev.lattenero.bot.daemon.spectator.ToolBox
@@ -102,24 +99,6 @@ internal fun wireChannel(
     val socketFile = File(cfg.baseDir, ChannelSpec.SOCKET_FILENAME)
     val remote = File(cfg.baseDir, "telegram-remote.json")
 
-    // THE QUESTIONS' throat (the answer round-trip): the commands lane's
-    // OWN files — the chat the owner's taps already ride. A hanging
-    // question is critical: the live-view law applies (the cooldown never
-    // gates it, a 429 widens the window). Without a live api (SHADOW /
-    // DRY-RUN) the board still REGISTERS — the stream's laws hold, only
-    // the phone's message is missing. Declared BEFORE the client: the
-    // stream callback below captures it.
-    val board: QuestionBoard = lanes.api?.let { api ->
-        val questionTelegram = LiveTelegram(
-            api = api,
-            cooldown = Cooldown(readFile = { File(pythonState, LaneFiles.COOLDOWN).takeIf { it.exists() } }),
-        )
-        QuestionBoard(
-            sendQuestion = { text, markup -> questionTelegram.ask(TgConfig.load(remote), text, markup) ?: 0L },
-            editQuestion = { mid, text, markup -> questionTelegram.edit(TgConfig.load(remote), mid, text, markup) },
-        )
-    } ?: QuestionBoard()
-
     // one send path for everything the channel says: the knob's leg (shadow
     // logs, dry-run composes+logs, LIVE posts with cooldown/outbox/last-ph);
     // the markup (the buttons) rides deliverMarkup — live posts it, the
@@ -162,25 +141,7 @@ internal fun wireChannel(
         tokenReader = { tokenFile.takeIf { it.exists() }?.readText() },
         onStreamEvent = { frame ->
             feedAndResync(hub, frame, System.currentTimeMillis())
-            // THE ANSWER ROUND-TRIP: the stream carries the questions AND
-            // their resolutions — the board messages the owner on the
-            // former (dedupe inside), seals honestly on the latter (the
-            // tap, the app's own answer, or the turn's own end).
-            board.onStreamEvent(frame)
-            when ((frame.event["type"] as? JsonPrimitive)?.content) {
-                "task_complete" -> {
-                    drainQueue()
-                    board.resolveTask(frame.taskId, "⌛ El turno terminó — la pregunta quedó sin responder.")
-                }
-
-                "task_error" ->
-                    board.resolveTask(frame.taskId, "⌛ El turno terminó — la pregunta quedó sin responder.")
-
-                "permission_response", "elicitation_response" ->
-                    (frame.event["requestId"] as? JsonPrimitive)?.content?.let {
-                        board.resolveByRequestId(it, "✅ Respondido desde la app.")
-                    }
-            }
+            if ((frame.event["type"] as? JsonPrimitive)?.content == "task_complete") drainQueue()
         },
         onInboundResult = { result ->
             when {
@@ -228,7 +189,7 @@ internal fun wireChannel(
     )
     val poller =
         buildPoller(
-            cfg, lanes.api, pythonState, pollOn, hub, client, speak, remote, queue, history, liveView, verbosity, board,
+            cfg, lanes.api, pythonState, pollOn, hub, client, speak, remote, queue, history, liveView, verbosity,
         )
     return ChannelStack(client, liveView, poller, hub)
 }
@@ -413,8 +374,7 @@ private fun buildPoller(
     queue: InboundQueue,
     history: TasksHistory,
     liveView: LivePublisher?,
-        verbosity: VerbositySetting,
-        board: QuestionBoard,
+    verbosity: VerbositySetting,
 ): Poller? {
     if (!pollOn) return null
     val liveApi = api ?: TgApi({ TgConfig.load(remote) })
@@ -448,10 +408,6 @@ private fun buildPoller(
 
                 // STEER: the running turn's redirection (the fork's `steer` frame, awaited)
                 override suspend fun steer(taskId: String, text: String) = client.steer(taskId, text)
-
-                // LA RESPUESTA del dueño: the fork's respond frame, awaited —
-                // the host's own truth comes back as the tap's answer
-                override suspend fun respondQuestion(frame: ClientFrame.Respond) = client.respond(frame)
 
                 override suspend fun sendInboundAwait(text: String, messageId: String, receivedAt: Long) =
                     client.sendInboundAwait(text, messageId, receivedAt)
@@ -491,7 +447,6 @@ private fun buildPoller(
         history = history,
         defaultWorkspacePath = File(File(cfg.baseDir, "workspace"), "default").absolutePath,
         verbosity = verbosity,
-        board = board,
     )
     return Poller(
         api = liveApi,
@@ -518,6 +473,12 @@ private fun buildPoller(
                     answerCallback(liveApi, update.callbackId)
                     commands.onCallback(update.data, update.updateId)
                         ?.let { speak(it.text, false, it.markup) }
+                    // THE BLOCK TAP'S EDIT IS IMMEDIATE (the owner taps «📖
+                    // CoT N» and reads it right there — the ~3s cadence
+                    // continues after): the tick re-renders the card with
+                    // the toggled block; the publisher's tick mutex
+                    // serializes it with the scheduled clock
+                    if (update.data.startsWith("cb:")) liveView?.tick()
                 }
             }
         },
