@@ -4,11 +4,11 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import java.math.BigDecimal
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
-import java.util.Locale
 
 /**
  * /quota's DIRECT rung (incident 30/10's fix): the coding plan's REAL
@@ -153,15 +153,15 @@ object QuotaDirect {
         return parseQuotaResponse(raw)?.let { renderQuota(it) }
     }
 
-    // ── Python's formatting helpers (utils/formatting.py), byte-exact ──
+    // ── Formatting helpers — Python's reset/percent shapes + the owner's number law (2/11) ──
 
-    /** Python's fmt_num: K only from 10K up, no decimals on small counts — miles con coma (el dueño 2/11). */
+    /** The owner's number law (2/11, repeated three times): a comma every
+     *  3 digits, the dot for decimals, the unit NEVER moves — Python's
+     *  fmt_num K-conversion died here (it turned 300,000K tokens into
+     *  «300K»: a thousand times fewer). The separator IS the whole change. */
     private fun fmtNum(n: Double?): String = when {
         n == null -> "?"
-        n >= NUM_K_FROM ->
-            group(String.format(Locale.ROOT, "%.1fK", n / NUM_K_DIVISOR).replace(".0K", "K"))
-
-        else -> group(n.toInt().toString()) // Python's str(int(n)): truncate
+        else -> group(BigDecimal(n.toString()).stripTrailingZeros().toPlainString())
     }
 
     /** Miles con coma (el dueño 2/11: «300,000.4» — ínfimo pero ayuda a leer). */
@@ -185,9 +185,7 @@ object QuotaDirect {
     }
 
     private const val ALERT_PCT = 75.0
-    private const val NUM_K_FROM = 10_000.0
     private const val GROUP_SIZE = 3
-    private const val NUM_K_DIVISOR = 1_000.0
     private val TIME_FMT = DateTimeFormatter.ofPattern("HH:mm")
     private val DATE_TIME_FMT = DateTimeFormatter.ofPattern("dd/MM HH:mm")
 

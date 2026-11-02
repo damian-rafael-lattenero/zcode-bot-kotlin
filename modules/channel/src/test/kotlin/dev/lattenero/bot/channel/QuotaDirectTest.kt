@@ -125,7 +125,7 @@ class QuotaDirectTest {
     // ── renderQuota: Python's quota_report copy byte-a-byte ──
 
     @Test
-    fun renderSpeaksPythonsExactLines() {
+    fun renderSpeaksTheQuotaLines() {
         val text = QuotaDirect.renderQuota(
             QuotaDirect.QuotaSnapshot(
                 level = "PRO",
@@ -139,10 +139,10 @@ class QuotaDirectTest {
             """
             📊 <b>Coding plan</b>
             ⏱ 5 hours: 31/120 credits (26%)
-            📅 Weekly: 88K/88K credits (90%) ⚠️
+            📅 Weekly: 88,000/88,000 credits (90%) ⚠️
             """.trimIndent(),
             text,
-            "Python's fmt_num (K from 10K up), the ⚠️ from 75%, 5h first",
+            "the owner's separator law (2/11), the ⚠️ from 75%, 5h first",
         )
     }
 
@@ -190,7 +190,10 @@ class QuotaDirectTest {
                 ),
             ),
         )
-        assertTrue("🔒 Limit: 9999/10K credits (99.96%) ⚠️" in text, "🔒 for any other number, 9999 stays plain, 10000 is 10K")
+        assertTrue(
+            "🔒 Limit: 9,999/10,000 credits (99.96%) ⚠️" in text,
+            "🔒 for any other number — the owner's separator law, the unit never moves",
+        )
     }
 
     // ── report: the injected-effects composition (the ladder's rung) ──

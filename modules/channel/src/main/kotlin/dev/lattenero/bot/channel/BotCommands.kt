@@ -7,6 +7,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import java.math.BigDecimal
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -2155,12 +2156,11 @@ class BotCommands(
 
         /**
          * The Start Plan's buckets (30/10's owner order: «necesito saber
-         * cuántos tokens me quedan en las próximas 5 horas y en la semana;
-         * si el plan no muestra esos dos valores, la cantidad y el
-         * porcentaje usado — 340K/500K usado x%»). One line per REAL
-         * balance bucket: used/total in tokens with the USED percent and
-         * its own reset — the fork's builder carries the numbers raw
-         * (usage/unit/remaining), never a bot-invented window.
+         * cuántos tokens me quedan en las próximas 5 horas y en la semana» —
+         * the 2/11 law fixed the unit: «no es 300k es 300,000.0k tokens»).
+         * One line per REAL balance bucket: used/total in K-tokens with the
+         * USED percent and its own reset — the fork's builder carries the
+         * numbers raw (usage/unit/remaining), never a bot-invented window.
          */
         @Suppress("CyclomaticComplexMethod") // one guard per bucket-line field
         private fun renderStartPlanBuckets(root: JsonObject): String? {
@@ -2176,10 +2176,10 @@ class BotCommands(
                 val label = lim.str("period") ?: lim.str("meter") ?: "cuota"
                 val body = when {
                     total != null && total > 0 ->
-                        "${fmtNum(used)}/${fmtNum(total)} usado " +
+                        "${fmtNum(used)}K/${fmtNum(total)}K usado " +
                             "${((used / total) * 100).toInt()}%"
 
-                    else -> "${fmtNum(used)} usados"
+                    else -> "${fmtNum(used)}K usados"
                 }
                 val reset = lim.long("nextResetTime")?.let { " · resets ${fmtReset(it)}" } ?: ""
                 val pctAlert = if (total != null && total > 0 && (used / total) >= 0.75) " ⚠️" else ""
@@ -2227,19 +2227,15 @@ class BotCommands(
             return grouped + tail
         }
 
-        /** Python's fmt_num: K only from 10K up, no decimals on small counts. */
+        /** The owner's number law (2/11, three times and over my over-engineering):
+         *  a comma every 3 digits, the dot for decimals — NOTHING else. The unit
+         *  never moves: «300,000K» is 300 thousand K-tokens, and collapsing it
+         *  to «300K» said a thousand times fewer. Python's fmt_num K-conversion
+         *  died here (the separator IS the whole change). */
         private fun fmtNum(n: Double?): String = when {
             n == null -> "?"
-            n >= NUM_K_FROM -> {
-                val text = String.format(Locale.ROOT, "%.1f", n / NUM_K_DIVISOR)
-                "${group(text.replace(".0", ""))}K"
-            }
-
-            else -> group(n.toInt().toString())
+            else -> group(BigDecimal(n.toString()).stripTrailingZeros().toPlainString())
         }
-
-        private const val NUM_K_FROM = 10_000.0
-        private const val NUM_K_DIVISOR = 1_000.0
 
         /** Python's datetime_dt: HH:MM today, dd/MM HH:MM otherwise (local zone). */
         private fun fmtReset(epochMs: Long): String {
