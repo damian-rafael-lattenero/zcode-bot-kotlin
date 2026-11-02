@@ -102,6 +102,15 @@ object SendLegs {
                     logger.warn {
                         "send LIVE ${d.watcher}/${d.decision}: parked (cooldown/breaker) — the shared outbox holds it"
                     }
+
+                // Telegram refused the PAYLOAD (final 400 — e.g. a raw HTML
+                // tag): the outbox holds it and the drain's poison cap drops
+                // it after 5 rejections — an outage park this is not
+                SendResult.Rejected ->
+                    logger.warn {
+                        "send LIVE ${d.watcher}/${d.decision}: REJECTED by Telegram — " +
+                            "the outbox holds it (the poison cap drops it after 5 rejections)"
+                    }
             }
         }
     }

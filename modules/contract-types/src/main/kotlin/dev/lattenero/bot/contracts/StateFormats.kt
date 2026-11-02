@@ -208,11 +208,21 @@ object ActiveTurns {
 data class OutboxItem(
     val ts: Long = 0,
     val text: String = "",
+    /**
+     * Los pases de flush FALLIDOS de este item (aditivo 2/11, ignorado por
+     * Python si algún día vuelve a leer el archivo). El cap del drain
+     * (Sender.MAX_ITEM_ATTEMPTS) lo descarta — un mensaje que Telegram
+     * rechaza SIEMPRE (el 400 de un tag HTML crudo) no puede ciclar para
+     * siempre: cada reintento cuenta como falla del breaker y lo mantiene
+     * OPEN — el veneno de un comando se come la voz de todo el bot.
+     */
+    val attempts: Int = 0,
 ) {
     companion object {
         fun fromJson(o: JsonObject) = OutboxItem(
             ts = o.pickLong("ts") ?: 0,
             text = o.pickString("text") ?: "",
+            attempts = o.pickLong("attempts")?.toInt() ?: 0,
         )
     }
 

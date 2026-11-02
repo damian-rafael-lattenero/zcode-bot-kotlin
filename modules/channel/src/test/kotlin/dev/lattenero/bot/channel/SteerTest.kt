@@ -145,7 +145,7 @@ class SteerTest {
     fun bareSteerSpeaksTheUsage() = runBlocking {
         val (bc, fake) = commands(ops())
         val reply = bc.handle("/steer", 6L)!!
-        assertTrue("/steer <texto>" in reply.text, reply.text)
+        assertTrue("/steer &lt;texto&gt;" in reply.text, reply.text) // ESCAPED — a raw <texto> was the 2/11 poison (400 forever)
         assertEquals(0, fake.steered.size) // nothing fired on a bare command
     }
 

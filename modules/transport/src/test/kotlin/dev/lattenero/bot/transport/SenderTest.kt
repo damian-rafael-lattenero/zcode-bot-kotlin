@@ -10,6 +10,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.jupiter.api.io.TempDir
@@ -71,6 +72,45 @@ class SenderTest {
         val r = sender().send(TgConfig(token = "", chatId = JsonPrimitive(1)), "x")
         assertIs<SendResult.NotConfigured>(r)
         assertTrue(requests.isEmpty())
+    }
+
+    @Test
+    fun thePoisonCapDropsAForeverRejectedItemAndTheRestStillGoOut() = runTest {
+        // the 2/11 incident: the /steer hint carried a raw <texto> tag —
+        // Telegram 400'd it EVERY time, the item cycled at the drain's
+        // front, each pass counted as breaker failures → OPEN forever →
+        // the WHOLE bot mute behind one usage hint. The cap drops it after
+        // MAX_ITEM_ATTEMPTS rejections; the healthy items still go out.
+        val poison = "🌀 /steer <texto> — redirigí el turno que corre"
+        behavior = { n ->
+            if (body(n)["text"]!!.jsonPrimitive.content == poison) {
+                respond("""{"ok":false,"error_code":400,"description":"Bad Request: can't parse entities"}""", HttpStatusCode.BadRequest)
+            } else {
+                respond("""{"ok": true, "result": {"message_id": $n}}""")
+            }
+        }
+        val s = sender()
+        s.send(cfg, poison) // final 400 → Rejected → the outbox holds it
+        s.send(cfg, "hola sano") // healthy — goes out directly, never queues
+        // passes 1-4: the poison survives (attempts 1..4), nothing else queued
+        repeat(4) { assertEquals(0, s.outboxFlush(cfg, pause = { })); assertTrue(parkedTexts().contains(poison)) }
+        assertEquals(0, s.outboxFlush(cfg, pause = { })) // the 5th rejection drops it
+        assertFalse(parkedTexts().contains(poison), "the poison is gone, the pipe is clean")
+    }
+
+    @Test
+    fun anOutageParkBurnsNoAttempts() = runTest {
+        // a cooldown/breaker park is NOT the item's fault (Telegram never
+        // said no to the message) — the item re-queues with its attempts
+        // untouched, ready for the window's lift
+        cooldownFile.createNewFile()
+        cooldownFile.setLastModified(System.currentTimeMillis() + 30_000)
+        val s = sender()
+        s.send(cfg, "durmiendo") // cooldown park → the outbox
+        s.outboxFlush(cfg, pause = { }) // the drain parks it again — zero bump
+        val box = Json.parseToJsonElement(outboxFile.readText()).jsonArray
+        val attempts = (box[0] as JsonObject)["attempts"]
+        assertTrue(attempts == null || attempts.jsonPrimitive.content == "0")
     }
 
     @Test
@@ -185,7 +225,9 @@ class SenderTest {
     fun a4xxFailsFastToTheOutbox() = runTest {
         behavior = { respond("""{"ok": false, "description": "Bad Request"}""", HttpStatusCode.BadRequest) }
         val r = sender().send(cfg, "bad one")
-        assertIs<SendResult.Parked>(r)
+        // 2/11: a 4xx is a REJECTION (Telegram said no to the PAYLOAD) —
+        // the outbox holds it and the drain's poison cap counts it
+        assertIs<SendResult.Rejected>(r)
         assertEquals(1, requests.size, "retrying a bad request is hammering with extra steps")
         assertEquals(listOf("bad one"), parkedTexts())
     }
