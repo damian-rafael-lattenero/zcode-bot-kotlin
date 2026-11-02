@@ -227,6 +227,28 @@ object Keyboards {
     }
 
     /**
+     * A collapsed CoT block's ONE button (the tap-expand-in-place, 2/11):
+     * the registry id rides the data (`cb:<id>` — a few bytes, the 64-byte
+     * law never even breathes); the label names the ACTION (open it / fold
+     * it back).
+     */
+    fun cotToggle(registryId: Int, expanded: Boolean): JsonObject = buildJsonObject {
+        putJsonArray("inline_keyboard") {
+            add(
+                buildJsonArray {
+                    add(
+                        if (expanded) {
+                            button("🙈 plegar", "cb:$registryId")
+                        } else {
+                            button("📖 leer", "cb:$registryId")
+                        },
+                    )
+                },
+            )
+        }
+    }
+
+    /**
      * /subagents's ONE view-switch button: the active view offers
      * «inactivos» (`sao:` — today's ended subagents), the inactive view
      * offers the way back, «activos» (`saa:`). Both datas are fixed 4-byte

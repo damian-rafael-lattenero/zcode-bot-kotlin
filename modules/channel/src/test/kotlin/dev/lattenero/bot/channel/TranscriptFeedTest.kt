@@ -6,13 +6,17 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
  * The TRANSCRIPT FEED's pure diff: what speaks between two turn
- * snapshots per level — the owner's «los cots uno debajo del otro en
- * mensajes separados» — and what never does (history re-spoken, SUMMARY
- * noise, invented content).
+ * snapshots per level. THE LAW (the owner, 2/11): the feed is THE DATA —
+ * each tool close its own ordered message with real content, and the CoT
+ * NEVER travels whole: every sealed 3K block is a COLLAPSED message
+ * (header + the tap affordance, `block` marks which message opens), the
+ * owner decides whether to read it. What never happens: history
+ * re-spoken, SUMMARY noise, invented content.
  */
 class TranscriptFeedTest {
 
@@ -49,13 +53,30 @@ class TranscriptFeedTest {
     )
 
     @Test
-    fun aNewlySealedBlockSpeaksWholeWithItsNumber() {
+    fun aNewlySealedBlockSpeaksCollapsedWithItsNumber() {
+        // «yo decido si los leo o no una vez que se llenó el botón de los
+        // 3k» — the header + the affordance, NEVER the text
         val prev = turn(blocks = listOf("uno"))
         val curr = turn(blocks = listOf("uno", "dos"))
         val msgs = TranscriptFeed.messages(prev, curr, FeedVerbosity.NORMAL, { "" }, verbs)
         assertEquals(1, msgs.size)
-        assertTrue("<b>CoT 2</b>" in msgs[0], "the block's number travels")
-        assertTrue("<blockquote>dos</blockquote>" in msgs[0])
+        val block = msgs[0]
+        assertEquals(2, block.block, "the message marks WHICH block it opens")
+        assertTrue("📖 <b>CoT 2</b>" in block.text)
+        assertTrue("tocar para leer" in block.text)
+        assertTrue("dos" !in block.text, "the block's text never rides the collapsed message")
+    }
+
+    @Test
+    fun theTapExpansionRendersTheBlockWhole() {
+        // the tap's expanded render: header + the WHOLE block, one message
+        val text = "línea uno\nlínea dos"
+        val expanded = TranscriptFeed.expandedBlock(3, PyText.cpLength(text), text)
+        assertTrue("📖 <b>CoT 3</b>" in expanded)
+        assertTrue("<blockquote>línea uno\nlínea dos</blockquote>" in expanded)
+        // the unsealed tail's honest label, both shapes
+        assertTrue("sin sellar" in TranscriptFeed.collapsedHeader(null, 1200))
+        assertTrue("sin sellar" in TranscriptFeed.expandedBlock(null, 1200, "x"))
     }
 
     @Test
@@ -82,7 +103,8 @@ class TranscriptFeedTest {
             ),
         )
         val msgs = TranscriptFeed.messages(prev, curr, FeedVerbosity.NORMAL, { "BOX(${it.name})" }, verbs)
-        assertEquals(listOf("BOX(Bash)"), msgs)
+        assertEquals(listOf("BOX(Bash)"), msgs.map { it.text })
+        assertNull(msgs[0].block, "a close is plain data — no CoT registration")
     }
 
     @Test
@@ -91,7 +113,7 @@ class TranscriptFeedTest {
         val curr = turn(tools = listOf(closed("t1", name = "Read", outputLines = 12)))
         val msgs = TranscriptFeed.messages(prev, curr, FeedVerbosity.NORMAL, { "" }, verbs)
         assertEquals(1, msgs.size)
-        assertTrue("<b>Read</b>: 12 líneas de salida ✅" in msgs[0])
+        assertTrue("<b>Read</b>: 12 líneas de salida ✅" in msgs[0].text)
     }
 
     @Test
@@ -105,7 +127,7 @@ class TranscriptFeedTest {
             "VERBOSE: the open speaks",
         )
         assertTrue(
-            TranscriptFeed.messages(prev, curr, FeedVerbosity.VERBOSE, { "" }, verbs)[0].startsWith("▶️"),
+            TranscriptFeed.messages(prev, curr, FeedVerbosity.VERBOSE, { "" }, verbs)[0].text.startsWith("▶️"),
         )
         assertEquals(
             emptyList(),
@@ -121,12 +143,14 @@ class TranscriptFeedTest {
             tools = listOf(closed("t1", input = buildJsonObject { put("command", "ls") }, output = "f", outputLines = 1)),
         )
         val msgs = TranscriptFeed.messages(turn(), curr, FeedVerbosity.VERBOSE, { "BOX" }, verbs)
-        assertEquals(listOf("BOX"), msgs, "the close is the content carrier; the open would be noise")
+        assertEquals(listOf("BOX"), msgs.map { it.text }, "the close is the content carrier; the open would be noise")
     }
 
     @Test
-    fun aLongBlockChunksUnderTheMessageLaw() {
-        val long = "x".repeat(8000)
+    fun aFullBlockNeverChunksOneMessageByLaw() {
+        // a block is capped at COT_BLOCK_CP (3000) — it ALWAYS fits one
+        // message; the old chunk shower is gone
+        val long = "x".repeat(8000) // over the cap: what the reducer could never produce, but the law holds
         val msgs = TranscriptFeed.messages(
             turn(blocks = listOf()),
             turn(blocks = listOf(long)),
@@ -134,20 +158,17 @@ class TranscriptFeedTest {
             { "" },
             verbs,
         )
-        assertTrue(msgs.size > 1, "the block chunks")
-        assertTrue("<b>CoT 1</b>" in msgs.first(), "the number rides the FIRST chunk only")
-        assertTrue("<b>CoT 1</b>" !in msgs[1])
-        assertTrue(
-            msgs.all { PyText.cpLength(it) <= LiveTurn.COT_SHOWER_CHUNK_CP + 200 },
-            "every chunk stays near the shower's budget",
-        )
+        assertEquals(1, msgs.size, "one collapsed message — the text lives behind the tap, not in the chat")
+        assertTrue("8K" in msgs[0].text)
     }
 
     @Test
-    fun thePendingTailFlushesHonestlyLabeled() {
+    fun thePendingTailFlushesCollapsedUnderBlockZero() {
         assertEquals(emptyList(), TranscriptFeed.pendingFlush(turn(pending = "")))
         val msgs = TranscriptFeed.pendingFlush(turn(pending = "cola final"))
         assertEquals(1, msgs.size)
-        assertTrue("sin sellar" in msgs[0] && "<blockquote>cola final</blockquote>" in msgs[0])
+        assertEquals(0, msgs[0].block, "the tail is block 0 — the registry knows its own label")
+        assertTrue("sin sellar" in msgs[0].text && "tocar para leer" in msgs[0].text)
+        assertTrue("cola final" !in msgs[0].text, "the tail's text never rides the collapsed message")
     }
 }

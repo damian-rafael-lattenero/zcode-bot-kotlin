@@ -30,9 +30,10 @@ class LivePublisherTest {
 
     private val cfg = TgConfig(token = "tok", chatId = JsonPrimitive(42), ownerUserId = 7L)
 
-    /** The captured wire: (json body, method) per call, answered OK always. */
+    /** The captured wire: (json body, method) per call, answered OK always — each send a FRESH message id. */
     private class Wire {
         val bodies = mutableListOf<Pair<String, String>>()
+        private var nextMid = 100L
         val factory: HttpClientEngineFactory<MockEngineConfig> =
             object : HttpClientEngineFactory<MockEngineConfig> {
                 override fun create(block: MockEngineConfig.() -> Unit): HttpClientEngine =
@@ -40,7 +41,7 @@ class LivePublisherTest {
                         MockEngineConfig().apply(block).apply {
                             addHandler { request ->
                                 bodies += (request.body as TextContent).text to request.url.segments.last()
-                                respond("""{"result":{"message_id":77}}""", HttpStatusCode.OK)
+                                respond("""{"result":{"message_id":${++nextMid}}}""", HttpStatusCode.OK)
                             }
                         },
                     )
@@ -80,7 +81,7 @@ class LivePublisherTest {
             ),
             config = { cfg },
             channelAlive = { true },
-            speak = { text -> spoken.add(text) },
+            speak = { text, _ -> spoken.add(text); 777L },
             toolBox = toolBox,
             finalAnswer = finalAnswer,
             clock = { TICK_MS },
@@ -159,7 +160,7 @@ class LivePublisherTest {
     // ---- the transcript feed -------------------------------------------------
 
     @Test
-    fun aSealedBlockBecomesItsOwnMessageAndTheCardIsRebornLast() = runTest {
+    fun aSealedBlockBecomesItsOwnCollapsedMessageAndTheCardIsRebornLast() = runTest {
         val taskId = "task-9"
         val hub = LiveHub()
         hub.apply(frame(taskId, "task_run_started", at = 1_000), nowMs = 1_000)
@@ -169,12 +170,18 @@ class LivePublisherTest {
         val publisher = publisher(wire, hub, spoken)
         publisher.tick() // the birth — feedSeen snapshots here
         val afterBirth = wire.bodies.size
+        val blockText = "p".repeat(3000)
         hub.apply(
-            frame(taskId, "agent_thought_chunk", at = 1_100, "content" to JsonPrimitive("p".repeat(3000))),
+            frame(taskId, "agent_thought_chunk", at = 1_100, "content" to JsonPrimitive(blockText)),
             nowMs = 1_100,
         )
-        publisher.tick() // the block sealed → the feed speaks, the card swaps
-        assertTrue(spoken.any { "<b>CoT 1</b>" in it && "<blockquote>" in it }, "the block travels WHOLE")
+        publisher.tick() // the block sealed → the COLLAPSED message speaks, the card swaps
+        // THE COLLAPSE (2/11): the header + the affordance — the text never
+        // rides the chat until the tap opens it
+        val collapsed = spoken.firstOrNull { "CoT 1" in it }
+        assertTrue(collapsed != null, "the block's collapsed message spoke")
+        assertTrue("tocar para leer" in collapsed!!)
+        assertTrue(blockText !in collapsed, "the whole-block send is GONE")
         // the swap's order: the card dies, the feed speaks (the speak lane),
         // the card is REBORN — deleteMessage then the birth sendMessage
         val methods = wire.bodies.drop(afterBirth).map { it.second }
@@ -182,7 +189,70 @@ class LivePublisherTest {
         assertEquals("sendMessage", methods[1])
         val reborn = wire.bodies.last { it.second == "sendMessage" }.first
         assertTrue("⏳ <b>Working" in reborn, "the re-born card IS the process card")
-        assertTrue("📖 CoT" in reborn, "the card carries the CoT row (count only)")
+        assertTrue("📖 CoT: 1 bloque plegado" in reborn, "the card carries the CoT row (count only)")
+    }
+
+    @Test
+    fun theTapExpandsTheBlockInPlaceAndFoldsItBack() = runTest {
+        // THE OWNER'S REFINEMENT, verbatim (2/11): «el lugar para que
+        // aparezca el texto ES EN EL BOTÓN del CoT» — the tap edits the
+        // collapsed message with the block WHOLE; another tap folds it
+        val taskId = "task-9"
+        val hub = LiveHub()
+        hub.apply(frame(taskId, "task_run_started", at = 1_000), nowMs = 1_000)
+        hub.apply(frame(taskId, "agent_thought_chunk", at = 1_050, "content" to JsonPrimitive("arranco")), nowMs = 1_050)
+        val wire = Wire()
+        val spoken = mutableListOf<String>()
+        val publisher = publisher(wire, hub, spoken)
+        publisher.tick() // the birth
+        val blockText = "el pensamiento sellado completo"
+        hub.apply(
+            frame(taskId, "agent_thought_chunk", at = 1_100, "content" to JsonPrimitive(blockText.repeat(120))),
+            nowMs = 1_100,
+        )
+        publisher.tick() // the collapsed message speaks + the registry records it
+        spoken.clear()
+        // THE TAP: the expansion is an EDIT on the block's own message —
+        // no new message, the chat's order untouched
+        assertEquals(null, publisher.toggle(1), "a working tap is silent — the edit IS the feedback")
+        val expanded = wire.bodies.last { it.second == "editMessageText" }.first
+        assertTrue("el pensamiento sellado completo" in expanded, "the block WHOLE, in place")
+        assertTrue("<blockquote>" in expanded)
+        assertTrue("🙈 plegar" in expanded, "the button offers the fold back")
+        // THE SECOND TAP folds it back to the one-line header
+        assertEquals(null, publisher.toggle(1))
+        val folded = wire.bodies.last { it.second == "editMessageText" }.first
+        assertTrue("tocar para leer" in folded)
+        assertTrue("el pensamiento sellado completo" !in folded, "the text goes back behind the tap")
+        // an unknown id answers the honest miss
+        assertEquals("🤷 Ese CoT ya no está en el registro — el botón quedó de otro turno.", publisher.toggle(99))
+    }
+
+    @Test
+    fun aThrottledTapFlipsNothing() = runTest {
+        val taskId = "task-9"
+        val hub = LiveHub()
+        hub.apply(frame(taskId, "task_run_started", at = 1_000), nowMs = 1_000)
+        hub.apply(frame(taskId, "agent_thought_chunk", at = 1_050, "content" to JsonPrimitive("arranco")), nowMs = 1_050)
+        val wire = Wire()
+        val spoken = mutableListOf<String>()
+        var nowSec = 2.0
+        val cooldown = Cooldown(now = { nowSec }, readFile = { null })
+        val publisher = publisher(wire, hub, spoken, cooldown = cooldown)
+        publisher.tick() // the birth
+        hub.apply(
+            frame(taskId, "agent_thought_chunk", at = 1_100, "content" to JsonPrimitive("q".repeat(3000))),
+            nowMs = 1_100,
+        )
+        publisher.tick() // the collapsed message speaks, the registry records it
+        cooldown.extend(raSeconds = 60) // Telegram named the window
+        val edits = wire.bodies.count { it.second == "editMessageText" }
+        assertEquals(null, publisher.toggle(1), "the tap answers no miss — it just couldn't edit")
+        assertEquals(edits, wire.bodies.count { it.second == "editMessageText" }, "a throttled tap edits NOTHING")
+        // the state did NOT flip: once the window lifts the tap opens it
+        nowSec = 5_000.0
+        assertEquals(null, publisher.toggle(1))
+        assertTrue("q".repeat(50) in wire.bodies.last { it.second == "editMessageText" }.first)
     }
 
     @Test
@@ -425,10 +495,13 @@ class LivePublisherTest {
         )
         hub.apply(frame(taskId, "task_complete", at = 9_999, "stopReason" to JsonPrimitive("end_turn")), nowMs = 9_999)
         publisher.tick() // the seal tick
-        // the remainder first (the unseen close + the unsealed thought tail),
-        // then the record, then the answer LAST
+        // the remainder first (the unseen close + the unsealed thought tail
+        // COLLAPSED — the tap opens it), then the record, then the answer LAST
         assertTrue(spoken.any { it == "BOX(Bash)" }, "the unseen close speaks at the seal")
-        assertTrue(spoken.any { "sin sellar" in it && "pensando" in it }, "the unsealed tail loses nothing")
+        val tail = spoken.firstOrNull { "sin sellar" in it }
+        assertTrue(tail != null, "the unsealed tail loses nothing — it travels collapsed")
+        assertTrue("tocar para leer" in tail!!)
+        assertTrue("pensando" !in tail, "the tail's text hides behind the tap too")
         assertTrue("end_turn" in spoken[spoken.size - 2], "the record is second-to-last")
         assertEquals("LA RESPUESTA", spoken.last(), "the answer is the last word")
         assertEquals("deleteMessage", wire.bodies.last { it.second != "editMessageText" }.second)
