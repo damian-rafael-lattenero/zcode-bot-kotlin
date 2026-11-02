@@ -155,7 +155,7 @@ class BotCommandsTest {
         val (bc, _) = commands(o)
         assertEquals(
             """
-            💬 <b>Conversations by project</b> — pick one with /tasks n
+            💬 <b>Conversations by project</b> — tap a row to watch it live
             🎯 1. arreglá el login
             🔄 2. second · 📁bot
 
@@ -192,41 +192,44 @@ class BotCommandsTest {
     }
 
     @Test
-    fun tasksPickBindsTheActiveConversation() = runBlocking {
-        val boundTo02 = """
-            {"bot":{"id":"daemon-local","enabled":true},
-             "context":{"workspacePath":"$app","activeTaskId":"task-02","mode":"task"}}
-        """.trimIndent()
-        val o = ops().apply {
-            botStatusJson = draftStatus
-            answers["botStatus"] = draftStatus
-            onInbound = { text ->
-                if (text.startsWith("/task ")) answers["botStatus"] = boundTo02
-            }
-        }
+    fun tasksNumericArgIsRetiredTheListIsTheAnswer() = runBlocking {
+        val o = ops().apply { answers["activeTaskIds"] = """["task-77"]""" }
         val (bc, _) = commands(o)
-        val reply = bc.reply("/tasks 2", 7L)!!
-        assertTrue("🎯 Active conversation: «second»" in reply)
-        assertTrue("/task task-02" in o.awaited.map { it.first })
-        assertEquals("tg-7-bind", o.awaited.first { it.first == "/task task-02" }.second)
+        val reply = bc.handle("/tasks 2", 7L)!!
+        assertTrue("Conversations by project" in reply.text, "a number just re-shows the tappable list")
+        assertTrue(reply.markup != null, "the list is never buttonless")
+        assertTrue("Sin números" in reply.text, "the retirement hint rides along")
+        assertTrue(o.inbound.isEmpty() && o.awaited.isEmpty(), "no bind ever fires from a number")
     }
 
     @Test
-    fun pickOutOfListIsPythonsMessage() = runBlocking {
+    fun allTasksNumericArgIsRetiredToo() = runBlocking {
         val (bc, _) = commands(ops())
-        assertEquals(
-            "⚠️ Number out of the list (1 to 2) — /tasks.",
-            bc.reply("/tasks 9", 1L),
-        )
+        val reply = bc.handle("/all_tasks 5", 1L)!!
+        assertTrue("All conversations" in reply.text)
+        assertTrue(reply.markup != null, "the all-list is tappable")
+        assertTrue("Sin números" in reply.text)
     }
 
     @Test
-    fun pickWhileThePreviousTaskRunsSaysStopFirst() = runBlocking {
+    fun tasksCarriesTheKeyboardEvenWithoutTheChannelsContext() = runBlocking {
+        // the 2/11 incident: a channel bounce made botStatus context-less and
+        // the list went out BUTTONLESS — the rows and taps are LOCAL data, the
+        // keyboard survives every context loss (only a dead channel degrades)
+        val (bc, _) = commands(ops(status = """{"bot":{"id":"daemon-local","enabled":true}}"""))
+        val reply = bc.handle("/tasks", 1L)!!
+        assertTrue("Conversations by project" in reply.text)
+        assertTrue(reply.markup != null, "buttons ride on the local session store, not on the channel's context")
+        assertTrue(reply.markup.toString().contains("\"t:task-77\""))
+    }
+
+    @Test
+    fun pickBySidWhileThePreviousTaskRunsSaysStopFirst() = runBlocking {
         val o = ops().apply { answers["activeTaskIds"] = """["task-77"]""" }
         val (bc, _) = commands(o)
         assertEquals(
             "⏳ The previous task's turn is still running — /stop first, then pick again.",
-            bc.reply("/tasks 2", 1L),
+            bc.reply("/tasks @task-02", 1L),
         )
         assertTrue(o.inbound.isEmpty()) // the doomed bind never fires
     }
@@ -695,20 +698,16 @@ class BotCommandsTest {
     }
 
     @Test
-    fun allTasksPickOutOfListNamesItsOwnCommand() = runBlocking {
+    fun allTasksNumericArgIsJustTheList() = runBlocking {
         val (bc, _) = commands(ops())
-        assertEquals(
-            "⚠️ Number out of the list (1 to 3) — /all_tasks.",
-            bc.reply("/all_tasks 9", 1L),
-        )
+        val reply = bc.reply("/all_tasks 9", 1L)!!
+        assertTrue("All conversations" in reply, "a number never errors — it re-shows the list")
     }
 
     @Test
-    fun tasksZeroIsBelowTheList() = runBlocking {
+    fun tasksZeroIsJustTheListToo() = runBlocking {
         val (bc, _) = commands(ops())
-        assertEquals(
-            "⚠️ Number out of the list (1 to 2) — /tasks.",
-            bc.reply("/tasks 0", 1L),
-        )
+        val reply = bc.reply("/tasks 0", 1L)!!
+        assertTrue("Conversations by project" in reply)
     }
 }

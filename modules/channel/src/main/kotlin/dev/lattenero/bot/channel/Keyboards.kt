@@ -29,19 +29,22 @@ object Keyboards {
 
     /**
      * /tasks's keyboard: one green row per conversation (Python's
-     * button_of: stamp + n + title[:34], callback `t:<sid>`), the blue
-     * subagent rows nested under the WATCHED task only (the live lanes
-     * we actually have — honest data, no frozen index here). Each row is
-     * its OWN array — Telegram's inline_keyboard is an array of rows.
+     * button_of: stamp + n + title[:34], callback `t:<sid>`), then the
+     * blue 🔵 subagent rows — ALWAYS visible (the owner's 2/11 law: the
+     * list is tasks AND subagents, tap-selectable): the live dispatch
+     * lanes first, then the store's running sessions (stream-independent,
+     * each with the honest ⏸️ ghost mark). Each row is its OWN array —
+     * Telegram's inline_keyboard is an array of rows.
      */
     fun tasksKeyboard(
         rows: List<TaskRow>,
         running: Set<String>,
         activeSid: String?,
-        watchedTaskId: String?,
         subagents: List<ToolLive>,
+        dbRunning: List<RunningSubagent> = emptyList(),
+        nowMs: Long = 0,
     ): JsonObject? {
-        if (rows.isEmpty()) return null
+        if (rows.isEmpty() && subagents.isEmpty() && dbRunning.isEmpty()) return null
         return buildJsonObject {
             putJsonArray("inline_keyboard") {
                 rows.forEachIndexed { i, t ->
@@ -59,15 +62,28 @@ object Keyboards {
                             add(button("✍️", "so:${t.sid}"))
                         },
                     )
-                    if (t.sid == watchedTaskId) {
-                        subagents.forEach { lane ->
-                            add(
-                                buildJsonArray {
-                                    add(button(subagentLabel(lane), "sa:${lane.toolId.takeLast(LANE_TAIL)}"))
-                                },
-                            )
-                        }
-                    }
+                }
+                subagents.forEach { lane ->
+                    add(
+                        buildJsonArray {
+                            add(button(subagentLabel(lane), "sa:${lane.toolId.takeLast(LANE_TAIL)}"))
+                            add(button("✍️", "so:${lane.toolId.takeLast(LANE_TAIL)}"))
+                        },
+                    )
+                }
+                // the store's running sessions — visible even when the bus
+                // died before their lane streamed (the /subagents law, now on
+                // every list; the frozen lastMs is the ghost marker)
+                dbRunning.forEach { r ->
+                    add(
+                        buildJsonArray {
+                            val label = r.title.takeIf { it.isNotBlank() }?.take(TITLE_CAP) ?: r.sid.takeLast(LANE_TAIL)
+                            val staleMin = (nowMs - r.lastMs) / 60000
+                            val mark = if (r.lastMs <= 0 || staleMin < SUB_STALE_MIN) "▶️" else "⏸️ hace ${staleMin}m"
+                            add(button("$SUBAGENT_MARK $label $mark", "sa:${r.sid.takeLast(LANE_TAIL)}"))
+                            add(button("✍️", "so:${r.sid.takeLast(LANE_TAIL)}"))
+                        },
+                    )
                 }
             }
         }

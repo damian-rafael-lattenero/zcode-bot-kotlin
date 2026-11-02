@@ -155,7 +155,7 @@ internal object RouteTexts {
 
     /** Python's handle_free_text refusal — free text NEVER opens a conversation by itself. */
     const val NO_ACTIVE_CONVERSATION =
-        "📭 There is no active conversation yet — send /tasks and pick one with /tasks n.\n" +
+        "📭 There is no active conversation yet — send /tasks and tap a row (buttons, no numbers).\n" +
             "After that, all text you send runs there (live mode)."
 
     /** The tombstone refusal: the bound conversation is gone and nothing is open to re-aim at. */
