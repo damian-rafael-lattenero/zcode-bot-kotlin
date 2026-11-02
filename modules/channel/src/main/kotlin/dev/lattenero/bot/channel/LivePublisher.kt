@@ -11,6 +11,7 @@ import kap.process
 import kap.repeat
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.serialization.json.JsonObject
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 
@@ -173,20 +174,23 @@ class LiveHub {
  *
  * THE TRANSCRIPT FEED (the owner's 30/10 order: «quiero VER los archivos,
  * leer los commands de bash…»): every tick drains [TranscriptFeed]'s
- * diff — each sealed CoT block and each tool CLOSE becomes its own
- * message through the render lane, and the card SWAPS (delete → feed →
- * re-birth last) in the same tick. The level ([FeedVerbosity], read PER
- * TICK from the injected setting — policy §7: the publisher never reads
- * files) gates: SUMMARY speaks nothing (the card STILL renders — the
- * process is never hidden), NORMAL blocks + closes, VERBOSE adds the
- * tool OPEN one-liners. Verbose is the DEFAULT.
+ * diff — each tool CLOSE becomes its own message with its real content,
+ * and each sealed CoT block becomes a COLLAPSED message (header + button,
+ * never the text) — the card SWAPS (delete → feed → re-birth last) in the
+ * same tick. The tap on a collapsed message EXPANDS THE BLOCK IN PLACE
+ * ([toggle], 2/11: «el lugar para que aparezca el texto ES EN EL BOTÓN»),
+ * another tap re-collapses. The level ([FeedVerbosity], read PER TICK
+ * from the injected setting — policy §7: the publisher never reads files)
+ * gates: SUMMARY speaks nothing (the card STILL renders — the process is
+ * never hidden), NORMAL collapsed blocks + closes, VERBOSE adds the tool
+ * OPEN one-liners. Verbose is the DEFAULT.
  */
 class LivePublisher(
     private val hub: LiveHub,
     private val telegram: LiveTelegram,
     private val config: () -> TgConfig,
     private val channelAlive: () -> Boolean,
-    private val speak: suspend (text: String) -> Unit,
+    private val speak: suspend (text: String, markup: JsonObject?) -> Long?,
     /**
      * The per-tool CLOSE renderer (injected — the daemon passes the
      * SPECTATOR's ToolBox, the same renderer the final transcript uses):
@@ -219,7 +223,7 @@ class LivePublisher(
      * file-backed store; tests and unwired daemons the in-memory default).
      */
     private val verbosity: VerbositySetting = VolatileVerbosity(),
-) {
+) : CoTTaps {
 
     /** the message being edited — the publisher's only mutable cell (§7 escape hatch). */
     @Volatile
@@ -233,6 +237,15 @@ class LivePublisher(
     private var lastWatchdogAtMs: Long = 0
     /** The feed's seen pointer — the last turn snapshot the transcript already spoke. */
     private var feedSeen: TurnLive? = null
+
+    /**
+     * THE CoT REGISTRY (the collapsed blocks' tap world) — built lazily
+     * on the publisher's telegram edit leg. All access rides [tickMutex]
+     * (the taps land here too): the registry itself stays a plain holder.
+     */
+    private val cotBlocks = CotBlocks { messageId, text, markup ->
+        telegram.edit(config(), messageId, text, markup)
+    }
 
     /**
      * The ORPHAN SEAL — this process's FIRST tick after a restart edits
@@ -293,7 +306,9 @@ class LivePublisher(
                     }
                 }
             }
-            tryBirthCard(cfg, state, now)
+            // the FIRST message is already the process card: the render,
+            // not a placeholder
+            tryBirth(cfg, state, LiveTurn.render(state, now, channelAlive(), verbs))
         }
         // THE STREAM WATCHDOG: a live turn with a long silence is the fork's
         // dead bus, not a quiet model (measured 30/10 twice — burst on
@@ -393,17 +408,62 @@ class LivePublisher(
         if (feed.isEmpty()) return
         val mid = statusMessageId
         if (mid == null) {
-            feed.forEach { speak(it) } // no card yet: the feed speaks, the birth lands below it
+            speakFeed(feed, state) // no card yet: the feed speaks, the birth lands below it
         } else {
             telegram.delete(cfg, mid)
             statusMessageId = null
             lastText = ""
-            feed.forEach { speak(it) }
-            tryBirthCard(cfg, state, now) // the card re-born LAST — above nothing, below everything
+            speakFeed(feed, state)
+            // the card re-born LAST with its CURRENT render — above
+            // nothing, below everything
+            tryBirth(cfg, state, LiveTurn.render(state, now, channelAlive(), verbs))
         }
         logger.info {
             "transcript feed: ${feed.size} message(s) spoken " +
                 "(card=${if (mid != null) "swapped" else "absent"})"
+        }
+    }
+
+    /**
+     * Speaks the feed's diff and REGISTERS every collapsed CoT message
+     * (via the registry's own speak-and-register): the message id (the
+     * tap's edit target), the block's number, its FULL text (the tap
+     * renders it whole) — the collapsed header is all the chat sees
+     * until the owner asks.
+     */
+    private suspend fun speakFeed(feed: List<FeedMessage>, state: TurnLive) {
+        feed.forEach { msg ->
+            val block = msg.block ?: run {
+                speak(msg.text, null)
+                return@forEach
+            }
+            val text = when (block) {
+                0 -> state.cotPending.takeIf { it.isNotBlank() }
+                else -> state.cotBlocks.getOrNull(block - 1)
+            } ?: return@forEach
+            cotBlocks.speakCollapsed(
+                number = if (block == 0) null else block,
+                text = text,
+                cp = PyText.cpLength(text),
+                send = { markup -> speak(msg.text, markup) },
+            )
+        }
+    }
+
+    /**
+     * THE TAP (the owner's 2/11 refinement, verbatim): «el lugar para que
+     * aparezca el texto ES EN EL BOTÓN del CoT» — the collapsed block's
+     * message expands IN PLACE with the block WHOLE; another tap folds it
+     * back to the one-line header. MUTEXED with the tick (the registry is
+     * the publisher's mutable state). The configured check rides here:
+     * the registry's edit leg is the same cooldown-gated telegram.
+     */
+    override suspend fun toggle(registryId: Int): String? = tickMutex.withLock {
+        val cfg = config()
+        if (!cfg.configured) {
+            "📡 Sin Telegram configurado — no hay mensaje que abrir."
+        } else {
+            cotBlocks.toggle(registryId)
         }
     }
 
@@ -429,19 +489,22 @@ class LivePublisher(
             telegram.edit(cfg, mid, LiveTurn.sealText(state, now))
         } else {
             telegram.delete(cfg, mid)
-            feed.forEach { speak(it) }
-            speak(LiveTurn.sealText(state, now))
+            speakFeed(feed, state)
+            speak(LiveTurn.sealText(state, now), null)
         }
         val answer = finalAnswer(state.taskId)?.takeIf { it.isNotBlank() }
         // the store's answer is RAW markdown/content — Telegram's HTML law
         // requires the escape (measured 31/10: a literal tag in the content
         // 400'd the send every tick until the breaker opened)
-        if (answer != null) speak(PyText.esc(answer))
+        if (answer != null) speak(PyText.esc(answer), null)
         logger.info {
             "live view sealed: taskId=${state.taskId} reason=${(state.phase as TurnPhase.Done).stopReason} " +
                 "thought=${state.thoughtChars} tools=${state.doneTools} answer=${answer?.length ?: 0} chars " +
                 "feed=${feed.size}"
         }
+        // THE REGISTRY SURVIVES THE SEAL (the collapsed buttons keep
+        // working after the turn ends — the owner reads the CoT calmly);
+        // only the entry cap prunes it.
         hub.clear()
         orphanStore?.clear()
         statusMessageId = null
@@ -450,17 +513,12 @@ class LivePublisher(
     }
 
     /**
-     * A birth (the first one and every re-draw) carries the card's REAL
-     * render — the process card, from its very first message.
-     */
-    private suspend fun tryBirthCard(cfg: TgConfig, state: TurnLive, now: Long) =
-        tryBirth(cfg, state, LiveTurn.render(state, now, channelAlive(), verbs))
-
-    /**
      * A failed birth (cooldown window) must NOT retry every tick: the
      * 14:55 loop logged «born message_id=null» every 3s and would hammer
      * Telegram the moment the window lifted. Back off BIRTH_RETRY_TICKS
-     * ticks between attempts, say it ONCE.
+     * ticks between attempts, say it ONCE. Every birth (the first and
+     * every re-draw) carries the card's REAL render — the process card,
+     * from its very first message.
      */
     private suspend fun tryBirth(cfg: TgConfig, state: TurnLive, text: String) {
         if (birthCooldownTicks > 0) {

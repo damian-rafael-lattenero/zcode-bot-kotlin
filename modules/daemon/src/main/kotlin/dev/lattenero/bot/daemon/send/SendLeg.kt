@@ -23,13 +23,17 @@ fun interface SendLeg {
 
     /**
      * The buttons' send (the markup hot-fix): same decision, plus the
-     * inline keyboard. The default is the knob's text-only contract —
-     * SHADOW keeps diffing TEXT (the comparator's parity is the words);
-     * DRY-RUN and LIVE override to carry the markup (one composition
-     * path: the logged body IS the posted body, buttons included).
+     * inline keyboard. Answers the BORN message's id (null = nothing
+     * flew: shadow, parked, failed) — the live view's collapsed CoT
+     * blocks register it so their tap can edit THAT message in place.
+     * The default is the knob's text-only contract — SHADOW keeps
+     * diffing TEXT (the comparator's parity is the words); DRY-RUN and
+     * LIVE override to carry the markup (one composition path: the logged
+     * body IS the posted body, buttons included).
      */
-    suspend fun deliverMarkup(decision: ShadowDecision, loud: Boolean, markup: JsonObject?) {
+    suspend fun deliverMarkup(decision: ShadowDecision, loud: Boolean, markup: JsonObject?): Long? {
         deliver(decision, loud)
+        return null
     }
 }
 
@@ -66,11 +70,12 @@ object SendLegs {
             deliverMarkup(d, loud, null)
         }
 
-        override suspend fun deliverMarkup(d: ShadowDecision, loud: Boolean, markup: JsonObject?) {
+        override suspend fun deliverMarkup(d: ShadowDecision, loud: Boolean, markup: JsonObject?): Long? {
             val r = composeSend(view(TgConfig.load(remote())), d.text, loud, markup)
             logger.info {
                 "send DRY-RUN ${d.watcher}/${d.decision}: method=${r.method} url=${r.url} body=${r.body}"
             }
+            return null // nothing flew — the id stays unknown by definition
         }
     }
 
@@ -87,32 +92,39 @@ object SendLegs {
             deliverMarkup(d, loud, null)
         }
 
-        override suspend fun deliverMarkup(d: ShadowDecision, loud: Boolean, markup: JsonObject?) {
+        override suspend fun deliverMarkup(d: ShadowDecision, loud: Boolean, markup: JsonObject?): Long? =
             when (val r = send(TgConfig.load(remote()), d.text, loud, markup)) {
-                is SendResult.Sent ->
+                is SendResult.Sent -> {
                     logger.info { "send LIVE ${d.watcher}/${d.decision}: message_id=${r.messageId}" }
+                    r.messageId
+                }
 
-                SendResult.NotConfigured ->
+                SendResult.NotConfigured -> {
                     logger.warn {
                         "send LIVE ${d.watcher}/${d.decision}: NOT CONFIGURED " +
                             "(enabled/token/chat_id) — nothing went out"
                     }
+                    null
+                }
 
-                SendResult.Parked ->
+                SendResult.Parked -> {
                     logger.warn {
                         "send LIVE ${d.watcher}/${d.decision}: parked (cooldown/breaker) — the shared outbox holds it"
                     }
+                    null
+                }
 
                 // Telegram refused the PAYLOAD (final 400 — e.g. a raw HTML
                 // tag): the outbox holds it and the drain's poison cap drops
                 // it after 5 rejections — an outage park this is not
-                SendResult.Rejected ->
+                SendResult.Rejected -> {
                     logger.warn {
                         "send LIVE ${d.watcher}/${d.decision}: REJECTED by Telegram — " +
                             "the outbox holds it (the poison cap drops it after 5 rejections)"
                     }
+                    null
+                }
             }
-        }
     }
 }
 

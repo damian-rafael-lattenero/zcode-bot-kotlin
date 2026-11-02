@@ -69,16 +69,38 @@ class CallbackTapsTest {
     )
 
     @Test
-    fun theOldBlockTapAnswersTheRetiredNoteHonestly() = runBlocking {
+    fun theBlockTapRoutesToTheRegistryTheUnwiredAnswersHonestly() = runBlocking {
         val hub = LiveHub()
         val o = FakeOps()
+        // THE WIRED TAP (2/11): cb:<id> goes to the publisher's registry —
+        // the toggle expands/folds IN PLACE and answers null (the edit IS
+        // the feedback: no message, the chat's order untouched)
+        val toggled = mutableListOf<Int>()
         val cmds = BotCommands(
             ops = o,
             hub = hub,
             daemonReset = { "ladder ok" },
             clock = { 1_000_000L },
+            blockTaps = CoTTaps { id ->
+                toggled.add(id)
+                null
+            },
         )
-        // one block sealed: 3000 cp of streamed thinking through the hub
+        assertEquals(null, cmds.onCallback("cb:7", 1L), "a working tap is silent")
+        assertEquals(listOf(7), toggled)
+        assertTrue(o.queries.isEmpty(), "the tap never touches the channel")
+        // the UNWIRED tap (a stale button, a bot restart): the honest note
+        val bare = BotCommands(
+            ops = o,
+            hub = LiveHub(),
+            daemonReset = { "ladder ok" },
+            clock = { 1_000_000L },
+        )
+        val reply = bare.onCallback("cb:1", 2L)!!
+        assertTrue("botón quedó de otro turno" in reply.text)
+        assertTrue(o.queries.isEmpty())
+        // one block sealed in the hub: the tap never touches it (the
+        // registry is the publisher's world, the hub is the stream's)
         hub.apply(
             ServerFrame.StreamEvent(
                 "task-9",
@@ -91,12 +113,6 @@ class CallbackTapsTest {
             ),
             100L,
         )
-        // the OLD block tap is RETIRED (the transcript feed carries the
-        // blocks as their own messages): the stale button answers honestly,
-        // no channel query, the hub untouched
-        val reply = cmds.onCallback("cb:1", 1L)!!
-        assertTrue("mensajes propios" in reply.text)
-        assertTrue(o.queries.isEmpty())
         assertEquals("x".repeat(3000), hub.peek()!!.cotBlocks[0])
     }
     @Test

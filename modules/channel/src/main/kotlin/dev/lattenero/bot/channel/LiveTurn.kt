@@ -353,13 +353,6 @@ object LiveTurn {
      */
     const val COT_BLOCK_CP = 3000
 
-    /**
-     * The transcript feed's chunk size (RAW code points before esc()) — a
-     * prose chunk escapes to ≈ itself, under the transport's CH_REPLY;
-     * esc() is per-char, so a chunk-then-escape never splits an entity.
-     */
-    const val COT_SHOWER_CHUNK_CP = 3600
-
     /** Thinking degrades honestly after this silence — «(30s sin eventos)». */
     const val STALE_SOFT_MS = 20_000L
 

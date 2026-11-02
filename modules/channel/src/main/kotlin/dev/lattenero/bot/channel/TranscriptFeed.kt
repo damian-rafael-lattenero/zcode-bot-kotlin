@@ -3,12 +3,34 @@ package dev.lattenero.bot.channel
 import dev.lattenero.bot.contracts.PyText
 
 /**
- * The TRANSCRIPT FEED (the owner's 30/10 order, his words are the spec):
- * «quiero VER los archivos, leer los commands de bash, leer los cots uno
- * debajo del otro en mensajes separados» — the turn no longer lives only
- * inside one redrawn card; each SEALED CoT block and each tool CLOSE
- * becomes its own Telegram message, real content, in order, while the
- * status card is ALWAYS redrawn as the LAST message of everything.
+ * One TRANSCRIPT FEED message: the words, the optional inline keyboard,
+ * and — for a collapsed CoT — WHICH block the message opens (`block`:
+ * 1-based for the sealed blocks, 0 for the unsealed tail, null for
+ * everything else). The markup itself is built by the PUBLISHER (it owns
+ * the callback's registry id, see [LivePublisher]); the feed only marks
+ * the message as a CoT one.
+ */
+data class FeedMessage(
+    val text: String,
+    val block: Int? = null,
+) {
+    companion object {
+        /** A plain data message (a tool close, an open one-liner). */
+        fun of(text: String) = FeedMessage(text)
+    }
+}
+
+/**
+ * The TRANSCRIPT FEED — THE DATA half of the ley raíz (the owner, 2/11:
+ * «separar bien el dato del proceso»): each tool CLOSE becomes its own
+ * Telegram message with its real content (the bash command + output, the
+ * edit's diff box), ordered, under the always-last process card. THE CoT
+ * STOPS TRAVELING WHOLE: each sealed 3K block becomes a COLLAPSED message
+ * — the header «📖 CoT N · 3K — tocar para leer» and a button; the tap
+ * expands the block WHOLE in place on that same message (the publisher's
+ * edit), another tap re-collapses (the owner, 2/11: «yo decido si los leo
+ * o no una vez que se llenó el botón de los 3k»). A block never chunks:
+ * it is capped at [LiveTurn.COT_BLOCK_CP] (3000 cp), one message by law.
  *
  * PURE: the feed is a diff between two consecutive turn snapshots —
  * nothing is emitted from a side queue, nothing is re-emitted after a
@@ -16,17 +38,17 @@ import dev.lattenero.bot.contracts.PyText
  * again), and a turn switch starts clean (the previous turn's history
  * stays sealed in the chat, never replayed). The publisher holds the
  * `prev` pointer and drains per tick; the level ([FeedVerbosity]) gates:
- * SUMMARY speaks nothing, NORMAL speaks sealed blocks + tool closes,
- * VERBOSE adds the tool OPEN one-liners.
+ * SUMMARY speaks nothing (the collapsed headers are data too), NORMAL
+ * speaks the collapsed blocks + tool closes, VERBOSE adds the tool OPEN
+ * one-liners.
  */
 object TranscriptFeed {
 
     /**
      * The messages born between `prev` and `curr`, oldest first — each a
-     * complete send under the message law (a long block chunks like the
-     * close shower always did). `toolBox` is the injected per-tool
-     * renderer (the daemon passes the SPECTATOR's ToolBox — the same
-     * renderer the final transcript uses); a blank render (or an
+     * complete send under the message law. `toolBox` is the injected
+     * per-tool renderer (the daemon passes the SPECTATOR's ToolBox — the
+     * same renderer the final transcript uses); a blank render (or an
      * input-less lane) falls back to the honest one-liner, never to
      * silence.
      */
@@ -38,15 +60,16 @@ object TranscriptFeed {
         level: FeedVerbosity,
         toolBox: (ToolLive) -> String,
         verbs: ToolVerbifier,
-    ): List<String> {
+    ): List<FeedMessage> {
         if (level == FeedVerbosity.SUMMARY) return emptyList()
         if (prev == null || prev.taskId != curr.taskId) return emptyList()
-        val out = mutableListOf<String>()
+        val out = mutableListOf<FeedMessage>()
 
         // the SEALED CoT blocks — every one below [prev.cotBlocks.size] was
-        // already spoken; the diff never re-speaks history
+        // already spoken; the diff never re-speaks history. COLLAPSED: the
+        // header + the tap affordance, never the text.
         for (i in prev.cotBlocks.size until curr.cotBlocks.size) {
-            out += blockMessages(i + 1, curr.cotBlocks[i])
+            out += FeedMessage(collapsedHeader(i + 1, PyText.cpLength(curr.cotBlocks[i])), block = i + 1)
         }
 
         // the tool CLOSES — real content per lane, one message each. A lane
@@ -57,7 +80,7 @@ object TranscriptFeed {
             val before = prevTools[lane.toolId]
             if (lane.status != null && (before == null || before.status == null)) {
                 val box = if (lane.input == null) "" else toolBox(lane)
-                out += box.ifBlank { closeFallback(lane, verbs) }
+                out += FeedMessage.of(box.ifBlank { closeFallback(lane, verbs) })
             }
         }
 
@@ -66,7 +89,7 @@ object TranscriptFeed {
         if (level == FeedVerbosity.VERBOSE) {
             curr.tools.forEach { lane ->
                 if (lane.status == null && lane.toolId !in prevTools) {
-                    out += openLine(lane, verbs)
+                    out += FeedMessage.of(openLine(lane, verbs))
                 }
             }
         }
@@ -75,32 +98,31 @@ object TranscriptFeed {
 
     /**
      * The turn's last thought — the block UNDER the seal cap when the
-     * turn ended: real streamed text that never sealed. The transcript
-     * flushes it at the seal (NORMAL/VERBOSE), so the owner's «los cots
-     * uno debajo del otro» loses nothing. Empty when there is no tail.
+     * turn ended: real streamed text that never sealed. Collapsed like
+     * the rest (block 0): the owner decides whether to read it. Empty
+     * when there is no tail.
      */
-    fun pendingFlush(state: TurnLive): List<String> =
-        if (state.cotPending.isBlank()) emptyList() else blockMessages(null, state.cotPending)
+    fun pendingFlush(state: TurnLive): List<FeedMessage> =
+        if (state.cotPending.isBlank()) {
+            emptyList()
+        } else {
+            listOf(FeedMessage(collapsedHeader(null, PyText.cpLength(state.cotPending)), block = 0))
+        }
 
     /**
-     * One block's render, chunked under the message law (the close
-     * shower's own recipe: chunk by CODE POINTS first, then esc — a
-     * prose chunk escapes to ≈ itself; the transport's truncate is the
-     * backstop). `number` null = the unsealed tail's honest label.
+     * The collapsed block's header — the whole message until the tap
+     * expands it: number, size, the affordance. The text itself never
+     * rides here.
      */
-    private fun blockMessages(number: Int?, text: String): List<String> {
-        val head = if (number != null) "🧠 <b>CoT $number</b>" else "🧠 <b>CoT · sin sellar</b>"
-        val chunks = mutableListOf<String>()
-        var rest = text
-        while (rest.isNotEmpty()) {
-            val chunk = PyText.take(rest, CHUNK_CP)
-            chunks.add(chunk)
-            rest = rest.substring(chunk.length)
-        }
-        return chunks.mapIndexed { i, chunk ->
-            val label = if (i == 0) "$head\n" else ""
-            label + "<blockquote>${PyText.esc(chunk)}</blockquote>"
-        }
+    internal fun collapsedHeader(number: Int?, cp: Int): String {
+        val label = if (number != null) "CoT $number" else "CoT · sin sellar"
+        return "📖 <b>$label</b> · ${LiveTurn.fmtK(cp)} — tocar para leer"
+    }
+
+    /** The tap's EXPANDED render: the header, then the block WHOLE. */
+    internal fun expandedBlock(number: Int?, cp: Int, text: String): String {
+        val label = if (number != null) "CoT $number" else "CoT · sin sellar"
+        return "📖 <b>$label</b> · ${LiveTurn.fmtK(cp)}\n<blockquote>${PyText.esc(text)}</blockquote>"
     }
 
     /** The close's fallback: the verdict the card's own stamp line carries — real numbers, nothing invented. */
@@ -126,9 +148,6 @@ object TranscriptFeed {
         val detail = if (clipped.isNotEmpty()) " <code>${PyText.esc(clipped)}</code>" else ""
         return "▶️ ${verb.head()}$detail"
     }
-
-    /** The feed chunk's cap — the close shower's own budget (raw code points before esc). */
-    private const val CHUNK_CP = LiveTurn.COT_SHOWER_CHUNK_CP
 
     /** The open one-liner's detail cap (the card's lane line uses the same window). */
     private const val OPEN_DETAIL_CP = 60

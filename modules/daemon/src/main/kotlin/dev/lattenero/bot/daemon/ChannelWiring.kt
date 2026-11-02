@@ -208,8 +208,10 @@ internal fun wireChannel(
     }
 
     // the RENDER lane's speak: the live view's final answer/boxes ride the
-    // firehose throat — render volume never touches the commands budget
-    val fireSpeak: suspend (String, Boolean, JsonObject?) -> Unit = { text, loud, markup ->
+    // firehose throat — render volume never touches the commands budget.
+    // The message id comes back (the collapsed CoT blocks register it —
+    // the tap's edit target); parked/null when the send didn't fly.
+    val fireSpeak: suspend (String, Boolean, JsonObject?) -> Long? = { text, loud, markup ->
         val now = System.currentTimeMillis() / 1000.0
         send.firehose.deliverMarkup(
             ShadowDecision(
@@ -298,6 +300,7 @@ internal fun wireChannel(
     // file-backed store: the owner's choice survives the restarts)
     val verbosity: VerbositySetting = FileVerbositySetting(File(File(cfg.homeDir, "state"), VERBOSITY_FILE))
 
+
     val liveView = buildLiveView(
         send,
         lanes,
@@ -320,6 +323,7 @@ internal fun wireChannel(
         queue,
         history,
         verbosity,
+        liveView = liveView,
     )
     return ChannelStack(client, liveView, poller, hub)
 }
@@ -347,7 +351,7 @@ private fun buildLiveView(
     lanes: SendLanes,
     hub: LiveHub,
     client: ChannelClient,
-    fireSpeak: suspend (String, Boolean, JsonObject?) -> Unit,
+    fireSpeak: suspend (String, Boolean, JsonObject?) -> Long?,
     orphanFile: File,
     history: TasksHistory,
     verbosity: VerbositySetting,
@@ -377,7 +381,7 @@ private fun buildLiveView(
             }
             if (ws != null) client.subscribe(taskId, ws)
         },
-        speak = { text -> fireSpeak(text, false, null) },
+        speak = { text, markup -> fireSpeak(text, false, markup) },
         // the transcript feed's per-tool CLOSE box: the spectator renderer
         // (the final transcript's own), status mark inside the head + the
         // VERBATIM output tail (the owner's «leer los commands de bash»)
@@ -418,6 +422,9 @@ private fun buildPoller(
     // constructed — the send-less board registers and seals quietly)
     verbosity: VerbositySetting,
     board: QuestionBoard = QuestionBoard(),
+    // the collapsed CoT blocks' taps (the cb: buttons) — the live view IS
+    // the registry (it spoke the messages and holds the ids + texts)
+    liveView: LivePublisher? = null,
 ): Poller? {
     if (!pollOn) return null
     val liveApi = api ?: TgApi({ TgConfig.load(remote) })
@@ -509,6 +516,7 @@ private fun buildPoller(
         verbosity = verbosity,
         board = board,
         quotaDirect = quotaDirectRung(cfg),
+        blockTaps = liveView,
     )
     return Poller(
         api = liveApi,
