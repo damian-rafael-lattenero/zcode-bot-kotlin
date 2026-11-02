@@ -34,6 +34,18 @@ fun interface CoTTaps {
     suspend fun toggle(registryId: Int): String?
 }
 
+/**
+ * A turn's LIVE subagent dispatch lanes — the ONE filter every reader
+ * shares (/tasks's rows, /subagents's keyboard and groups, the ⏹️ stop's
+ * resolution): an open top-level Agent/Task dispatch. The 30/10 bug's
+ * law: a subagent row IS this dispatch lane, never the agents' inner
+ * tools; four copies of this predicate once drifted — never again.
+ */
+internal fun dispatchLanes(turn: TurnLive?): List<ToolLive> =
+    turn?.tools.orEmpty().filter {
+        it.parentToolUseId == null && it.status == null && it.name in BotCommands.SUBAGENT_DISPATCH_NAMES
+    }
+
 /** The dispatcher's data source — the client's queries behind one interface (tests fake it). */
 interface ChannelOps {
     suspend fun query(query: ChannelQuery): QueryAnswer
@@ -215,6 +227,11 @@ class BotCommands(
 
         data.startsWith("so:") -> orderArm(data.removePrefix("so:"))
 
+        // the ⏹️ tap (sst:<tail>) — intercepted HERE, never left to the
+        // callbackText fallback: a stray tail falling through would ride
+        // to the agent as the owner's own words (the graver bug)
+        data.startsWith("sst:") -> subagentStop(data.removePrefix("sst:"))
+
         // LA PREGUNTA's taps (the answer round-trip): qa:<sid>:<i> answers
         // the option; qf:<sid> arms the next line as the free-text answer.
         data.startsWith("qa:") -> questionTap(data.removePrefix("qa:"), updateId)
@@ -360,6 +377,47 @@ class BotCommands(
     }
 
     /**
+     * The ⏹️ tap (`sst:<tail>` — beside the ▶️ of every live subagent):
+     * resolve the tail to the child's FULL session id ([SubagentStop]'s
+     * pure half — lanes first, then the store's fresh rows) and fly the
+     * SAME awaited stop a /stop uses, now at subagent level (the fork's
+     * stopGeneration is goal-pause — the ack says the generation stops,
+     * never a promised kill). Every outcome is the honest one: the real
+     * error verbatim on failure, the refuso when the fork has not named
+     * the child's session yet, «ya no está vivo» when nothing answers.
+     */
+    private suspend fun subagentStop(tail: String): BotReply {
+        val turn = hub.peek()
+        val lanes = dispatchLanes(turn)
+        val parentSid = turn?.taskId
+            ?: (contextAnswer() as? ContextAnswer.Ctx)?.value?.activeTaskId
+        val dbRunning = if (parentSid != null) history.subagentsRunning(parentSid) else emptyList()
+        return when (val target = SubagentStop.resolve(lanes, dbRunning, tail, clock())) {
+            is SubagentStopTarget.Gone -> {
+                logger.info { "callback ⏹️ sst: tail=$tail resolves to nothing alive — honest gone" }
+                BotReply("⏹️ Ese subagente ya no está vivo.")
+            }
+
+            is SubagentStopTarget.Unnamed -> {
+                logger.info { "callback ⏹️ sst: «${target.name}» alive but unnamed (no launch ACK yet)" }
+                BotReply("⏹️ «${PyText.esc(target.name)}» — todavía no sé su sesión — probá en un momento.")
+            }
+
+            is SubagentStopTarget.Ready -> {
+                logger.info { "callback ⏹️ sst: STOP ${target.sid} («${target.name}»)" }
+                when (val answer = ops.query(ChannelQuery.Stop(target.sid))) {
+                    is QueryAnswer.Ok -> BotReply("⏹️ «${PyText.esc(target.name)}» — generación detenida.")
+                    is QueryAnswer.Unavailable -> BotReply(DEGRADED)
+                    is QueryAnswer.Failed -> BotReply(
+                        "⚠️ No pude detener «${PyText.esc(target.name)}» (${answer.code}): " +
+                            PyText.esc(answer.message ?: "?"),
+                    )
+                }
+            }
+        }
+    }
+
+    /**
      * Free text → the ACTIVE conversation, NEVER a new one (Python's
      * `only_active_task` doctrine — Damian, 29/10: «probando probando»
      * opened a fresh conversation instead of landing in the open one).
@@ -423,7 +481,13 @@ class BotCommands(
         is RoutePlan.Refuse -> ""
     }
 
-    /** La orden armada VUELA: directo a la sesión nombrada, el router ni se entera. */
+    /**
+     * La orden armada VUELA: directo a la sesión nombrada, el router ni se
+     * entera. ONE SHOT: the arm is consumed HERE, before the wire — a
+     * second text rides the normal route (the 2/11 law the test pins; an
+     * arm that survives its shot would silently redirect the owner's next
+     * line to a subagent).
+     */
     private suspend fun fireArmedOrder(order: ArmedOrder, text: String, updateId: Long): BotReply {
         armedOrder = null // ONE shot: se consume al volar — el siguiente texto vuelve al router
         logger.info {
@@ -740,9 +804,7 @@ class BotCommands(
     private suspend fun taskList(all: Boolean, hint: String? = null): BotReply {
         val rows = scopeRows(history.ctxTasks(if (all) ALL_CAP else TASKS_CAP), all, defaultWorkspacePath)
         val watched = hub.peek()
-        val lanes = watched?.tools.orEmpty().filter {
-            it.parentToolUseId == null && it.status == null && it.name in SUBAGENT_DISPATCH_NAMES
-        }
+        val lanes = dispatchLanes(watched)
         return when (val ctx = contextAnswer()) {
             ContextAnswer.Degraded -> BotReply(degraded("botStatus"))
             ContextAnswer.None -> taskListWithoutContext(rows, all, hint, watched, lanes)
@@ -1653,9 +1715,7 @@ class BotCommands(
             // PLUS the store's own running sessions (stream-independent: the
             // bus can die mid-run, the store cannot — a running subagent is
             // visible even when its lane never reached the watcher)
-            val lanes = turn?.tools.orEmpty().filter {
-                it.parentToolUseId == null && it.status == null && it.name in SUBAGENT_DISPATCH_NAMES
-            }
+            val lanes = dispatchLanes(turn)
             val parentSid = turn?.taskId
                 ?: (contextAnswer() as? ContextAnswer.Ctx)?.value?.activeTaskId
             val dbRunning = if (parentSid != null) history.subagentsRunning(parentSid) else emptyList()
@@ -1690,8 +1750,7 @@ class BotCommands(
      * inactive ones in).
      */
     private fun subagentGroups(turn: TurnLive): List<SubagentGroup> {
-        val dispatches = turn.tools
-            .filter { it.parentToolUseId == null && it.status == null && it.name in SUBAGENT_DISPATCH_NAMES }
+        val dispatches = dispatchLanes(turn)
             .associateBy { it.toolId }
         val openInner = turn.tools
             .filter { it.parentToolUseId != null && it.status == null }

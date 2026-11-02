@@ -63,9 +63,16 @@ class KeyboardsTest {
         val lane1 = keyboard[2].jsonArray[0].jsonObject
         assertEquals("🔵 Task ▶️", lane1["text"]!!.jsonPrimitive.content)
         assertTrue(lane1["callback_data"]!!.jsonPrimitive.content.startsWith("sa:"))
-        assertEquals(1, keyboard[2].jsonArray.size, "the tasks list carries NO ✍️ — the owner's 2/11 (the unknown manito is noise)")
+        // the ✍️ manito stays OUT of /tasks (the owner's 2/11: the unknown
+        // manito is noise) — but the ⏹️ is an HONEST action: an open lane
+        // carries its stop beside it (the same button /subagents has)
+        assertEquals(2, keyboard[2].jsonArray.size)
+        assertEquals("⏹️", keyboard[2].jsonArray[1].jsonObject["text"]!!.jsonPrimitive.content)
+        assertTrue(keyboard[2].jsonArray[1].jsonObject["callback_data"]!!.jsonPrimitive.content.startsWith("sst:"))
         val lane2 = keyboard[3].jsonArray[0].jsonObject
         assertEquals("🔵 Grep ⏹️", lane2["text"]!!.jsonPrimitive.content)
+        // the CLOSED lane earns no stop — a stop over a finished child is decoration
+        assertEquals(1, keyboard[3].jsonArray.size)
     }
 
     @Test
@@ -86,8 +93,15 @@ class KeyboardsTest {
         val fresh = keyboard[0].jsonArray[0].jsonObject
         assertEquals("🔵 root-cause hunter ▶️", fresh["text"]!!.jsonPrimitive.content)
         assertEquals("sa:sess_fresh", fresh["callback_data"]!!.jsonPrimitive.content)
+        // the FRESH row carries its ⏹️ (sst: + a 16-char tail ≈ 20 bytes —
+        // the 64-byte law never even breathes)
+        assertEquals("⏹️", keyboard[0].jsonArray[1].jsonObject["text"]!!.jsonPrimitive.content)
+        assertEquals("sst:sess_fresh", keyboard[0].jsonArray[1].jsonObject["callback_data"]!!.jsonPrimitive.content)
+        assertTrue(Keyboards.callbackDataValid("sst:sess_fresh"))
+        // the GHOST earns no stop — a ⏸️ hace 20m row is the dead agent it renders as
         val ghost = keyboard[1].jsonArray[0].jsonObject
         assertEquals("🔵 killed box agent ⏸️ hace 20m", ghost["text"]!!.jsonPrimitive.content)
+        assertEquals(1, keyboard[1].jsonArray.size, "the ghost row has no ⏹️")
     }
 
     @Test
