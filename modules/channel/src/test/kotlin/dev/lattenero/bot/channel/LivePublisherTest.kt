@@ -104,11 +104,12 @@ class LivePublisherTest {
         assertEquals(1, calls) // exactly one history read
         val birth = wire.bodies.first { it.second == "sendMessage" }.first
         assertTrue("«arreglá el login»" in birth, "the birth wears the REAL title, not the sid tail")
-        assertTrue("«644150daf013»" !in birth) // the tail is not the head (the taskId line stays, by design)
-        publisher.tick() // the next tick re-renders — the resolution is ONE-SHOT per turn
+        assertTrue("«644150daf013»" !in birth) // the tail is not the head
+        hub.apply(frame(taskId, "agent_thought_chunk", at = 1_200, "content" to JsonPrimitive("más")), nowMs = 1_200)
+        publisher.tick() // a new event → the card re-draws; the resolution is ONE-SHOT per turn
         assertEquals(1, calls)
-        val edit = wire.bodies.last { it.second == "editMessageText" }.first
-        assertTrue("arreglá el login" in edit, "the status render carries the honest name too")
+        val redraw = wire.bodies.last { it.second == "sendMessage" }.first
+        assertTrue("arreglá el login" in redraw, "the re-drawn card carries the honest name too")
     }
 
     @Test
@@ -179,7 +180,62 @@ class LivePublisherTest {
         val methods = wire.bodies.drop(afterBirth).map { it.second }
         assertEquals("deleteMessage", methods.first())
         assertEquals("sendMessage", methods[1])
-        assertTrue("turn live" in wire.bodies.last { it.second == "sendMessage" }.first)
+        val reborn = wire.bodies.last { it.second == "sendMessage" }.first
+        assertTrue("⏳ <b>Working" in reborn, "the re-born card IS the process card")
+        assertTrue("📖 CoT" in reborn, "the card carries the CoT row (count only)")
+    }
+
+    @Test
+    fun everyStateChangeRedrawsTheCardLastNeverAnEdit() = runTest {
+        // THE CARD IS THE PROCESS (the owner, 2/11: «la quiero debajo de
+        // todo SIEMPRE»): a changed render DELETES and RE-BIRTHS the card
+        // as the last message — an in-place edit would stay buried under
+        // whatever spoke after it
+        val taskId = "task-9"
+        val hub = LiveHub()
+        hub.apply(frame(taskId, "task_run_started", at = 1_000), nowMs = 1_000)
+        hub.apply(frame(taskId, "agent_thought_chunk", at = 1_050, "content" to JsonPrimitive("arranco")), nowMs = 1_050)
+        val wire = Wire()
+        val publisher = publisher(wire, hub)
+        publisher.tick() // the birth
+        val afterBirth = wire.bodies.size
+        hub.apply(frame(taskId, "agent_thought_chunk", at = 1_100, "content" to JsonPrimitive("más")), nowMs = 1_100)
+        publisher.tick()
+        val methods = wire.bodies.drop(afterBirth).map { it.second }
+        assertTrue("deleteMessage" in methods, "the old card dies")
+        assertTrue(methods.last() == "sendMessage", "the card is REBORN last")
+        assertTrue("editMessageText" !in methods, "never an edit — an edit cannot move the card")
+        // a quiet tick (no events, fixed clock): the render did not change —
+        // nothing moves (the change law keeps the 429 budget alive)
+        val before = wire.bodies.size
+        publisher.tick()
+        assertEquals(before, wire.bodies.size, "no change, no redraw")
+    }
+
+    @Test
+    fun aThrottledWindowKeepsTheCardWhereItIsStaleButPresent() = runTest {
+        val taskId = "task-9"
+        val hub = LiveHub()
+        hub.apply(frame(taskId, "task_run_started", at = 1_000), nowMs = 1_000)
+        hub.apply(frame(taskId, "agent_thought_chunk", at = 1_050, "content" to JsonPrimitive("arranco")), nowMs = 1_050)
+        val wire = Wire()
+        var nowSec = 2.0
+        val cooldown = Cooldown(now = { nowSec }, readFile = { null })
+        val publisher = publisher(wire, hub, cooldown = cooldown)
+        publisher.tick() // the birth
+        val afterBirth = wire.bodies.size
+        hub.apply(frame(taskId, "agent_thought_chunk", at = 1_100, "content" to JsonPrimitive("más")), nowMs = 1_100)
+        cooldown.extend(raSeconds = 60) // Telegram named the window
+        publisher.tick()
+        assertTrue(
+            wire.bodies.drop(afterBirth).none { it.second == "deleteMessage" },
+            "no redraw under throttle — the card is never left deleted",
+        )
+        // the window lifts: the card re-draws with the CURRENT state
+        nowSec = 5_000.0
+        publisher.tick()
+        val methods = wire.bodies.drop(afterBirth).map { it.second }
+        assertTrue("deleteMessage" in methods && methods.last() == "sendMessage")
     }
 
     @Test
@@ -256,7 +312,7 @@ class LivePublisherTest {
     }
 
     @Test
-    fun summarySpeaksNothingAndNeverSwapsTheCard() = runTest {
+    fun summaryKeepsTheFeedSilentButTheCardStillRenders() = runTest {
         val taskId = "task-9"
         val hub = LiveHub()
         hub.apply(frame(taskId, "task_run_started", at = 1_000), nowMs = 1_000)
@@ -289,9 +345,12 @@ class LivePublisherTest {
             nowMs = 1_200,
         )
         publisher.tick()
-        assertEquals(emptyList(), spoken.toList(), "SUMMARY: the feed is silent")
-        assertTrue(wire.bodies.drop(afterBirth).none { it.second == "deleteMessage" }, "no swap at SUMMARY")
-        assertTrue(wire.bodies.drop(afterBirth).any { it.second == "editMessageText" }, "the card still ticks")
+        assertEquals(emptyList(), spoken.toList(), "SUMMARY: the feed is silent — the DATA obeys the level")
+        val methods = wire.bodies.drop(afterBirth).map { it.second }
+        assertTrue(
+            "deleteMessage" in methods && methods.last() == "sendMessage",
+            "the card STILL re-draws last — the process is never hidden",
+        )
     }
 
     @Test

@@ -158,27 +158,28 @@ class LiveHub {
 }
 
 /**
- * THE VIEW THAT NEVER GOES QUIET (the owner's si-o-si): one Telegram
- * message, born at the turn's start, EDITED IN PLACE at a safe cadence —
- * spinner, phase counters with their timers, the CoT preview, the
- * visible heartbeat. Ticking is a Kap Process (`repeat(spaced(3s))`):
- * the spinner advances even when the model is quiet, which is exactly
- * the difference between "thinking" and "dead" the owner asked to SEE.
- *
- * At `task_complete` the seal replaces the status text and the FINAL
- * render travels as its own message: the turn's answer through the
- * injected snapshot reader (`taskSnapshot` query in the wiring).
+ * THE CARD IS THE PROCESS, THE FEED IS THE DATA (the owner's ley raíz,
+ * 2/11: «separar bien el dato del proceso — el proceso debe estar siempre
+ * visible, el dato debe mostrarse de forma ordenada»). THE CARD: one
+ * Telegram message born at the turn's start carrying the WORKING header
+ * (the elapsed since the real start) and the NOW line (verb + target +
+ * that tool's own elapsed) — and it is RE-DRAWN AS THE CHAT'S LAST
+ * MESSAGE after every event (the delete+redraw machinery, not only at
+ * completions): nothing the bot says may bury the process. Honest about
+ * lag: the redraw rides the 3s tick and the change law (a quiet render
+ * moves nothing), and under a 429 window the card stays where it is —
+ * stale but present, never missing. At `task_complete` the seal speaks
+ * the one-line record and the turn's answer.
  *
  * THE TRANSCRIPT FEED (the owner's 30/10 order: «quiero VER los archivos,
- * leer los commands de bash, leer los cots uno debajo del otro en
- * mensajes separados»): every tick drains [TranscriptFeed]'s diff — each
- * sealed CoT block and each tool CLOSE becomes its own message through
- * the render lane, and the status card SWAPS (delete → feed → re-birth)
- * so the thinking box is ALWAYS the last message of everything. The
- * level ([FeedVerbosity], read PER TICK from the injected setting —
- * policy §7: the publisher never reads files) gates: SUMMARY speaks
- * nothing, NORMAL blocks + closes, VERBOSE adds the tool OPEN
- * one-liners. Verbose is the DEFAULT.
+ * leer los commands de bash…»): every tick drains [TranscriptFeed]'s
+ * diff — each sealed CoT block and each tool CLOSE becomes its own
+ * message through the render lane, and the card SWAPS (delete → feed →
+ * re-birth last) in the same tick. The level ([FeedVerbosity], read PER
+ * TICK from the injected setting — policy §7: the publisher never reads
+ * files) gates: SUMMARY speaks nothing (the card STILL renders — the
+ * process is never hidden), NORMAL blocks + closes, VERBOSE adds the
+ * tool OPEN one-liners. Verbose is the DEFAULT.
  */
 class LivePublisher(
     private val hub: LiveHub,
@@ -262,9 +263,9 @@ class LivePublisher(
 
     /**
      * One tick of the never-silence clock. MUTEXED: the scheduled ~3s
-     * process AND the block tap's immediate nudge both land here — the
-     * cells (statusMessageId, lastText, spin) are the publisher's only
-     * mutable state and a tap must never race a seal.
+     * process and (once the CoT collapse lands) the block taps all land
+     * here — the cells (statusMessageId, lastText, the CoT registry) are
+     * the publisher's only mutable state and a tap must never race a seal.
      */
     suspend fun tick() = tickMutex.withLock { tickLocked() }
 
@@ -292,7 +293,7 @@ class LivePublisher(
                     }
                 }
             }
-            tryBirth(cfg, state)
+            tryBirthCard(cfg, state, now)
         }
         // THE STREAM WATCHDOG: a live turn with a long silence is the fork's
         // dead bus, not a quiet model (measured 30/10 twice — burst on
@@ -320,45 +321,67 @@ class LivePublisher(
         // (measured 30/10: the owner watched a thinking tick while the app
         // was DOWN). Seal the old one honestly; the new turn births its own.
         if (statusTaskId != null && statusTaskId != state.taskId) {
-            telegram.edit(
-                cfg,
-                mid,
-                "⛓️ turno reemplazado — esta vista era de otra tarea; la nueva tiene su propio cartel.",
-            )
-            logger.info { "live view REPLACED: old taskId=$statusTaskId message_id=$mid -> new=${state.taskId}" }
-            statusMessageId = null
-            statusTaskId = null
-            lastText = ""
-            sealed = false
-            titleResolvedFor = null // the new task's card resolves its own title
-            feedSeen = null // the new turn's transcript starts clean — history is never replayed
+            sealReplaced(cfg, mid)
             return
         }
         if (state.phase is TurnPhase.Done && !sealed) {
             seal(cfg, mid, state, now)
             return
         }
-        drainFeed(cfg, state)
+        drainFeed(cfg, state, now)
         val liveMid = statusMessageId ?: return // the swap's re-birth is throttled: the card returns next tick
-        val text = LiveTurn.render(state, now, spin(), channelAlive(), verbs)
-        if (text == lastText) return // nothing visible changed: no edit (the 429 budget is shared)
-        if (telegram.edit(cfg, liveMid, text)) lastText = text
+        redrawCard(cfg, state, now, liveMid)
+    }
+
+    /** The task-switch corpse seal: the watched turn was replaced — the old card speaks once and dies. */
+    private suspend fun sealReplaced(cfg: TgConfig, mid: Long) {
+        telegram.edit(
+            cfg,
+            mid,
+            "⛓️ turno reemplazado — esta vista era de otra tarea; la nueva tiene su propio cartel.",
+        )
+        logger.info { "live view REPLACED: old taskId=$statusTaskId message_id=$mid" }
+        statusMessageId = null
+        statusTaskId = null
+        lastText = ""
+        sealed = false
+        titleResolvedFor = null // the new task's card resolves its own title
+        feedSeen = null // the new turn's transcript starts clean — history is never replayed
+    }
+
+    /**
+     * THE CARD IS ALWAYS LAST: a changed render re-draws the card as a
+     * NEW last message (the owner's law, 2/11 — «la quiero debajo de
+     * todo SIEMPRE»), never an in-place edit something may have buried.
+     * Only on change (the 429 budget is shared); under a 429 window the
+     * redraw skips whole — the card stays where it is, stale but present,
+     * and the next tick re-draws when the window lifts.
+     */
+    private suspend fun redrawCard(cfg: TgConfig, state: TurnLive, now: Long, liveMid: Long) {
+        val text = LiveTurn.render(state, now, channelAlive(), verbs)
+        if (text == lastText) return // nothing visible changed: the card stays
+        if (telegram.throttled()) return
+        telegram.delete(cfg, liveMid)
+        statusMessageId = null
+        lastText = ""
+        tryBirth(cfg, state, text)
     }
 
     /**
      * The TRANSCRIPT FEED's drain: [TranscriptFeed]'s diff between the
      * seen pointer and this tick's state, spoken through the render lane.
      * When it speaks, THE CARD SWAPS — delete, the feed goes out, the
-     * card is REBORN as the last message (the owner's rule: «el thinking
-     * box siempre se tiene que redibujar como último mensaje de todo» — a
-     * feed message may never bury the thinking box). Back-pressure: a
-     * cooldown window skips the whole drain WITHOUT advancing the seen
-     * pointer — the next tick re-speaks the same diff when it lifts; the
-     * parked outbox and the re-born card never race for the chat's order.
+     * card is REBORN as the last message with its CURRENT render (the
+     * owner's rule: «el thinking box siempre se tiene que redibujar como
+     * último mensaje de todo» — a feed message may never bury the card).
+     * Back-pressure: a cooldown window skips the whole drain WITHOUT
+     * advancing the seen pointer — the next tick re-speaks the same diff
+     * when it lifts; the parked outbox and the re-born card never race
+     * for the chat's order.
      */
     // one guard per early exit (silent level, throttle window) — the drain's own shape
     @Suppress("ReturnCount")
-    private suspend fun drainFeed(cfg: TgConfig, state: TurnLive) {
+    private suspend fun drainFeed(cfg: TgConfig, state: TurnLive, now: Long) {
         val level = verbosity.current()
         if (level == FeedVerbosity.SUMMARY) {
             feedSeen = state // the level speaks nothing — but history stays history
@@ -376,7 +399,7 @@ class LivePublisher(
             statusMessageId = null
             lastText = ""
             feed.forEach { speak(it) }
-            tryBirth(cfg, state) // the card re-born LAST — above nothing, below everything
+            tryBirthCard(cfg, state, now) // the card re-born LAST — above nothing, below everything
         }
         logger.info {
             "transcript feed: ${feed.size} message(s) spoken " +
@@ -426,10 +449,12 @@ class LivePublisher(
         feedSeen = null
     }
 
-    private fun spin(): Int {
-        spinCount += 1
-        return spinCount % SPIN_CYCLE
-    }
+    /**
+     * A birth (the first one and every re-draw) carries the card's REAL
+     * render — the process card, from its very first message.
+     */
+    private suspend fun tryBirthCard(cfg: TgConfig, state: TurnLive, now: Long) =
+        tryBirth(cfg, state, LiveTurn.render(state, now, channelAlive(), verbs))
 
     /**
      * A failed birth (cooldown window) must NOT retry every tick: the
@@ -437,12 +462,12 @@ class LivePublisher(
      * Telegram the moment the window lifted. Back off BIRTH_RETRY_TICKS
      * ticks between attempts, say it ONCE.
      */
-    private suspend fun tryBirth(cfg: TgConfig, state: TurnLive) {
+    private suspend fun tryBirth(cfg: TgConfig, state: TurnLive, text: String) {
         if (birthCooldownTicks > 0) {
             birthCooldownTicks -= 1
             return
         }
-        val born = telegram.birth(cfg, LiveTurn.birthText(state))
+        val born = telegram.birth(cfg, text)
         if (born == null) {
             if (!birthFailLogged) {
                 logger.warn {
@@ -457,7 +482,7 @@ class LivePublisher(
         birthFailLogged = false
         sealed = false
         statusTaskId = state.taskId
-        lastText = ""
+        lastText = text
         orphanStore?.save(born, state.taskId) // the boot seal's pointer
         logger.info { "live view born: taskId=${state.taskId} message_id=$statusMessageId" }
     }
@@ -476,14 +501,12 @@ class LivePublisher(
                 },
             )
 
-    private var spinCount = 0
     private var birthCooldownTicks = 0
     private var birthFailLogged = false
     private val tickMutex = Mutex()
 
     private companion object {
         val EDIT_CADENCE = 3.seconds
-        const val SPIN_CYCLE = 4
 
         /** A blocked birth retries every ~30s (10 ticks × 3s), not every tick. */
         const val BIRTH_RETRY_TICKS = 10
