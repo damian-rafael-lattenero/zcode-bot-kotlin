@@ -1317,26 +1317,36 @@ class BotCommands(
     }
 
     /**
-     * /quota — the ladder: 1) the direct z.ai report (the REAL coding plan
-     * pools — [QuotaDirect] with the bot-provider.json key), 2) the
-     * channel's fork query (the Start-Plan buckets through the fork's
-     * usage service), 3) the honest degradation both branches already
-     * speak. The fork's `not_configured` (incident 30/10) only reaches
-     * the user when the direct rung has no key AND the fork refuses.
+     * /quota — the ladder, CHANNEL FIRST (the owner's 2/11: «me aparece la
+     * quota de z.ai no la de start plan» — the bot-provider.json key answers
+     * the OLD coding plan's pools while the conversation actually consumes
+     * whatever provider the app has active): 1) the channel's quota query
+     * (the Start-Plan buckets through the fork's usage service — the active
+     * conversation's taskId rides along for the provider classification),
+     * 2) the direct z.ai report ([QuotaDirect], the coding-plan pools) when
+     * the channel cannot answer (not_configured / failed / down), 3) the
+     * channel's own honest word last.
      */
     private suspend fun quota(): String {
-        quotaDirect?.let { run ->
-            runCatching { run() }.getOrNull()?.let { return it }
-        }
-        // the active conversation names the provider — the fork needs it to
-        // classify the accountAccess hint (the Start Plan path's gate)
         val taskId = (contextAnswer() as? ContextAnswer.Ctx)?.value?.activeTaskId
-        return when (val answer = ops.query(ChannelQuery.Quota(taskId = taskId))) {
+        val channel = when (val answer = ops.query(ChannelQuery.Quota(taskId = taskId))) {
             is QueryAnswer.Ok -> renderQuota(answer.resultJson, clock())
             is QueryAnswer.Unavailable -> DEGRADED
             is QueryAnswer.Failed -> "⚠️ Quota failed (${answer.code}): ${PyText.esc(answer.message ?: "?")}"
         }
+        if (channelUsable(channel)) return channel
+        quotaDirect?.let { run ->
+            runCatching { run() }.getOrNull()?.let { return it }
+        }
+        return channel
     }
+
+    /** The channel's word is final unless it is the honest not_configured / degraded / failed one. */
+    private fun channelUsable(text: String): Boolean =
+        !text.contains("unavailable") &&
+            !text.contains("no pool info") &&
+            text != DEGRADED &&
+            !text.startsWith("⚠️ Quota failed")
 
     /**
      * /last — re-sends the active conversation's LAST assistant answer
