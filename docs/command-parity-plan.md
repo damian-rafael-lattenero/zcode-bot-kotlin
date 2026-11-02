@@ -26,6 +26,20 @@ post-U2.5 hot-fix queue, NOT a re-order of the compass) and
   `createTask` (needed by /run), any gift/promo surface, or the additive
   `bindTaskId` inbound field (designed in fork-interface-map, queued).
 
+## Progress (2026-11-02, updated as units land)
+
+- **B1 ✅** — `QuotaDirect.kt` live (direct z.ai API → Start-Plan buckets
+  fallback → honest without key) + the owner's number law v4 (`tokenRaw`:
+  raw tokens → K → M, sistema americano; commit 10a80b8).
+- **B2 ✅** — /retry merged (c79f393): atomic last-prompt store, re-fire
+  through the SAME router (busy → F17 push-or-enqueue), armed order never
+  spent by /retry; armed-order one-shot fix (49e88db).
+- **B3 ❌ DROPPED** (owner decision): /handshake + /ping leave the batch
+  and the phone checklist.
+- **Landed alongside**: ⏹️ stop-subagent on live lanes (2c9a73d), the
+  Working-bar faithful mirror + collapsed CoT (📖/🙈 in-place toggle),
+  ⏹️ buttons only on fresh rows (honest-indicator law).
+
 ## Execution doctrine
 
 Two tracks in parallel, ONE deploy batch at the end (the 4th Telegram
@@ -83,7 +97,7 @@ commit+push (`--no-verify`); deploys batched.
    from a normal terminal (never ZCode's integrated one) — carries A4.
 2. Daemon: the coordinator runs `scripts/deploy-daemon.sh` (standing grant)
    — carries Track B + A2 + A3.
-3. Phone checklist: /quota (real buckets) · /retry · /handshake · /usage ·
+3. Phone checklist: /quota (real buckets) · /retry · /usage ·
    /ctx · /run · /mode · a 2-question elicitation · plan approval ·
    permission ✅/❌ · the unified aesthetics.
 
