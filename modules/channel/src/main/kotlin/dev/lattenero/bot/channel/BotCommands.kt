@@ -124,6 +124,16 @@ class BotCommands(
     private val verbosity: VerbositySetting = VolatileVerbosity(),
     /** The questions' board (the answer round-trip) — null = unwired: the taps answer honestly. */
     private val board: QuestionBoard? = null,
+    /**
+     * /quota's DIRECT rung (incident 30/10): the z.ai monitor endpoint with
+     * the coding-plan key from bot-provider.json — the REAL pools when the
+     * fork's usage provider says not_configured. A null answer (no key,
+     * dead network, bad shape) or no wiring = the channel path answers as
+     * always; a THROWN answer is caught here — the ladder never throws at
+     * the user. The daemon's wiring composes it ([QuotaDirect.report]);
+     * tests inject fakes.
+     */
+    private val quotaDirect: (suspend () -> String?)? = null,
 ) {
 
     /** /nuclear's single-flight companion: the in-process half (the wiring adds the cross-restart mtime gate). */
@@ -1218,8 +1228,18 @@ class BotCommands(
         }
     }
 
-    /** /quota — the coding plan's pool (IUsageStatsService through the channel). */
+    /**
+     * /quota — the ladder: 1) the direct z.ai report (the REAL coding plan
+     * pools — [QuotaDirect] with the bot-provider.json key), 2) the
+     * channel's fork query (the Start-Plan buckets through the fork's
+     * usage service), 3) the honest degradation both branches already
+     * speak. The fork's `not_configured` (incident 30/10) only reaches
+     * the user when the direct rung has no key AND the fork refuses.
+     */
     private suspend fun quota(): String {
+        quotaDirect?.let { run ->
+            runCatching { run() }.getOrNull()?.let { return it }
+        }
         // the active conversation names the provider — the fork needs it to
         // classify the accountAccess hint (the Start Plan path's gate)
         val taskId = (contextAnswer() as? ContextAnswer.Ctx)?.value?.activeTaskId
