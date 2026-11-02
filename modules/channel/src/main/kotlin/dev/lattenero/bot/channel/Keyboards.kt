@@ -56,10 +56,6 @@ object Keyboards {
                                     callbackData = "t:${t.sid}",
                                 ),
                             )
-                            // the ✍️ arms the next free text as an ORDER direct
-                            // to that task — the bind is workspace-scoped (the
-                            // fork's project boundary), the order is not
-                            add(button("✍️", "so:${t.sid}"))
                         },
                     )
                 }
@@ -67,7 +63,6 @@ object Keyboards {
                     add(
                         buildJsonArray {
                             add(button(subagentLabel(lane), "sa:${lane.toolId.takeLast(LANE_TAIL)}"))
-                            add(button("✍️", "so:${lane.toolId.takeLast(LANE_TAIL)}"))
                         },
                     )
                 }
@@ -81,7 +76,6 @@ object Keyboards {
                             val staleMin = (nowMs - r.lastMs) / 60000
                             val mark = if (r.lastMs <= 0 || staleMin < SUB_STALE_MIN) "▶️" else "⏸️ hace ${staleMin}m"
                             add(button("$SUBAGENT_MARK $label $mark", "sa:${r.sid.takeLast(LANE_TAIL)}"))
-                            add(button("✍️", "so:${r.sid.takeLast(LANE_TAIL)}"))
                         },
                     )
                 }

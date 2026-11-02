@@ -659,12 +659,17 @@ class BotCommands(
         replies.firstOrNull { TASK_MISSING_MARKER in it }?.let {
             return BindOutcome.Refused(reply = it, fallback = "taskMissing — not in the bot's workspace/project")
         }
+        if (sent is InboundAnswer.Answered) {
+            // hot-fix 2's law: the awaited reply IS the verdict — an answered
+            // await with no refusal markers means the host re-pointed (the
+            // old botStatus poll demanded a context a fresh tap may not have,
+            // which answered the owner's taps with «send text first» noise)
+            return BindOutcome.Confirmed(how = "awaited verdict")
+        }
         repeat(BIND_CONFIRM_TRIES) {
             delay(BIND_CONFIRM_EVERY_MS)
             if ((contextAnswer() as? ContextAnswer.Ctx)?.value?.activeTaskId == taskId) {
-                return BindOutcome.Confirmed(
-                    how = if (replies.isEmpty()) "botStatus poll" else "command reply + poll",
-                )
+                return BindOutcome.Confirmed(how = "botStatus poll")
             }
         }
         return BindOutcome.Failed("botStatus never said activeTaskId=$taskId")
@@ -802,8 +807,31 @@ class BotCommands(
         } else {
             "👁 «${PyText.esc(title)}» suscripto — la carta en vivo entra cuando arranque su próximo turno."
         }
-        return BotReply("$watchLine\n${pickBySid(sid, updateId)}")
+        return BotReply("$watchLine\n${bindAttempt(sid, updateId, title)}")
     }
+
+    /**
+     * The tap's bind attempt WITHOUT the router's context pre-check (the
+     * owner's 2/11 confusion: a context-less tap answered the free-text
+     * boilerplate «send text first» instead of the truth). The bind needs
+     * no bot-side context — the HOST's verdict is the truth: taskRunning,
+     * Task not found (the deliberate project boundary), or confirmed.
+     */
+    private suspend fun bindAttempt(sid: String, updateId: Long, title: String): String =
+        when (val bind = bindTo(sid, updateId)) {
+            is BindOutcome.Confirmed ->
+                "🎯 Tu texto va a «${PyText.esc(title)}» — la conversación activa es esa."
+
+            is BindOutcome.Refused ->
+                if (TASK_MISSING_MARKER in bind.reply) {
+                    "🚧 «${PyText.esc(title)}» vive en otro proyecto/workspace — la leés en vivo (👁), " +
+                        "pero tu texto no puede apuntarla: la frontera de proyecto del fork es deliberada."
+                } else {
+                    "⏳ ${PyText.esc(bind.reply)} — tu texto sigue yendo a la activa; el 👁 ya está puesto."
+                }
+
+            is BindOutcome.Failed -> RouteTexts.BIND_FAILED
+        }
 
     /** One armed order: the next free text flies to this session. The §7 escape hatch. */
     private data class ArmedOrder(val sessionId: String, val title: String)

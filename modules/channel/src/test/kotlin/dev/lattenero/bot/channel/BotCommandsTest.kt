@@ -483,7 +483,7 @@ class BotCommandsTest {
         }
         val (bc, _) = commands(o)
         val reply = bc.onCallback("t:task-02", 99L)!!
-        assertTrue("🎯 Active conversation: «second»" in reply.text)
+        assertTrue("🎯 Tu texto va a «second»" in reply.text) // bindAttempt's copy — the host's verdict confirmed
         assertEquals(listOf("/task task-02" to "tg-99-bind"), o.awaited)
     }
 
