@@ -557,7 +557,8 @@ class BotCommandsTest {
         val text = BotCommands.renderQuota(json, nowMs = 0L)
         assertTrue("📊 <b>Start plan</b>" in text)
         assertTrue("• 5 hours: 340K/500K usado 68%" in text)
-        assertTrue("• weekly: 900K/4000K usado 22%" in text)
+        // miles con coma (el dueño 2/11): 4000K carries the comma, 900K does not
+        assertTrue("• weekly: 900K/4,000K usado 22%" in text)
         assertTrue("⚠️" !in text) // 68% and 22% are below the 75% alert
     }
 
