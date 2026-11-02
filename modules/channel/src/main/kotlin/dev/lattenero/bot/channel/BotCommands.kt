@@ -8,6 +8,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import java.math.BigDecimal
+import java.math.RoundingMode
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -2216,9 +2217,11 @@ class BotCommands(
         /**
          * The Start Plan's buckets (30/10's owner order: «necesito saber
          * cuántos tokens me quedan en las próximas 5 horas y en la semana» —
-         * the 2/11 law fixed the unit: «no es 300k es 300,000.0k tokens»).
-         * One line per REAL balance bucket: used/total in K-tokens with the
-         * USED percent and its own reset — the fork's builder carries the
+         * the 2/11 law v3: K-counts climb to M once they cover 1M tokens —
+         * «300,000K → 300M»).
+         * One line per REAL balance bucket: used/total through the owner's
+         * ladder with the USED percent and its own reset — the fork's
+         * builder carries the
          * numbers raw (usage/unit/remaining), never a bot-invented window.
          */
         @Suppress("CyclomaticComplexMethod") // one guard per bucket-line field
@@ -2235,10 +2238,10 @@ class BotCommands(
                 val label = lim.str("period") ?: lim.str("meter") ?: "cuota"
                 val body = when {
                     total != null && total > 0 ->
-                        "${fmtNum(used)}K/${fmtNum(total)}K usado " +
+                        "${tokenK(used)}/${tokenK(total)} usado " +
                             "${((used / total) * 100).toInt()}%"
 
-                    else -> "${fmtNum(used)}K usados"
+                    else -> "${tokenK(used)} usados"
                 }
                 val reset = lim.long("nextResetTime")?.let { " · resets ${fmtReset(it)}" } ?: ""
                 val pctAlert = if (total != null && total > 0 && (used / total) >= 0.75) " ⚠️" else ""
@@ -2286,15 +2289,40 @@ class BotCommands(
             return grouped + tail
         }
 
-        /** The owner's number law (2/11, three times and over my over-engineering):
-         *  a comma every 3 digits, the dot for decimals — NOTHING else. The unit
-         *  never moves: «300,000K» is 300 thousand K-tokens, and collapsing it
-         *  to «300K» said a thousand times fewer. Python's fmt_num K-conversion
-         *  died here (the separator IS the whole change). */
+        /** The owner's number law, v3 (2/11 — three iterations in one hour):
+         *  RAW numbers wear a comma every 3 digits and nothing else; a
+         *  K-COUNT of tokens (the Start Plan pools) climbs to MILLIONS with
+         *  2 decimals once it covers 1M tokens — «300,000K → 300M»,
+         *  «550678.888K → 550.68M» — sistema americano (dot = decimals,
+         *  comma = thousands). The v1 mistake: Python's fmt_num collapsed
+         *  300,000K into «300K» — a thousand times fewer. */
         private fun fmtNum(n: Double?): String = when {
             n == null -> "?"
-            else -> group(BigDecimal(n.toString()).stripTrailingZeros().toPlainString())
+            else -> group(plain(n))
         }
+
+        /** A K-count of tokens through the owner's ladder: ≥ 1M tokens
+         *  (1000 K) reads as millions with 2 decimals, trailing zeros off
+         *  («300M», «166.6M», «4,000M»); below stays the honest K («950K»). */
+        private fun tokenK(n: Double?): String = when {
+            n == null -> "?"
+            n >= K_PER_M -> group(
+                BigDecimal((n / K_PER_M).toString())
+                    .setScale(M_DECIMALS, RoundingMode.HALF_UP)
+                    .stripTrailingZeros()
+                    .toPlainString(),
+            ) + "M"
+
+            else -> group(plain(n)) + "K"
+        }
+
+        /** The Double as a short plain string — «300000», «166603.4» — never
+         *  the scientific form Double.toString sprouts past 1e7. */
+        private fun plain(n: Double): String =
+            BigDecimal(n.toString()).stripTrailingZeros().toPlainString()
+
+        private const val K_PER_M = 1_000.0
+        private const val M_DECIMALS = 2
 
         /** Python's datetime_dt: HH:MM today, dd/MM HH:MM otherwise (local zone). */
         private fun fmtReset(epochMs: Long): String {
