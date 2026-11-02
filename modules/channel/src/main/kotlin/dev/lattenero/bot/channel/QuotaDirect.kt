@@ -155,13 +155,21 @@ object QuotaDirect {
 
     // ── Python's formatting helpers (utils/formatting.py), byte-exact ──
 
-    /** Python's fmt_num: K only from 10K up, no decimals on small counts. */
+    /** Python's fmt_num: K only from 10K up, no decimals on small counts — miles con coma (el dueño 2/11). */
     private fun fmtNum(n: Double?): String = when {
         n == null -> "?"
         n >= NUM_K_FROM ->
-            String.format(Locale.ROOT, "%.1fK", n / NUM_K_DIVISOR).replace(".0K", "K")
+            group(String.format(Locale.ROOT, "%.1fK", n / NUM_K_DIVISOR).replace(".0K", "K"))
 
-        else -> n.toInt().toString() // Python's str(int(n)): truncate
+        else -> group(n.toInt().toString()) // Python's str(int(n)): truncate
+    }
+
+    /** Miles con coma (el dueño 2/11: «300,000.4» — ínfimo pero ayuda a leer). */
+    private fun group(digits: String): String {
+        val dot = digits.indexOf('.')
+        val head = if (dot >= 0) digits.substring(0, dot) else digits
+        val tail = if (dot >= 0) digits.substring(dot) else ""
+        return head.reversed().chunked(GROUP_SIZE).joinToString(",").reversed() + tail
     }
 
     /** Python renders the raw percentage: JSON ints stay ints (26 → "26"). */
@@ -178,6 +186,7 @@ object QuotaDirect {
 
     private const val ALERT_PCT = 75.0
     private const val NUM_K_FROM = 10_000.0
+    private const val GROUP_SIZE = 3
     private const val NUM_K_DIVISOR = 1_000.0
     private val TIME_FMT = DateTimeFormatter.ofPattern("HH:mm")
     private val DATE_TIME_FMT = DateTimeFormatter.ofPattern("dd/MM HH:mm")
