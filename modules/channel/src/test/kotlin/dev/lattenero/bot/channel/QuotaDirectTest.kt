@@ -284,12 +284,28 @@ class QuotaDirectTest {
     )
 
     @Test
-    fun ladderDirectRungWinsAndSparesTheChannel() = runBlocking {
+    fun ladderChannelWinsAndTheDirectRungNeverFires() = runBlocking {
+        // the owner's 2/11: the conversation consumes the START PLAN — the
+        // channel's answer (the app's own usage service, provider-classified)
+        // is the truth; the bot-provider.json key is the OLD plan's view
         val o = LadderOps().apply { answers = mapOf("botStatus" to "null", "quota" to channelQuotaJson) }
+        val bc = bot(o) { throw AssertionError("the direct rung must not fire when the channel answers") }
+        val reply = bc.handle("/quota", 1L)!!.text
+        assertTrue("41% remaining" in reply, "the channel's text IS the answer")
+        assertTrue(o.asked.any { it is ChannelQuery.Quota })
+    }
+
+    @Test
+    fun ladderNotConfiguredFallsThroughToTheDirectRung() = runBlocking {
+        val o = LadderOps().apply {
+            answers = mapOf(
+                "botStatus" to "null",
+                "quota" to """{"generatedAt":1,"unavailableReason":"not_configured"}""",
+            )
+        }
         val bc = bot(o) { "📊 <b>Coding plan</b>\n⏱ 5 hours: 31/120 credits (26%)" }
         val reply = bc.handle("/quota", 1L)!!.text
-        assertTrue("31/120" in reply, "the direct rung's text IS the answer")
-        assertTrue(o.asked.isEmpty(), "a direct answer asks the channel NOTHING (not even the context)")
+        assertTrue("31/120" in reply, "the fork's not_configured is NOT the final word — the coding-plan key still gets its shot")
     }
 
     @Test
@@ -306,7 +322,7 @@ class QuotaDirectTest {
         val o = LadderOps().apply { answers = mapOf("botStatus" to "null", "quota" to channelQuotaJson) }
         val bc = bot(o) { throw IOException("boom") }
         val reply = bc.handle("/quota", 1L)!!.text
-        assertTrue("41% remaining" in reply, "a thrown rung falls through — no exception flies")
+        assertTrue("41% remaining" in reply, "the usable channel wins — the throwing rung is never consulted")
         assertTrue(o.asked.any { it is ChannelQuery.Quota })
     }
 
@@ -315,6 +331,18 @@ class QuotaDirectTest {
         val o = LadderOps().apply { available = false } // the channel is down too
         val bc = bot(o) { null }
         assertEquals(BotCommands.DEGRADED, bc.handle("/quota", 1L)!!.text)
+    }
+
+    @Test
+    fun ladderNotConfiguredWithoutKeySpeaksTheChannelsHonestWord() = runBlocking {
+        val o = LadderOps().apply {
+            answers = mapOf(
+                "botStatus" to "null",
+                "quota" to """{"generatedAt":1,"unavailableReason":"not_configured"}""",
+            )
+        }
+        val bc = bot(o, direct = null) // no key at the edge either
+        assertTrue("not_configured" in bc.handle("/quota", 1L)!!.text, "the channel's honest word is the last resort")
     }
 
     @Test
