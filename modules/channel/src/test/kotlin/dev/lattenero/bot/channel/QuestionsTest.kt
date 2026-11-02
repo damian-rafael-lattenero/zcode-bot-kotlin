@@ -247,7 +247,9 @@ class QuestionsTest {
     }
 
     @Test
-    fun resolveTaskSealsEveryPendingQuestionOfTheTask() = runBlocking {
+    // `: Unit` is the LAW: kotlin.test's assertNotNull RETURNS the value, so a
+    // bare last expression makes this test non-void and Jupiter silently skips it
+    fun resolveTaskSealsEveryPendingQuestionOfTheTask(): Unit = runBlocking {
         val seams = Seams()
         val board = seams.board()
         board.onStreamEvent(questionFrame("r1"))
@@ -268,7 +270,8 @@ class QuestionsTest {
     }
 
     @Test
-    fun theRegistryCapEvictsTheOldest() = runBlocking {
+    // `: Unit` (the assertNotNull law): a non-void @Test never runs in Jupiter
+    fun theRegistryCapEvictsTheOldest(): Unit = runBlocking {
         val seams = Seams()
         val board = seams.board()
         for (i in 1..QuestionBoard.REGISTRY_CAP + 1) {

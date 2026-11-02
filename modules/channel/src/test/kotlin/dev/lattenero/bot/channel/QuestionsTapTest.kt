@@ -159,7 +159,8 @@ class QuestionsTapTest {
     }
 
     @Test
-    fun unavailableKeepsTheQuestionArmed() = runBlocking {
+    // `: Unit` (the assertNotNull law): a non-void @Test never runs in Jupiter
+    fun unavailableKeepsTheQuestionArmed(): Unit = runBlocking {
         val ops = FakeOps()
         val board = Seams().board()
         val cmds = commands(ops, board)
