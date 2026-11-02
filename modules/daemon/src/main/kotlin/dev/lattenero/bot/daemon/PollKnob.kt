@@ -10,7 +10,7 @@ import java.io.File
  * knob lives in — read ONCE at boot (a change is a kickstart). SHIPPED
  * OFF: the poller exists but does not run, because Python still owns
  * getUpdates (ADR-001's single reader — two pollers on one token fight
- * Telegram's 409). The retirement sequence (`scripts/retire-python.sh`)
+ * Telegram's 409). The retirement sequence (`scripts/retire-python.nu`)
  * is the ONLY thing that flips it: unload Python's LaunchAgents FIRST,
  * then this knob to true + kickstart, then verify getUpdates answers
  * without a 409. A bad reading is OFF loudly (a typo must degrade to

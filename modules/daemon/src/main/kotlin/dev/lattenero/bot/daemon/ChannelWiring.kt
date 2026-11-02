@@ -86,7 +86,7 @@ internal suspend fun feedAndResync(hub: LiveHub, frame: ServerFrame.StreamEvent,
  * is). The LIVE VIEW runs only when the daemon owns the send (its birth
  * message and the command replies are SENDS — in shadow/dry-run Python
  * speaks and a second speaker is a duplicate). The POLLER runs only when
- * the `poll` knob is on (ADR-001's single reader — retire-python.sh is
+ * the `poll` knob is on (ADR-001's single reader — retire-python.nu is
  * the only thing that flips it). The final render rides the spectator's
  * own renderer, INJECTED so the channel module never depends on daemon.
  */
@@ -329,7 +329,7 @@ private fun buildLiveView(
     )
 }
 
-/** The single reader — knob-gated (retire-python.sh turns it on). */
+/** The single reader — knob-gated (retire-python.nu turns it on). */
 private fun buildPoller(
     cfg: DaemonConfig,
     api: TgApi?,

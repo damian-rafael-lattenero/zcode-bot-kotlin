@@ -84,7 +84,7 @@ data class PollOutcome(val offset: Long, val messages: Int, val conflict: Boolea
  * daemon.json, read at boot like the send knob). The sequencing rule is
  * ADR-001's single reader: TWO pollers on one token fight Telegram's 409,
  * so Python keeps the phone's reads until the retirement moment — then
- * `retire-python.sh` flips this knob on and unloads Python's agents, and
+ * `retire-python.nu` flips this knob on and unloads Python's agents, and
  * THIS process becomes the one reader.
  *
  * The cycle is Python's `AsyncPoller` shape in values: a SHORT long-poll
