@@ -152,6 +152,13 @@ class BotCommands(
      * (unwired) = a stale cb: tap answers the honest retired note.
      */
     private val blockTaps: CoTTaps? = null,
+    /**
+     * The last fired prompt's store (Python's F22): the SAVE rides the
+     * free-text fire path's success branch, /retry reads it back. Null =
+     * unwired (tests): /retry answers the honest «nada» and the save is
+     * a no-op — never a crash.
+     */
+    private val lastPrompt: LastPrompt? = null,
 ) {
 
     /** /nuclear's single-flight companion: the in-process half (the wiring adds the cross-restart mtime gate). */
@@ -181,6 +188,7 @@ class BotCommands(
             "compact" -> compact()
             "context_window" -> contextWindow()
             "queue" -> queue()
+            "retry" -> retry(updateId)
             "steer" -> steer(rest)
             "verbosity" -> verbosityCmd(rest)
             else -> BotReply(UNKNOWN)
@@ -372,7 +380,6 @@ class BotCommands(
      * taskRunning, taskMissing) and CONFIRMED via botStatus — the server
      * does not serialize inbounds.
      */
-    @Suppress("ReturnCount") // one branch per plan — the router's honest outcomes
     private suspend fun route(text: String, updateId: Long): BotReply? {
         pendingAnswerFor?.let { shortId ->
             pendingAnswerFor = null
@@ -380,6 +387,18 @@ class BotCommands(
             if (consumed) return reply
             // the question died while armed: the text rides the normal route
         }
+        return routeCore(text, updateId)
+    }
+
+    /**
+     * The fire flow's decision core — the body a TYPED line and /retry
+     * share verbatim (the plan resolves as if the owner typed it). /retry
+     * lands here directly: a command never eats the armed question with
+     * the saved text, and the armed order (if any) flies exactly as it
+     * would for the typed line.
+     */
+    @Suppress("ReturnCount") // one branch per plan — the router's honest outcomes
+    private suspend fun routeCore(text: String, updateId: Long): BotReply? {
         // LA ORDEN ARMADA PRECEDE AL ROUTER (2/11: el park de F17 se comía
         // sus textos y la orden nunca volaba): un tiro DIRECTO a una sesión
         // nombrada — el fork lo entrega en ESA sesión sin tocar la ocupada,
@@ -528,7 +547,9 @@ class BotCommands(
         facts: RouteFacts,
     ): BotReply? {
         if (plan.bind && armedOrder == null && ops.supportsBind()) {
-            return fireAtomicBind(plan, text, updateId)
+            val reply = fireAtomicBind(plan, text, updateId)
+            if (reply == null) rememberPrompt(plan.sid, text) // the atomic-bind fire IS a fire (F22)
+            return reply
         }
         if (plan.bind) {
             fireLegacyBind(plan, text, updateId, facts)?.let { return it }
@@ -541,6 +562,7 @@ class BotCommands(
         armedOrder?.let { return fireArmedOrder(it, text, updateId) }
         return when (ops.sendInbound(text, messageId = "tg-$updateId", receivedAt = clock())) {
             InboundReceipt.FIRED -> {
+                rememberPrompt(plan.sid, text) // F22: the fired prompt is /retry's ammo
                 logger.info { "route: text FIRED at ${plan.sid} (${plan.reason})" }
                 watchContext() // the turn this text starts is the one to stream
                 null // the live view + the final render speak; no ack noise
@@ -551,6 +573,43 @@ class BotCommands(
                 BotReply(RouteTexts.CHANNEL_DOWN)
             }
         }
+    }
+
+    /**
+     * Python's F22 — the fire path's ONLY save: a prompt that FIRED (the
+     * plain inbound or the atomic bind; a parked text, a refused bind, an
+     * armed order and a dead channel never save) becomes /retry's ammo,
+     * stored per the daemon's own state dir ([LastPrompt]).
+     */
+    private fun rememberPrompt(sid: String, text: String) {
+        lastPrompt?.save(sid, text, clock())
+    }
+
+    /**
+     * /retry — relaunches the SAVED prompt verbatim (Python's F22
+     * `_cmd_retry`: the failure/crash/timeout rescue). The saved text runs
+     * the SAME fire flow a typed line takes ([routeCore] — the plan
+     * resolves as if the owner typed it), so a busy conversation PARKS
+     * with the push-or-enqueue question — strictly better than Python's
+     * flat refusal. Nothing saved (or the store unwired) → the honest
+     * «nada para relanzar».
+     */
+    private suspend fun retry(updateId: Long): BotReply {
+        val saved = lastPrompt?.load() ?: return BotReply(RETRY_NOTHING)
+        if (saved.text.isBlank()) return BotReply(RETRY_NOTHING)
+        logger.info { "retry: re-firing the prompt saved at ${saved.sid} (${fmtEndClock(saved.ts)})" }
+        // null = FIRED (the live view + the final render speak): our confirm line closes it
+        return routeCore(saved.text, updateId) ?: BotReply(retryFiredLine(saved.ts))
+    }
+
+    /** /retry's confirm: the fired target's title + the save's own HH:MM stamp. */
+    private suspend fun retryFiredLine(ts: Long): String {
+        val active = (contextAnswer() as? ContextAnswer.Ctx)?.value?.activeTaskId
+        val title = active?.let { sid -> history.ctxTasks(SCOPE_FOR_PICK).firstOrNull { it.sid == sid }?.title }
+            ?.takeIf { it.isNotEmpty() }
+            ?: active?.takeLast(SID_TAIL)?.takeIf { it.isNotEmpty() }
+            ?: "?"
+        return "🔁 Re-lanzado a «${PyText.esc(title)}» el prompt guardado ${fmtEndClock(ts)}."
     }
 
     /**
@@ -1882,6 +1941,11 @@ class BotCommands(
         internal const val DEGRADED =
             "📡 The channel to the app is down — the fork's host is not running? " +
                 "Commands that need it wait for the app."
+
+        /** /retry's honest refusal — nothing fired yet, so nothing to relaunch (F22). */
+        internal const val RETRY_NOTHING =
+            "🤔 Nada para relanzar — no hay prompt guardado. " +
+                "Todo texto que entra a una conversación queda guardado y /retry lo vuelve a lanzar."
 
         /** The botsService's own refusal replies, matched by their stable markers (en-US). */
         const val TASK_RUNNING_MARKER = "still running"
