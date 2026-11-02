@@ -1,9 +1,41 @@
 # Plan Brujula — un solo sistema, cinco repos, cinco cosas
 
-> Creado: 2026-10-30 · Estado: v1.2 — decisiones de arranque tomadas (mismo día, ver §7)
+> Creado: 2026-10-30 · Estado: v1.16 — cierre de ciclo al 2026-11-02 (ver «Estado real» abajo)
 > Orden de ejecución decidido: **U0 → U1a (paralelo) → U2 → U1b → U3 → U4 → U5 → U6 → U7 → U8 → U9 → U10 → U11**
 > La brújula: Fazt, «Para ser ingeniero de IA no necesitas crear tu propio ChatGPT» (27/10/2026, 2:56) — https://www.youtube.com/watch?v=dWyB3EcpNLQ
 > Este plan unifica y obedece la doctrina ya existente: `docs/parity-and-engineering.md` §7 · `~/Projects/bot/docs/kap-first-migration.md` (+ ADRs 021-025) · `~/Projects/agent-brain/plan.md` (+ ADRs 001-008) · `~/Projects/kap/SPEC-5.0-concurrency.md` · `~/Projects/ZCode/FORK.md` + `docs/fork/ARCHITECTURE.md`.
+
+## Estado real al 2026-11-02 (cierre de ciclo)
+
+> Este bloque manda sobre los checkboxes de abajo: varios quedaron sin tildar
+> aunque el trabajo está hecho y deployado. Verificado contra repos, código y
+> la Mac, no contra el texto del plan.
+
+**Vivo hoy**
+- `daemon.json` = `send: live`, `poll: true`; el daemon Kotlin es el único lector de getUpdates.
+- Python retirado: 0 LaunchAgents `telegram-*`/`bot-healer` cargados. El repo `bot` queda como referencia de paridad y puerta de rollback.
+- Fork instalado con el canal daemon-local (`caps=16`); app reconstruida y deployada.
+- Beacon healthchecks.io sano; comparador diario escribiendo reportes.
+- `agent-brain`: Postgres + Redpanda arriba, `test` + `bbLocal` + `detektAll` + eval 20/20 verdes. `serve` y brain-mcp todavía no instalados.
+- Nushell: los 13 `.sh` propios son `.nu` tipados; nightly `0.116.2-nightly.28` pineada por shebang; `nu-check --debug` limpio en los 20 archivos.
+
+**Fases**
+- U0 cerrado salvo kap 4.3 (sigue pendiente).
+- U1a no empezado: indexador de repos + `make plugin` + instalar brain-mcp.
+- U1b replanteado: Python ya no existe, así que no hay knob `event_bus` que prender. El daemon Kotlin no publica `BusEvent` (`BusEvent.kt` es solo lectura). Hay que portar el productor o elegir otra fuente; `memory_inject` también hay que portarlo.
+- U2 cerrado salvo E2 (métricas Micrometer/Prometheus).
+- U2.5 completo (los checkboxes de abajo quedaron desactualizados).
+- U3: canal y live mode hechos; faltan `/mode live|headless` y E3 (OTel).
+- U4 a U11 no empezados; U5 tiene el render core B4 como riesgo mayor.
+- `zcode-diff-ask` 0.9.20 cerrado y verificado (unit + check + e2e).
+- Worktrees `zcode-bot-feed` y `zcode-bot-superset` eliminados (ramas ya mergeadas).
+
+**Próximo checkpoint (en orden)**
+1. U1a: indexador de `~/Projects` + `make plugin` + instalar brain-mcp en ZCode.
+2. U1b: decidir y portar el productor del bus + `memory_inject` al daemon Kotlin.
+3. kap 4.3 quick unlocks.
+4. agent-brain fase A (ya desbloqueada por kap 4.2).
+5. kap 5.0 + render core B4.
 
 ## 0. La brújula (el video)
 
@@ -82,9 +114,10 @@ Sí, es el consenso 2026 — los roadmaps vigentes (roadmap.sh/ai-engineer, Kode
 - [ ] `make plugin` + instalar brain-mcp en el ZCode de Damian → `rag_query`/`memory_search` desde el chat.
 - Gate: `rag_query` respondiendo con citas sobre los repos propios, desde ZCode.
 
-### U1b — Encender bus y memoria (inmediatamente DESPUÉS del cutover U2 — decidido 30/10)
-- [ ] Activar `"event_bus": true` en `~/.zcode/telegram-remote.json` + deploy → el bus alimenta RAG y memoria con conversaciones reales.
-- [ ] Activar `memory_inject` → `/brain` y `/memory` desde Telegram; memoria inyectada en los turnos.
+### U1b — Encender bus y memoria (replanteado 2026-11-02: el cutover ya pasó y Python ya no existe)
+**El plan original decía «activar `"event_bus": true` en `~/.zcode/telegram-remote.json`». Eso era un knob del bot Python, que está retirado. El daemon Kotlin NO publica `BusEvent`: `modules/contract-types/.../BusEvent.kt` es solo el contrato de lectura y `~/.zcode/agent-brain/bus-events.jsonl` no existe. U1b no es prender un knob; es construir el productor.**
+- [ ] **Decidir el productor**: portar `bus.py` al daemon Kotlin (recomendado: el daemon ya ve los turnos y los eventos del canal), o un sidecar mínimo, o otra fuente (el stream del canal). Sin esto, RAG y memoria no tienen datos vivos.
+- [ ] Portar `memory_inject` al bot Kotlin (hoy solo existe en el Python retirado): `/brain` y `/memory` desde Telegram, memoria inyectada en los turnos.
 - [ ] Verificación: una conversación real queda recordada (memoria) y consultable (RAG) al día siguiente.
 - Gate: memoria citada en un turno real + `/brain` respondiendo en Telegram.
 
@@ -107,20 +140,20 @@ El camino final (cuatro corridas, cada fallo un pothole medido y fixeado): B2 fl
 - **Si o si**: streaming en vivo del CoT · spinner de «thinking» · **progreso acumulado** (writing → líneas creciendo; thinking → chars creciendo) · **timer** de hace cuánto corre cada cosa · **heartbeat visible** · **nunca silencio de radio** (saber qué hace ZCode a cada momento — edición in-place periódica del mensaje de estado, como la línea parpadeante del Python) · **superficie de errores: TODOS los errores tipificados de conexión/streaming del fork visibles en el bot** (inventario completo 30/10 con file:line verificados: 13 errores, taxonomía `ModelRetryReason` del fork; **hallazgo crítico: el countdown del zconn era sintetizado** — un 1308 de usage-limit con espera real de 10.5 h se anunciaba «next retry 2s»; fix en B3b: needle `model.network.retry_scheduled` con countdown real = timestamp+delayMs + render de `session_info_update{apiRetry}` en LiveTurn — el estado exacto del pill del desktop ya viaja por el canal y caía en el `else` + filtro de `reason:"cancelled"` que disparaba pills falsos con ⌘-stop. Vías más baratas primero, todo Kotlin-puro; highspeed y resetAt estructurado fuera de scope).
 - Fuente de los eventos vivos: el stream `bot-channel-continuous` del canal (agent_thought_chunk, tool_input_delta, task_complete) — camino único; sidecars live-io solo como fallback documentado.
 
-- [ ] Cliente del socket del daemon (protocolo del ADR de B3a, retry/reconnect como Kap policy).
-- [ ] Poller propio: getUpdates (TgOffset ya existe) + dispatcher mínimo.
-- [ ] Router live: texto libre → socket → la conversación REAL; el stream continuo → render existente (spectator/zconn) → Telegram.
-- [ ] Los 8 comandos del MVP (service queries del canal; /stop y /nuclear via control ops; /subagents por parent info).
-- [ ] **Live view**: el mensaje de estado in-place (spinner + timer + contadores de progreso + heartbeat) editado a cadencia segura para Telegram.
-- [ ] Deploy del daemon completo + deploy del fork (cuando Damian pueda reiniciar la app).
-- [ ] **Retiro abrupto del Python**: unload de los LaunchAgents (com.zcode.telegram-cmds, watchers, bot-healer) y silencio total.
-- [ ] Verificación end-to-end: una conversación real desde el teléfono por el camino único.
-- [ ] **Loop de hot-fix**: el daemon sobrevive por sus Process/RestartPolicy + KeepAlive; cada falla se fixea y commitea en caliente.
+- [x] Cliente del socket del daemon (protocolo del ADR de B3a, retry/reconnect como Kap policy).
+- [x] Poller propio: getUpdates (TgOffset ya existe) + dispatcher mínimo.
+- [x] Router live: texto libre → socket → la conversación REAL; el stream continuo → render existente (spectator/zconn) → Telegram.
+- [x] Los 8 comandos del MVP (service queries del canal; /stop y /nuclear via control ops; /subagents por parent info).
+- [x] **Live view**: el mensaje de estado in-place (spinner + timer + contadores de progreso + heartbeat) editado a cadencia segura para Telegram.
+- [x] Deploy del daemon completo + deploy del fork (cuando Damian pueda reiniciar la app).
+- [x] **Retiro abrupto del Python**: unload de los LaunchAgents (com.zcode.telegram-cmds, watchers, bot-healer) y silencio total.
+- [x] Verificación end-to-end: una conversación real desde el teléfono por el camino único.
+- [x] **Loop de hot-fix**: el daemon sobrevive por sus Process/RestartPolicy + KeepAlive; cada falla se fixea y commitea en caliente. El loop siguió el 31/10 y el 2/11: preguntas/permisos respondibles, `/steer`, `/plan`, `/context_window`, `/last`, `/compact`, `/queue`, `/subagents`, `/verbosity`, `/file`, `/diff`, adjuntos, feed del transcript, heartbeat del stream y el fix del contador de CoT.
 - **Disparador: TOTALMENTE AUTOMÁTICO (decisión del dueño 30/10: «quiero que se haga solo»)** — cuando B3b y el autómata terminen, el main revisa resultados y lanza `nohup scripts/deploy-fork-and-retire.nu --real & disown` (con gracia de ~30s para que el último mensaje llegue). El autómata narrará por Telegram las 6 fases (quit → build+swap → reopen → verify → retire → final), ZCode reabre solo, y la sesión se retoma al vuelo para verificación. Sin ninguna palabra del dueño en el medio.
 - Qué se degrada al principio (aceptado por el dueño, se recupera en caliente/después): hooks de permisos del CLI (▶️✅❓🔐), warm worker/rotación, `model:` por turno, thought levels, adjuntos entrantes, /brain //memory (esperan U1b). La auditoría de paridad pierde su evidencia Python al retirarlo (moot por diseño); la red de seguridad pasan a ser los golden vectors, los tests y el tráfico real.
 
 ### U3 — Live mode (B3a + B3b)
-- [ ] `ZCode` fork: canal «daemon local» (unix socket): `handleInboundMessage` + stream `bot-channel-continuous` + service queries (listTasks/quota/meta).
+- [x] `ZCode` fork: canal «daemon local» (unix socket): `handleInboundMessage` + stream `bot-channel-continuous` + service queries (listTasks/quota/meta).
 - [ ] `zcode-bot-kotlin`: routing live|headless, `/mode live|headless`.
 - [ ] E3: OTel spans (span por turno, child por tool call).
 - Gate: un turno desde el teléfono viaja por la conversación real (no headless).
@@ -138,7 +171,8 @@ El camino final (cuatro corridas, cada fallo un pothole medido y fixeado): B2 fl
 
 ### U6 — Cierre (B5)
 - [ ] Hooks híbridos delgados (socket al daemon); un solo artefacto LaunchAgent.
-- [ ] **Retiro del Python**; runbook portado (E5).
+- [x] **Retiro del Python** (hecho 30/10 en U2.5; el repo `bot` queda como referencia/rollback).
+- [ ] Runbook portado (E5).
 
 ### U7 — Evals propios (la cosa 4 como herramienta, no solo gate)
 - [ ] El EvalRunner de agent-brain sube a producto: preguntas reales + esperadas + pass/fail + **costo y latencia** por corrida, comparación de modelos (caro/barato/local), gates en CI.
@@ -181,6 +215,7 @@ El propósito declarado (30/10/2026): **llegar a ser AI engineer construyendo el
 
 ## 7. Changelog
 
+- 2026-11-02 v1.16: **cierre de ciclo**. Estado real agregado arriba (§ después del header) porque los checkboxes habían quedado desactualizados. Los 13 `.sh` propios del ecosistema migraron a `.nu` tipado con el nightly `0.116.2-nightly.28` (deploy-daemon/recorder/comparator/retire-python, build-install/verify-deploy/bootstrap-diff-ask/sync-upstream, bootstrap/deploy/bot-revive, bootstrap de brain y verify-claims de kap); el detach de `--when-quit` pasó de Python a un job de launchd (`launchctl submit`). U2.5 y el primer ítem de U3 quedaron tildados. U1b se reescribió: Python retirado ⇒ `event_bus` ya no es un knob, el daemon Kotlin no publica `BusEvent` y hay que portar el productor. `zcode-diff-ask` 0.9.20 cerró con unit + check + e2e. `agent-brain` verde con Postgres/Redpanda arriba: test + bbLocal + detektAll + eval 20/20. Worktrees `zcode-bot-feed`/`zcode-bot-superset` eliminados.
 - 2026-10-30 v1.15: **Nushell everywhere** — regla de piedra nueva (§3): todo script nuevo es `.nu` (adiós bash/Python para scripts), nightly tipada pineada por shebang, estilo Kotlin, gate nu-check, knowledge base `~/Projects/nu/`. El autómata canónico ya es `deploy-fork-and-retire.nu` (`062e531`: dryrun paridad 23/23, fail-path rc 3 verificado, cero bash embebido, DX report del agente en `~/Projects/nu/001-primer-script-deploy-learnings.md`). Pendiente: B3b (última pieza del disparo).
 - 2026-10-30 v1.14: inventario de errores tipificados COMPLETO (13 errores, file:line verificados, clasificación YA-FLUYE/LOG-SIN-USAR/CANAL-SI/UI-ONLY). **Bug crítico encontrado**: countdown del zconn sintetizado (10.5 h reales anunciados como «2s»). Fixes mandados al B3b: render de `session_info_update{apiRetry}` (el pill del desktop ya viaja por el canal), needle `retry_scheduled` con countdown real, filtro cancelled (pills falsos con ⌘-stop). Cero cambios al fork necesarios. Autómata blindado: pgrep/pkill NO ven el proceso del app (argv reescrito) — detección por ps comm exacto (`907e1e4`). **Nueva línea de adopción Nushell** (decisión del dueño): el autómata canónico migra a `deploy-fork-and-retire.nu` — Nushell nightly 0.116.2 con el keyword `type` (parser-time type errors, prueba conceptual del dueño: «no tolero los lenguajes no tipados»), idiomático total (try/catch/finally, match con records, flags tipados, cero bash embebido), .sh como frozen fallback; nace el knowledge base `~/Projects/nu/` (learnings numerados + symlink al script) y Nushell-as-MCP-server entra como candidato de U8.
 - 2026-10-30 v1.13: el disparador final también se automatiza (orden del dueño: «quiero que se haga solo»): al completarse B3b + el autómata, el main lanza el deploy-fork-and-retire despegado — Telegram narra, ZCode reabre, Python se jubila, sin ningún gesto del dueño.
