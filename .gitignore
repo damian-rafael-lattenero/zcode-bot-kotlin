@@ -3,3 +3,5 @@ build/
 *.log
 .DS_Store
 local.properties
+.zcode/
+.worktrees/
