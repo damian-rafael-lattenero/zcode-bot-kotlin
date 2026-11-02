@@ -424,6 +424,7 @@ class BotCommands(
 
     /** La orden armada VUELA: directo a la sesión nombrada, el router ni se entera. */
     private suspend fun fireArmedOrder(order: ArmedOrder, text: String, updateId: Long): BotReply {
+        armedOrder = null // ONE shot: se consume al volar — el siguiente texto vuelve al router
         logger.info {
             "route: ORDER to ${order.sessionId} («${order.title}»): ${text.take(ORDER_LOG_PREVIEW)}"
         }
