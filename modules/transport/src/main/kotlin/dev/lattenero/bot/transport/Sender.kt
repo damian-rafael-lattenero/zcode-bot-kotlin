@@ -18,8 +18,17 @@ sealed interface SendResult {
 
     data object NotConfigured : SendResult
 
-    /** The message did NOT go out; the outbox holds it (when aOutbox). */
+    /** The message did NOT go out (cooldown/breaker) — the outbox holds it (when aOutbox). */
     data object Parked : SendResult
+
+    /**
+     * Telegram REFUSED the payload itself (a final 400 — malformed HTML,
+     * oversized…) and the outbox holds it when aOutbox. Distinct from
+     * [Parked]: the drain counts THESE as poison attempts (an outage park
+     * must never burn an item's retries — Telegram never said no to the
+     * message, it said no to everything).
+     */
+    data object Rejected : SendResult
 }
 
 /**
@@ -92,6 +101,15 @@ class Sender(
             retryAfterOf(e)?.let { cooldown.extend(it) }
             logger.warn { "sendMessage failed (final): ${e.message}" }
             park(aOutbox, text)
+            // Rejected SOLO cuando Telegram entendió el request y rechazó el
+            // PAYLOAD (un 4xx — el HTML crudo de /steer): un 429 (throttle,
+            // el mensaje está bien), la red y los timeouts son PARKED — el
+            // cap de veneno del drain jamás quema attempts de una outage.
+            if (e is TgHttpException && e.code != null && e.code in 400..499 && e.code != 429) {
+                SendResult.Rejected
+            } else {
+                SendResult.Parked
+            }
         }
     }
 
@@ -120,18 +138,41 @@ class Sender(
         val remaining = mutableListOf<dev.lattenero.bot.contracts.OutboxItem>()
         for ((index, item) in taken.withIndex()) {
             if (index > 0) pause() // the burst guard: sustained, never back-to-back
-            if (send(cfg, item.text, loud = false, aOutbox = false) is SendResult.Sent) {
-                ok++
-            } else {
-                remaining.add(item)
-                if (cooldown.active()) {
-                    // a 429 opened the window mid-drain — the rest would all
-                    // park; re-queue them untouched and stop (a lone 4xx does
-                    // NOT stop the drain: the poison item stays at the front,
-                    // the rest still go out — Python's semantics)
-                    remaining.addAll(taken.drop(index + 1))
-                    break
+            when (send(cfg, item.text, loud = false, aOutbox = false)) {
+                is SendResult.Sent -> ok++
+
+                // THE POISON CAP (2/11): a message Telegram REJECTS forever
+                // (the /steer <texto> 400 — a raw HTML tag in the copy) used
+                // to cycle at the front of every drain pass, each pass
+                // counting as breaker failures → the breaker never saw a
+                // success → OPEN forever → the WHOLE bot went mute behind
+                // one command's usage hint. Only a REAL rejection burns an
+                // attempt — a breaker/cooldown park (an outage) re-queues
+                // untouched. After MAX_ITEM_ATTEMPTS rejections the item is
+                // dropped with a loud log line.
+                SendResult.Rejected -> {
+                    val bumped = item.copy(attempts = item.attempts + 1)
+                    if (bumped.attempts >= MAX_ITEM_ATTEMPTS) {
+                        logger.warn {
+                            "outbox: DROPPED a poison item after ${bumped.attempts} rejections " +
+                                "(Telegram refuses it every time): ${bumped.text.take(POISON_LOG_PREVIEW)}"
+                        }
+                    } else {
+                        remaining.add(bumped)
+                    }
+                    if (cooldown.active()) {
+                        // a 429 opened the window mid-drain — the rest would
+                        // all park; re-queue them untouched and stop (a lone
+                        // 4xx does NOT stop the drain: the rest still go out
+                        // — Python's semantics)
+                        remaining.addAll(taken.drop(index + 1))
+                        break
+                    }
                 }
+
+                // an outage park (cooldown/breaker): NOT the item's fault —
+                // re-queue untouched, zero attempts burned
+                SendResult.Parked, SendResult.NotConfigured -> remaining.add(item)
             }
         }
         outbox.putBack(remaining)
@@ -140,6 +181,18 @@ class Sender(
 
     private companion object {
         const val ATTEMPTS = 3
+
+        /**
+         * The poison cap: one Telegram-rejected-forever message dies after
+         * 5 failed flush passes (~5 cycles) instead of holding the whole
+         * send path hostage (the breaker's half-open probe kept landing on
+         * it). A transient failure survives dozens of passes; 5 straight
+         * passes of a FINAL failure is a malformed payload, not an outage.
+         */
+        const val MAX_ITEM_ATTEMPTS = 5
+
+        /** The dropped-poison log preview (code points, the render's own cap helper). */
+        private const val POISON_LOG_PREVIEW = 120
 
         /** 1 msg/s is Telegram's per-chat sustained line — the flush rides it exactly. */
         private val FLUSH_PAUSE_S = 1.seconds

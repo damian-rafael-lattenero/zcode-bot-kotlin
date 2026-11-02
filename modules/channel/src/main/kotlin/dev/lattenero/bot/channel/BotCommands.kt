@@ -814,15 +814,49 @@ class BotCommands(
      * truth — Resolved seals with the option's label, Failed seals with the
      * host's verbatim error (a stale question never lies ok), Unavailable
      * keeps the question armed (the owner retries). Null = the edit IS the
-     * feedback (a second message would only bury it).
+     * feedback (a second message would only bury it). A MULTI-question form
+     * ([QuestionFlow.Advanced]) never flies here: the answer is recorded,
+     * the SAME message is edited with the next question, and the ONE frame
+     * waits for the last answer ([QuestionFlow.Completed]).
      */
-    @Suppress("ReturnCount") // one guard per outcome — the tap's honest shapes
+    @Suppress("ReturnCount", "CyclomaticComplexMethod") // one guard per outcome — the tap's honest shapes
     private suspend fun questionTap(arg: String, updateId: Long): BotReply? {
         val active = board ?: return null
         val shortId = arg.substringBeforeLast(':')
         val index = arg.substringAfterLast(':').toIntOrNull() ?: return null
         val q = active.byShortId(shortId) ?: return BotReply("⏳ Esa pregunta ya no está pendiente.")
         val option = q.options.getOrNull(index) ?: return null
+        logger.info { "question tap: ${q.kind} «${option.label}» → ${q.requestId.take(REQUEST_ID_LOG)}…" }
+        if (q.kind == "elicitation") {
+            return when (val step = active.answer(shortId, option.optionId)) {
+                is QuestionFlow.Advanced -> null // the edit IS the feedback — the next question is on screen
+
+                is QuestionFlow.Completed -> when (val answer = ops.respondQuestion(elicitationFrame(step.question, "tg-$updateId-qa"))) {
+                    RespondAnswer.Resolved -> {
+                        val seal = if (step.question.questionCount > 1) {
+                            "✅ Respondidas las ${step.question.questionCount} preguntas"
+                        } else {
+                            "✅ Respondido: <b>${PyText.esc(option.label)}</b>"
+                        }
+                        active.resolve(shortId, seal)
+                        null
+                    }
+
+                    RespondAnswer.Unavailable ->
+                        BotReply("📡 El canal está caído — la pregunta sigue esperando, probá de nuevo.")
+
+                    is RespondAnswer.Failed -> {
+                        val detail = answer.message?.takeIf { it.isNotBlank() } ?: answer.code
+                        val seal = "⚠️ El tap no entró (${PyText.esc(answer.code)}): " +
+                            PyText.esc(PyText.take(detail, ORDER_LOG_PREVIEW))
+                        active.resolve(shortId, seal)
+                        null
+                    }
+                }
+
+                null -> BotReply("⏳ Esa pregunta ya no está pendiente.")
+            }
+        }
         val frame = when (q.kind) {
             "permission" -> ClientFrame.Respond(
                 id = "",
@@ -834,7 +868,7 @@ class BotCommands(
                 messageId = "tg-$updateId-qa",
             )
 
-            "plan" -> ClientFrame.Respond(
+            else -> ClientFrame.Respond(
                 id = "",
                 taskId = q.taskId,
                 requestId = q.requestId,
@@ -842,18 +876,7 @@ class BotCommands(
                 action = if (option.isDeny || option.optionId == "decline") "decline" else "accept",
                 messageId = "tg-$updateId-qa",
             )
-
-            else -> ClientFrame.Respond(
-                id = "",
-                taskId = q.taskId,
-                requestId = q.requestId,
-                kind = "elicitation",
-                action = "accept",
-                content = elicitationContent(q.title, option.optionId, q.questionCount),
-                messageId = "tg-$updateId-qa",
-            )
         }
-        logger.info { "question tap: ${q.kind} «${option.label}» → ${q.requestId.take(REQUEST_ID_LOG)}…" }
         return when (val answer = ops.respondQuestion(frame)) {
             RespondAnswer.Resolved -> {
                 active.resolve(shortId, "✅ Respondido: <b>${PyText.esc(option.label)}</b>")
@@ -873,6 +896,22 @@ class BotCommands(
         }
     }
 
+    /**
+     * The elicitation's respond frame — the COMPLETE questionnaire's content
+     * in the fork's exact shape (buildBotElicitationContent's: `answers`
+     * keyed by each question's text, `answer_N` per index, the singular
+     * `answer` only for a one-question form).
+     */
+    private fun elicitationFrame(q: PendingQuestion, messageId: String) = ClientFrame.Respond(
+        id = "",
+        taskId = q.taskId,
+        requestId = q.requestId,
+        kind = "elicitation",
+        action = "accept",
+        content = elicitationContentAll(q.answerEntries(), q.questionCount),
+        messageId = messageId,
+    )
+
     /** The ✍️ arm: the NEXT free text IS the elicitation's answer (one shot, ArmedOrder's mechanics). */
     private suspend fun answerArm(shortId: String): BotReply {
         val q = board?.byShortId(shortId) ?: return BotReply("⏳ Esa pregunta ya no está pendiente.")
@@ -884,49 +923,52 @@ class BotCommands(
      * The armed answer's flight: the elicitation content carries the owner's
      * words verbatim (buildBotElicitationContent's shape — the answers keyed
      * by the QUESTION text, the bots' own precedent for accepting a
-     * questionnaire). The pair's FIRST leg is the consumption law: true =
-     * the line WAS the answer (whatever the outcome — the caller stops
-     * routing it), false = the question died while armed (the line rides
-     * the normal route). Unavailable RE-ARMS — the words are still the
-     * answer once the channel returns.
+     * questionnaire). On a MULTI-question form the text answers the question
+     * ON SCREEN ([QuestionFlow.Advanced] — the message advances, the arm is
+     * consumed; a further text question needs a fresh ✍️ tap) and the ONE
+     * frame flies only with the LAST answer ([QuestionFlow.Completed]). The
+     * pair's FIRST leg is the consumption law: true = the line WAS the
+     * answer (whatever the outcome — the caller stops routing it), false =
+     * the question died while armed (the line rides the normal route).
+     * Unavailable RE-ARMS — the words are still the answer once the channel
+     * returns.
      */
     @Suppress("ReturnCount") // one guard per outcome — the armed answer's shapes
     private suspend fun answerWithFreeText(shortId: String, text: String, updateId: Long): Pair<Boolean, BotReply?> {
         val active = board ?: return false to null
         val q = active.byShortId(shortId) ?: return false to null
         if (q.kind != "elicitation") return false to null // plans and permissions answer by button only
-        val frame = ClientFrame.Respond(
-            id = "",
-            taskId = q.taskId,
-            requestId = q.requestId,
-            kind = "elicitation",
-            action = "accept",
-            content = elicitationContent(q.title, text, q.questionCount),
-            messageId = "tg-$updateId-qf",
-        )
-        logger.info {
-            "question answer (free text) → ${q.requestId.take(REQUEST_ID_LOG)}…: ${text.take(ORDER_LOG_PREVIEW)}"
-        }
-        return when (val answer = ops.respondQuestion(frame)) {
-            RespondAnswer.Resolved -> {
-                active.resolve(shortId, "✅ Tu respuesta entró.")
-                true to null
+        return when (val step = active.answer(shortId, text)) {
+            is QuestionFlow.Advanced -> true to null // the edit IS the feedback — the next question is on screen
+
+            is QuestionFlow.Completed -> {
+                logger.info {
+                    "question answer (free text) → ${q.requestId.take(REQUEST_ID_LOG)}…: ${text.take(ORDER_LOG_PREVIEW)}"
+                }
+                when (val answer = ops.respondQuestion(elicitationFrame(step.question, "tg-$updateId-qf"))) {
+                    RespondAnswer.Resolved -> {
+                        active.resolve(shortId, "✅ Tu respuesta entró.")
+                        true to null
+                    }
+
+                    RespondAnswer.Unavailable -> {
+                        pendingAnswerFor = shortId
+                        true to BotReply(
+                            RouteTexts.CHANNEL_DOWN + "\nLa respuesta sigue armada — reintentá con tu próxima línea.",
+                        )
+                    }
+
+                    is RespondAnswer.Failed -> {
+                        val detail = answer.message?.takeIf { it.isNotBlank() } ?: answer.code
+                        val seal = "⚠️ La respuesta no entró (${PyText.esc(answer.code)}): " +
+                            PyText.esc(PyText.take(detail, ORDER_LOG_PREVIEW))
+                        active.resolve(shortId, seal)
+                        true to null
+                    }
+                }
             }
 
-            RespondAnswer.Unavailable -> {
-                pendingAnswerFor = shortId
-                true to BotReply(
-                    RouteTexts.CHANNEL_DOWN + "\nLa respuesta sigue armada — reintentá con tu próxima línea.",
-                )
-            }
-
-            is RespondAnswer.Failed -> {
-                val detail = answer.message?.takeIf { it.isNotBlank() } ?: answer.code
-                val seal = "⚠️ La respuesta no entró (${PyText.esc(answer.code)}): " +
-                    PyText.esc(PyText.take(detail, ORDER_LOG_PREVIEW))
-                active.resolve(shortId, seal)
-                true to null
-            }
+            null -> false to null // the question died while armed: the line rides the normal route
         }
     }
 
@@ -1894,7 +1936,7 @@ class BotCommands(
          */
         internal const val UNKNOWN_REQUEST_CODE = "unknown_request"
         internal const val STEER_USAGE =
-            "🌀 /steer <texto> — redirigí el turno que corre: el texto entra DENTRO del turno vivo " +
+            "🌀 /steer &lt;texto&gt; — redirigí el turno que corre: el texto entra DENTRO del turno vivo " +
                 "(no se estaciona en la cola)."
         internal const val STEER_OLD_FORK =
             "⚠️ La app conectada no conoce el frame «steer» — falta deployar el fork actualizado " +

@@ -14,6 +14,8 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
@@ -181,12 +183,11 @@ class Outbox(
     private fun JsonElement.asBox(): List<OutboxItem> =
         (this as? JsonArray)?.let { OutboxItem.Box.fromJson(it) } ?: emptyList()
 
-    private fun OutboxItem.toJson(): JsonObject = JsonObject(
-        mapOf(
-            "ts" to JsonPrimitive(ts),
-            "text" to JsonPrimitive(text),
-        ),
-    )
+    private fun OutboxItem.toJson(): JsonObject = buildJsonObject {
+        put("ts", JsonPrimitive(ts))
+        put("text", JsonPrimitive(text))
+        if (attempts > 0) put("attempts", JsonPrimitive(attempts))
+    }
 
     companion object {
         const val MAX_BOX = 20
