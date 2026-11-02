@@ -196,6 +196,7 @@ class BotCommands(
             "nuclear", "nuke" -> nuclear(rest)
             "quota" -> BotReply(quota())
             "usage" -> BotReply(usage())
+            "ctx" -> ctxList()
             "help", "start" -> BotReply(help())
             "subagents", "agents" -> subagents(rest)
             "plan" -> plan()
@@ -1544,6 +1545,82 @@ class BotCommands(
     }
 
     /**
+     * /ctx — el medidor de contexto por conversación, EN LISTA (Python's
+     * `context_report`, one numbered line per usage-backed conversation of
+     * the tasks-index, sidebar order). The SUPERIOR data: Python estimated
+     * the window from a model→tokens map and could show a STALE pre-compact
+     * number as current — every line here rides the fork's REAL contextWindow
+     * meter (runtime projection + the model registry's window, 9cfb39a9),
+     * the same source the desktop's meter restores. The 🧹 compacted flag
+     * Python derived from scanner logs: the fork's payload carries NO such
+     * field, so no flag is rendered — never a fake. A conversation that
+     * reports nothing reads ❔ sin datos; an old host refusing the query BY
+     * NAME degrades the whole card into the fork-deploy note.
+     */
+    private suspend fun ctxList(): BotReply {
+        val ctx = contextAnswer()
+        val rows = if (ctx == ContextAnswer.Degraded) {
+            emptyList()
+        } else {
+            runCatching { history.ctxTasks(CTX_CAP) }.getOrDefault(emptyList())
+        }
+        val reply = when {
+            ctx == ContextAnswer.Degraded -> BotReply(DEGRADED)
+            rows.isEmpty() -> BotReply(CTX_NO_ROWS)
+            else -> BotReply(ctxCard(rows, (ctx as? ContextAnswer.Ctx)?.value?.workspacePath))
+        }
+        return reply
+    }
+
+    /** The list's body: one query per row (cheap local IPC), the by-name refusal loud once. */
+    private suspend fun ctxCard(rows: List<TaskRow>, activeWs: String?): String {
+        val answers = rows.map { row -> ops.query(ChannelQuery.ContextWindow(row.sid, row.ws)) }
+        val refused = answers.filterIsInstance<QueryAnswer.Failed>()
+            .firstOrNull { it.code == UNKNOWN_QUERY_CODE }
+        if (refused != null) return contextWindowFailure(refused.code, refused.message)
+        val lines = answers.mapIndexed { i, answer -> ctxLine(i + 1, rows[i], answer, activeWs) }
+        return (listOf(CTX_HEADER) + lines + CTX_FOOTER).joinToString("\n")
+    }
+
+    /** One numbered row: the meter's line, the 📁 tag when the row lives in another workspace. */
+    private fun ctxLine(n: Int, row: TaskRow, answer: QueryAnswer, activeWs: String?): String {
+        val tag = if (row.ws.isNotEmpty() && row.ws != activeWs) {
+            " · 📁${PyText.esc(row.ws.substringAfterLast('/'))}"
+        } else {
+            ""
+        }
+        val title = PyText.esc(row.title.ifEmpty { row.sid.takeLast(SID_TAIL) })
+        val body = when (answer) {
+            is QueryAnswer.Ok -> ctxMeter(answer.resultJson)
+            else -> CTX_NO_DATA
+        }
+        return "$n. $body$tag — $title"
+    }
+
+    /**
+     * The meter's read (pure): used+window → the emoji/pct line (Python's
+     * 🔴 ≥80 · 🟡 ≥50 · 🟢 law); window unknown → the used count with a
+     * «ventana ?» and NO invented percent; nothing reported → the honest ❔.
+     * Every token count through [tokenRaw] — the number law.
+     */
+    private fun ctxMeter(json: String): String {
+        val root = runCatching { Json.parseToJsonElement(json) as? JsonObject }.getOrNull()
+        val used = root?.long("usedTokens")?.takeIf { it >= 0 }
+        val window = root?.long("windowTokens")?.takeIf { it > 0 }
+        val body = when {
+            used == null -> CTX_NO_DATA
+            window == null -> "${tokenRaw(used.toDouble())} · ventana ?"
+            else -> {
+                val pct = ((used * CTX_PERCENT_SCALE + window / 2) / window).toInt()
+                val emoji = if (pct >= CTX_HOT_PCT) "🔴" else if (pct >= CTX_WARM_PCT) "🟡" else "🟢"
+                val approx = if (root?.str("windowSource") == "owner_default") " (~)" else ""
+                "$emoji ${tokenRaw(used.toDouble())} ($pct%)$approx"
+            }
+        }
+        return body
+    }
+
+    /**
      * /last — re-sends the active conversation's LAST assistant answer
      * (the missed one: a restart, a flood window, a scroll past). The
      * same taskSnapshot the final shower uses; the body rides raw like
@@ -2106,6 +2183,7 @@ class BotCommands(
             "nuclear" to "emergency: stops EVERYTHING and resets the bot",
             "quota" to "coding plan credits",
             "usage" to "token usage of the active conversation — real, cumulative",
+            "ctx" to "context % per conversation — the real meter list",
             "subagents" to "the active subagents · «inactivos» shows today's ended",
             "verbosity" to "cuánto habla el feed en vivo — summary / normal / verbose",
             "help" to "all commands",
@@ -2209,6 +2287,16 @@ class BotCommands(
         /** A zero TOTAL is a fresh conversation's truth — no tokens spent yet. */
         internal const val USAGE_EMPTY =
             "📭 Aún sin uso registrado — cuando la conversación consuma tokens, el total aparece acá."
+
+        /** /ctx's card: Python's cap (8 rows), header, footer and the honest no-data word. */
+        private const val CTX_CAP = 8
+        internal const val CTX_HEADER = "🧠 <b>Contexto por conversación</b> (el medidor real del fork)"
+        internal const val CTX_NO_ROWS = "🧠 No hay conversaciones con uso registrado."
+        internal const val CTX_NO_DATA = "❔ sin datos"
+        internal const val CTX_FOOTER =
+            "🗜 /compact compacta la conversación activa · /context_window su medidor completo."
+        private const val CTX_HOT_PCT = 80
+        private const val CTX_WARM_PCT = 50
         private const val CTX_MODEL_UNKNOWN = "desconocido"
         private const val CTX_BAR_FULL = "▰"
         private const val CTX_BAR_EMPTY = "▱"
