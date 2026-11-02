@@ -45,6 +45,7 @@ class ContextWindowTest {
             text: String,
             messageId: String,
             receivedAt: Long,
+            bindTaskId: String?,
         ): InboundAnswer = InboundAnswer.Answered(duplicate = false, replies = emptyList())
 
         override suspend fun enqueueInbound(text: String, messageId: String, receivedAt: Long): Int = 0

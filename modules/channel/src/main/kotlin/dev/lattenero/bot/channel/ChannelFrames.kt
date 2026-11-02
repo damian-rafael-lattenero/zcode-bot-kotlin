@@ -139,6 +139,15 @@ sealed interface ClientFrame {
         val taskId: String? = null,
         /** ATTACHMENTS IN (30/10): the owner's photo/document, already on the daemon's disk. */
         val attachments: List<InboundAttachment> = emptyList(),
+        /**
+         * EL BIND ATÓMICO (aditivo, fork d8510c23): presente → el host apunta
+         * el contexto con la ley del /task (frontera de proyecto + veredicto
+         * taskRunning) y entrega el texto DESPUÉS, en el MISMO frame; el
+         * refusal viaja como única reply del inbound_result. Solo se envía
+         * cuando el hello anunció el cap «bind» — un servidor viejo IGNORARÍA
+         * el campo y el texto caería en la conversación equivocada.
+         */
+        val bindTaskId: String? = null,
     ) : ClientFrame
 
     data class Subscribe(val id: String, val taskId: String, val workspacePath: String) : ClientFrame
@@ -196,6 +205,7 @@ fun encodeClient(frame: ClientFrame): String = when (frame) {
         if (frame.receivedAt != null) put("receivedAt", frame.receivedAt)
         if (frame.taskId != null) put("taskId", frame.taskId)
         if (frame.attachments.isNotEmpty()) put("attachments", encodeAttachments(frame.attachments))
+        if (frame.bindTaskId != null) put("bindTaskId", frame.bindTaskId)
     }
 
     is ClientFrame.Subscribe -> buildJsonObject {
@@ -508,7 +518,9 @@ fun decodeServerLine(line: String): ServerFrame? {
 fun describe(frame: ClientFrame): String = when (frame) {
     is ClientFrame.Hello -> "hello(clientId=${frame.clientId}, token=***)"
     is ClientFrame.Inbound -> "inbound(id=${frame.id}, messageId=${frame.messageId}, ${frame.text.length} chars" +
-        (if (frame.attachments.isEmpty()) "" else ", ${frame.attachments.size} attachment(s)") + ")"
+        (if (frame.attachments.isEmpty()) "" else ", ${frame.attachments.size} attachment(s)") +
+        (if (frame.taskId != null) ", order=${frame.taskId}" else "") +
+        (if (frame.bindTaskId != null) ", bind=${frame.bindTaskId}" else "") + ")"
     is ClientFrame.Subscribe -> "subscribe(id=${frame.id}, taskId=${frame.taskId})"
     is ClientFrame.Unsubscribe -> "unsubscribe(id=${frame.id}, taskId=${frame.taskId})"
     is ClientFrame.Steer -> "steer(id=${frame.id}, taskId=${frame.taskId}, ${frame.text.length} chars)"

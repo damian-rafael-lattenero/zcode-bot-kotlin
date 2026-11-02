@@ -388,8 +388,17 @@ private fun buildPoller(
                 // the host's own truth comes back as the tap's answer
                 override suspend fun respondQuestion(frame: ClientFrame.Respond) = client.respond(frame)
 
-                override suspend fun sendInboundAwait(text: String, messageId: String, receivedAt: Long) =
-                    client.sendInboundAwait(text, messageId, receivedAt)
+                override suspend fun sendInboundAwait(
+                    text: String,
+                    messageId: String,
+                    receivedAt: Long,
+                    bindTaskId: String?,
+                ) = client.sendInboundAwait(text, messageId, receivedAt, bindTaskId)
+
+                // EL BIND ATÓMICO (the fork's cap «bind», d8510c23): solo con
+                // el cap anunciado — un servidor viejo ignoraría el campo y el
+                // texto caería en la conversación equivocada
+                override fun supportsBind(): Boolean = client.speaks("bind")
 
                 override suspend fun enqueueInbound(text: String, messageId: String, receivedAt: Long) =
                     queue.add(text, messageId, receivedAt)

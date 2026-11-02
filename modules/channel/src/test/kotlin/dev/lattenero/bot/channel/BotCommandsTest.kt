@@ -52,12 +52,24 @@ class BotCommandsTest {
             return InboundReceipt.FIRED
         }
 
-        override suspend fun sendInboundAwait(text: String, messageId: String, receivedAt: Long): InboundAnswer {
+        override suspend fun sendInboundAwait(
+            text: String,
+            messageId: String,
+            receivedAt: Long,
+            bindTaskId: String?,
+        ): InboundAnswer {
             if (!available) return InboundAnswer.Unavailable
             awaited.add(text to messageId)
+            if (bindTaskId != null) atomicBinds.add(bindTaskId to text)
             onInbound(text)
             return InboundAnswer.Answered(duplicate = false, replies = awaitReplies)
         }
+
+        /** The atomic binds (bindTaskId → text) — empty unless the wiring speaks the cap. */
+        val atomicBinds = mutableListOf<Pair<String, String>>()
+        var bindCap = false
+
+        override fun supportsBind(): Boolean = bindCap
 
         override suspend fun enqueueInbound(text: String, messageId: String, receivedAt: Long): Int {
             queued.add(Triple(text, messageId, receivedAt))
@@ -260,6 +272,47 @@ class BotCommandsTest {
             o.awaited, // the switch command FIRST (awaited), the text after the confirm
         )
         assertEquals(listOf("task-77" to app), o.subscribed)
+    }
+
+    @Test
+    fun theAtomicBindFliesAsOneFrameWhenTheServerSpeaksIt() = runBlocking {
+        // the fork's cap «bind» (d8510c23): bind + text in ONE awaited frame —
+        // no "/task" command, no second send, the refusal would ride the same
+        // inbound_result
+        val o = ops().apply {
+            botStatusJson = draftStatus
+            answers["botStatus"] = draftStatus
+            bindCap = true
+            // the REAL host re-points the context during the atomic bind —
+            // the frame's own side effect (the old path flipped it on "/task")
+            onInbound = { answers["botStatus"] = boundStatus }
+        }
+        val (bc, _) = commands(o)
+        assertNull(bc.reply("probando probando", 10L))
+        assertTrue(o.inbound.isEmpty(), "the text went INSIDE the awaited frame, not as a second send")
+        assertEquals(
+            listOf("probando probando" to "tg-10"),
+            o.awaited, // ONE awaited frame — the text itself, never a "/task" command
+        )
+        assertEquals(listOf("task-77" to "probando probando"), o.atomicBinds)
+        assertEquals(listOf("task-77" to app), o.subscribed)
+    }
+
+    @Test
+    fun theAtomicBindRefusalSpeaksAndNeverDeliversTwice() = runBlocking {
+        // the host's taskRunning verdict rides the SAME inbound_result — the
+        // text did NOT fly, the owner hears it, nothing re-sends
+        val o = ops().apply {
+            botStatusJson = draftStatus
+            answers["botStatus"] = draftStatus
+            bindCap = true
+            awaitReplies = listOf("⏳ task still running")
+        }
+        val (bc, _) = commands(o)
+        val reply = bc.reply("probando probando", 11L)
+        assertTrue(reply != null, "the refusal speaks")
+        assertTrue(o.inbound.isEmpty(), "the refused text is never delivered by a second send")
+        assertEquals(1, o.atomicBinds.size)
     }
 
     @Test

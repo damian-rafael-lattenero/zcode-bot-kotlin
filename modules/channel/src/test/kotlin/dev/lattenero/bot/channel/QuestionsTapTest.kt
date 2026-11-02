@@ -42,7 +42,12 @@ class QuestionsTapTest {
             return InboundReceipt.FIRED
         }
 
-        override suspend fun sendInboundAwait(text: String, messageId: String, receivedAt: Long): InboundAnswer =
+        override suspend fun sendInboundAwait(
+            text: String,
+            messageId: String,
+            receivedAt: Long,
+            bindTaskId: String?,
+        ): InboundAnswer =
             InboundAnswer.Answered(duplicate = false, replies = emptyList())
 
         override suspend fun enqueueInbound(text: String, messageId: String, receivedAt: Long): Int = 1

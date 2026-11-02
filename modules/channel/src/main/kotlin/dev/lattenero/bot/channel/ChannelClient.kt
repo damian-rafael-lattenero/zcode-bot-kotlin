@@ -156,6 +156,19 @@ class ChannelClient(
     @Volatile
     private var session: Session? = null
 
+    /**
+     * The hello_ok's capability words (the additive law's front door): a
+     * frame the server does not ADVERTISE must never be sent — an old
+     * host would ignore the field and the text would land in the wrong
+     * conversation. Refreshed on every connect.
+     */
+    @Volatile
+    var serverCapabilities: Set<String> = emptySet()
+        private set
+
+    /** Whether the live server advertised [capability] (false while disconnected — degrade honestly). */
+    fun speaks(capability: String): Boolean = capability in serverCapabilities
+
     /** True while a hello_ok'd connection exists — the 💓/📡 of the status line. */
     val connected: Boolean get() = session != null
 
@@ -242,6 +255,7 @@ class ChannelClient(
             session = live
             live.fire(ClientFrame.Hello(token))
             val hello = awaitHello(live)
+            serverCapabilities = hello.capabilities.toSet()
             logger.info {
                 "channel UP: hello_ok v${hello.protocolVersion} bot=${hello.botId} enabled=${hello.botEnabled} " +
                     "server pid=${hello.serverPid} app=${hello.appVersion ?: "?"} caps=${hello.capabilities.size}"
@@ -468,12 +482,19 @@ class ChannelClient(
         text: String,
         messageId: String,
         receivedAt: Long,
+        bindTaskId: String? = null,
         timeout: Duration = INBOUND_ANSWER_TIMEOUT,
     ): InboundAnswer {
         val live = session ?: return InboundAnswer.Unavailable
         val id = "r${ids.incrementAndGet()}"
         return try {
-            when (val frame = live.request(ClientFrame.Inbound(id, text, messageId, receivedAt), id, timeout)) {
+            when (
+                val frame = live.request(
+                    ClientFrame.Inbound(id, text, messageId, receivedAt, bindTaskId = bindTaskId),
+                    id,
+                    timeout,
+                )
+            ) {
                 is ServerFrame.InboundResult ->
                     InboundAnswer.Answered(duplicate = frame.duplicate, replies = frame.replies)
 
