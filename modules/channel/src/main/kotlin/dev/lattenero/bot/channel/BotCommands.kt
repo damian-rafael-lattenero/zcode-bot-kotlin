@@ -661,8 +661,8 @@ class BotCommands(
      * «nada para relanzar».
      */
     private suspend fun retry(updateId: Long): BotReply {
-        val saved = lastPrompt?.load() ?: return BotReply(RETRY_NOTHING)
-        if (saved.text.isBlank()) return BotReply(RETRY_NOTHING)
+        val saved = lastPrompt?.load()
+        if (saved == null || saved.text.isBlank()) return BotReply(RETRY_NOTHING)
         logger.info { "retry: re-firing the prompt saved at ${saved.sid} (${fmtEndClock(saved.ts)})" }
         // null = FIRED (the live view + the final render speak): our confirm line closes it
         return routeCore(saved.text, updateId) ?: BotReply(retryFiredLine(saved.ts))
