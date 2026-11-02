@@ -422,8 +422,15 @@ class BotCommands(
         is RoutePlan.Refuse -> ""
     }
 
-    /** La orden armada VUELA: directo a la sesión nombrada, el router ni se entera. */
+    /**
+     * La orden armada VUELA: directo a la sesión nombrada, el router ni se
+     * entera. ONE SHOT: the arm is consumed HERE, before the wire — a
+     * second text rides the normal route (the 2/11 law the test pins; an
+     * arm that survives its shot would silently redirect the owner's next
+     * line to a subagent).
+     */
     private suspend fun fireArmedOrder(order: ArmedOrder, text: String, updateId: Long): BotReply {
+        armedOrder = null
         logger.info {
             "route: ORDER to ${order.sessionId} («${order.title}»): ${text.take(ORDER_LOG_PREVIEW)}"
         }
