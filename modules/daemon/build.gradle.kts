@@ -22,12 +22,15 @@ dependencies {
     implementation(libs.kap.core)
     implementation(libs.kap.resilience)
     implementation(libs.kotlin.logging)
+    implementation(libs.ktor.client.core)
+    implementation(libs.ktor.client.cio)
     implementation(libs.logback.classic)
     implementation(libs.logstash.logback.encoder)
     implementation(libs.xerial.sqlite.jdbc)
     testImplementation(kotlin("test"))
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.kotest.property)
+    testImplementation(libs.ktor.client.mock)
 }
 
 tasks.withType<Test>().configureEach {
