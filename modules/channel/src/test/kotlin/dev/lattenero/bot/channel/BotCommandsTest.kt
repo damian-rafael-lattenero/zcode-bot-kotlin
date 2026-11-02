@@ -536,14 +536,15 @@ class BotCommandsTest {
         val text = BotCommands.renderQuota(json, nowMs = 0L)
         assertTrue("📊 <b>Coding plan</b>" in text)
         assertTrue("⏱ 5 hours: 31/120 credits (26%)" in text) // 5h first, weekly after
-        assertTrue("📅 Weekly: 88K/88K credits (90%)" in text) // Python's fmt_num: K from 10K up
+        assertTrue("📅 Weekly: 88,000/88,000 credits (90%)" in text) // the owner's law: separator, unit never moves
         assertTrue("⚠️" in text) // ≥75% carries the alert
     }
 
     @Test
     fun quotaSpeaksTheStartPlanBucketsWithTheUsedPercent() {
-        // the owner's 30/10 order: «340K/500K usado x%» — the Start Plan's
-        // REAL balance buckets (the fork's builder carries usage/unit raw;
+        // the owner's 30/10 order, with the 2/11 unit law: «no es 300k es
+        // 300,000.0k tokens» — the numbers ARE K-counts, the separator is
+        // the whole change (the fork's builder carries usage/unit raw;
         // its percentage is REMAINING-based, so the used % is computed here)
         val json = """
             {"authenticated":true,
@@ -556,9 +557,25 @@ class BotCommandsTest {
         """.trimIndent()
         val text = BotCommands.renderQuota(json, nowMs = 0L)
         assertTrue("📊 <b>Start plan</b>" in text)
-        assertTrue("• 5 hours: 340K/500K usado 68%" in text)
-        assertTrue("• weekly: 900K/4000K usado 22%" in text)
+        assertTrue("• 5 hours: 340,000K/500,000K usado 68%" in text)
+        assertTrue("• weekly: 900,000K/4,000,000K usado 22%" in text)
         assertTrue("⚠️" !in text) // 68% and 22% are below the 75% alert
+    }
+
+    @Test
+    fun quotaSpeaksTheGiftBucketWithItsSeparators() {
+        // the owner's law verbatim (2/11): «no es 300k es 300,000.0k tokens» —
+        // a comma every 3 digits, NOTHING else; the one_time gift bucket is
+        // 300,000K tokens and «300K» would have said a thousand times fewer
+        val json = """
+            {"authenticated":true,
+             "provider":{"id":"account:zai-start-plan","name":"Start Plan"},
+             "quota":{"level":"Start","limits":[
+               {"type":"tok_one_time","meter":"tokens","period":"one_time","unit":300000,"usage":166603.4,"nextResetTime":3600000}]}
+            }
+        """.trimIndent()
+        val text = BotCommands.renderQuota(json, nowMs = 0L)
+        assertTrue("• one_time: 166,603.4K/300,000K usado 55%" in text, "got: $text")
     }
 
     @Test
@@ -570,7 +587,7 @@ class BotCommandsTest {
             }
         """.trimIndent()
         val text = BotCommands.renderQuota(json, nowMs = 0L)
-        assertTrue("340K/400K usado 85%" in text)
+        assertTrue("340,000K/400,000K usado 85%" in text)
         assertTrue("⚠️" in text)
     }
 
