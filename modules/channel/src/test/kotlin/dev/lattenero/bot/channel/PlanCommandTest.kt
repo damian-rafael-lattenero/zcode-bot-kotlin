@@ -121,6 +121,22 @@ class PlanCommandTest {
     }
 
     @Test
+    fun planWithoutAnActiveConversationNamesTheMissingContext() = runBlocking {
+        val o = FakeOps().apply {
+            answers["botStatus"] =
+                """{"bot":{"id":"daemon-local","enabled":true},"context":null}"""
+        }
+        val reply = commands(o).reply("/plan")!!
+        assertTrue("No hay conversación activa" in reply, reply)
+        assertTrue("/tasks n" in reply, reply)
+        assertTrue("fork" !in reply, "must not blame the deploy: $reply")
+        assertTrue(
+            o.queries.filterIsInstance<ChannelQuery.ModelSelection>().isEmpty(),
+            "no modelSelection query without a context",
+        )
+    }
+
+    @Test
     fun planTapFiresASingleFieldSetAndRerendersFromItsOwnAnswer() = runBlocking {
         val o = ops()
         val reply = commands(o).onCallback("pl:account:zai-start-plan", 2L)!!

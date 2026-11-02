@@ -1,9 +1,8 @@
 #!/Users/lattenero/.local/bin/nu-nightly
-# deploy-daemon.nu — B1a: build + install the shadow daemon (zconn under a
-# KAP Process). ADDITIVE ONLY: it reads the CLI logs the Python bot also
-# reads and writes ONLY under ~/.zcode/bot-kotlin (its own state, shadow
-# decisions, logs). The Python bot keeps sending — shadow mode: Kotlin
-# computes, Python still speaks (ADR-023).
+# deploy-daemon.nu — build + install the Kotlin daemon (zconn/spectator +
+# channel/live view + getUpdates poller) and its LaunchAgent. The daemon is
+# the LIVE bot since the 30/10 cutover; Python is retired. It reads the
+# fork's CLI logs and writes under ~/.zcode/bot-kotlin (ADR-023).
 #
 # Migrated from deploy-daemon.sh on 2026-11-02. Typed end to end; the
 # interpreter is pinned by the shebang (nu-nightly 0.116.2-nightly.28).
@@ -32,6 +31,7 @@ def main []: nothing -> nothing {
     ^/bin/cp -R $"($built)/." $"($dest)/"
 
     step $"LaunchAgent ($LABEL) \(KeepAlive: launchd is the dumb outer ring\)"
+    let started = (date now | format date "%s" | into int)
     bootstrap-agent $repo $LABEL
 
     step "verification: first heartbeat + armed state (deadline 15s)"
@@ -40,9 +40,16 @@ def main []: nothing -> nothing {
     mut ok = false
     mut waited = 0
     while ($waited < 15000) {
-        if (($hb | path type) != "" and ($zconn | path type) != "") {
-            $ok = true
-            break
+        # The heartbeat must be NEWER than this deploy: the files survive
+        # restarts, so mere existence false-passed a daemon that never
+        # booted (measured 2026-11-02). zconn.json is state, not a clock:
+        # it only has to exist.
+        if (($hb | path type) == "file") and (($zconn | path type) == "file") {
+            let hb_mtime = (^stat -f %m $hb | str trim | into int)
+            if $hb_mtime >= $started {
+                $ok = true
+                break
+            }
         }
         sleep 100ms
         $waited += 100
@@ -64,6 +71,6 @@ def main []: nothing -> nothing {
     if ($last | length) > 0 {
         log $"log tail: ($last | first)"
     }
-    print 'done. Shadow decisions land in ~/.zcode/bot-kotlin/shadow/zconn.jsonl as cuts happen;'
-    print 'the parity gate compares them with what the Python bot sends (ADR-023).'
+    print 'done. Live daemon armed: channel + getUpdates poller + send (daemon.json is the knob).'
+    print 'Health: ~/.zcode/bot-kotlin/state/hb-channel · hb-poller · hb-zconn-shadow; log: logs/daemon.jsonl.'
 }

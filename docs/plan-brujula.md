@@ -19,7 +19,7 @@
 - `agent-brain`: Postgres + Redpanda arriba, `test` + `bbLocal` + `detektAll` + eval 20/20 verdes. `serve` y brain-mcp todavía no instalados.
 - Nushell: los 13 `.sh` propios son `.nu` tipados; nightly `0.116.2-nightly.28` pineada por shebang; `nu-check --debug` limpio en los 20 archivos.
 - Deploy 2/11: autómata `--real` rc=0 (6/6), tag `damian-v3.16.2-20261102` sobre `bac786e5`, `verify-deploy.nu` PASS, Diff Ask 0.9.20 instalado, canal `hello_ok` caps=16, `hb-channel`/`hb-poller` y beacon sanos, Python sin LaunchAgents.
-- Caveat medido en la verificación: `/plan` con la app recién abierta y **sin task activa** devuelve `botStatus.context=null` y el canal falla con `internal: no bot context found`; el daemon cae al texto «¿el fork está deployado?», que es engañoso. Con conversación activa el contexto existe (el hot-fix loop lo usó el 31/10). Pendiente: distinguir «sin contexto» de «fork viejo» en ese mensaje.
+- Caveat medido en la verificación y **corregido en el hot-fix 2/11**: `/plan` con la app recién abierta y **sin task activa** devuelve `botStatus.context=null`; el daemon ahora responde «📭 No hay conversación activa — abrí una en ZCode o usá /tasks n» en vez de culpar al deploy. Con conversación activa el contexto existe (el hot-fix loop lo usó el 31/10). Los demás comandos que dependen del contexto (`/last`, `/compact`, `/context_window`, `/queue`, `/steer`, `/subagents`, `/stop` soft, `/diff`) también piden una conversación activa; `/tasks`, `/all_tasks`, `/quota`, `/help`, `/verbosity`, `/file` y `/nuclear` funcionan sin ella.
 
 **Fases**
 - U0 cerrado salvo kap 4.3 (sigue pendiente).
