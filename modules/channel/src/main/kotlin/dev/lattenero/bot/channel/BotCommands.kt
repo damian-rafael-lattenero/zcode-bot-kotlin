@@ -195,6 +195,7 @@ class BotCommands(
             "stop" -> stop(rest)
             "nuclear", "nuke" -> nuclear(rest)
             "quota" -> BotReply(quota())
+            "usage" -> BotReply(usage())
             "help", "start" -> BotReply(help())
             "subagents", "agents" -> subagents(rest)
             "plan" -> plan()
@@ -1519,6 +1520,30 @@ class BotCommands(
             !text.startsWith("⚠️ Quota failed")
 
     /**
+     * /usage — el consumo REAL de la conversación activa (the fork's
+     * taskUsage query: the agent usage db's own aggregate — the same source
+     * the desktop's panel reads; in the channel since B3a, so no
+     * fork-deploy excuse lives here). Python's /usage summed TODAY across
+     * sessions; the channel's query has NO time filter, so the card says
+     * «acumulado» and never invents a «hoy» — honest about what the number
+     * is (the B4 verdict: real data, shape pinned in UsageCommandTest). No
+     * bound conversation → the honest 📭; channel down → 📡.
+     */
+    @Suppress("ReturnCount") // one guard per query outcome — the commands' shared shape
+    private suspend fun usage(): String {
+        val ctx = contextAnswer() as? ContextAnswer.Ctx ?: return noConversationOrDown()
+        val taskId = ctx.value.activeTaskId
+            ?: return "📭 No active conversation — /tasks n picks one; its answers come back here."
+        val title = history.ctxTasks(SCOPE_FOR_PICK).firstOrNull { it.sid == taskId }
+            ?.title?.takeIf { it.isNotEmpty() } ?: taskId.takeLast(SID_TAIL)
+        return when (val answer = ops.query(ChannelQuery.TaskUsage(taskId, ctx.value.workspacePath))) {
+            is QueryAnswer.Ok -> renderUsage(answer.resultJson, title)
+            is QueryAnswer.Unavailable -> DEGRADED
+            is QueryAnswer.Failed -> "⚠️ Usage failed (${answer.code}): ${PyText.esc(answer.message ?: "?")}"
+        }
+    }
+
+    /**
      * /last — re-sends the active conversation's LAST assistant answer
      * (the missed one: a restart, a flood window, a scroll past). The
      * same taskSnapshot the final shower uses; the body rides raw like
@@ -2080,6 +2105,7 @@ class BotCommands(
             "stop" to "stops the active task's turn",
             "nuclear" to "emergency: stops EVERYTHING and resets the bot",
             "quota" to "coding plan credits",
+            "usage" to "token usage of the active conversation — real, cumulative",
             "subagents" to "the active subagents · «inactivos» shows today's ended",
             "verbosity" to "cuánto habla el feed en vivo — summary / normal / verbose",
             "help" to "all commands",
@@ -2175,6 +2201,14 @@ class BotCommands(
         /** No usedTokens at all: the conversation never reported usage — ask, don't invent. */
         internal const val CTX_WINDOW_NO_DATA =
             "⚠️ La conversación aún no reporta uso de contexto — mandá un mensaje y volvé a probar."
+
+        /** The taskUsage answer the daemon cannot parse — a broken host, said out loud. */
+        internal const val USAGE_UNPARSEABLE =
+            "⚠️ No pude leer la respuesta de uso (shape inesperado del host)"
+
+        /** A zero TOTAL is a fresh conversation's truth — no tokens spent yet. */
+        internal const val USAGE_EMPTY =
+            "📭 Aún sin uso registrado — cuando la conversación consuma tokens, el total aparece acá."
         private const val CTX_MODEL_UNKNOWN = "desconocido"
         private const val CTX_BAR_FULL = "▰"
         private const val CTX_BAR_EMPTY = "▱"
@@ -2352,6 +2386,51 @@ class BotCommands(
                 )
             }
             return lines.joinToString("\n")
+        }
+
+        /**
+         * taskUsage → the usage card (pure — /usage's body). The fork's REAL
+         * aggregate (the agent usage db — the desktop panel's own source),
+         * rendered honest about WHAT it is: acumulado de la conversación,
+         * never a «hoy» the query cannot know. Every token count climbs the
+         * owner's ladder ([tokenRaw] — the number law: 166603400 → «166.6M»,
+         * 850500 → «850.5K»); the request counts are NOT tokens — [fmtNum]'s
+         * grouping only. A missing field renders «?», never an invented
+         * zero; a zero TOTAL is a fresh conversation's truth (the 📭 line).
+         */
+        fun renderUsage(json: String, title: String): String {
+            val root = runCatching { Json.parseToJsonElement(json) as? JsonObject }.getOrNull()
+            val total = root?.long("totalTokens")?.takeIf { it >= 0 }
+            val lines = when {
+                root == null || total == null -> listOf(USAGE_UNPARSEABLE)
+
+                total == 0L -> listOf(
+                    "📈 <b>Uso de «${PyText.esc(title)}»</b>",
+                    USAGE_EMPTY,
+                )
+
+                else -> usageLines(root, total, title)
+            }
+            return lines.joinToString("\n")
+        }
+
+        /** The card's rows for a conversation WITH usage (the ladder's happy tier). */
+        private fun usageLines(root: JsonObject, total: Long, title: String): List<String> = listOf(
+            "📈 <b>Uso de «${PyText.esc(title)}»</b> — acumulado de la conversación",
+            "• input ${tokenRaw(root.long("inputTokens")?.toDouble())} · " +
+                "output ${tokenRaw(root.long("outputTokens")?.toDouble())} · " +
+                "reasoning ${tokenRaw(root.long("reasoningTokens")?.toDouble())}",
+            "• cache creación ${tokenRaw(root.long("cacheCreationTokens")?.toDouble())} · " +
+                "lectura ${tokenRaw(root.long("cacheReadTokens")?.toDouble())}",
+            usageTotalLine(root, total),
+        )
+
+        /** Python's bold total — requests through [fmtNum] (grouping only), tokens through [tokenRaw]. */
+        private fun usageTotalLine(root: JsonObject, total: Long): String {
+            val errors = root.long("modelErrorCount")?.takeIf { it > 0 }
+                ?.let { " · ${fmtNum(it.toDouble())} errores" } ?: ""
+            return "<b>Total: ${fmtNum(root.long("modelRequestCount")?.toDouble())} req · " +
+                "${tokenRaw(total.toDouble())} tokens</b>$errors"
         }
 
         /** A JSON number as Double (ints and fractions alike — credits can be 31.5). */
