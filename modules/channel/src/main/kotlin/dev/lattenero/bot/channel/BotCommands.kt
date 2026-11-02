@@ -21,6 +21,18 @@ private val logger = KotlinLogging.logger {}
  */
 data class QueuedText(val text: String, val messageId: String, val receivedAt: Long)
 
+/**
+ * A collapsed CoT block's tap (the `cb:<id>` buttons, 2/11): expand/fold
+ * IN PLACE on the block's own message. The PUBLISHER owns the message
+ * ids and the block texts (it spoke the collapsed messages and keeps the
+ * registry) — the commands only route the tap. The answer is the toast's
+ * text; null = the edit itself is the feedback (no new message lands in
+ * the chat — the card's always-last law keeps its order).
+ */
+fun interface CoTTaps {
+    suspend fun toggle(registryId: Int): String?
+}
+
 /** The dispatcher's data source — the client's queries behind one interface (tests fake it). */
 interface ChannelOps {
     suspend fun query(query: ChannelQuery): QueryAnswer
@@ -134,6 +146,12 @@ class BotCommands(
      * tests inject fakes.
      */
     private val quotaDirect: (suspend () -> String?)? = null,
+    /**
+     * The collapsed CoT blocks' taps (the cb: buttons): the publisher's
+     * registry — expand/fold IN PLACE on the block's own message. Null
+     * (unwired) = a stale cb: tap answers the honest retired note.
+     */
+    private val blockTaps: CoTTaps? = null,
 ) {
 
     /** /nuclear's single-flight companion: the in-process half (the wiring adds the cross-restart mtime gate). */
@@ -224,13 +242,19 @@ class BotCommands(
         data.startsWith("pl:") || data.startsWith("pm:") || data.startsWith("pe:") || data == "pd:" ->
             planTap(data)
 
-        // The OLD CoT block tap, RETIRED by the transcript feed (each sealed
-        // block IS its own Telegram message now — /verbosity ajusta el
-        // nivel): a stale button of a pre-deploy card answers honestly and
-        // dies with the card's next edit (the markup replace clears it).
+        // LA EXPANSIÓN EN EL LUGAR (2/11): the collapsed CoT block's tap —
+        // the tap toggles the block WHOLE on its OWN message (expand, then
+        // fold). The registry lives in the publisher ([CoTTaps]); an
+        // unwired cb: tap answers the honest note. The toast text (when
+        // non-null) is the miss — a working tap edits silently.
         data.startsWith("cb:") -> {
-            logger.info { "callback cb: RETIRED — the transcript feed carries the blocks as messages" }
-            BotReply("📖 Los bloques CoT ahora viajan como mensajes propios — /verbosity ajusta el nivel.")
+            val id = data.removePrefix("cb:").toIntOrNull()
+            if (id == null || blockTaps == null) {
+                logger.info { "callback cb: UNWIRED — no CoT registry behind this button" }
+                BotReply("📖 Ese botón quedó de otro turno — los bloques CoT se abren en sus propios mensajes.")
+            } else {
+                blockTaps.toggle(id)?.let { BotReply(it) }
+            }
         }
 
         else -> {
@@ -356,6 +380,11 @@ class BotCommands(
             if (consumed) return reply
             // the question died while armed: the text rides the normal route
         }
+        // LA ORDEN ARMADA PRECEDE AL ROUTER (2/11: el park de F17 se comía
+        // sus textos y la orden nunca volaba): un tiro DIRECTO a una sesión
+        // nombrada — el fork lo entrega en ESA sesión sin tocar la ocupada,
+        // así que ni el busy-park ni los refusals le aplican.
+        armedOrder?.let { return fireArmedOrder(it, text, updateId) }
         val facts = routeFacts()
         val plan = planRoute(facts, newIntent)
         logger.info {
@@ -391,6 +420,22 @@ class BotCommands(
         is RoutePlan.Enqueue -> "(${reason})"
         is RoutePlan.BusyRebind -> "(wanted «${wantedTitle ?: wantedSid}»)"
         is RoutePlan.Refuse -> ""
+    }
+
+    /** La orden armada VUELA: directo a la sesión nombrada, el router ni se entera. */
+    private suspend fun fireArmedOrder(order: ArmedOrder, text: String, updateId: Long): BotReply {
+        logger.info {
+            "route: ORDER to ${order.sessionId} («${order.title}»): ${text.take(ORDER_LOG_PREVIEW)}"
+        }
+        return when (
+            ops.sendOrder(text, messageId = "tg-$updateId-ord", receivedAt = clock(), taskId = order.sessionId)
+        ) {
+            InboundReceipt.FIRED -> BotReply(
+                "⚔️ Orden entregada a «${PyText.esc(order.title)}» — su respuesta llega en la carta attachada.",
+            )
+
+            InboundReceipt.UNAVAILABLE -> BotReply(RouteTexts.CHANNEL_DOWN)
+        }
     }
 
     /**
@@ -493,21 +538,7 @@ class BotCommands(
         // write an order): one armed shot — the next free text goes DIRECT to
         // that session (the fork's inbound taskId), then the arm disarms. The
         // reply lands on the attached card's own stream.
-        armedOrder?.let { order ->
-            armedOrder = null
-            logger.info {
-                "route: ORDER to ${order.sessionId} («${order.title}»): ${text.take(ORDER_LOG_PREVIEW)}"
-            }
-            return when (
-                ops.sendOrder(text, messageId = "tg-$updateId-ord", receivedAt = clock(), taskId = order.sessionId)
-            ) {
-                InboundReceipt.FIRED -> BotReply(
-                    "⚔️ Orden entregada a «${PyText.esc(order.title)}» — su respuesta llega en la carta attachada.",
-                )
-
-                InboundReceipt.UNAVAILABLE -> BotReply(RouteTexts.CHANNEL_DOWN)
-            }
-        }
+        armedOrder?.let { return fireArmedOrder(it, text, updateId) }
         return when (ops.sendInbound(text, messageId = "tg-$updateId", receivedAt = clock())) {
             InboundReceipt.FIRED -> {
                 logger.info { "route: text FIRED at ${plan.sid} (${plan.reason})" }
@@ -2186,15 +2217,24 @@ class BotCommands(
         private fun JsonObject.num(key: String): Double? =
             (this[key] as? JsonPrimitive)?.content?.toDoubleOrNull()
 
+        /** Miles con coma (el dueño 2/11: «300,000.4» — ínfimo pero ayuda a leer). */
+        private fun group(digits: String): String {
+            val dot = digits.indexOf('.')
+            val head = if (dot >= 0) digits.substring(0, dot) else digits
+            val tail = if (dot >= 0) digits.substring(dot) else ""
+            val grouped = head.reversed().chunked(3).joinToString(",").reversed()
+            return grouped + tail
+        }
+
         /** Python's fmt_num: K only from 10K up, no decimals on small counts. */
         private fun fmtNum(n: Double?): String = when {
             n == null -> "?"
             n >= NUM_K_FROM -> {
                 val text = String.format(Locale.ROOT, "%.1f", n / NUM_K_DIVISOR)
-                "${text.replace(".0", "")}K"
+                "${group(text.replace(".0", ""))}K"
             }
 
-            else -> n.toInt().toString()
+            else -> group(n.toInt().toString())
         }
 
         private const val NUM_K_FROM = 10_000.0
