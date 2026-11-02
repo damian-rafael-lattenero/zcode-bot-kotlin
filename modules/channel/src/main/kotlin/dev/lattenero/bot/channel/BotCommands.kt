@@ -2295,8 +2295,8 @@ class BotCommands(
         /**
          * The Start Plan's buckets (30/10's owner order: «necesito saber
          * cuántos tokens me quedan en las próximas 5 horas y en la semana» —
-         * the 2/11 law v3: K-counts climb to M once they cover 1M tokens —
-         * «300,000K → 300M»).
+         * the 2/11 law v4: RAW token counts climb the ladder —
+         * «300,000,000 → 300,000K → 300M»).
          * One line per REAL balance bucket: used/total through the owner's
          * ladder with the USED percent and its own reset — the fork's
          * builder carries the
@@ -2316,10 +2316,10 @@ class BotCommands(
                 val label = lim.str("period") ?: lim.str("meter") ?: "cuota"
                 val body = when {
                     total != null && total > 0 ->
-                        "${tokenK(used)}/${tokenK(total)} usado " +
+                        "${tokenRaw(used)}/${tokenRaw(total)} usado " +
                             "${((used / total) * 100).toInt()}%"
 
-                    else -> "${tokenK(used)} usados"
+                    else -> "${tokenRaw(used)} usados"
                 }
                 val reset = lim.long("nextResetTime")?.let { " · resets ${fmtReset(it)}" } ?: ""
                 val pctAlert = if (total != null && total > 0 && (used / total) >= 0.75) " ⚠️" else ""
@@ -2367,39 +2367,43 @@ class BotCommands(
             return grouped + tail
         }
 
-        /** The owner's number law, v3 (2/11 — three iterations in one hour):
-         *  RAW numbers wear a comma every 3 digits and nothing else; a
-         *  K-COUNT of tokens (the Start Plan pools) climbs to MILLIONS with
-         *  2 decimals once it covers 1M tokens — «300,000K → 300M»,
-         *  «550678.888K → 550.68M» — sistema americano (dot = decimals,
-         *  comma = thousands). The v1 mistake: Python's fmt_num collapsed
-         *  300,000K into «300K» — a thousand times fewer. */
+        /** The owner's number law (2/11, over three iterations): RAW numbers
+         *  wear a comma every 3 digits and nothing else — the unit never
+         *  moves, Python's fmt_num K-conversion stays dead. The token pools
+         *  have their own ladder: [tokenRaw]. */
         private fun fmtNum(n: Double?): String = when {
             n == null -> "?"
             else -> group(plain(n))
         }
 
-        /** A K-count of tokens through the owner's ladder: ≥ 1M tokens
-         *  (1000 K) reads as millions with 2 decimals, trailing zeros off
-         *  («300M», «166.6M», «4,000M»); below stays the honest K («950K»). */
-        private fun tokenK(n: Double?): String = when {
+        /** A RAW token count through the owner's ladder (2/11, v4 — the API
+         *  numbers are RAW: «300,000,000 → 300,000K → 300M»): ≥ 1M reads as
+         *  MILLIONS with 2 decimals, trailing zeros off («300M», «166.6M»,
+         *  «4,000M»); ≥ 1K reads as K («850.5K»); below, the plain number.
+         *  The v3 mistake: the input is NOT a K-count — dividing it by 1000
+         *  again said a thousand times MORE. */
+        private fun tokenRaw(n: Double?): String = when {
             n == null -> "?"
-            n >= K_PER_M -> group(
-                BigDecimal((n / K_PER_M).toString())
-                    .setScale(M_DECIMALS, RoundingMode.HALF_UP)
-                    .stripTrailingZeros()
-                    .toPlainString(),
-            ) + "M"
-
-            else -> group(plain(n)) + "K"
+            n >= RAW_PER_M -> group(scaled(n, RAW_PER_M)) + "M"
+            n >= RAW_PER_K -> group(scaled(n, RAW_PER_K)) + "K"
+            else -> group(plain(n))
         }
+
+        /** The quotient through the owner's rounding: 2 decimals, trailing
+         *  zeros off («300», «166.6», «550.68»). */
+        private fun scaled(n: Double, divisor: Double): String =
+            BigDecimal((n / divisor).toString())
+                .setScale(M_DECIMALS, RoundingMode.HALF_UP)
+                .stripTrailingZeros()
+                .toPlainString()
 
         /** The Double as a short plain string — «300000», «166603.4» — never
          *  the scientific form Double.toString sprouts past 1e7. */
         private fun plain(n: Double): String =
             BigDecimal(n.toString()).stripTrailingZeros().toPlainString()
 
-        private const val K_PER_M = 1_000.0
+        private const val RAW_PER_M = 1_000_000.0
+        private const val RAW_PER_K = 1_000.0
         private const val M_DECIMALS = 2
 
         /** Python's datetime_dt: HH:MM today, dd/MM HH:MM otherwise (local zone). */
