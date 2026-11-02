@@ -63,6 +63,9 @@ object Keyboards {
                     add(
                         buildJsonArray {
                             add(button(subagentLabel(lane), "sa:${lane.toolId.takeLast(LANE_TAIL)}"))
+                            // the ⏹️ stops the child's generation (sst:) —
+                            // only an OPEN lane earns it
+                            if (lane.status == null) add(button(STOP_BUTTON, "sst:${lane.toolId.takeLast(LANE_TAIL)}"))
                         },
                     )
                 }
@@ -73,9 +76,12 @@ object Keyboards {
                     add(
                         buildJsonArray {
                             val label = r.title.takeIf { it.isNotBlank() }?.take(TITLE_CAP) ?: r.sid.takeLast(LANE_TAIL)
-                            val staleMin = (nowMs - r.lastMs) / 60000
-                            val mark = if (r.lastMs <= 0 || staleMin < SUB_STALE_MIN) "▶️" else "⏸️ hace ${staleMin}m"
-                            add(button("$SUBAGENT_MARK $label $mark", "sa:${r.sid.takeLast(LANE_TAIL)}"))
+                            val saData = "sa:${r.sid.takeLast(LANE_TAIL)}"
+                            add(button("$SUBAGENT_MARK $label ${dbRunningMark(r, nowMs)}", saData))
+                            // the ⏹️ rides ONLY a fresh row — a ghost's stop is decoration
+                            if (dbRunningFresh(r, nowMs)) {
+                                add(button(STOP_BUTTON, "sst:${r.sid.takeLast(LANE_TAIL)}"))
+                            }
                         },
                     )
                 }
@@ -93,6 +99,19 @@ object Keyboards {
         val title = t.title.takeIf { it.isNotEmpty() } ?: t.sid.takeLast(BotCommands.SID_TAIL)
         return "$marks $n · ${title.take(TITLE_CAP)}"
     }
+
+    /**
+     * A store row's ALIVE verdict — the ONE freshness law shared by the
+     * ▶️/⏸️ mark, the ⏹️ button's presence and the stop resolution's own
+     * gate (SubagentStop): a row untouched this long IS the ghost it
+     * renders as, and nothing alive ever stops it.
+     */
+    internal fun dbRunningFresh(r: RunningSubagent, nowMs: Long): Boolean =
+        r.lastMs <= 0 || (nowMs - r.lastMs) / MINUTE_MS < SUB_STALE_MIN
+
+    /** The same law as the mark: ▶️ fresh, ⏸️ hace Xm the ghost. */
+    internal fun dbRunningMark(r: RunningSubagent, nowMs: Long): String =
+        if (dbRunningFresh(r, nowMs)) "▶️" else "⏸️ hace ${(nowMs - r.lastMs) / MINUTE_MS}m"
 
     /** The blue lane: ▶️ while open, ⏹️ once closed (the owner's exact marks). */
     internal fun subagentLabel(lane: ToolLive): String {
@@ -115,10 +134,11 @@ object Keyboards {
     /**
      * /subagents' ACTIVE view keyboard: one row per open dispatch lane —
      * the 🔵 `sa:` tap attaches that subagent's stream (the session attach
-     * when the fork names it, lane-scope otherwise) and the ✍️ `so:` tap
-     * ARMS the next free text as an ORDER direct to it — then the
-     * view-switch row. The «inactivos» view stays text-only: ended
-     * sessions have no stream to attach to, no ear to hear an order.
+     * when the fork names it, lane-scope otherwise), the ✍️ `so:` tap
+     * ARMS the next free text as an ORDER direct to it, and the ⏹️ `sst:`
+     * tap stops the child's generation live — then the view-switch row.
+     * The «inactivos» view stays text-only: ended sessions have no stream
+     * to attach to, no ear to hear an order, nothing left to stop.
      */
     fun subagentsKeyboard(
         lanes: List<ToolLive>,
@@ -133,6 +153,9 @@ object Keyboards {
                         add(button(subagentLabel(lane), "sa:${lane.toolId.takeLast(LANE_TAIL)}"))
                         // the ✍️ arms the next free text as an ORDER to that subagent
                         add(button("✍️", "so:${lane.toolId.takeLast(LANE_TAIL)}"))
+                        // the ⏹️ stops the child's generation live (sst:) —
+                        // only an OPEN lane earns it
+                        if (lane.status == null) add(button(STOP_BUTTON, "sst:${lane.toolId.takeLast(LANE_TAIL)}"))
                     },
                 )
             }
@@ -142,12 +165,15 @@ object Keyboards {
                 add(
                     buildJsonArray {
                         val label = r.title.takeIf { it.isNotBlank() }?.take(TITLE_CAP) ?: r.sid.takeLast(LANE_TAIL)
+                        val saData = "sa:${r.sid.takeLast(LANE_TAIL)}"
                         // the store never closes a KILLED agent's row: its
                         // frozen lastMs is the ghost marker — rendered honest
-                        val staleMin = (nowMs - r.lastMs) / 60000
-                        val mark = if (r.lastMs <= 0 || staleMin < SUB_STALE_MIN) "▶️" else "⏸️ hace ${staleMin}m"
-                        add(button("$SUBAGENT_MARK $label $mark", "sa:${r.sid.takeLast(LANE_TAIL)}"))
+                        add(button("$SUBAGENT_MARK $label ${dbRunningMark(r, nowMs)}", saData))
                         add(button("✍️", "so:${r.sid.takeLast(LANE_TAIL)}"))
+                        // the ⏹️ rides ONLY a fresh row — a ghost's stop is decoration
+                        if (dbRunningFresh(r, nowMs)) {
+                            add(button(STOP_BUTTON, "sst:${r.sid.takeLast(LANE_TAIL)}"))
+                        }
                     },
                 )
             }
@@ -317,10 +343,14 @@ object Keyboards {
     private const val MARK_ACTIVE = "🎯"
     private const val MARK_RUNNING_LANE = "▶️"
     private const val MARK_STOPPED_LANE = "⏹️"
+
+    /** The stop tap's own button — the ⏹️ beside the ▶️/✍️, the action it names. */
+    private const val STOP_BUTTON = "⏹️"
     private const val TITLE_CAP = 34
 
     /** A store row untouched this long renders ⏸️ (a killed agent's ghost), not ▶️. */
-    private const val SUB_STALE_MIN = 15L
+    internal const val SUB_STALE_MIN = 15L
+    private const val MINUTE_MS = 60_000L
     internal const val LANE_TAIL = 16
     private const val CALLBACK_BYTES = 64
     private const val CALLBACK_TEXT_CAP = 64
