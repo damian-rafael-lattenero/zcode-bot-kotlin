@@ -1327,6 +1327,7 @@ class BotCommands(
      * the channel cannot answer (not_configured / failed / down), 3) the
      * channel's own honest word last.
      */
+    @Suppress("ReturnCount") // one return per rung — the ladder's own shape
     private suspend fun quota(): String {
         val taskId = (contextAnswer() as? ContextAnswer.Ctx)?.value?.activeTaskId
         val channel = when (val answer = ops.query(ChannelQuery.Quota(taskId = taskId))) {
