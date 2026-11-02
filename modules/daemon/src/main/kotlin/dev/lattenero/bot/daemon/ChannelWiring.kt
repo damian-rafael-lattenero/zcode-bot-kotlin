@@ -15,6 +15,7 @@ import dev.lattenero.bot.channel.LiveOrphanStore
 import dev.lattenero.bot.channel.LivePublisher
 import dev.lattenero.bot.channel.LiveTelegram
 import dev.lattenero.bot.channel.Poller
+import dev.lattenero.bot.channel.QuotaDirect
 import dev.lattenero.bot.channel.QueryAnswer
 import dev.lattenero.bot.channel.ServerFrame
 import dev.lattenero.bot.channel.TasksHistory
@@ -41,6 +42,15 @@ import dev.lattenero.bot.transport.LastPh
 import dev.lattenero.bot.transport.TgApi
 import dev.lattenero.bot.transport.TgConfig
 import io.github.oshai.kotlinlogging.KotlinLogging
+import io.ktor.client.HttpClient
+import io.ktor.client.engine.HttpClientEngineFactory
+import io.ktor.client.engine.cio.CIO
+import io.ktor.client.plugins.HttpTimeout
+import io.ktor.client.request.get
+import io.ktor.client.request.header
+import io.ktor.client.statement.bodyAsText
+import io.ktor.http.HttpHeaders
+import io.ktor.http.isSuccess
 import kotlinx.coroutines.delay
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -49,6 +59,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.put
 import java.io.File
+import java.io.IOException
 import kotlin.time.Duration.Companion.seconds
 
 private val logger = KotlinLogging.logger {}
@@ -78,6 +89,67 @@ internal suspend fun feedAndResync(hub: LiveHub, frame: ServerFrame.StreamEvent,
         hub.resync(frame.taskId)
     }
     hub.apply(frame, nowMs, SEQUENCE_LINE_DIFFER)
+}
+
+/** /quota's direct leg budget: ONE attempt, short — the channel fallback is the retry. */
+private val ZAI_QUOTA_TIMEOUT = 5.seconds
+
+/**
+ * /quota's DIRECT rung, wired (incident 30/10): the z.ai monitor endpoint
+ * with the coding-plan key from bot-provider.json (Python's
+ * _quota_api_key path — config.providerConfigRules.providerRules[] →
+ * config.access, type zhipu-coding-plan-api-key). Every failure — no
+ * file, no key, dead network, bad shape — is QuotaDirect's honest null
+ * and the commands' ladder falls through to the channel path; a THROWN
+ * one is caught there too. The key never logs: it rides the fetch's
+ * header only.
+ */
+private fun quotaDirectRung(cfg: DaemonConfig): suspend () -> String? = {
+    QuotaDirect.report(
+        providerJson = {
+            runCatching {
+                File(cfg.baseDir, "hooks/bot-provider.json")
+                    .takeIf { it.isFile }?.readText()
+            }.getOrNull()
+        },
+        fetch = { url, token -> zaiQuotaGet(url, token) },
+    )
+}
+
+/**
+ * /quota's direct leg (incident 30/10): ONE Bearer GET against z.ai's
+ * monitor endpoint — TgApi's own Ktor shape (CIO engine, explicit status,
+ * `expectSuccess = false`), a 5 s budget, and the REDACTION LAW: the key
+ * rides a request HEADER (never a URL), and the thrown messages carry
+ * neither URL, body nor headers — nothing that could log it. The client
+ * is SCOPED: the rare /quota pays its own setup and nothing outlives the
+ * call (no daemon-lifecycle plumbing for a command typed by hand).
+ * Failures THROW — [QuotaDirect.report] is the honest-null boundary.
+ */
+@Suppress("TooGenericExceptionCaught") // every transport failure must pass the redaction law — none flies raw
+internal suspend fun zaiQuotaGet(
+    url: String,
+    token: String,
+    engine: HttpClientEngineFactory<*> = CIO,
+): String {
+    val client = HttpClient(engine) {
+        expectSuccess = false
+        install(HttpTimeout) { requestTimeoutMillis = ZAI_QUOTA_TIMEOUT.inWholeMilliseconds }
+    }
+    return client.use {
+        val resp = try {
+            it.get(url) {
+                header(HttpHeaders.Authorization, "Bearer $token")
+                header(HttpHeaders.Accept, "application/json")
+            }
+        } catch (e: Exception) {
+            // the exception's own text may embed anything — the class name
+            // is the only witness the log gets (TgApi's law, header-flavored)
+            throw IOException("z.ai quota fetch failed: ${e::class.simpleName}", e)
+        }
+        if (!resp.status.isSuccess()) throw IOException("z.ai quota HTTP ${resp.status.value}")
+        resp.bodyAsText()
+    }
 }
 
 /**
@@ -436,6 +508,7 @@ private fun buildPoller(
         defaultWorkspacePath = File(File(cfg.baseDir, "workspace"), "default").absolutePath,
         verbosity = verbosity,
         board = board,
+        quotaDirect = quotaDirectRung(cfg),
     )
     return Poller(
         api = liveApi,
