@@ -203,6 +203,7 @@ class BotCommands(
             "context_window" -> contextWindow()
             "queue" -> queue()
             "retry" -> retry(updateId)
+            "run" -> runCmd(rest, updateId)
             "steer" -> steer(rest)
             "verbosity" -> verbosityCmd(rest)
             else -> BotReply(UNKNOWN)
@@ -692,6 +693,98 @@ class BotCommands(
             ?: "?"
         return "🔁 Re-lanzado a «${PyText.esc(title)}» el prompt guardado ${fmtEndClock(ts)}."
     }
+
+    /**
+     * /run <prompt> — Python's _cmd_run (handlers_tasks.py:343): a FRESH
+     * conversation and the prompt in it, ONE shot. The channel-side
+     * guarantee (B5's make-or-break, closed with existing caps — no
+     * createTask needed): /new (the fork's own bot-chat command, it rides
+     * inbound) moves the bot's context to a draft, botStatus CONFIRMS the
+     * draft (activeTaskId null — the same poll the bind uses, the server
+     * does not serialize inbounds), and the prompt flies with the create
+     * intent armed so the router NEVER freshBinds to the app's open
+     * conversation. Every refusal leaves that open conversation UNTOUCHED
+     * (the 2/11 clobber law); the timeout's word is «nothing fired».
+     * Python spawned silently (None) — here the fired line names the new
+     * conversation (the live view streams it) and F22 saves the prompt
+     * for /retry, strictly better.
+     */
+    @Suppress("ReturnCount") // one guard per honest state: usage, armed order, the fresh-draft ladder
+    private suspend fun runCmd(rest: String, updateId: Long): BotReply {
+        val prompt = rest.trim()
+        if (prompt.isEmpty()) return BotReply(RUN_USAGE)
+        armedOrder?.let { order ->
+            logger.info { "run: REFUSED — an armed order to ${order.sessionId} is live; the shot stays the owner's" }
+            return BotReply(
+                "✍️ Tenés una orden armada para «${PyText.esc(order.title)}» — mandala primero; " +
+                    "/run no se la roba y después lo corré de nuevo.",
+            )
+        }
+        return when (val fresh = prepareFreshDraft(updateId)) {
+            is FreshDraft.Refused -> BotReply(fresh.reason)
+
+            is FreshDraft.Ready -> {
+                newIntent = true // ONE text: this prompt CREATES, the next line routes as always
+                try {
+                    routeCore(prompt, updateId) ?: BotReply(runFiredLine(fresh.workspacePath))
+                } finally {
+                    newIntent = false // spent (or lost with a refusal) — never leaks to the next line
+                }
+            }
+        }
+    }
+
+    /** /run's fresh-draft ladder: READY (a CONFIRMED draft) or the honest refusal — never a maybe. */
+    private sealed interface FreshDraft {
+        /** The context IS a draft (activeTaskId null): the next text CREATES — the guarantee holds. */
+        data class Ready(val workspacePath: String) : FreshDraft
+
+        /** The refusal's whole text — the open conversation was never touched. */
+        data class Refused(val reason: String) : FreshDraft
+    }
+
+    /**
+     * THE NEWNESS GUARANTEE, step by step: a draft context is confirmed
+     * BEFORE the prompt exists on any wire. Already a draft → ready (its
+     * first text creates). Bound → the AWAITED /new (the fork's own
+     * command; the taskRunning refusal is the busy verdict) and then the
+     * botStatus poll ([BIND_CONFIRM_TRIES]' window) — a draft the server
+     * never admitted is a refusal, never a prompt into the old
+     * conversation.
+     */
+    @Suppress("ReturnCount") // one guard per honest state on the way to the confirmed draft
+    private suspend fun prepareFreshDraft(updateId: Long): FreshDraft {
+        val ctx = contextAnswer()
+        if (ctx is ContextAnswer.Degraded) return FreshDraft.Refused(DEGRADED)
+        if (ctx !is ContextAnswer.Ctx) return FreshDraft.Refused(RUN_NO_CONTEXT)
+        val ws = ctx.value.workspacePath
+        if (ctx.value.activeTaskId == null) return FreshDraft.Ready(ws)
+        logger.info { "run: bound to ${ctx.value.activeTaskId} — /new first, the prompt waits for the confirmed draft" }
+        val sent = ops.sendInboundAwait("/new", "tg-$updateId-new", clock())
+        if (sent is InboundAnswer.Unavailable) return FreshDraft.Refused(RouteTexts.CHANNEL_DOWN)
+        val replies = (sent as? InboundAnswer.Answered)?.replies.orEmpty()
+        replies.firstOrNull { TASK_RUNNING_MARKER in it }?.let {
+            logger.warn { "run: /new REFUSED (taskRunning) — the open conversation stays untouched" }
+            return FreshDraft.Refused(RUN_BUSY)
+        }
+        repeat(BIND_CONFIRM_TRIES) {
+            delay(BIND_CONFIRM_EVERY_MS)
+            if ((contextAnswer() as? ContextAnswer.Ctx)?.value?.activeTaskId == null) {
+                logger.info { "run: draft CONFIRMED (botStatus poll) — the prompt may fly" }
+                return FreshDraft.Ready(ws)
+            }
+        }
+        logger.warn {
+            "run: /new never confirmed a draft in ${BIND_CONFIRM_TRIES * BIND_CONFIRM_EVERY_MS}ms — " +
+                "refusing, NOTHING fired"
+        }
+        return FreshDraft.Refused(RUN_NOT_FRESH)
+    }
+
+    /** /run's confirm: the new conversation's project + the untouched-open law. */
+    private fun runFiredLine(workspacePath: String): String =
+        "🚀 /run: conversación NUEVA en «${PyText.esc(workspacePath.substringAfterLast('/'))}» — " +
+            "el prompt ya entró ahí (la que tenías abierta no se tocó)."
 
     /**
      * The router's frozen inputs, each one named in the log. The open
@@ -2023,6 +2116,26 @@ class BotCommands(
             "🤔 Nada para relanzar — no hay prompt guardado. " +
                 "Todo texto que entra a una conversación queda guardado y /retry lo vuelve a lanzar."
 
+        /** /run's usage (Python's line; the project tag honestly retired — /tasks new's law). */
+        internal const val RUN_USAGE =
+            "⚠️ /run <prompt> — abre una conversación NUEVA en el proyecto activo y manda el prompt. " +
+                "(Cambiar de proyecto desde el phone es el próximo hot-fix.)"
+
+        /** /run with no bot context at all: nothing to spawn from (the fork's inbound needs the context). */
+        internal const val RUN_NO_CONTEXT =
+            "📭 No hay contexto del bot en la app — /run no puede abrir nada. " +
+                "Mandá /tasks y tocá una fila primero."
+
+        /** /run with the active turn running: the /new was gated — the open conversation is NOT touched. */
+        internal const val RUN_BUSY =
+            "🔄 Hay un turno corriendo y el /new no entró — /run no toca esa conversación. " +
+                "/stop primero o esperá a que termine."
+
+        /** /run when the draft never confirmed: the honest gap — nothing fired, try again. */
+        internal const val RUN_NOT_FRESH =
+            "⚠️ No pude garantizar una conversación nueva (el /new no aterrizó) — NADA voló. " +
+                "La conversación abierta está intacta; probá de nuevo."
+
         /** The botsService's own refusal replies, matched by their stable markers (en-US). */
         const val TASK_RUNNING_MARKER = "still running"
         const val TASK_MISSING_MARKER = "Task not found"
@@ -2076,6 +2189,7 @@ class BotCommands(
             "compact" to "shrinks the active conversation's context",
             "context_window" to "context window used — tokens, model window and percent",
             "queue" to "the parked texts — launch or discard",
+            "run" to "opens a NEW conversation in the active project and sends the prompt — /run <prompt>",
             "steer" to "steers the RUNNING turn — the text enters the live turn",
             "stop" to "stops the active task's turn",
             "nuclear" to "emergency: stops EVERYTHING and resets the bot",
@@ -2093,7 +2207,7 @@ class BotCommands(
                 "",
                 "Anything else is TEXT: it goes to the ACTIVE conversation (live mode) " +
                     "and the live view shows every thought, tool and line as it happens. " +
-                    "Free text never opens a new one — /tasks new does.",
+                    "Free text never opens a new one — /tasks new or /run <prompt> do.",
             )).joinToString("\n")
 
         /**
