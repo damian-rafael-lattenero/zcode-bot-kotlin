@@ -14,9 +14,13 @@
   <key>Label</key><string>com.zcode.deploy-fork</string>
   <key>ProgramArguments</key>
   <array>
-    <string>/Users/lattenero/.local/bin/nu-nightly</string>
-    <string>/Users/lattenero/Projects/zcode-bot-kotlin/scripts/deploy-fork-and-retire.nu</string>
-    <string>--real</string>
+    <!-- 2/11: launchd NO puede spawnear el binario nu-nightly directo
+         (OS_REASON_CODESIGNING — ad-hoc linker-signed + xattr provenance;
+         desde shell anda, desde launchd no). El wrapper zsh (firmado por
+         Apple) lo exec como hijo y pasa el gate. -->
+    <string>/bin/zsh</string>
+    <string>-c</string>
+    <string>exec /Users/lattenero/.local/bin/nu-nightly /Users/lattenero/Projects/zcode-bot-kotlin/scripts/deploy-fork-and-retire.nu --real</string>
   </array>
   <key>StandardOutPath</key><string>/tmp/deploy-fork.log</string>
   <key>StandardErrorPath</key><string>/tmp/deploy-fork.log</string>
