@@ -105,11 +105,7 @@ class Sender(
             // PAYLOAD (un 4xx — el HTML crudo de /steer): un 429 (throttle,
             // el mensaje está bien), la red y los timeouts son PARKED — el
             // cap de veneno del drain jamás quema attempts de una outage.
-            if (e is TgHttpException && e.code != null && e.code in 400..499 && e.code != 429) {
-                SendResult.Rejected
-            } else {
-                SendResult.Parked
-            }
+            if (payloadRejection(e)) SendResult.Rejected else SendResult.Parked
         }
     }
 
@@ -179,8 +175,21 @@ class Sender(
         return ok
     }
 
+    /**
+     * Telegram understood the request and rejected the PAYLOAD: any 4xx
+     * except 429 (the throttle is not the message's fault). The drain's
+     * poison cap counts only these.
+     */
+    private fun payloadRejection(e: Throwable): Boolean {
+        val code = (e as? TgHttpException)?.code
+        return code != null && code in REJECTION_MIN..REJECTION_MAX && code != THROTTLE
+    }
+
     private companion object {
         const val ATTEMPTS = 3
+        private const val REJECTION_MIN = 400
+        private const val REJECTION_MAX = 499
+        private const val THROTTLE = 429
 
         /**
          * The poison cap: one Telegram-rejected-forever message dies after
