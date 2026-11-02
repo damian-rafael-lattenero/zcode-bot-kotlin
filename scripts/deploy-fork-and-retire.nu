@@ -1,8 +1,7 @@
 #!/Users/lattenero/.local/bin/nu-nightly
 # deploy-fork-and-retire.nu — el autómata one-shot del cutover, en Nushell
-# TIPADO (port del deploy-fork-and-retire.sh, que queda como fallback congelado:
-# el canónico es este .nu; el .sh es el fallback de emergencia — runtime
-# garantizado en cualquier bash).
+# TIPADO (port del deploy-fork-and-retire.sh original, borrado el 2026-11-02
+# tras demostrar paridad: el canónico es este .nu y no queda fallback bash).
 #
 # La prueba conceptual: TODO el script queda tipado con `type` de nu 0.116 —
 # los errores de tipo son de PARSER (nu::parser::type_mismatch con span exacto),
@@ -24,16 +23,16 @@
 #
 # Fases (cada una anunciada por Telegram en --real):
 #   0 sanity   fork en origin/damian (git fetch + HEAD local == origin/damian),
-#              daemon del bot cargado (launchctl), retire-python.sh presente.
+#              daemon del bot cargado (launchctl), retire-python.nu presente.
 #   1 quit     osascript graceful (≤30 s) → ÚLTIMO RECURSO: kill de los pids →
 #              hasta 120 s esperando cero proceso.
-#   2 build    cd ~/Projects/ZCode && scripts/build-install.sh --yes (swap de
+#   2 build    cd ~/Projects/ZCode && scripts/build-install.nu --yes (swap de
 #              /Applications/ZCode.app; ese script REABRE el app y manda su
 #              propio anuncio «Fork instalado» — esperado, no duplicado).
 #   3 reopen   barrido de socket/token huérfanos + open -a ZCode si hiciera
 #              falta → poll ≤90 s (c/2 s) al socket Y al token.
-#   4 verify   scripts/verify-deploy.sh + smoke hello→hello_ok del canal.
-#   5 retire   scripts/retire-python.sh (solo si verify OK y retire=on).
+#   4 verify   scripts/verify-deploy.nu + smoke hello→hello_ok del canal.
+#   5 retire   scripts/retire-python.nu (solo si verify OK y retire=on).
 #   6 final    «Kotlin bot 100% — Python retirado» o el estado real.
 #
 # El estado fluye como VALOR tipado (RunState): cada fase recibe el estado y
@@ -248,13 +247,13 @@ def phase0-sanity [st: RunState]: nothing -> PhaseResult {
         log $st $"✗ ($note)"
         return {state: $st, outcome: {ok: false, note: $note}}
     }
-    if not (is-exec ($st.fork_dir + "/scripts/build-install.sh")) {
-        let note = "falta build-install.sh ejecutable en el fork"
+    if not (is-exec ($st.fork_dir + "/scripts/build-install.nu")) {
+        let note = "falta build-install.nu ejecutable en el fork"
         log $st $"✗ ($note)"
         return {state: $st, outcome: {ok: false, note: $note}}
     }
-    if not (is-exec ($st.fork_dir + "/scripts/verify-deploy.sh")) {
-        let note = "falta verify-deploy.sh ejecutable en el fork"
+    if not (is-exec ($st.fork_dir + "/scripts/verify-deploy.nu")) {
+        let note = "falta verify-deploy.nu ejecutable en el fork"
         log $st $"✗ ($note)"
         return {state: $st, outcome: {ok: false, note: $note}}
     }
@@ -317,7 +316,7 @@ def phase0-sanity [st: RunState]: nothing -> PhaseResult {
     }
 
     let st = if (is-exec $st.retire_script) {
-        log $st "retire-python.sh presente y ejecutable → retire=on"
+        log $st "retire-python.nu presente y ejecutable → retire=on"
         $st | update retire "on"
     } else {
         log $st $"WARN: falta ($st.retire_script) \(¿B3b?\) → retire=skip: el run se DETIENE tras la verificación avisando"
@@ -437,11 +436,11 @@ def phase1-quit [st: RunState]: nothing -> PhaseResult {
 # ──────────────────────────── fase 2: build + swap ──────────────────────────
 def phase2-build [st: RunState]: nothing -> PhaseResult {
     if $st.mode != "real" {
-        log $st $"[dryrun] SKIP fase 2: \(cd ($st.fork_dir) && scripts/build-install.sh --yes\) — bundle del tree actual + swap de /Applications/ZCode.app \(minutos\). Ese script REABRE el app y manda su propio anuncio «Fork instalado» — esperado. Si el app reaparece durante el build \(medido: pasa\) → re-quit y retry del swap."
+        log $st $"[dryrun] SKIP fase 2: \(cd ($st.fork_dir) && scripts/build-install.nu --yes\) — bundle del tree actual + swap de /Applications/ZCode.app \(minutos\). Ese script REABRE el app y manda su propio anuncio «Fork instalado» — esperado. Si el app reaparece durante el build \(medido: pasa\) → re-quit y retry del swap."
         return {state: $st, outcome: {ok: true, note: ""}}
     }
-    log $st "build+swap: scripts/build-install.sh --yes (esto toma minutos)..."
-    let rc = (run-script $st $st.fork_dir "./scripts/build-install.sh" -- --yes)
+    log $st "build+swap: scripts/build-install.nu --yes (esto toma minutos)..."
+    let rc = (run-script $st $st.fork_dir "./scripts/build-install.nu" -- --yes)
     if ($rc != 0) and (zcode-running) {
         log $st "el app REAPARECIÓ durante el build (alguien lo abrió para mirar 😉 — incidente 17:48) — re-quit y retry del swap \(build cacheado\)"
         let q = (quit-ladder $st)
@@ -450,9 +449,9 @@ def phase2-build [st: RunState]: nothing -> PhaseResult {
             log $st $"✗ ($note)"
             return {state: $st, outcome: {ok: false, note: $note}}
         }
-        let rc2 = (run-script $st $st.fork_dir "./scripts/build-install.sh" -- --yes)
+        let rc2 = (run-script $st $st.fork_dir "./scripts/build-install.nu" -- --yes)
         if $rc2 != 0 {
-            let note = $"build-install.sh exit ($rc2) en el retry \(el app viejo queda en /Applications — lo reabro\)"
+            let note = $"build-install.nu exit ($rc2) en el retry \(el app viejo queda en /Applications — lo reabro\)"
             log $st $"✗ ($note)"
             return {state: $st, outcome: {ok: false, note: $note}}
         }
@@ -460,7 +459,7 @@ def phase2-build [st: RunState]: nothing -> PhaseResult {
         return {state: $st, outcome: {ok: true, note: "retry tras reaparición"}}
     }
     if $rc != 0 {
-        let note = $"build-install.sh exit ($rc) \(el app viejo queda en /Applications — lo reabro\)"
+        let note = $"build-install.nu exit ($rc) \(el app viejo queda en /Applications — lo reabro\)"
         log $st $"✗ ($note)"
         return {state: $st, outcome: {ok: false, note: $note}}
     }
@@ -542,14 +541,14 @@ except Exception as e:
 
 def phase4-verify [st: RunState]: nothing -> PhaseResult {
     if $st.mode != "real" {
-        log $st $"[dryrun] SKIP fase 4a: \(cd ($st.fork_dir) && scripts/verify-deploy.sh\) — corre contra el app INSTALADO; solo tiene sentido tras el swap real."
+        log $st $"[dryrun] SKIP fase 4a: \(cd ($st.fork_dir) && scripts/verify-deploy.nu\) — corre contra el app INSTALADO; solo tiene sentido tras el swap real."
         log $st $"[dryrun] SKIP fase 4b: smoke hello→hello_ok por ($st.sock) con el token de ($st.token_file) \(python3 AF_UNIX, ver header\) — idem: canal recién tras el deploy."
         return {state: $st, outcome: {ok: true, note: ""}}
     }
-    log $st "verify-deploy.sh del fork..."
-    let rc = (run-script $st $st.fork_dir "./scripts/verify-deploy.sh")
+    log $st "verify-deploy.nu del fork..."
+    let rc = (run-script $st $st.fork_dir "./scripts/verify-deploy.nu")
     if $rc != 0 {
-        let note = $"verify-deploy.sh FAIL \(exit ($rc)\)"
+        let note = $"verify-deploy.nu FAIL \(exit ($rc)\)"
         log $st $"✗ ($note)"
         return {state: $st, outcome: {ok: false, note: $note}}
     }
@@ -560,21 +559,21 @@ def phase4-verify [st: RunState]: nothing -> PhaseResult {
 def phase5-retire [st: RunState]: nothing -> PhaseResult {
     if $st.mode != "real" {
         if $st.retire == "on" {
-            log $st $"[dryrun] SKIP fase 5: \(cd ($st.repo) && scripts/retire-python.sh\) — presente y ejecutable; capturaría su salida acá mismo y su exit code."
+            log $st $"[dryrun] SKIP fase 5: \(cd ($st.repo) && scripts/retire-python.nu\) — presente y ejecutable; capturaría su salida acá mismo y su exit code."
         } else {
-            log $st "[dryrun] SKIP fase 5: retire=skip (falta scripts/retire-python.sh de B3b) — en --real el run se detiene ACÁ, tras la verificación, avisando por Telegram."
+            log $st "[dryrun] SKIP fase 5: retire=skip (falta scripts/retire-python.nu de B3b) — en --real el run se detiene ACÁ, tras la verificación, avisando por Telegram."
         }
         return {state: ($st | update retire_result "skip (dryrun)"), outcome: {ok: true, note: ""}}
     }
     if $st.retire != "on" {
         log $st $"retire=skip — me detengo tras la verificación: FALTA ($st.retire_script) \(B3b\). El fork queda deployado y verificado; Python sigue vivo."
-        announce $st "⚠️ Fork deployado y verificado ✓, pero FALTA scripts/retire-python.sh — me detengo acá: Python sigue vivo."
+        announce $st "⚠️ Fork deployado y verificado ✓, pero FALTA scripts/retire-python.nu — me detengo acá: Python sigue vivo."
         return {state: ($st | update retire_result "skip (falta script)"), outcome: {ok: true, note: ""}}
     }
-    log $st "retire: scripts/retire-python.sh (salida capturada abajo)..."
-    let rc = (run-script $st $st.repo "./scripts/retire-python.sh")
+    log $st "retire: scripts/retire-python.nu (salida capturada abajo)..."
+    let rc = (run-script $st $st.repo "./scripts/retire-python.nu")
     if $rc != 0 {
-        let note = $"retire-python.sh exit ($rc)"
+        let note = $"retire-python.nu exit ($rc)"
         log $st $"✗ ($note)"
         return {state: $st, outcome: {ok: false, note: $note}}
     }
@@ -586,7 +585,7 @@ def phase5-retire [st: RunState]: nothing -> PhaseResult {
 def phase6-final [st: RunState]: nothing -> RunState {
     let m: record<msg: string, code: int> = match {retire_result: $st.retire_result, mode: $st.mode} {
         {retire_result: "hecho"} => {msg: $"🏁 Kotlin bot 100% — Python retirado. [($st.report)]", code: 0}
-        {mode: "real"} => {msg: $"⚠️ Fork deployado y verificado; retire PENDIENTE \(falta retire-python.sh\) — Python sigue vivo. [($st.report)]", code: 4}
+        {mode: "real"} => {msg: $"⚠️ Fork deployado y verificado; retire PENDIENTE \(falta retire-python.nu\) — Python sigue vivo. [($st.report)]", code: 4}
         _ => {msg: $"rehearsal completa — nada fue tocado. [($st.report)]", code: 0}
     }
     log $st $"── fase 6/6: ($m.msg)"
@@ -655,7 +654,7 @@ def init-state [mode: Mode]: nothing -> RunState {
         sock: $"($env.ZCODE_DATA_BASE_DIR? | default $"($home)/.zcode")/daemon-local.sock",
         token_file: $"($env.ZCODE_DATA_BASE_DIR? | default $"($home)/.zcode")/daemon-local.token",
         tg_cfg: $"($home)/.zcode/telegram-remote.json",
-        retire_script: $"($repo)/scripts/retire-python.sh",
+        retire_script: $"($repo)/scripts/retire-python.nu",
         drytag: "",
     }
 }

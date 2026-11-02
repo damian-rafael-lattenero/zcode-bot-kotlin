@@ -66,7 +66,7 @@ fun main(args: Array<String>) {
     logger.info { "send knob: mode=${knob.mode} (file=$knobFile)" }
 
     // B3b's poll knob: SHIPPED OFF — Python owns getUpdates until the
-    // retirement (ADR-001's single reader; retire-python.sh flips this).
+    // retirement (ADR-001's single reader; retire-python.nu flips this).
     val pollKnob = PollKnob.load(knobFile)
     if (pollKnob.warning != null) logger.warn { "poll knob $knobFile: ${pollKnob.warning}" }
     logger.info {
@@ -135,7 +135,7 @@ fun main(args: Array<String>) {
 
         // B3b: the channel client (degraded LOUD without the fork's host),
         // its keepalive, the live view (never-silence; LIVE sends only),
-        // and — only when retire-python.sh flipped the knob — the poller
+        // and — only when retire-python.nu flipped the knob — the poller
         val hbChannel = File(stateDir, HB_CHANNEL)
         val channelHandle = stack.client.asProcess(onHeartbeat = { touch(hbChannel) }).startIn(this)
         val pingHandle = stack.client.pingProcess().startIn(this)
