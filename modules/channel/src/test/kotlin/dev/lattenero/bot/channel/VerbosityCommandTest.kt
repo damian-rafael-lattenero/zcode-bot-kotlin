@@ -32,6 +32,7 @@ class VerbosityCommandTest {
             text: String,
             messageId: String,
             receivedAt: Long,
+            bindTaskId: String?,
         ) = InboundAnswer.Answered(duplicate = false, replies = emptyList())
 
         override suspend fun enqueueInbound(text: String, messageId: String, receivedAt: Long) = 0

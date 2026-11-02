@@ -56,8 +56,26 @@ interface ChannelOps {
      */
     suspend fun respondQuestion(frame: ClientFrame.Respond): RespondAnswer = RespondAnswer.Unavailable
 
-    /** The bind's send: the inbound's own answer (replies = the botsService's words). */
-    suspend fun sendInboundAwait(text: String, messageId: String, receivedAt: Long): InboundAnswer
+    /**
+     * The bind's send: the inbound's own answer (replies = the botsService's
+     * words). [bindTaskId] (the fork's atomic bind, cap «bind»): el host
+     * apunta el contexto con la ley del /task y entrega el texto en el MISMO
+     * frame — el refusal viaja como única reply.
+     */
+    suspend fun sendInboundAwait(
+        text: String,
+        messageId: String,
+        receivedAt: Long,
+        bindTaskId: String? = null,
+    ): InboundAnswer
+
+    /**
+     * Whether the live server advertised the atomic bind (cap «bind»).
+     * Default false: an un-advertised frame MUST NOT be sent — an old host
+     * would ignore the field and the text would land in the wrong
+     * conversation (the two-step bind below stays the honest path).
+     */
+    fun supportsBind(): Boolean = false
 
     /** Python's F17: park a text while its conversation is mid-turn — the queue size after, or -1. */
     suspend fun enqueueInbound(text: String, messageId: String, receivedAt: Long): Int
@@ -366,41 +384,99 @@ class BotCommands(
     }
 
     /**
+     * EL BIND ATÓMICO (the fork's bindTaskId, cap «bind»): una sola ida —
+     * el host apunta el contexto con la ley completa del /task y entrega el
+     * texto en el MISMO frame; el refusal viaja como única reply (el mismo
+     * veredicto que leía el bind en dos pasos). Sin orden armada: una orden
+     * vuela DIRECTO por su propio camino y el bind sería basura.
+     */
+    @Suppress("ReturnCount") // one guard per verdict
+    private suspend fun fireAtomicBind(plan: RoutePlan.Fire, text: String, updateId: Long): BotReply? =
+        when (val answer = ops.sendInboundAwait(text, "tg-$updateId", clock(), bindTaskId = plan.sid)) {
+            is InboundAnswer.Answered -> {
+                val refusal = answer.replies.firstOrNull {
+                    TASK_RUNNING_MARKER in it || TASK_MISSING_MARKER in it
+                }
+                if (refusal != null) {
+                    logger.warn { "route: atomic bind to ${plan.sid} REFUSED ($refusal) — text not delivered" }
+                    BotReply(RouteTexts.BIND_FAILED)
+                } else {
+                    logger.info {
+                        "route: atomic bind+fire at ${plan.sid} (${answer.replies.size} system replies)"
+                    }
+                    watchContext() // the turn this text starts is the one to stream
+                    null // the live view + the final render speak; no ack noise
+                }
+            }
+
+            is InboundAnswer.Unavailable -> {
+                logger.warn { "route: atomic bind to ${plan.sid} — channel down" }
+                BotReply(RouteTexts.CHANNEL_DOWN)
+            }
+
+            is InboundAnswer.TimedOut -> {
+                // no verdict in the window: the frame MAY have flown —
+                // never re-send (double delivery); speak the doubt
+                logger.warn { "route: atomic bind to ${plan.sid} TIMED OUT after ${answer.waitedMs}ms" }
+                BotReply(RouteTexts.BIND_FAILED)
+            }
+        }
+
+    /**
      * Executes a Fire: bind first when the plan says so, then the text.
      * A bind that lands on a RUNNING conversation parks the text (the
      * server would only bounce it with taskRunning — honest and quiet).
      */
-    @Suppress("ReturnCount") // one guard per bind outcome
+    /**
+     * The two-step bind for forks WITHOUT the cap «bind»: the `/task`
+     * command's verdict (awaited), then the mid-bind park (F17) — a turn
+     * that started between the pre-check and the bind parks the text
+     * instead of bouncing it. null = continue (the text flies below);
+     * a BotReply = the terminal answer.
+     */
+    @Suppress("ReturnCount") // one exit per bind outcome
+    private suspend fun fireLegacyBind(
+        plan: RoutePlan.Fire,
+        text: String,
+        updateId: Long,
+        facts: RouteFacts,
+    ): BotReply? {
+        when (val bind = bindTo(plan.sid, updateId)) {
+            is BindOutcome.Confirmed -> logger.info { "route: bound to ${plan.sid} (${bind.how})" }
+
+            is BindOutcome.Refused -> {
+                // the pre-check said idle but a turn started mid-switch — the
+                // server's own refusal text already reached the chat via the
+                // awaited replies; park the text on what actually runs
+                logger.warn { "route: bind to ${plan.sid} REFUSED (${bind.reply}) — ${bind.fallback}" }
+                return BotReply(RouteTexts.BIND_FAILED)
+            }
+
+            is BindOutcome.Failed -> {
+                logger.warn { "route: bind to ${plan.sid} FAILED: ${bind.reason}" }
+                return BotReply(RouteTexts.BIND_FAILED)
+            }
+        }
+        val ws = facts.workspacePath
+        if (ws != null && isRunning(plan.sid, ws) && plan.sid != facts.activeTaskId) {
+            logger.info { "route: ${plan.sid} started running mid-bind — text parked (F17)" }
+            return enqueueOrRefuse(text, updateId, plan.sid)
+        }
+        return null
+    }
+
+    @Suppress("ReturnCount") // one exit per route outcome (atomic / legacy / order / plain)
     private suspend fun firePlan(
         plan: RoutePlan.Fire,
         text: String,
         updateId: Long,
         facts: RouteFacts,
     ): BotReply? {
+        if (plan.bind && armedOrder == null && ops.supportsBind()) {
+            return fireAtomicBind(plan, text, updateId)
+        }
         if (plan.bind) {
-            when (val bind = bindTo(plan.sid, updateId)) {
-                is BindOutcome.Confirmed -> logger.info { "route: bound to ${plan.sid} (${bind.how})" }
-
-                is BindOutcome.Refused -> {
-                    // the pre-check said idle but a turn started mid-switch — the
-                    // server's own refusal text already reached the chat via the
-                    // awaited replies; park the text on what actually runs
-                    logger.warn { "route: bind to ${plan.sid} REFUSED (${bind.reply}) — ${bind.fallback}" }
-                    return BotReply(RouteTexts.BIND_FAILED)
-                }
-
-                is BindOutcome.Failed -> {
-                    logger.warn { "route: bind to ${plan.sid} FAILED: ${bind.reason}" }
-                    return BotReply(RouteTexts.BIND_FAILED)
-                }
-            }
-            // the bind may have landed on a conversation that just STARTED
-            // (task_run_started races the text): park instead of bouncing
-            val ws = facts.workspacePath
-            if (ws != null && isRunning(plan.sid, ws) && plan.sid != facts.activeTaskId) {
-                logger.info { "route: ${plan.sid} started running mid-bind — text parked (F17)" }
-                return enqueueOrRefuse(text, updateId, plan.sid)
-            }
+            fireLegacyBind(plan, text, updateId, facts)?.let { return it }
         }
         newIntent = false
         // LA ORDEN ARMADA (the owner's loop: tap a subagent → read its stream →

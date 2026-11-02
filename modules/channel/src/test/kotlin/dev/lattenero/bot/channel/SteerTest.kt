@@ -42,7 +42,12 @@ class SteerTest {
             attachments: List<InboundAttachment>,
         ) = InboundReceipt.UNAVAILABLE
 
-        override suspend fun sendInboundAwait(text: String, messageId: String, receivedAt: Long) =
+        override suspend fun sendInboundAwait(
+            text: String,
+            messageId: String,
+            receivedAt: Long,
+            bindTaskId: String?,
+        ) =
             InboundAnswer.Unavailable
 
         override suspend fun enqueueInbound(text: String, messageId: String, receivedAt: Long) = -1

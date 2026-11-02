@@ -40,7 +40,12 @@ class TaskAttachTest {
             return InboundReceipt.FIRED
         }
 
-        override suspend fun sendInboundAwait(text: String, messageId: String, receivedAt: Long): InboundAnswer {
+        override suspend fun sendInboundAwait(
+            text: String,
+            messageId: String,
+            receivedAt: Long,
+            bindTaskId: String?,
+        ): InboundAnswer {
             inbound.add(text)
             // the app's /task bind effect: the conversation now points there
             if (text.startsWith("/task ")) {
