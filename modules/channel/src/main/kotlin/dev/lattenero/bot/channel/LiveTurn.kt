@@ -149,11 +149,11 @@ data class TurnLive(
     /**
      * The SEALED CoT blocks (Python's CotSealer boxes, reasoning.py): one
      * per [LiveTurn.COT_BLOCK_CP] code points of REAL streamed thinking.
-     * The full accumulation lives here — the tail above is just the live
-     * preview window; a block's text is never summarized, never invented.
-     * The TRANSCRIPT FEED speaks each one as its own Telegram message the
-     * moment it seals (the old in-card cb: toggle is retired — the owner
-     * reads the blocks one under the other, /verbosity adjusts the flow).
+     * The full accumulation lives here; a block's text is never
+     * summarized, never invented. Each block travels as its own COLLAPSED
+     * Telegram message (header + button — the owner decides whether to
+     * read it, 2/11: «yo decido si los leo o no una vez que se llenó el
+     * botón de los 3k»); the card carries the COUNT only.
      */
     val cotBlocks: List<String> = emptyList(),
     /** The block currently filling: seals into [cotBlocks] at the cap. */
@@ -352,9 +352,6 @@ object LiveTurn {
      * at 3000 CODE POINTS of streamed thinking and the feed speaks it.
      */
     const val COT_BLOCK_CP = 3000
-
-    /** How much of the tail the STATUS message shows while it fits (the cajita's window). */
-    const val COT_PREVIEW_CP = 1100
 
     /**
      * The transcript feed's chunk size (RAW code points before esc()) — a
@@ -660,20 +657,23 @@ object LiveTurn {
     // ---- render ------------------------------------------------------------
 
     /**
-     * The status message's TEXT (pure state→string): the phase keyed by
-     * what ACTUALLY happens (the verbifier's vocabulary), the staleness
-     * watchdog, the typed pills, the CoT cajita and the visible
-     * heartbeat. The blink is F80's: the leading pair toggles per edit.
+     * The status message's TEXT — THE PROCESS (the owner's ley raíz,
+     * 2/11: «separar bien el dato del proceso»). The card's shape is the
+     * desktop pill's mirror: the WORKING header (how long the turn has
+     * run), the NOW line (what is executing RIGHT NOW — the verb, the
+     * target, that tool's own elapsed; between tools the thinking line,
+     * chars only), then the honest pills, the other lanes, the stamps and
+     * the CoT row — and the staleness line, which always speaks. The
+     * card is redrawn as the chat's LAST message per event; the DATA
+     * (outputs, diffs, blocks' text) travels in the feed below it.
      */
     @Suppress("CyclomaticComplexMethod", "LongMethod") // one branch per phase/lane — the message IS the state machine
     fun render(
         state: TurnLive,
         nowMs: Long,
-        spin: Int,
         channelAlive: Boolean,
         verbs: ToolVerbifier = ToolVerbs.MINIMAL,
     ): String {
-        val brain = if (spin % 2 == 0) "🧠" else "💭"
         // THE OWNER'S RULE («los segundos no deben correr»): when reality
         // is not advancing — silence, a dead channel, an error pill — every
         // clock in this render derives from the LAST REAL EVENT, never from
@@ -686,57 +686,57 @@ object LiveTurn {
             state.apiRetry != null
         val clockNow = if (frozen) (state.lastEventAtMs ?: nowMs) else nowMs
         val elapsed = state.startedAtMs?.let { fmtDur(clockNow - it) } ?: "—"
-        val head = "${PyText.esc(state.title)} · $elapsed"
         val lines = mutableListOf<String>()
         when (val phase = state.phase) {
-            is TurnPhase.Idle -> lines.add("💻 <b>«$head»</b> — suscripto, nada corriendo")
+            is TurnPhase.Idle -> lines.add("💻 <b>«${PyText.esc(state.title)}»</b> — suscripto, nada corriendo")
+
+            is TurnPhase.Done -> lines.add(
+                "${if (state.failedTools > 0) "⚠️" else "✅"} <b>«${PyText.esc(state.title)}»</b>" +
+                    " — listo: ${PyText.esc(phase.stopReason)}",
+            )
 
             is TurnPhase.Thinking -> {
-                lines.add("$brain <b>«$head»</b>")
+                lines.add(workingHead(state.title, elapsed))
                 val stale = stalenessWord(silence, channelAlive)
+                // THE PENDING TAIL IS A ONE-LINER (the owner, 2/11: the CoT
+                // never spills — he opens the collapsed blocks when he wants)
                 lines.add(
-                    "<b>pensando</b> · ${phase.chars} caracteres · ${fmtDur(clockNow - phase.sinceMs)}$stale",
+                    "🧠 <b>pensando</b> · ${phase.chars} caracteres · ${fmtDur(clockNow - phase.sinceMs)}$stale",
                 )
             }
 
             is TurnPhase.Writing -> {
-                val lane = phase.toolId?.let { id -> state.tools.firstOrNull { it.toolId == id } }
-                val verb = verbs.of(lane?.name ?: phase.tool ?: "", lane?.input, lane?.isMcp ?: false)
+                lines.add(workingHead(state.title, elapsed))
                 if (phase.tool == null) {
-                    lines.add("✍️ <b>«$head»</b>")
                     lines.add(
-                        "✍️ escribiendo la respuesta · ${phase.rawChars} caracteres · " +
+                        "✍️ <b>escribiendo la respuesta</b> · ${phase.rawChars} caracteres · " +
                             fmtDur(clockNow - phase.sinceMs),
                     )
                 } else {
-                    lines.add("${verb.emoji} <b>«$head»</b>")
-                    lines.add(
-                        verbLine(verb, lane, phase, clockNow, silence, channelAlive),
-                    )
+                    val lane = phase.toolId?.let { id -> state.tools.firstOrNull { it.toolId == id } }
+                    val verb = verbs.of(lane?.name ?: phase.tool ?: "", lane?.input, lane?.isMcp ?: false)
+                    lines.add(verbLine(verb, lane, phase, clockNow, silence, channelAlive))
                 }
             }
-
-            is TurnPhase.Done -> lines.add(
-                "${if (state.failedTools > 0) "⚠️" else "✅"} <b>«$head»</b>" +
-                    " — listo: ${PyText.esc(phase.stopReason)}",
-            )
         }
         // the socket drop is a STATE, not a background detail: the phase line
         // must never pretend a turn is alive while the channel reconnects
         if (!channelAlive && state.phase !is TurnPhase.Done) {
             lines.add("📡 canal caído — reconectando… (última señal hace ${fmtDur(silence)})")
         }
+        state.interaction?.let { lines.add("${it.emoji} esperando: ${PyText.esc(it.title ?: it.kind)}") }
         state.typedError?.let { pill ->
             val quota = if (pill.isQuota) " · 💳 CUOTA" else ""
             lines.add("💀 <b>error:</b> ${pill.line()}$quota")
         }
         // the lanes, BOUNDED (the owner's 30/10 corpse card: a dead
         // subagent's bash lane ticked «43m23s» forever): only the most
-        // recent open lanes, plus the last verdict stamps. A lane with no
-        // event for [LANE_FROZEN_MS] renders FROZEN — dimmed, its clock
-        // stopped at its last real event («los segundos no deben correr»).
+        // recent open lanes — the NOW lane already spoke, first under the
+        // header. A lane with no event for [LANE_FROZEN_MS] renders FROZEN
+        // — dimmed, its clock stopped at its last real event.
+        val nowLaneId = (state.phase as? TurnPhase.Writing)?.toolId
         state.tools.asSequence()
-            .filter { it.status == null }
+            .filter { it.status == null && it.toolId != nowLaneId }
             .sortedByDescending { it.touchedAtMs }
             .take(LANE_OPEN_CAP)
             .forEach { lines.add(laneLine(it, verbs, clockNow, nowMs)) }
@@ -749,13 +749,12 @@ object LiveTurn {
         state.subagentThought.forEach { (parent, chars) ->
             lines.add("🤖 subagente ${parent.takeLast(SUBAGENT_ID_TAIL)} · $chars caracteres pensando")
         }
-        state.interaction?.let { lines.add("${it.emoji} esperando: ${PyText.esc(it.title ?: it.kind)}") }
         // the fork's own pill — the honest difference between «z.ai down» and «I typed too much»
         state.apiRetry?.let { pill ->
             val suffix = pill.errorStatus?.let { " (HTTP $it)" } ?: ""
             lines.add("⚠️ ${PyText.esc(ApiRetryText.line(pill, nowMs))}$suffix")
         }
-        cotBlock(state)?.let(lines::add)
+        cotRow(state)?.let(lines::add)
         // THE HEART IS DEAD (the owner's 30/10 verdict on the 💓): liveness
         // is the per-box counters themselves plus this sober line — «en
         // vivo» with the honest silence while the stream moves or waits;
@@ -769,6 +768,10 @@ object LiveTurn {
         )
         return lines.joinToString("\n")
     }
+
+    /** THE WORKING HEADER — the desktop pill's mirror: «⏳ Working · 3m 51s — «título»». */
+    private fun workingHead(title: String, elapsed: String): String =
+        "⏳ <b>Working · $elapsed</b> — «${PyText.esc(title)}»"
 
     /**
      * One open lane's line: the verb + its detail (the shell's command, the
@@ -821,9 +824,9 @@ object LiveTurn {
         return "${verbs.of(lane.name, lane.input, lane.isMcp).emoji} ${PyText.esc(lane.name)}: $verdict$mark"
     }
 
-    /** The phase's line: verb + detail + honest counters + the staleness word.
-     *  The timer runs on [clockNow] — the frozen clock, never the present. */
-    @Suppress("CyclomaticComplexMethod") // one shape per verb family
+    /** The NOW line for a tool: verb + target + the honest counters + the
+     *  tool's OWN elapsed (the timer runs on [clockNow] — the frozen
+     *  clock, never the present) + the staleness word. */
     private fun verbLine(
         verb: ToolVerb,
         lane: ToolLive?,
@@ -836,14 +839,16 @@ object LiveTurn {
         val detail = if (clipped.isNotEmpty()) " <code>${PyText.esc(clipped)}</code>" else ""
         val stale = stalenessWord(silence, channelAlive)
         val timer = fmtDur(clockNow - phase.sinceMs)
-        return when {
+        val counts = when {
             lane != null && (lane.added != null || lane.removed != null) ->
-                "${verb.head()}$detail · 🟢 +${lane.added ?: 0} · 🔴 −${lane.removed ?: 0} · $timer"
+                " · 🟢 +${lane.added ?: 0} · 🔴 −${lane.removed ?: 0}"
 
-            phase.lines > 0 -> "${verb.head()}$detail · ${phase.lines} líneas · $timer$stale"
+            phase.lines > 0 -> " · ${phase.lines} líneas"
 
-            else -> "${verb.head()}$detail · $timer$stale"
+            lane != null -> laneCounts(lane) // «salida al cerrar» — the fork streams no live output
+            else -> ""
         }
+        return "${verb.head()}$detail$counts · $timer$stale"
     }
 
     /** The honest staleness word — silence is data, never a hidden spinner. */
@@ -859,14 +864,25 @@ object LiveTurn {
         nowMs - (state.lastEventAtMs ?: state.startedAtMs ?: nowMs)
 
     /**
-     * The CoT's LIVE preview: the tail as a quote block while the model
-     * streams (what is being thought RIGHT NOW). The tail is a window,
-     * never the reading: the SEALED blocks travel as their own messages
-     * (the transcript feed), the unsealed rest flushes at the seal.
+     * The CoT ROW — the card's one-liner for the thinking (the owner,
+     * 2/11: «yo decido si los leo o no una vez que se llenó el botón de
+     * los 3k»): the sealed blocks' count and the pending fill, CHARS
+     * ONLY. The text itself lives in the collapsed block messages below
+     * the card (the tap opens each one in place) — the tail never spills.
      */
-    internal fun cotBlock(state: TurnLive): String? {
-        if (state.phase !is TurnPhase.Thinking || state.cotTail.isEmpty()) return null
-        return "<blockquote>${PyText.esc(takeLastCodePoints(state.cotTail, COT_PREVIEW_CP))}</blockquote>"
+    internal fun cotRow(state: TurnLive): String? {
+        val blocks = state.cotBlocks.size
+        val pending = PyText.cpLength(state.cotPending)
+        val blocksWord = when {
+            blocks == 0 -> null
+            blocks == 1 -> "1 bloque plegado"
+            else -> "$blocks bloques plegados"
+        }
+        val pendingWord = if (pending == 0) null else "${fmtK(pending)} en camino"
+        return when {
+            blocksWord == null && pendingWord == null -> null
+            else -> "📖 CoT: " + listOfNotNull(blocksWord, pendingWord).joinToString(" · ")
+        }
     }
 
     /** Python's «cot 1.2K» — thousands with one decimal. */
@@ -879,10 +895,6 @@ object LiveTurn {
         else -> n.toString()
     }
 
-    /** The message born at the turn's start (before any edit). */
-    fun birthText(state: TurnLive): String =
-        "🖥️ <b>«${PyText.esc(state.title)}»</b> — turn live (channel)\n${PyText.esc(state.taskId)}"
-
     /**
      * True when the card still wears the fallback title — the sid's tail
      * («644150daf013», the owner's 30/10 verdict): the stream's
@@ -891,9 +903,12 @@ object LiveTurn {
      */
     fun isFallbackTitle(taskId: String, title: String): Boolean = title == taskId.takeLast(TITLE_TAIL)
 
-    /** The seal of the status message at Done — one line, the record of the turn. */
+    /**
+     * The seal of the status message at Done — one line, the record of the
+     * turn (the card's LAST shape: the process's one-line summary).
+     */
     fun sealText(state: TurnLive, nowMs: Long): String {
-        val phase = state.phase as? TurnPhase.Done ?: return render(state, nowMs, 0, true)
+        val phase = state.phase as? TurnPhase.Done ?: return render(state, nowMs, true)
         val total = state.startedAtMs?.let { fmtDur(nowMs - it) } ?: "?"
         val error = state.typedError?.let { "\n💀 ${it.line()}" + if (it.isQuota) " · 💳 CUOTA" else "" } ?: ""
         val blocks = when {
