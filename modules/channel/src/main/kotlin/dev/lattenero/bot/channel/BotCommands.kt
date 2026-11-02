@@ -452,9 +452,10 @@ class BotCommands(
     /**
      * The fire flow's decision core — the body a TYPED line and /retry
      * share verbatim (the plan resolves as if the owner typed it). /retry
-     * lands here directly: a command never eats the armed question with
-     * the saved text, and the armed order (if any) flies exactly as it
-     * would for the typed line.
+     * lands here with any armed order STASHED ([retry] restores it on the
+     * way out: the one-shot is the owner's TYPED words' privilege, a
+     * command never spends it) — a typed line still meets the armed order
+     * first, below.
      */
     @Suppress("ReturnCount") // one branch per plan — the router's honest outcomes
     private suspend fun routeCore(text: String, updateId: Long): BotReply? {
@@ -659,13 +660,26 @@ class BotCommands(
      * with the push-or-enqueue question — strictly better than Python's
      * flat refusal. Nothing saved (or the store unwired) → the honest
      * «nada para relanzar».
+     *
+     * THE ARMED ORDER IS NEVER /retry's AMMO (2/11): the one-shot is the
+     * owner's TYPED words' privilege — the ✍️ loop (tap a subagent → read
+     * its stream → write the order) must not lose its shot to a /retry,
+     * and the saved prompt must never ride as the order. So the arm is
+     * stashed for the fire and restored on the way out (try/finally): the
+     * order survives for the NEXT free text, verbatim law intact.
      */
     private suspend fun retry(updateId: Long): BotReply {
         val saved = lastPrompt?.load()
         if (saved == null || saved.text.isBlank()) return BotReply(RETRY_NOTHING)
         logger.info { "retry: re-firing the prompt saved at ${saved.sid} (${fmtEndClock(saved.ts)})" }
-        // null = FIRED (the live view + the final render speak): our confirm line closes it
-        return routeCore(saved.text, updateId) ?: BotReply(retryFiredLine(saved.ts))
+        val armed = armedOrder
+        armedOrder = null
+        try {
+            // null = FIRED (the live view + the final render speak): our confirm line closes it
+            return routeCore(saved.text, updateId) ?: BotReply(retryFiredLine(saved.ts))
+        } finally {
+            armedOrder = armed
+        }
     }
 
     /** /retry's confirm: the fired target's title + the save's own HH:MM stamp. */
