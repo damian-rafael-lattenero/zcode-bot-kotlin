@@ -63,7 +63,7 @@ class KeyboardsTest {
         val lane1 = keyboard[2].jsonArray[0].jsonObject
         assertEquals("🔵 Task ▶️", lane1["text"]!!.jsonPrimitive.content)
         assertTrue(lane1["callback_data"]!!.jsonPrimitive.content.startsWith("sa:"))
-        assertEquals("so:toolu_running", keyboard[2].jsonArray[1].jsonObject["callback_data"]!!.jsonPrimitive.content)
+        assertEquals(1, keyboard[2].jsonArray.size, "the tasks list carries NO ✍️ — the owner's 2/11 (the unknown manito is noise)")
         val lane2 = keyboard[3].jsonArray[0].jsonObject
         assertEquals("🔵 Grep ⏹️", lane2["text"]!!.jsonPrimitive.content)
     }

@@ -54,8 +54,11 @@ class TaskAttachTest {
                     "\"activeTaskId\":\"${text.removePrefix("/task ")}\"",
                 ).replace("\"activeTaskId\":null", "\"activeTaskId\":\"${text.removePrefix("/task ")}\"")
             }
-            return InboundAnswer.Answered(duplicate = false, replies = emptyList())
+            return InboundAnswer.Answered(duplicate = false, replies = cannedBindReplies)
         }
+
+        /** The host's canned bind verdict (empty = confirmed silently). */
+        var cannedBindReplies: List<String> = emptyList()
 
         override suspend fun enqueueInbound(text: String, messageId: String, receivedAt: Long): Int = 1
 
@@ -152,11 +155,15 @@ class TaskAttachTest {
     fun attachHappensEvenWhenTheBindRefuses() = runBlocking {
         // task-02 owns the conversation and is RUNNING: the old tap died
         // right here («/stop first») — the watch must survive the refusal
-        val ops = FakeOps(boundStatus).apply { answers["activeTaskIds"] = """["task-02"]""" }
+        val ops = FakeOps(boundStatus).apply {
+            // the HOST is the referee now: its taskRunning refusal rides the
+            // awaited reply (the bot-side pre-check is gone from the tap)
+            cannedBindReplies = listOf("⏳ The previous task's turn is still running")
+        }
         val reply = commands(ops).onCallback("t:task-77", 5L)!!
         assertEquals(listOf("task-77" to app), ops.subscribed)
         assertTrue("👁" in reply.text)
-        assertTrue("⏳" in reply.text) // the bind's honest refusal rides along
+        assertTrue("⏳" in reply.text) // the host's honest refusal rides along
     }
 
     @Test
@@ -166,6 +173,28 @@ class TaskAttachTest {
         assertTrue(ops.subscribed.isEmpty()) // nothing to attach to — no silent fake watch
         assertTrue("🤷" in reply.text)
         assertTrue("/tasks" in reply.text)
+    }
+
+    @Test
+    fun aContextlessTapBindsByTheHostsVerdictNeverTheRoutingBoilerplate() = runBlocking {
+        // the owner's 2/11: context None + a REAL sid answered «send text
+        // first» — the bind needs no bot-side context, the HOST decides. The
+        // fork's project boundary (Task not found) is the honest answer.
+        val ops = FakeOps(noContextStatus).apply { cannedBindReplies = listOf("Task not found") }
+        val reply = commands(ops).onCallback("t:task-77", 5L)!!
+        assertEquals(listOf("task-77" to app), ops.subscribed) // the attach happened
+        assertTrue("👁" in reply.text)
+        assertTrue("🚧" in reply.text, "the project boundary speaks, not the routing boilerplate")
+        assertTrue("frontera" in reply.text)
+        assertTrue("send text first" !in reply.text, "the router's line NEVER rides a tap")
+    }
+
+    @Test
+    fun aContextlessTapInTheSameWorkspaceBindsFine() = runBlocking {
+        val ops = FakeOps(noContextStatus) // the fake's default: the host confirms silently
+        val reply = commands(ops).onCallback("t:task-77", 5L)!!
+        assertTrue("🎯" in reply.text, "the host confirmed the bind — context not needed")
+        assertTrue("send text first" !in reply.text)
     }
 
     // ---- subagent lanes: subagent implements task (the owner's model) -------
