@@ -10,6 +10,7 @@ import dev.lattenero.bot.channel.ClientFrame
 import dev.lattenero.bot.channel.InboundAttachment
 import dev.lattenero.bot.channel.InboundReceipt
 import dev.lattenero.bot.channel.InboundUpdate
+import dev.lattenero.bot.channel.LastPrompt
 import dev.lattenero.bot.channel.LiveHub
 import dev.lattenero.bot.channel.LiveOrphanStore
 import dev.lattenero.bot.channel.LivePublisher
@@ -300,6 +301,11 @@ internal fun wireChannel(
     // file-backed store: the owner's choice survives the restarts)
     val verbosity: VerbositySetting = FileVerbositySetting(File(File(cfg.homeDir, "state"), VERBOSITY_FILE))
 
+    // Python's F22: /retry's ammo — the LAST FIRED prompt, one JSON in the
+    // daemon's OWN state dir (the queue's and the verbosity store's exact
+    // pattern: ~/.zcode/bot-kotlin/state, one file, one law)
+    val lastPrompt = LastPrompt(File(File(cfg.homeDir, "state"), LAST_PROMPT_FILE))
+
 
     val liveView = buildLiveView(
         send,
@@ -323,6 +329,7 @@ internal fun wireChannel(
         queue,
         history,
         verbosity,
+        lastPrompt = lastPrompt,
         liveView = liveView,
     )
     return ChannelStack(client, liveView, poller, hub)
@@ -334,6 +341,9 @@ private const val LIVE_ORPHAN_FILE = "live-view-active.json"
 
 /** The /verbosity level's persisted line (FileVerbositySetting's file). */
 private const val VERBOSITY_FILE = "verbosity.txt"
+
+/** /retry's ammo (Python's F22) — the last FIRED prompt's own file (LastPrompt). */
+private const val LAST_PROMPT_FILE = "last-prompt.json"
 private val QUEUE_DRAIN_DELAY = 1.seconds
 
 /**
@@ -406,6 +416,7 @@ private fun buildLiveView(
 }
 
 /** The single reader — knob-gated (retire-python.nu turns it on). */
+@Suppress("LongMethod") // wiring breadth: the reader's every piece, one home (buildChannelStack's own law)
 private fun buildPoller(
     cfg: DaemonConfig,
     api: TgApi?,
@@ -421,6 +432,8 @@ private fun buildPoller(
     // per tick) and the questions' board: the answer round-trip (default
     // constructed — the send-less board registers and seals quietly)
     verbosity: VerbositySetting,
+    // /retry's ammo (Python's F22) — the last FIRED prompt's store
+    lastPrompt: LastPrompt,
     board: QuestionBoard = QuestionBoard(),
     // the collapsed CoT blocks' taps (the cb: buttons) — the live view IS
     // the registry (it spoke the messages and holds the ids + texts)
@@ -517,6 +530,7 @@ private fun buildPoller(
         board = board,
         quotaDirect = quotaDirectRung(cfg),
         blockTaps = liveView,
+        lastPrompt = lastPrompt,
     )
     return Poller(
         api = liveApi,
