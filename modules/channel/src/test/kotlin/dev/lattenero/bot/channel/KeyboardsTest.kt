@@ -37,7 +37,7 @@ class KeyboardsTest {
     }
 
     @Test
-    fun tasksKeyboardIsGreenRowsWithBlueSubagentLanes() {
+    fun tasksKeyboardIsGreenRowsWithFlatBlueSubagentLanes() {
         val rows = listOf(
             TaskRow(sid = "ses_a", title = "arreglá el login", ws = "/w/app"),
             TaskRow(sid = "ses_b", title = "", ws = "/w/app"),
@@ -50,28 +50,50 @@ class KeyboardsTest {
             rows = rows,
             running = setOf("ses_b"),
             activeSid = "ses_a",
-            watchedTaskId = "ses_a",
             subagents = lanes,
         )!!
         val keyboard = kb.jsonObject["inline_keyboard"]!!.jsonArray
-        assertEquals(4, keyboard.size) // task1, its 2 nested lanes, then task2
+        assertEquals(4, keyboard.size) // task1, task2, then the FLAT lanes (the 2/11 law: always visible)
         val first = keyboard[0].jsonArray[0].jsonObject
         assertEquals("🟢 🎯 1 · arreglá el login", first["text"]!!.jsonPrimitive.content)
         assertEquals("t:ses_a", first["callback_data"]!!.jsonPrimitive.content)
-        val lane1 = keyboard[1].jsonArray[0].jsonObject
-        assertEquals("🔵 Task ▶️", lane1["text"]!!.jsonPrimitive.content)
-        assertTrue(lane1["callback_data"]!!.jsonPrimitive.content.startsWith("sa:"))
-        val lane2 = keyboard[2].jsonArray[0].jsonObject
-        assertEquals("🔵 Grep ⏹️", lane2["text"]!!.jsonPrimitive.content)
-        val second = keyboard[3].jsonArray[0].jsonObject
+        val second = keyboard[1].jsonArray[0].jsonObject
         assertEquals("🟢 🔄 2 · ses_b", second["text"]!!.jsonPrimitive.content)
         assertEquals("t:ses_b", second["callback_data"]!!.jsonPrimitive.content)
+        val lane1 = keyboard[2].jsonArray[0].jsonObject
+        assertEquals("🔵 Task ▶️", lane1["text"]!!.jsonPrimitive.content)
+        assertTrue(lane1["callback_data"]!!.jsonPrimitive.content.startsWith("sa:"))
+        assertEquals("so:toolu_running", keyboard[2].jsonArray[1].jsonObject["callback_data"]!!.jsonPrimitive.content)
+        val lane2 = keyboard[3].jsonArray[0].jsonObject
+        assertEquals("🔵 Grep ⏹️", lane2["text"]!!.jsonPrimitive.content)
     }
 
     @Test
-    fun tasksKeyboardWithoutRowsIsNull() {
+    fun tasksKeyboardCarriesTheStoreRunningSubagentsWithTheGhostMark() {
+        val kb = Keyboards.tasksKeyboard(
+            rows = emptyList(),
+            running = emptySet(),
+            activeSid = null,
+            subagents = emptyList(),
+            dbRunning = listOf(
+                RunningSubagent(sid = "sess_fresh", title = "root-cause hunter", lastMs = 2_000_000L),
+                RunningSubagent(sid = "sess_ghost", title = "killed box agent", lastMs = 2_000_000L - 20 * 60_000),
+            ),
+            nowMs = 2_000_000L,
+        )!!
+        val keyboard = kb.jsonObject["inline_keyboard"]!!.jsonArray
+        assertEquals(2, keyboard.size)
+        val fresh = keyboard[0].jsonArray[0].jsonObject
+        assertEquals("🔵 root-cause hunter ▶️", fresh["text"]!!.jsonPrimitive.content)
+        assertEquals("sa:sess_fresh", fresh["callback_data"]!!.jsonPrimitive.content)
+        val ghost = keyboard[1].jsonArray[0].jsonObject
+        assertEquals("🔵 killed box agent ⏸️ hace 20m", ghost["text"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun tasksKeyboardWithoutAnyRowIsNull() {
         assertNull(
-            Keyboards.tasksKeyboard(rows = emptyList(), running = emptySet(), activeSid = null, watchedTaskId = null, subagents = emptyList()),
+            Keyboards.tasksKeyboard(rows = emptyList(), running = emptySet(), activeSid = null, subagents = emptyList()),
         )
     }
 

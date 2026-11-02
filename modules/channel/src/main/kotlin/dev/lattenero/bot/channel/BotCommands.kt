@@ -588,77 +588,102 @@ class BotCommands(
 
     /**
      * /tasks — Python's `/task`: the projects-scope history (usage-backed
-     * tasks, loose DEFAULT-workspace ones excluded). `n` picks (rebinds the
-     * channel's context), `new` arms the next text to CREATE.
+     * tasks, loose DEFAULT-workspace ones excluded), NOW with the owner's
+     * 2/11 law: NO numeric args — the answer is always the TAPPABLE list
+     * (tasks + subagents); `new` arms the next text to CREATE, `@sid`
+     * stays for the taps' internal resolution.
      */
     private suspend fun tasks(rest: String, updateId: Long): BotReply = when {
-        rest.isEmpty() -> taskList(all = false)
         rest.startsWith("@") -> BotReply(pickBySid(rest.substring(1), updateId))
-        rest.all { it.isDigit() } -> BotReply(pickScoped(rest.toInt(), all = false, updateId, "tasks"))
         rest.substringBefore(' ') == "new" -> BotReply(newConversation(rest.removePrefix("new").trim()))
-        else -> BotReply(TASK_USAGE)
+        else -> taskList(all = false, hint = if (rest.isNotEmpty()) NO_NUMBERS_HINT else null)
     }
 
-    /** /all_tasks — Python's `/all_tasks`: every conversation, loose ones included. `n` picks. */
+    /** /all_tasks — Python's `/all_tasks`: every conversation, loose ones included — buttons only, no numbers. */
+    @Suppress("UnusedParameter") // the dispatcher's uniform (rest, updateId) shape; numbers are retired
     private suspend fun allTasks(rest: String, updateId: Long): BotReply =
-        if (rest.all { it.isDigit() } && rest.isNotEmpty()) {
-            BotReply(pickScoped(rest.toInt(), all = true, updateId, "all_tasks"))
-        } else {
-            taskList(all = true)
-        }
+        taskList(all = true, hint = if (rest.isNotEmpty()) NO_NUMBERS_HINT else null)
 
     /**
      * The list itself — Python's task_list_report(scope): rows + stamps +
-     * footer, and now the KEYBOARD (the structural gap the interface map
-     * named): one green 🟢 row per task (`t:<sid>` re-binds on tap), the
-     * blue 🔵 lanes nested under the watched task only.
+     * footer, and the KEYBOARD in every branch that has rows (the owner's
+     * 2/11 incident: the keyboard used to live ONLY in the Ctx branch, so
+     * every channel bounce answered a buttonless list — the buttons ride
+     * on LOCAL data: rows from the session store, subagents from the hub's
+     * lanes + the store's running sessions; a tap on a dead channel fails
+     * honestly at the tap, never buttonless at the list).
      */
-    private suspend fun taskList(all: Boolean): BotReply {
+    private suspend fun taskList(all: Boolean, hint: String? = null): BotReply {
         val rows = scopeRows(history.ctxTasks(if (all) ALL_CAP else TASKS_CAP), all, defaultWorkspacePath)
+        val watched = hub.peek()
+        val lanes = watched?.tools.orEmpty().filter {
+            it.parentToolUseId == null && it.status == null && it.name in SUBAGENT_DISPATCH_NAMES
+        }
         return when (val ctx = contextAnswer()) {
             ContextAnswer.Degraded -> BotReply(degraded("botStatus"))
-            ContextAnswer.None -> BotReply(renderTaskList(rows, emptySet(), null, null, all))
-            is ContextAnswer.Ctx -> {
-                val running = when (val answer = ops.query(ChannelQuery.ActiveTaskIds(ctx.value.workspacePath))) {
-                    is QueryAnswer.Ok -> parseStrings(answer.resultJson).toSet()
-                    else -> emptySet()
-                }
-                val watched = hub.peek()
-                BotReply(
-                    text = renderTaskList(
-                        rows,
-                        running,
-                        ctx.value.activeTaskId,
-                        ctx.value.workspacePath,
-                        all,
-                        watchedSid = watched?.taskId,
-                    ),
-                    markup = Keyboards.tasksKeyboard(
-                        rows = rows,
-                        running = running,
-                        // the 🎯 follows THE PIPE THE OWNER IS WATCHING (30/10:
-                        // «me muestra siempre unificador» — the bind REFUSES to
-                        // move while that turn runs; his selection is the attach)
-                        activeSid = watched?.taskId ?: ctx.value.activeTaskId,
-                        watchedTaskId = watched?.taskId,
-                        // ONLY the live dispatch lanes (the owner's 30/10 bug: the
-                        // old parentToolUseId!=null filter showed the agents' inner
-                        // tools as «bash, bash, read, read» — a subagent row IS the
-                        // open Agent/Task dispatch lane, named as he named it)
-                        subagents = watched?.tools.orEmpty().filter {
-                            it.parentToolUseId == null && it.status == null && it.name in SUBAGENT_DISPATCH_NAMES
-                        },
-                    ),
-                )
-            }
+            ContextAnswer.None -> taskListWithoutContext(rows, all, hint, watched, lanes)
+            is ContextAnswer.Ctx -> taskListWithContext(rows, all, hint, ctx, watched, lanes)
         }
     }
 
-    /** `/tasks n` — Python's task_select: the VISIBLE list's n binds the active conversation. */
-    private suspend fun pickScoped(n: Int, all: Boolean, updateId: Long, word: String): String {
-        val rows = scopeRows(history.ctxTasks(if (all) ALL_CAP else TASKS_CAP), all, defaultWorkspacePath)
-        if (n < 1 || n > rows.size) return outOfList(word, rows.size)
-        return pickBySid(rows[n - 1].sid, updateId)
+    /** The None branch: the channel's context is silent — the LOCAL truth still carries the buttons. */
+    private suspend fun taskListWithoutContext(
+        rows: List<TaskRow>,
+        all: Boolean,
+        hint: String?,
+        watched: TurnLive?,
+        lanes: List<ToolLive>,
+    ): BotReply {
+        val running = watched?.taskId?.let { setOf(it) } ?: emptySet()
+        val dbRunning = watched?.taskId?.let { history.subagentsRunning(it) }.orEmpty()
+        return BotReply(
+            text = renderTaskList(rows, running, watched?.taskId, null, all, watchedSid = watched?.taskId) +
+                (hint ?: ""),
+            markup = Keyboards.tasksKeyboard(rows, running, watched?.taskId, lanes, dbRunning, clock()),
+        )
+    }
+
+    /** The Ctx branch: the channel answered — the running set and the 🎯 come from it. */
+    private suspend fun taskListWithContext(
+        rows: List<TaskRow>,
+        all: Boolean,
+        hint: String?,
+        ctx: ContextAnswer.Ctx,
+        watched: TurnLive?,
+        lanes: List<ToolLive>,
+    ): BotReply {
+        val running = when (val answer = ops.query(ChannelQuery.ActiveTaskIds(ctx.value.workspacePath))) {
+            is QueryAnswer.Ok -> parseStrings(answer.resultJson).toSet()
+            else -> emptySet()
+        }
+        val dbRunning = (watched?.taskId ?: ctx.value.activeTaskId)
+            ?.let { history.subagentsRunning(it) }
+            ?: emptyList()
+        return BotReply(
+            text = renderTaskList(
+                rows,
+                running,
+                ctx.value.activeTaskId,
+                ctx.value.workspacePath,
+                all,
+                watchedSid = watched?.taskId,
+            ) + (hint ?: ""),
+            markup = Keyboards.tasksKeyboard(
+                rows = rows,
+                running = running,
+                // the 🎯 follows THE PIPE THE OWNER IS WATCHING (30/10:
+                // «me muestra siempre unificador» — the bind REFUSES to
+                // move while that turn runs; his selection is the attach)
+                activeSid = watched?.taskId ?: ctx.value.activeTaskId,
+                // ONLY the live dispatch lanes (the owner's 30/10 bug: the
+                // old parentToolUseId!=null filter showed the agents' inner
+                // tools as «bash, bash, read, read» — a subagent row IS the
+                // open Agent/Task dispatch lane, named as he named it)
+                subagents = lanes,
+                dbRunning = dbRunning,
+                nowMs = clock(),
+            ),
+        )
     }
 
     /**
@@ -1636,12 +1661,12 @@ class BotCommands(
         const val TASK_RUNNING_MARKER = "still running"
         const val TASK_MISSING_MARKER = "Task not found"
 
-        /** Python's /task usage hint, renamed to the owner's vocabulary. */
-        internal const val TASK_USAGE =
-            "⚠️ /tasks · /tasks &lt;n&gt; picks · /tasks new [project] · /all_tasks shows all"
+        /** The owner's 2/11 law: the lists are BUTTONS only — a typed number just re-shows them. */
+        internal const val NO_NUMBERS_HINT =
+            "\n⚠️ Sin números: tocá una fila para verla en vivo · /tasks new [project] crea"
 
-        /** Python's status: «🎯 Active: none (/task n to pick one)». */
-        internal const val ACTIVE_NONE = "🎯 Active: none (/tasks n to pick one)"
+        /** Python's status: «🎯 Active: none (/task n to pick one)» — buttons are the picker now. */
+        internal const val ACTIVE_NONE = "🎯 Active: none — /tasks and tap a row"
         internal const val SID_TAIL = 8
 
         /** The requestId's log tail (the full wire id is noise in the daemon log). */
@@ -1817,10 +1842,6 @@ class BotCommands(
             return base to (parts.getOrNull(1)?.trim() ?: "")
         }
 
-        /** Python's args.out_of_list_error. */
-        fun outOfList(word: String, n: Int): String =
-            "⚠️ Number out of the list (1 to $n) — /$word."
-
         /**
          * Python's task_list_report — the text half of the tappable list:
          * header, `{stamp} {n}. {title}[ · 📁ws]` per row, footer. The stamp
@@ -1842,7 +1863,7 @@ class BotCommands(
             val header = if (all) {
                 "💬 <b>All conversations</b> (loose ones included) — /tasks only projects"
             } else {
-                "💬 <b>Conversations by project</b> — pick one with /tasks n"
+                "💬 <b>Conversations by project</b> — tap a row to watch it live"
             }
             val lines = mutableListOf(header)
             rows.forEachIndexed { i, t ->
