@@ -1,0 +1,96 @@
+# Command parity plan — the "bot completo" batch (2026-11-02)
+
+The per-command, per-unit work plan agreed with the owner after the full
+reconnaissance of the retired Python bot (`~/Projects/bot`, byte-exact
+behavioral spec), the live Kotlin daemon, and the fork's channel surface.
+Companion of `plan-brujula.md` (the U0–U11 roadmap — this batch is the
+post-U2.5 hot-fix queue, NOT a re-order of the compass) and
+`parity-and-engineering.md` (the verdict matrix this plan executes).
+
+## State of the world at planning time
+
+- The live bot registers 15 commands (+ `/file` `/diff` intercepted), the
+  transcript feed, the question round-trip and the multi-bot lanes. All
+  deployed (fork caps=16, daemon master 294141f + 0e46e77).
+- **The button round-trip already exists**: `Questions.kt` parses
+  `permission_request` (🔐 one ✅/❌ row per option),
+  `elicitation_request` (multiple-choice buttons + ✍️ free-text arm) and
+  plan approval (ExitPlanMode → ✅/❌); the fork's `respond` frame
+  (6993d7e8) answers them. The owner's "everything zcode sends must land
+  as actionable buttons" is therefore a VERIFY + close-residuals job, not
+  a build-from-zero.
+- **Verbosity already matches zcode**: the bot's `summary|normal|verbose`
+  is the fork's `messageStreamVerbosity` enum; the bot's default is
+  `verbose` (the owner's standing order; zcode defaults to `normal`).
+- The channel does NOT yet expose: `setMode` (needed by /mode),
+  `createTask` (needed by /run), any gift/promo surface, or the additive
+  `bindTaskId` inbound field (designed in fork-interface-map, queued).
+
+## Execution doctrine
+
+Two tracks in parallel, ONE deploy batch at the end (the 4th Telegram
+flood penalty was caused by 3 daemon restarts in 3h — never again).
+Track A (buttons: fork + bot), Track B (bot-side commands). Python is the
+byte-exact spec for behavior and emojis; the "Kotlin must be SUPERIOR"
+doctrine wins the improvements (FP-first: pure core + property tests, KAP
+for orchestration). Max 2 concurrent subagents; every unit = 1 incremental
+commit+push (`--no-verify`); deploys batched.
+
+## Track A — buttons
+
+- **A1. Live drill** (owner's phone): fire a permission request, a
+  multi-option AskUserQuestion and an ExitPlanMode; verify each arrives as
+  buttons and the tap seals the message. Diagnose from `daemon.jsonl`
+  (`route:` lines) if anything does not arrive. Deliverable: verdict per
+  kind + fixes.
+- **A2. Multi-question elicitation** (real gap: only question 1 of N is
+  rendered): per-question navigation (q1 → answer → q2, «pregunta 2 de N»
+  counter); `elicitationContent` accumulates `answers` for ALL answered
+  questions (today only `answer_0` flies). Python ref:
+  `handlers_tasks.py:90-111`. Tests: 2-question flow, partial answers,
+  double tap.
+- **A3. UI style guide + total sweep** (owner's choice): `ui-style-guide.md`
+  built FROM the existing vocabulary (ToolBox.familyOf verbs, F23 acks —
+  untouchable), then every `Keyboards.kt` builder and command render swept
+  through it in one unification commit. Tests pin the guide (destructive
+  never first row, caps respected).
+- **A4. Fork package** (one batch → one owner ⌘Q deploy): additive
+  `bindTaskId` on `inbound` (free text targets the conversation without
+  the bind-by-command workaround; simplifies `Routing.kt`) + additive
+  `setMode` query (plan 🗺 / yolo 🔓; Python ref `handlers_system.py:180`)
+  + anything A1/A2 uncover.
+- **A5. SAVED — gifts & promos** (when tokens return; does not block the
+  batch): find where the gift boxes live (token pill "reset 5 hour quota
+  now, expires in X" / weekly; config sidebar "free 500.000K token expires
+  in 2 days, Select!") — the provider endpoints/data (IUsageStatsService /
+  z.ai) — then surface them in an enriched /quota + a 🔴 alert when a
+  claimable gift exists.
+
+## Track B — bot-side commands
+
+| # | Unit | Python spec | Kotlin shape |
+|---|---|---|---|
+| B1 | /quota real data | `handlers_info.py:47` + `reporting.py:211-283` (`https://api.z.ai/api/monitor/usage/quota/limit`, Bearer from `~/.zcode/hooks/bot-provider.json`, 5h+weekly buckets, ⚠️≥75%) | new `QuotaDirect.kt` (pure parser, injected HTTP); `BotCommands.kt:1121` tries direct → falls back to the channel's `quota` query (Start-Plan buckets already render) → honest without key. No leveldb scraping — better than Python |
+| B2 | /retry | `handlers_tasks.py:155` + `_save_last_prompt` (`workers.py:937`) | last prompt per sid in `state/last-prompt.json` on every confirmed inbound; /retry = armed order to the bound sid; honest refusals (no context / busy) |
+| B3 | /handshake + /ping | `handlers_system.py:238-310` + `:103` | pure `HealthReport`: channel ping RTT (exists), hb-poller/hb-channel ages, outbox depth + cooldown active, running subagents (TasksHistory), live-view state, manual resubscribe button. /ping = 🏓 pong + uptime + channel |
+| B4 | /usage + /ctx | `handlers_info.py:51-55` + `reporting.usage_report:283` + `context_report:358` | FIRST verify `ChannelQuery.TaskUsage` returns real data (the `not_configured` was the QUOTA provider, not usage); /usage = TaskUsage of the bound task + today's aggregate (rollout parser via the spectator if needed); /ctx = contextWindow per open conversation as a LIST (the fork's REAL meter — better than Python's estimate) + 🧹 compacted flag |
+| B5 | /run `<prompt>` | `handlers_tasks.py:343` | design against `Routing.kt` (naked inbound with no open conversation already creates one); if "new conversation + prompt" cannot be guaranteed channel-side, honest refusal + the gap joins A4 (createTask) |
+| B6 | /deploy | `handlers_system.py:38-77` (two-step `dep:go/dep:no`, 600s ceiling, log tail, loud failure) | intercept in `ChannelWiring.kt` (the /file /diff pattern); go = DETACHED spawn of `scripts/deploy-daemon.sh` (anti-suicide door: the script announces BEFORE, the new daemon posts the tail at boot); owner-only, loud failure |
+
+## Final deploy batch (the only one)
+
+1. Fork: the OWNER runs `~/.local/bin/nu-nightly scripts/deploy-fork-and-retire.nu --real`
+   from a normal terminal (never ZCode's integrated one) — carries A4.
+2. Daemon: the coordinator runs `scripts/deploy-daemon.sh` (standing grant)
+   — carries Track B + A2 + A3.
+3. Phone checklist: /quota (real buckets) · /retry · /handshake · /usage ·
+   /ctx · /run · /mode · a 2-question elicitation · plan approval ·
+   permission ✅/❌ · the unified aesthetics.
+
+## After the batch — the compass order stands (v1.16)
+
+U1a (repo RAG indexer + brain-mcp, parallel, never touches the bot) →
+U1b (BusEvent producer + memory_inject port → enables /brain /memory) →
+kap 4.3 (TgBreaker → kap CircuitBreaker) → E2 (metrics) → E3 (OTel) →
+U4+. Stale docs (README build section, fork-interface-map TOP-5) get
+repaired along the way.
