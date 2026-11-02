@@ -542,17 +542,17 @@ class BotCommandsTest {
 
     @Test
     fun quotaSpeaksTheStartPlanBucketsWithTheUsedPercent() {
-        // the owner's 30/10 order, with the 2/11 law v3: the numbers ARE
-        // K-counts, so they climb to M once they cover 1M tokens —
-        // «300,000K → 300M» (the fork's builder carries usage/unit raw;
-        // its percentage is REMAINING-based, so the used % is computed here)
+        // the owner's 30/10 order, with the 2/11 law v4: the API numbers are
+        // RAW token counts — «300,000,000 → 300,000K → 300M» (the fork's
+        // builder carries usage/unit raw; its percentage is REMAINING-based,
+        // so the used % is computed here)
         val json = """
             {"authenticated":true,
              "provider":{"id":"account:zai-start-plan","name":"Start Plan"},
              "remaining":{"count":160000,"isShow":true,"percentage":0.32},
              "quota":{"level":"Start","limits":[
-               {"type":"tok_5h","meter":"tokens","period":"5 hours","unit":500000,"usage":340000,"remaining":160000,"percentage":0.32,"nextResetTime":3600000},
-               {"type":"tok_week","meter":"tokens","period":"weekly","unit":4000000,"usage":900000,"remaining":3100000,"percentage":0.775,"nextResetTime":500000000}]}
+               {"type":"tok_5h","meter":"tokens","period":"5 hours","unit":500000000,"usage":340000000,"remaining":160000000,"percentage":0.32,"nextResetTime":3600000},
+               {"type":"tok_week","meter":"tokens","period":"weekly","unit":4000000000,"usage":900000000,"remaining":3100000000,"percentage":0.775,"nextResetTime":500000000}]}
             }
         """.trimIndent()
         val text = BotCommands.renderQuota(json, nowMs = 0L)
@@ -563,15 +563,29 @@ class BotCommandsTest {
     }
 
     @Test
-    fun quotaSpeaksTheGiftBucketWithItsSeparators() {
-        // the owner's law verbatim (2/11): «no es 300k es 300,000.0k tokens»
-        // → v3: «300,000K → 300M» — the gift reads 166.6M/300M, trailing
-        // zeros off, sistema americano
+    fun quotaBucketBelowAMillionTokensStaysK() {
+        // the ladder's bottom rung: raw 850,000 tokens → «850K», never «0.85M»
         val json = """
             {"authenticated":true,
              "provider":{"id":"account:zai-start-plan","name":"Start Plan"},
              "quota":{"level":"Start","limits":[
-               {"type":"tok_one_time","meter":"tokens","period":"one_time","unit":300000,"usage":166603.4,"nextResetTime":3600000}]}
+               {"type":"tok_5h","meter":"tokens","period":"5 hours","unit":500000000,"usage":850000,"remaining":499150000,"percentage":0.9993,"nextResetTime":3600000}]}
+            }
+        """.trimIndent()
+        val text = BotCommands.renderQuota(json, nowMs = 0L)
+        assertTrue("• 5 hours: 850K/500M usado 0%" in text, "got: $text")
+    }
+
+    @Test
+    fun quotaSpeaksTheGiftBucketWithItsSeparators() {
+        // the owner's law verbatim (2/11): the gift is 300M tokens — RAW
+        // 300,000,000 → «300M»; the used side 166,603,400 → «166.6M»
+        // (2 decimals, trailing zeros off, sistema americano)
+        val json = """
+            {"authenticated":true,
+             "provider":{"id":"account:zai-start-plan","name":"Start Plan"},
+             "quota":{"level":"Start","limits":[
+               {"type":"tok_one_time","meter":"tokens","period":"one_time","unit":300000000,"usage":166603400,"nextResetTime":3600000}]}
             }
         """.trimIndent()
         val text = BotCommands.renderQuota(json, nowMs = 0L)
@@ -583,7 +597,7 @@ class BotCommandsTest {
         val json = """
             {"authenticated":true,
              "quota":{"level":"Start","limits":[
-               {"type":"tok_5h","meter":"tokens","period":"5 hours","unit":400000,"usage":340000,"nextResetTime":3600000}]}
+               {"type":"tok_5h","meter":"tokens","period":"5 hours","unit":400000000,"usage":340000000,"nextResetTime":3600000}]}
             }
         """.trimIndent()
         val text = BotCommands.renderQuota(json, nowMs = 0L)
