@@ -140,13 +140,14 @@ class SubagentsCommandTest {
         assertTrue("subagents" in reply.text)
         assertTrue("Grep" !in reply.text, "completed inner lanes must not mix in: ${reply.text}")
         assertTrue("Bash" !in reply.text, "completed top-level lanes must not mix in: ${reply.text}")
-        // the live dispatch lane's row: the 🔵 attach + the ✍️ order arm,
-        // then the view switch (30/10: the owner taps a subagent to READ its
-        // stream and to WRITE it an order)
+        // the live dispatch lane's row: the 🔵 attach + the ✍️ order arm +
+        // the ⏹️ stop, then the view switch (30/10: the owner taps a
+        // subagent to READ its stream and to WRITE it an order — and the
+        // ⏹️ stops its generation live)
         assertEquals(
-            listOf("sa:dispatch-1", "so:dispatch-1", "sao:"),
+            listOf("sa:dispatch-1", "so:dispatch-1", "sst:dispatch-1", "sao:"),
             buttonData(reply),
-            "attach + order arm + the switch",
+            "attach + order arm + stop + the switch",
         )
     }
 
