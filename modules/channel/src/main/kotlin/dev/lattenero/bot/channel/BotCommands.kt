@@ -261,12 +261,23 @@ class BotCommands(
     }
 
     /** /plan — «elegir el plan, el modelo, y la velocidad de effort». */
+    @Suppress("ReturnCount") // one guard per honest state (no context, degraded, unreadable, menu)
     private suspend fun plan(): BotReply {
-        val ws = (contextAnswer() as? ContextAnswer.Ctx)?.value?.workspacePath
-        val title = (contextAnswer() as? ContextAnswer.Ctx)?.value?.activeTaskId?.let {
+        val ctx = contextAnswer()
+        // No conversation yet: the fork's modelSelection needs a bot context,
+        // so querying it would fail with an internal error. Say the real
+        // reason instead of blaming the deploy (the old fallback did).
+        if (ctx is ContextAnswer.None) {
+            return BotReply(
+                "📭 No hay conversación activa — abrí una en ZCode o usá /tasks n. " +
+                    "/plan lee el plan, el modelo y el effort de la conversación activa.",
+            )
+        }
+        val value = (ctx as? ContextAnswer.Ctx)?.value ?: return BotReply(DEGRADED)
+        val title = value.activeTaskId?.let {
             history.ctxTasks(SCOPE_FOR_PICK).firstOrNull { r -> r.sid == it }?.title
         }
-        val v = planViews(ws) ?: return BotReply(
+        val v = planViews(value.workspacePath) ?: return BotReply(
             "📡 No pude leer la selección — ¿el fork está deployado con los frames de /plan? " +
                 "(commits 3d07cace+, falta el deploy del fork).",
         )
