@@ -542,9 +542,9 @@ class BotCommandsTest {
 
     @Test
     fun quotaSpeaksTheStartPlanBucketsWithTheUsedPercent() {
-        // the owner's 30/10 order, with the 2/11 unit law: «no es 300k es
-        // 300,000.0k tokens» — the numbers ARE K-counts, the separator is
-        // the whole change (the fork's builder carries usage/unit raw;
+        // the owner's 30/10 order, with the 2/11 law v3: the numbers ARE
+        // K-counts, so they climb to M once they cover 1M tokens —
+        // «300,000K → 300M» (the fork's builder carries usage/unit raw;
         // its percentage is REMAINING-based, so the used % is computed here)
         val json = """
             {"authenticated":true,
@@ -557,16 +557,16 @@ class BotCommandsTest {
         """.trimIndent()
         val text = BotCommands.renderQuota(json, nowMs = 0L)
         assertTrue("📊 <b>Start plan</b>" in text)
-        assertTrue("• 5 hours: 340,000K/500,000K usado 68%" in text)
-        assertTrue("• weekly: 900,000K/4,000,000K usado 22%" in text)
+        assertTrue("• 5 hours: 340M/500M usado 68%" in text)
+        assertTrue("• weekly: 900M/4,000M usado 22%" in text)
         assertTrue("⚠️" !in text) // 68% and 22% are below the 75% alert
     }
 
     @Test
     fun quotaSpeaksTheGiftBucketWithItsSeparators() {
-        // the owner's law verbatim (2/11): «no es 300k es 300,000.0k tokens» —
-        // a comma every 3 digits, NOTHING else; the one_time gift bucket is
-        // 300,000K tokens and «300K» would have said a thousand times fewer
+        // the owner's law verbatim (2/11): «no es 300k es 300,000.0k tokens»
+        // → v3: «300,000K → 300M» — the gift reads 166.6M/300M, trailing
+        // zeros off, sistema americano
         val json = """
             {"authenticated":true,
              "provider":{"id":"account:zai-start-plan","name":"Start Plan"},
@@ -575,7 +575,7 @@ class BotCommandsTest {
             }
         """.trimIndent()
         val text = BotCommands.renderQuota(json, nowMs = 0L)
-        assertTrue("• one_time: 166,603.4K/300,000K usado 55%" in text, "got: $text")
+        assertTrue("• one_time: 166.6M/300M usado 55%" in text, "got: $text")
     }
 
     @Test
@@ -587,7 +587,7 @@ class BotCommandsTest {
             }
         """.trimIndent()
         val text = BotCommands.renderQuota(json, nowMs = 0L)
-        assertTrue("340,000K/400,000K usado 85%" in text)
+        assertTrue("340M/400M usado 85%" in text)
         assertTrue("⚠️" in text)
     }
 
