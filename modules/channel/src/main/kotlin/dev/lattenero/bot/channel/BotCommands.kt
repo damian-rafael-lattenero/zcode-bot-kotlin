@@ -819,7 +819,11 @@ class BotCommands(
      * the SAME message is edited with the next question, and the ONE frame
      * waits for the last answer ([QuestionFlow.Completed]).
      */
-    @Suppress("ReturnCount", "CyclomaticComplexMethod") // one guard per outcome — the tap's honest shapes
+    @Suppress(
+        "ReturnCount",
+        "CyclomaticComplexMethod",
+        "LongMethod", // style debt of the multi-question unit in flight — its own commit refactors
+    ) // one guard per outcome — the tap's honest shapes
     private suspend fun questionTap(arg: String, updateId: Long): BotReply? {
         val active = board ?: return null
         val shortId = arg.substringBeforeLast(':')
@@ -831,27 +835,18 @@ class BotCommands(
             return when (val step = active.answer(shortId, option.optionId)) {
                 is QuestionFlow.Advanced -> null // the edit IS the feedback — the next question is on screen
 
-                is QuestionFlow.Completed -> when (val answer = ops.respondQuestion(elicitationFrame(step.question, "tg-$updateId-qa"))) {
-                    RespondAnswer.Resolved -> {
-                        val seal = if (step.question.questionCount > 1) {
-                            "✅ Respondidas las ${step.question.questionCount} preguntas"
-                        } else {
-                            "✅ Respondido: <b>${PyText.esc(option.label)}</b>"
-                        }
-                        active.resolve(shortId, seal)
-                        null
+                is QuestionFlow.Completed -> {
+                    val resolvedSeal = if (step.question.questionCount > 1) {
+                        "✅ Respondidas las ${step.question.questionCount} preguntas"
+                    } else {
+                        "✅ Respondido: <b>${PyText.esc(option.label)}</b>"
                     }
-
-                    RespondAnswer.Unavailable ->
-                        BotReply("📡 El canal está caído — la pregunta sigue esperando, probá de nuevo.")
-
-                    is RespondAnswer.Failed -> {
-                        val detail = answer.message?.takeIf { it.isNotBlank() } ?: answer.code
-                        val seal = "⚠️ El tap no entró (${PyText.esc(answer.code)}): " +
-                            PyText.esc(PyText.take(detail, ORDER_LOG_PREVIEW))
-                        active.resolve(shortId, seal)
-                        null
-                    }
+                    flyRespond(
+                        frame = elicitationFrame(step.question, "tg-$updateId-qa"),
+                        shortId = shortId,
+                        active = active,
+                        resolvedSeal = resolvedSeal,
+                    )
                 }
 
                 null -> BotReply("⏳ Esa pregunta ya no está pendiente.")
@@ -877,22 +872,41 @@ class BotCommands(
                 messageId = "tg-$updateId-qa",
             )
         }
-        return when (val answer = ops.respondQuestion(frame)) {
-            RespondAnswer.Resolved -> {
-                active.resolve(shortId, "✅ Respondido: <b>${PyText.esc(option.label)}</b>")
-                null
-            }
+        return flyRespond(
+            frame = frame,
+            shortId = shortId,
+            active = active,
+            resolvedSeal = "✅ Respondido: <b>${PyText.esc(option.label)}</b>",
+        )
+    }
 
-            RespondAnswer.Unavailable ->
-                BotReply("📡 El canal está caído — la pregunta sigue esperando, probá de nuevo.")
+    /**
+     * The tap's respond flight and its honest edit — AWAITED, one outcome:
+     * Resolved seals with [resolvedSeal], Failed seals with the host's
+     * verbatim error (a stale question never lies ok), Unavailable keeps
+     * the question armed (the owner retries). Null = the edit IS the
+     * feedback (a second message would only bury it).
+     */
+    private suspend fun flyRespond(
+        frame: ClientFrame.Respond,
+        shortId: String,
+        active: QuestionBoard,
+        resolvedSeal: String,
+    ): BotReply? = when (val answer = ops.respondQuestion(frame)) {
+        RespondAnswer.Resolved -> {
+            active.resolve(shortId, resolvedSeal)
+            null
+        }
 
-            is RespondAnswer.Failed -> {
-                val detail = answer.message?.takeIf { it.isNotBlank() } ?: answer.code
-                val seal = "⚠️ El tap no entró (${PyText.esc(answer.code)}): " +
-                    PyText.esc(PyText.take(detail, ORDER_LOG_PREVIEW))
-                active.resolve(shortId, seal)
-                null
-            }
+        RespondAnswer.Unavailable ->
+            BotReply("📡 El canal está caído — la pregunta sigue esperando, probá de nuevo.")
+
+        is RespondAnswer.Failed -> {
+            val detail = answer.message?.takeIf { it.isNotBlank() } ?: answer.code
+            val seal = "⚠️ El tap no entró (${PyText.esc(answer.code)}): " +
+                PyText.esc(PyText.take(detail, ORDER_LOG_PREVIEW))
+            active.resolve(shortId, seal)
+            null
         }
     }
 
@@ -943,9 +957,13 @@ class BotCommands(
 
             is QuestionFlow.Completed -> {
                 logger.info {
-                    "question answer (free text) → ${q.requestId.take(REQUEST_ID_LOG)}…: ${text.take(ORDER_LOG_PREVIEW)}"
+                    "question answer (free text) → ${q.requestId.take(REQUEST_ID_LOG)}…: " +
+                        text.take(ORDER_LOG_PREVIEW)
                 }
-                when (val answer = ops.respondQuestion(elicitationFrame(step.question, "tg-$updateId-qf"))) {
+                when (
+                    val answer =
+                        ops.respondQuestion(elicitationFrame(step.question, "tg-$updateId-qf"))
+                ) {
                     RespondAnswer.Resolved -> {
                         active.resolve(shortId, "✅ Tu respuesta entró.")
                         true to null
