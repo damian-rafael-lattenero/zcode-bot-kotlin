@@ -190,7 +190,8 @@ class QuotaDirectTest {
                 ),
             ),
         )
-        assertTrue("🔒 Limit: 9999/10K credits (99.96%) ⚠️" in text, "🔒 for any other number, 9999 stays plain, 10000 is 10K")
+        // miles con coma (el dueño 2/11: «300,000.4») — 9999 groups, 10000 is 10K
+        assertTrue("🔒 Limit: 9,999/10K credits (99.96%) ⚠️" in text, "🔒 the miles-con-coma law: 9999 → 9,999, 10000 is 10K")
     }
 
     // ── report: the injected-effects composition (the ladder's rung) ──
