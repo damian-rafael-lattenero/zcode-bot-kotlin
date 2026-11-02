@@ -79,6 +79,46 @@ class QuestionsTest {
     }
 
     @Test
+    fun multiQuestionEventCarriesTheFullQuestionnaire() {
+        val q = parseQuestionEvent(
+            ev(
+                """{"type":"elicitation_request","taskId":"t1","requestId":"r2","questions":[
+                     {"question":"¿qué base?","header":"Elegí","options":[
+                       {"value":"main","label":"main"},{"value":"dev","label":"dev"}]},
+                     {"question":"¿qué runtime?","options":[{"value":"node","label":"node"}]},
+                     {"question":"¿notas?"}]}""",
+            ),
+        )!!
+        assertEquals(3, q.questionCount)
+        assertEquals(3, q.questions.size)
+        assertEquals(0, q.questionIndex)
+        assertEquals("¿qué base?", q.title) // the question on screen is the FIRST
+        assertEquals(listOf("main", "dev"), q.options.map { it.optionId })
+        assertEquals("¿qué runtime?", q.questions[1].text)
+        assertEquals(listOf("node"), q.questions[1].options.map { it.optionId })
+        assertEquals("¿notas?", q.questions[2].text)
+        assertTrue(q.questions[2].options.isEmpty()) // the ✍️ arm only
+        // the keyboard shows the CURRENT question's options + the arm
+        val rows = questionKeyboard("q9", q)["inline_keyboard"]!!.toString()
+        assertTrue("qa:q9:0" in rows)
+        assertFalse("qa:q9:2" in rows) // question 3 has no options — nothing to tap
+        assertTrue("qf:q9" in rows)
+    }
+
+    @Test
+    fun multiQuestionRenderSaysWhichQuestionIsOnScreen() {
+        val q = parseQuestionEvent(
+            ev(
+                """{"type":"elicitation_request","taskId":"t1","requestId":"r2","questions":[
+                     {"question":"uno"},{"question":"dos"}]}""",
+            ),
+        )!!
+        assertTrue("pregunta 1 de 2" in questionText(q))
+        val advanced = q.copy(questionIndex = 1, header = q.questions[1].header, title = q.questions[1].text)
+        assertTrue("pregunta 2 de 2" in questionText(advanced))
+    }
+
+    @Test
     fun planApprovalRidesTheElicitationDoor() {
         val q = parseQuestionEvent(
             ev(
@@ -114,6 +154,39 @@ class QuestionsTest {
         assertEquals("main", c["answer_0"]?.let { (it as JsonPrimitive).content })
         assertEquals("main", c["answer"]?.let { (it as JsonPrimitive).content })
         assertNull(elicitationContent("q", "x", 2)["answer"]) // multi-question: no whole-answer key
+    }
+
+    @Test
+    fun completeMultiAnswerContentPinsTheForksExactWireShape() {
+        // The fork's buildBotElicitationContent (botsService.ts:4439) for a
+        // 2-question form: answers keyed by each QUESTION text, answer_N per
+        // index, NO singular `answer`. This fixture is the contract.
+        val expected = Json.parseToJsonElement(
+            """{"answers":{"¿qué base?":"main","¿qué runtime?":"node"},"answer_0":"main","answer_1":"node"}""",
+        ) as JsonObject
+        val entries = listOf("¿qué base?" to "main", "¿qué runtime?" to "node")
+        assertEquals(expected, elicitationContentAll(entries, 2))
+        // the singular `answer` rides ONLY for a one-question form
+        val single = Json.parseToJsonElement(
+            """{"answers":{"q":"x"},"answer_0":"x","answer":"x"}""",
+        ) as JsonObject
+        assertEquals(single, elicitationContentAll(listOf("q" to "x"), 1))
+    }
+
+    @Test
+    fun answerEntriesMapsEveryQuestionIndexToItsAnswer() {
+        val q = parseQuestionEvent(
+            ev(
+                """{"type":"elicitation_request","taskId":"t1","requestId":"r2","questions":[
+                     {"question":"¿qué base?"},{"question":"¿qué runtime?"}]}""",
+            ),
+        )!!
+        assertEquals(
+            listOf("¿qué base?" to "", "¿qué runtime?" to ""),
+            q.answerEntries(), // nothing answered yet — the honest blanks
+        )
+        val completed = q.copy(answers = mapOf(0 to "main", 1 to "node"))
+        assertEquals(listOf("¿qué base?" to "main", "¿qué runtime?" to "node"), completed.answerEntries())
     }
 
     // ---- the board: registry laws ----
@@ -203,5 +276,151 @@ class QuestionsTest {
         }
         assertNull(board.byShortId("q1")) // the eldest evicted
         assertNotNull(board.byShortId("q${QuestionBoard.REGISTRY_CAP + 1}"))
+    }
+
+    // ---- the multi-question flow: advance IN PLACE, ONE respond at the end ----
+
+    private fun elicitationFrame(requestId: String, questions: String): ServerFrame.StreamEvent =
+        ServerFrame.StreamEvent(
+            taskId = "t1",
+            seq = 1,
+            at = 0,
+            event = ev(
+                """{"type":"elicitation_request","taskId":"t1","requestId":"$requestId","questions":[$questions]}""",
+            ),
+        )
+
+    private class FlowSeams {
+        val sent = mutableListOf<String>()
+        val edits = mutableListOf<Triple<Long, String, JsonObject?>>()
+
+        fun board(): QuestionBoard = QuestionBoard(
+            sendQuestion = { text, _ ->
+                sent.add(text)
+                9L
+            },
+            editQuestion = { mid, text, markup -> edits.add(Triple(mid, text, markup)) },
+        )
+    }
+
+    private fun twoQuestionEvent(requestId: String) = elicitationFrame(
+        requestId,
+        questions = """
+            {"question":"¿qué base?","options":[{"value":"main","label":"main"},{"value":"dev","label":"dev"}]},
+            {"question":"¿qué runtime?","options":[{"value":"node","label":"node"}]}
+        """.trimIndent(),
+    )
+
+    @Test
+    fun twoQuestionFlowAdvancesTheSameMessageThenCarriesBothAnswers() = runBlocking {
+        val seams = FlowSeams()
+        val board = seams.board()
+        board.onStreamEvent(twoQuestionEvent("rm"))
+        assertEquals(1, seams.sent.size) // ONE message for the whole questionnaire
+
+        // q1 answered by tap → the SAME message edited with q2, nothing flies yet
+        val step1 = board.answer("q1", "main")
+        assertTrue(step1 is QuestionFlow.Advanced)
+        assertEquals(1, seams.sent.size) // the rate law: never a second message
+        val (mid, text, markup) = seams.edits.single()
+        assertEquals(9L, mid)
+        assertTrue("pregunta 2 de 2" in text)
+        assertTrue("¿qué runtime?" in text)
+        assertTrue("qa:q1:0" in markup.toString()) // q2's OWN option now on screen
+        assertEquals("¿qué runtime?", board.byShortId("q1")?.title)
+
+        // q2 answered → Completed; the content carries BOTH answers in the fork's shape
+        val step2 = board.answer("q1", "node")
+        assertTrue(step2 is QuestionFlow.Completed)
+        val completed = (step2 as QuestionFlow.Completed).question
+        // the flight owns the LAST answer: the stored entry keeps q1's answer but
+        // not q2's — an Unavailable retry re-answers only the last question
+        val stored = board.byShortId("q1")!!
+        assertEquals(mapOf(0 to "main"), stored.answers)
+        assertEquals(1, stored.questionIndex)
+        assertEquals(
+            Json.parseToJsonElement(
+                """{"answers":{"¿qué base?":"main","¿qué runtime?":"node"},"answer_0":"main","answer_1":"node"}""",
+            ) as JsonObject,
+            elicitationContentAll(completed.answerEntries(), completed.questionCount),
+        )
+    }
+
+    @Test
+    fun optionlessSecondQuestionTakesTheFreeTextArmThenFlies() = runBlocking {
+        val seams = FlowSeams()
+        val board = seams.board()
+        board.onStreamEvent(
+            elicitationFrame(
+                "rn",
+                questions = """
+                    {"question":"¿qué base?","options":[{"value":"main","label":"main"}]},
+                    {"question":"¿notas?","header":"Notas"}
+                """.trimIndent(),
+            ),
+        )
+        assertTrue(board.answer("q1", "main") is QuestionFlow.Advanced)
+        val (_, text, markup) = seams.edits.single()
+        assertTrue("¿notas?" in text)
+        assertTrue("qf:q1" in markup.toString()) // the ✍️ arm remains
+        assertFalse("qa:q1:" in markup.toString()) // q2 has no options — nothing to tap
+
+        val step = board.answer("q1", "una nota")
+        assertTrue(step is QuestionFlow.Completed)
+        val completed = (step as QuestionFlow.Completed).question
+        val content = elicitationContentAll(completed.answerEntries(), completed.questionCount)
+        val answers = content["answers"] as JsonObject
+        assertEquals("main", answers["¿qué base?"]?.let { (it as JsonPrimitive).content })
+        assertEquals("una nota", answers["¿notas?"]?.let { (it as JsonPrimitive).content })
+    }
+
+    @Test
+    fun resolveByRequestIdMidFlowSealsAndDiscardsThePartialState() = runBlocking {
+        val seams = FlowSeams()
+        val board = seams.board()
+        board.onStreamEvent(elicitationFrame("rp", questions = """{"question":"uno"},{"question":"dos"}"""))
+        assertTrue(board.answer("q1", "x") is QuestionFlow.Advanced)
+        board.resolveByRequestId("rp", "✅ Respondido desde la app.")
+        assertNull(board.byShortId("q1"))
+        assertEquals(2, seams.edits.size) // the advance edit + the honest seal
+        assertNull(board.answer("q1", "y")) // answered from the app: no orphan advance, no respond
+        assertEquals(2, seams.edits.size) // nothing further edits the dead message
+    }
+
+    @Test
+    fun completedQuestionnaireAnswersNoMore() = runBlocking {
+        val seams = FlowSeams()
+        val board = seams.board()
+        board.onStreamEvent(elicitationFrame("rd", questions = """{"question":"uno"}"""))
+        assertTrue(board.answer("q1", "x") is QuestionFlow.Completed)
+        board.resolve("q1", "✅ Respondido.")
+        assertNull(board.answer("q1", "y")) // the double tap: an honest miss
+        assertEquals(1, seams.edits.size) // the seal was the last word
+    }
+
+    @Test
+    fun singleQuestionFlowStaysTheSingularAnswerCase() = runBlocking {
+        val seams = FlowSeams()
+        val board = seams.board()
+        board.onStreamEvent(
+            elicitationFrame("rs", questions = """{"question":"¿qué base?","options":[{"value":"main","label":"main"}]}"""),
+        )
+        val step = board.answer("q1", "main")
+        assertTrue(step is QuestionFlow.Completed)
+        assertEquals(0, seams.edits.size) // nothing to advance — no edit flew
+        val completed = (step as QuestionFlow.Completed).question
+        assertEquals(1, completed.questionCount)
+        val content = elicitationContentAll(completed.answerEntries(), completed.questionCount)
+        assertEquals("main", content["answer"]?.let { (it as JsonPrimitive).content }) // the singular key rides
+        assertEquals(elicitationContent("¿qué base?", "main", 1), content) // byte-identical to the shape always flown
+    }
+
+    @Test
+    fun theFlowRefusesPermissionQuestions() = runBlocking {
+        val seams = FlowSeams()
+        val board = seams.board()
+        board.onStreamEvent(questionFrame("rperm"))
+        assertNull(board.answer("q1", "allow"))
+        assertEquals(0, seams.edits.size)
     }
 }

@@ -84,6 +84,18 @@ class QuestionsTapTest {
            {"question":"¿qué base?","options":[{"value":"main","label":"main"}]}]}
     """.trimIndent()
 
+    private val multiElicitationEvent = """
+        {"type":"elicitation_request","taskId":"task-q","requestId":"rm","questions":[
+           {"question":"¿qué base?","options":[{"value":"main","label":"main"},{"value":"dev","label":"dev"}]},
+           {"question":"¿qué runtime?","options":[{"value":"node","label":"node"}]}]}
+    """.trimIndent()
+
+    private val optionlessSecondEvent = """
+        {"type":"elicitation_request","taskId":"task-q","requestId":"ro","questions":[
+           {"question":"¿qué base?","options":[{"value":"main","label":"main"}]},
+           {"question":"¿notas?","header":"Notas"}]}
+    """.trimIndent()
+
     private fun commands(ops: FakeOps, board: QuestionBoard): BotCommands =
         BotCommands(
             ops,
@@ -205,6 +217,11 @@ class QuestionsTapTest {
             "la main",
             (answers?.get("¿qué base?") as? kotlinx.serialization.json.JsonPrimitive)?.content,
         )
+        // questionCount == 1: the singular `answer` rides — byte-identical to the shape always flown
+        assertEquals(
+            "la main",
+            frame.content?.get("answer")?.let { it as kotlinx.serialization.json.JsonPrimitive }?.content,
+        )
         assertNull(board.byShortId("q1")) // sealed
 
         cmds.handle("otra cosa", 12) // the arm is gone: the text rides the normal route (the router's own tests cover that path)
@@ -230,5 +247,98 @@ class QuestionsTapTest {
         ops.answer = RespondAnswer.Resolved
         assertNull(cmds.handle("la main otra vez", 12)) // the retry lands
         assertEquals(2, ops.responds.size)
+    }
+
+    // ---- the MULTI-question round-trip: advance in place, ONE frame at the end ----
+
+    @Test
+    fun multiQuestionTapFlowEditsInPlaceAndFliesOneFrameWithBothAnswers() = runBlocking {
+        val ops = FakeOps()
+        val seams = Seams()
+        val board = seams.board()
+        val cmds = commands(ops, board)
+        feed(board, multiElicitationEvent)
+        assertEquals(1, seams.sent.size) // ONE message for the whole questionnaire
+
+        assertNull(cmds.onCallback("qa:q1:0", 20)) // q1: main — the edit IS the feedback
+        assertEquals(0, ops.responds.size) // no frame yet — the questionnaire is half done
+        assertEquals(1, seams.edits.size)
+        assertTrue("pregunta 2 de 2" in seams.edits[0].second)
+        assertTrue("¿qué runtime?" in seams.edits[0].second)
+        assertEquals("¿qué runtime?", board.byShortId("q1")?.title)
+
+        assertNull(cmds.onCallback("qa:q1:0", 21)) // q2: node — the LAST answer
+        assertEquals(1, ops.responds.size) // exactly ONE frame, at the end
+        val frame = ops.responds[0]
+        assertEquals("elicitation", frame.kind)
+        assertEquals("accept", frame.action)
+        assertEquals("tg-21-qa", frame.messageId)
+        // the fork's exact shape (buildBotElicitationContent): both answers, no singular `answer`
+        assertEquals(
+            Json.parseToJsonElement(
+                """{"answers":{"¿qué base?":"main","¿qué runtime?":"node"},"answer_0":"main","answer_1":"node"}""",
+            ).jsonObject,
+            frame.content,
+        )
+        assertNull(frame.content?.get("answer"))
+        assertEquals("✅ Respondidas las 2 preguntas", seams.edits[1].second) // the honest seal
+        assertNull(board.byShortId("q1"))
+
+        assertEquals(
+            "⏳ Esa pregunta ya no está pendiente.",
+            cmds.onCallback("qa:q1:0", 22)?.text, // the double tap: honest failure, no second frame
+        )
+        assertEquals(1, ops.responds.size)
+    }
+
+    @Test
+    fun multiQuestionFreeTextArmCollectsTheOptionlessSecondOnly() = runBlocking {
+        val ops = FakeOps()
+        val seams = Seams()
+        val board = seams.board()
+        val cmds = commands(ops, board)
+        feed(board, optionlessSecondEvent)
+
+        assertNull(cmds.onCallback("qa:q1:0", 30)) // q1 by tap → the message advances to q2
+        assertEquals(0, ops.responds.size)
+
+        val arm = cmds.onCallback("qf:q1", 31) // the ✍️ arm — NOW it names question 2
+        assertTrue(arm?.text?.contains("Notas") == true)
+
+        assertNull(cmds.handle("una nota larga", 32)) // q2 by text → the ONE frame flies
+        assertEquals(1, ops.responds.size)
+        val frame = ops.responds[0]
+        assertEquals("tg-32-qf", frame.messageId)
+        assertEquals(
+            Json.parseToJsonElement(
+                """{"answers":{"¿qué base?":"main","¿notas?":"una nota larga"},"answer_0":"main","answer_1":"una nota larga"}""",
+            ).jsonObject,
+            frame.content,
+        )
+        assertNull(board.byShortId("q1")) // sealed
+
+        cmds.handle("otra cosa", 33) // the arm was consumed with q2: the line rides the normal route
+        assertEquals(1, ops.responds.size)
+    }
+
+    @Test
+    fun resolveByRequestIdMidFlowSealsAndNoOrphanRespondFlies() = runBlocking {
+        val ops = FakeOps()
+        val seams = Seams()
+        val board = seams.board()
+        val cmds = commands(ops, board)
+        feed(board, multiElicitationEvent)
+
+        cmds.onCallback("qa:q1:1", 40) // q1: dev — partial state only
+        assertEquals(0, ops.responds.size)
+        board.resolveByRequestId("rm", "✅ Respondido desde la app.")
+        assertNull(board.byShortId("q1"))
+
+        assertEquals(
+            "⏳ Esa pregunta ya no está pendiente.",
+            cmds.onCallback("qa:q1:0", 41)?.text, // the stale tap: honest miss
+        )
+        assertEquals(0, ops.responds.size) // NO orphan respond
+        assertEquals(2, seams.edits.size) // the advance edit + the seal — nothing more
     }
 }
