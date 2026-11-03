@@ -271,6 +271,21 @@ class GiftsCommandTest {
     }
 
     @Test
+    fun theServersCaptchaGateNamesTheWorkingDoor() = runBlocking {
+        // measured live 3/11: claimManualPlan throws «captcha verify failed»;
+        // the fork's security edition is a stub, so no proof can exist here
+        val o = ops().apply {
+            claimAnswer = QueryAnswer.Failed("internal", "captcha verify failed")
+        }
+        val bc = commands(o)
+        bc.handle("/quota", 1L)
+        bc.onCallback("cl:global-build", 2L)
+        val done = bc.onCallback("cly:", 3L)!!
+        assertEquals(BotCommands.GIFT_CAPTCHA, done.text)
+        assertTrue("CAPTCHA" in done.text && "stub" in done.text)
+    }
+
+    @Test
     fun cancelTouchesNothing() = runBlocking {
         val o = ops()
         val bc = commands(o)
