@@ -5,6 +5,8 @@ import dev.lattenero.bot.channel.MemoryContext
 import dev.lattenero.bot.contracts.PyText
 import dev.lattenero.bot.daemon.bus.SwitchKnob
 import dev.lattenero.bot.daemon.bus.SwitchReading
+import dev.lattenero.bot.daemon.metrics.Metrics
+import dev.lattenero.bot.daemon.metrics.NoopMetrics
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
@@ -35,11 +37,18 @@ object MemoryInjectKnob {
  *   prepended, never appended: the owner's words stay last, whole;
  * - the bus keeps the ORIGINAL prompt (the caller taps before preparing) —
  *   memory never feeds on its own output.
+ *
+ * E2's taps ride the same events the log lines already speak: one
+ * `memory.injected` per block actually prepended, one
+ * `memory.inject.failures` per timeout/down/HTTP-error, and the fetch's
+ * real latency on the `memory.fetch` timer (timed around the call itself,
+ * so the no-op facade costs no clock read).
  */
 class MemoryInjector(
     private val search: suspend (query: String, k: Int) -> BrainReply,
     private val log: (String) -> Unit = {},
     private val timeout: Duration = DEFAULT_TIMEOUT,
+    private val metrics: Metrics = NoopMetrics,
 ) {
 
     /** The text that goes to the conversation: the block + the owner's words, or the words alone. */
@@ -48,22 +57,26 @@ class MemoryInjector(
         return when (val reply = fetch(text)) {
             null -> {
                 log("memory_inject: timeout ${timeout.inWholeMilliseconds}ms — texto crudo")
+                metrics.memoryInjectFailed()
                 text
             }
 
             is BrainReply.Down -> {
                 log("memory_inject: brain caído (${reply.detail ?: "?"}) — texto crudo")
+                metrics.memoryInjectFailed()
                 text
             }
 
             BrainReply.Timeout -> {
                 log("memory_inject: brain sin respuesta — texto crudo")
+                metrics.memoryInjectFailed()
                 text
             }
 
             is BrainReply.Response -> when {
                 reply.status !in HTTP_SUCCESS -> {
                     log("memory_inject: brain HTTP ${reply.status} — texto crudo")
+                    metrics.memoryInjectFailed()
                     text
                 }
 
@@ -74,6 +87,7 @@ class MemoryInjector(
                         text
                     } else {
                         log("memory_inject: ${PyText.cpLength(block)} chars inyectados (k=$TOP_K)")
+                        metrics.memoryInjected()
                         MemoryContext.prepend(text, block)
                     }
                 }
@@ -83,11 +97,13 @@ class MemoryInjector(
 
     /**
      * The one fetch: the caller's deadline, and a thrown leg is folded into
-     * the same 📡 classification (the send must never see it).
+     * the same 📡 classification (the send must never see it). The E2
+     * timer wraps the whole bounded window — a deadline cut is a real
+     * duration too.
      */
     @Suppress("TooGenericExceptionCaught") // the send path must never see a brain failure
     private suspend fun fetch(text: String): BrainReply? = try {
-        withTimeoutOrNull(timeout) { search(text, TOP_K) }
+        metrics.memoryFetch { withTimeoutOrNull(timeout) { search(text, TOP_K) } }
     } catch (e: CancellationException) {
         throw e
     } catch (e: Exception) {

@@ -309,4 +309,26 @@ class ZconnShadowTest {
     }
 
     private fun ts(iso: String): Double = java.time.Instant.parse(iso).toEpochMilli() / 1000.0
+
+    /** E2's gauge: the persisted machine's own `down`, read at scrape time. */
+    @Test
+    fun downNowReadsThePersistedMachine() {
+        logFile().writeText("")
+        var nowVal = 100.0
+        val z = shadow { nowVal }
+        assertEquals(false, z.downNow(), "no state yet: not down")
+
+        z.pass() // arm
+        assertEquals(false, z.downNow())
+
+        logFile().appendText(downLine("2026-10-29T10:00:41.200Z", "Cannot connect to API: read ETIMEDOUT"))
+        nowVal = 102.0
+        z.pass()
+        assertEquals(true, z.downNow())
+
+        logFile().appendText(upLine("2026-10-29T10:01:10.200Z"))
+        nowVal = 131.0
+        z.pass()
+        assertEquals(false, z.downNow())
+    }
 }

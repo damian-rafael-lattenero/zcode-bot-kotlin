@@ -92,6 +92,12 @@ and is wired but does not run, because Python still owns the phone's
 reads (ADR-001's single reader — two pollers on one token fight
 Telegram's 409). It turns on ONLY at the retirement.
 
+The `metrics` knob (E2, also **shipped OFF**) lights up a
+Micrometer/Prometheus registry and a `GET /metrics` listener on
+**127.0.0.1 only** (`metrics_port`, default 9102) — every metric
+derives from a real event that already exists, and OFF is byte-for-byte
+the pre-E2 daemon. The full inventory: [docs/observability.md](docs/observability.md).
+
 One-line rollback of the send flip (knob back + Python's send on):
 
 ```bash

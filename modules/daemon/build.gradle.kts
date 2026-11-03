@@ -24,6 +24,8 @@ dependencies {
     implementation(libs.kotlin.logging)
     implementation(libs.ktor.client.core)
     implementation(libs.ktor.client.cio)
+    implementation(libs.micrometer.core)
+    implementation(libs.micrometer.registry.prometheus)
     implementation(libs.logback.classic)
     implementation(libs.logstash.logback.encoder)
     implementation(libs.xerial.sqlite.jdbc)
