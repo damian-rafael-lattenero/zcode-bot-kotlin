@@ -23,11 +23,11 @@ jobs:
           # U0's binding rule: no hand-rolled loops/sleeps in production code —
           # cadence and waiting are kap operators. The DEFINITIVE gate will be
           # the detekt rule from kap (in the works); until then this sweep
-          # catches the literals. Classified exception: recorder Main.kt's
-          # bounded do{} CLI loop (--interval-seconds mode; the deployed agent
-          # runs one-shot, launchd owns the cadence) — pending its own Kap
-          # repeat refactor, tracked in U0's audit.
-          ! grep -rnE 'while[[:space:]]*\([[:space:]]*true|do[[:space:]]*\{' modules/*/src/main | grep -v 'recorder/Main.kt'
+          # catches the literals. No classified exceptions remain: recorder
+          # Main.kt's do{} CLI loop converted to Kap.repeat(Schedule.spaced(...))
+          # in the kap-first sweep 2 (3/11) — the deployed agent runs one-shot
+          # (launchd owns the cadence) and the dev loop is the schedule's.
+          ! grep -rnE 'while[[:space:]]*\([[:space:]]*true|do[[:space:]]*\{' modules/*/src/main
       - name: Transport jar smoke
         run: ./gradlew :modules:transport:jar
       - name: Recorder installDist smoke
