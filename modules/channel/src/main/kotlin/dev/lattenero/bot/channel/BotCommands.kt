@@ -545,12 +545,17 @@ class BotCommands(
         return BotReply("📬 Cancelado — no se tocó nada.")
     }
 
-    private fun giftFailure(verb: String, answer: QueryAnswer.Failed): BotReply =
-        if (answer.code == UNKNOWN_QUERY_CODE) {
+    private fun giftFailure(verb: String, answer: QueryAnswer.Failed): BotReply {
+        val message = answer.message.orEmpty()
+        // the server's captcha gate: this fork build has the security edition
+        // STUBBED, so no proof can ever be produced here — say where it CAN
+        if (message.contains("captcha", ignoreCase = true)) return BotReply(GIFT_CAPTCHA)
+        return if (answer.code == UNKNOWN_QUERY_CODE) {
             BotReply(GIFT_OLD_FORK)
         } else {
-            BotReply("⚠️ No pude $verb (${answer.code}): ${PyText.esc(answer.message ?: "?")}")
+            BotReply("⚠️ No pude $verb (${answer.code}): ${PyText.esc(message.ifBlank { "?" })}")
         }
+    }
 
     /**
      * ⚡ — the text is already in the F17 queue: stopping the turn IS the
@@ -2958,6 +2963,17 @@ class BotCommands(
         internal const val GIFT_OLD_FORK =
             "⚠️ La app conectada no conoce el frame de regalos — falta deployar el fork actualizado " +
                 "(ZCode damian, A5)."
+
+        /**
+         * The claim's captcha gate (measured live 3/11): the server refuses
+         * without an anti-bot proof, and THIS fork build ships the security
+         * edition as a stub (no captcha code exists in the tree) — so the
+         * app's own Claim fails the same way. Name the working door.
+         */
+        internal const val GIFT_CAPTCHA =
+            "🛡 El server pide un <b>CAPTCHA</b> para reclamar, y este build del fork no trae esa " +
+                "verificación (la edición de seguridad es un stub). Reclamá desde la app oficial o la " +
+                "web; después /quota ya muestra el plan y /plan lo puede usar."
 
         /** The confirmation's one-shot window (the pending slot's TTL). */
         internal const val PENDING_GIFT_TTL_MS = 5 * 60 * 1000L
