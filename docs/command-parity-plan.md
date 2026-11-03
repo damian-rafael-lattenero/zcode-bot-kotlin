@@ -104,6 +104,21 @@ post-U2.5 hot-fix queue, NOT a re-order of the compass) and
   the SAME freshness law: a stale store row earns NO row at all (and a
   keyboard with nothing alive and no rows is null) — the app's DB is
   read-only to the bot, so the filter is the whole fix.
+- **A5's gifts, claimed from the phone** (owner's 3/11: «hay un regalo que
+  podemos reclamar… a ver si lo podemos reclamar desde el celular» — the
+  gift turned out to be the CLAIMABLE PLAN banner, «ZCODE GLOBAL BUILD ·
+  300,000,000 tokens · Claim», not the reset pill): the fork gained three
+  additive query kinds — `codingPlanGifts` (reset status + billing
+  preview + the marketing banner's claim actions, each plane degradable
+  on its own), `useCodingPlanReset` (spend one granted reset, edge-
+  validated: FIVE_HOUR|WEEK + 1..64 idempotency key) and `claimCodingPlan`
+  (the SAME `claimManualPlan` the banner runs, returning the service's
+  verdict — 401 without a ZCode JWT, 1001-1005 terminal refusals).
+  Bot side: `/quota` appends 🎁/🔴 lines ONLY on a usable card, and each
+  write sits behind its own confirmation row (✅/❌ with a 5-minute
+  pending slot; the planId/key never ride the callback — Telegram's
+  64-byte law). No data → no line; an old host → silence; the number law
+  renders 300,000,000 as 300M. Fork `e6756260`, pending the owner's ⌘Q.
 - **The ORDER pulse gate + the sn: detail card** (66d6a7e, the owner's
   live proof 20:34): two orders into the ⏹️ agent's dead session bounced
   nothing — now the ✍️ arm and the fire both ask the tri-state pulse

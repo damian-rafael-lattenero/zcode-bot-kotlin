@@ -114,6 +114,32 @@ sealed interface ChannelQuery {
      */
     data class SetMode(val taskId: String, val mode: String) : ChannelQuery
 
+    /**
+     * A5's read (fork cap `queries:codingPlanGifts`): the coding plan's gift
+     * planes — granted quota resets, claimable offers (billing preview) and
+     * the marketing banner's claim actions. Nothing mutates here; an old
+     * host says unknown_query and /quota stays silent about gifts.
+     */
+    data class CodingPlanGifts(val taskId: String? = null) : ChannelQuery
+
+    /**
+     * A5's IRREVERSIBLE half: spend ONE granted reset. The fork validates
+     * the type and the idempotency key at the edge; the bot confirms with a
+     * second tap before ever sending this.
+     */
+    data class UseCodingPlanReset(
+        val taskId: String?,
+        val resetType: String,
+        val idempotencyKey: String,
+    ) : ChannelQuery
+
+    /**
+     * The claim (`control:claimCodingPlan`): the SAME `claimManualPlan` the
+     * app's marketing banner runs. The host answers {success, code, message,
+     * plan?} — its verdict is final, never re-interpreted as a success.
+     */
+    data class ClaimCodingPlan(val planId: String) : ChannelQuery
+
     data class StopAll(val workspacePath: String? = null) : ChannelQuery
 
     data class Compact(val taskId: String) : ChannelQuery
@@ -360,6 +386,23 @@ private fun encodeQuery(query: ChannelQuery): JsonObject = when (query) {
         put("mode", query.mode)
     }
 
+    is ChannelQuery.CodingPlanGifts -> buildJsonObject {
+        put("kind", "codingPlanGifts")
+        query.taskId?.let { put("taskId", it) }
+    }
+
+    is ChannelQuery.UseCodingPlanReset -> buildJsonObject {
+        put("kind", "useCodingPlanReset")
+        query.taskId?.let { put("taskId", it) }
+        put("resetType", query.resetType)
+        put("idempotencyKey", query.idempotencyKey)
+    }
+
+    is ChannelQuery.ClaimCodingPlan -> buildJsonObject {
+        put("kind", "claimCodingPlan")
+        put("planId", query.planId)
+    }
+
     is ChannelQuery.StopAll -> buildJsonObject {
         put("kind", "stopAll")
         if (query.workspacePath != null) put("workspacePath", query.workspacePath)
@@ -569,6 +612,9 @@ fun queryKind(query: ChannelQuery): String = when (query) {
     is ChannelQuery.StopAll -> "stopAll"
     is ChannelQuery.Compact -> "compact"
     is ChannelQuery.SetMode -> "setMode"
+    is ChannelQuery.CodingPlanGifts -> "codingPlanGifts"
+    is ChannelQuery.UseCodingPlanReset -> "useCodingPlanReset"
+    is ChannelQuery.ClaimCodingPlan -> "claimCodingPlan"
 }
 
 // ---- tiny JSON readers (JsonObject's stdlib accessors made shorter) ----------
