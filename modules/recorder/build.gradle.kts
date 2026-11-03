@@ -16,6 +16,9 @@ application {
 dependencies {
     implementation(project(":modules:contract-types"))
     implementation(libs.kotlinx.serialization.json)
+    implementation(libs.kotlinx.coroutines.core)
+    implementation(libs.kap.core)
+    implementation(libs.kap.resilience)
     testImplementation(kotlin("test"))
 }
 
