@@ -42,6 +42,8 @@ class DeploySpawn(
     private val javaHome: String = System.getProperty("java.home"),
     private val home: String = System.getProperty("user.home"),
     private val launchctl: Launchctl = Launchctl { args -> runLaunchctl(args) },
+    /** The beat between a failed bootstrap and its one retry (injected: tests never sleep). */
+    private val beat: (Long) -> Unit = { Thread.sleep(it) },
 ) {
 
     /**
@@ -90,20 +92,33 @@ class DeploySpawn(
     /**
      * Write the job's plist and hand it to launchd. A previous run of the
      * same label (one-shot, normally already exited) is cleared first —
-     * bootstrap refuses an already-loaded label. Any failure to write or
-     * to bootstrap throws: [DeployFlow]'s catch turns it into the phone's
-     * LOUD failure and THIS daemon stays up.
+     * bootstrap refuses an already-loaded label with `error 5: Input/output
+     * error` (a lie about the cause).
+     *
+     * bootout's teardown RACES the bootstrap: measured 2/11 22:20, the
+     * second /deploy of the day bounced twice with error 5 because the job
+     * was still loaded from the 22:11 run and the bootstrap flew
+     * milliseconds after the bootout. The nushell helper already retries
+     * once after a beat (`lib/deploy.nu`); this edge now does the same.
+     *
+     * Any failure to write or to bootstrap throws: [DeployFlow]'s catch
+     * turns it into the phone's LOUD failure and THIS daemon stays up.
      */
     fun spawn(): LaunchctlResult {
         plistFile.parentFile?.mkdirs()
         plistFile.writeText(plist())
         logFile.parentFile?.mkdirs()
-        logFile.appendText("\n==> deploy job bootstrapped at ${java.time.Instant.now()}\n")
         launchctl.run(listOf("bootout", domain(), JOB_LABEL))
-        val out = launchctl.run(listOf("bootstrap", domain(), plistFile.absolutePath))
+        var out = launchctl.run(listOf("bootstrap", domain(), plistFile.absolutePath))
+        if (out.exit != 0) {
+            beat(BOOTOUT_BEAT_MS)
+            out = launchctl.run(listOf("bootstrap", domain(), plistFile.absolutePath))
+        }
         if (out.exit != 0) {
             throw IllegalStateException("launchctl bootstrap $JOB_LABEL failed: ${out.text.trim()}")
         }
+        // the log's line is the RECEIPT: only a bootstrapped job earns it
+        logFile.appendText("\n==> deploy job $JOB_LABEL armed at ${java.time.Instant.now()}\n")
         return out
     }
 
@@ -128,6 +143,9 @@ class DeploySpawn(
 
         /** The rendered plist's file name inside the daemon's state dir. */
         const val JOB_PLIST_NAME = "deploy-job.plist"
+
+        /** The beat between a failed bootstrap and its one retry (lib/deploy.nu's measured fix). */
+        const val BOOTOUT_BEAT_MS = 2_000L
 
         private fun xml(text: String): String =
             text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")

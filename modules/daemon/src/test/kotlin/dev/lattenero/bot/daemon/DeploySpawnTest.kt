@@ -99,6 +99,62 @@ class DeploySpawnTest {
     }
 
     @Test
+    fun aRacingBootoutIsRetriedOnceSoASecondDeployOfTheDayStillLands() {
+        // measured 2/11 22:20: the job was still loaded from the 22:11 run,
+        // bootout had not finished, and the bootstrap bounced with error 5
+        var bootstraps = 0
+        val beats = mutableListOf<Long>()
+        val fake = Launchctl { args ->
+            if (args.first() == "bootstrap") {
+                bootstraps++
+                if (bootstraps == 1) LaunchctlResult(5, "Bootstrap failed: 5: Input/output error")
+                else LaunchctlResult(0, "")
+            } else {
+                LaunchctlResult(0, "")
+            }
+        }
+        val spawn = DeploySpawn(
+            script,
+            log,
+            plist,
+            uid = "501",
+            javaHome = "/jdk-25",
+            home = "/Users/fake",
+            launchctl = fake,
+            beat = { beats += it },
+        )
+        val out = spawn.spawn()
+        assertEquals(0, out.exit)
+        assertEquals(2, bootstraps)
+        assertEquals(listOf(DeploySpawn.BOOTOUT_BEAT_MS), beats)
+    }
+
+    @Test
+    fun aRaceLostTwiceStillFailsLoudly() {
+        var bootstraps = 0
+        val fake = Launchctl { args ->
+            if (args.first() == "bootstrap") {
+                bootstraps++
+                LaunchctlResult(5, "Bootstrap failed: 5: Input/output error")
+            } else {
+                LaunchctlResult(0, "")
+            }
+        }
+        val spawn = DeploySpawn(
+            script,
+            log,
+            plist,
+            uid = "501",
+            javaHome = "/jdk-25",
+            home = "/Users/fake",
+            launchctl = fake,
+            beat = {},
+        )
+        assertFailsWith<IllegalStateException> { spawn.spawn() }
+        assertEquals(2, bootstraps)
+    }
+
+    @Test
     fun aFailedBootstrapThrowsLoudlySoThePhoneHearsIt() {
         val fake = Launchctl { args ->
             if (args.first() == "bootstrap") {
@@ -107,7 +163,17 @@ class DeploySpawnTest {
                 LaunchctlResult(0, "")
             }
         }
-        val e = assertFailsWith<IllegalStateException> { edge(fake).spawn() }
+        val spawn = DeploySpawn(
+            script,
+            log,
+            plist,
+            uid = "501",
+            javaHome = "/jdk-25",
+            home = "/Users/fake",
+            launchctl = fake,
+            beat = {},
+        )
+        val e = assertFailsWith<IllegalStateException> { spawn.spawn() }
         assertContains(e.message.orEmpty(), "Input/output error")
         assertContains(e.message.orEmpty(), DeploySpawn.JOB_LABEL)
     }
