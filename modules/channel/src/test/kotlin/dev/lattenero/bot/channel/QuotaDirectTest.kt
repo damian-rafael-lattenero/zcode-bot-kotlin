@@ -279,7 +279,7 @@ class QuotaDirectTest {
          "remaining":{"count":72,"isShow":true,"percentage":41,"nextResetTime":4700000}}
     """.trimIndent()
 
-    private fun bot(o: LadderOps, direct: (suspend () -> String?)?) = BotCommands(
+    private fun bot(o: LadderOps, direct: (suspend (String?) -> String?)?) = BotCommands(
         ops = o,
         hub = LiveHub(),
         daemonReset = { "" },
@@ -292,7 +292,7 @@ class QuotaDirectTest {
         // channel's answer (the app's own usage service, provider-classified)
         // is the truth; the bot-provider.json key is the OLD plan's view
         val o = LadderOps().apply { answers = mapOf("botStatus" to "null", "quota" to channelQuotaJson) }
-        val bc = bot(o) { throw AssertionError("the direct rung must not fire when the channel answers") }
+        val bc = bot(o) { _ -> throw AssertionError("the direct rung must not fire when the channel answers") }
         val reply = bc.handle("/quota", 1L)!!.text
         assertTrue("41% remaining" in reply, "the channel's text IS the answer")
         assertTrue(o.asked.any { it is ChannelQuery.Quota })
@@ -306,7 +306,7 @@ class QuotaDirectTest {
                 "quota" to """{"generatedAt":1,"unavailableReason":"not_configured"}""",
             )
         }
-        val bc = bot(o) { "📊 <b>Coding plan</b>\n⏱ 5 hours: 31/120 credits (26%)" }
+        val bc = bot(o) { _ -> "📊 <b>Coding plan</b>\n⏱ 5 hours: 31/120 credits (26%)" }
         val reply = bc.handle("/quota", 1L)!!.text
         assertTrue("31/120" in reply, "the fork's not_configured is NOT the final word — the coding-plan key still gets its shot")
     }
@@ -314,7 +314,7 @@ class QuotaDirectTest {
     @Test
     fun ladderNullRungFallsThroughToTheChannel() = runBlocking {
         val o = LadderOps().apply { answers = mapOf("botStatus" to "null", "quota" to channelQuotaJson) }
-        val bc = bot(o) { null } // no key at the edge — the honest null
+        val bc = bot(o) { _ -> null } // no key at the edge — the honest null
         val reply = bc.handle("/quota", 1L)!!.text
         assertTrue("41% remaining" in reply, "the channel path answers as always")
         assertTrue(o.asked.any { it is ChannelQuery.Quota }, "the fork's quota query ran")
@@ -323,7 +323,7 @@ class QuotaDirectTest {
     @Test
     fun ladderThrowingRungNeverHitsTheUser() = runBlocking {
         val o = LadderOps().apply { answers = mapOf("botStatus" to "null", "quota" to channelQuotaJson) }
-        val bc = bot(o) { throw IOException("boom") }
+        val bc = bot(o) { _ -> throw IOException("boom") }
         val reply = bc.handle("/quota", 1L)!!.text
         assertTrue("41% remaining" in reply, "the usable channel wins — the throwing rung is never consulted")
         assertTrue(o.asked.any { it is ChannelQuery.Quota })
@@ -332,7 +332,7 @@ class QuotaDirectTest {
     @Test
     fun ladderBothRungsFailSpeaksTheHonestCopy() = runBlocking {
         val o = LadderOps().apply { available = false } // the channel is down too
-        val bc = bot(o) { null }
+        val bc = bot(o) { _ -> null }
         assertEquals(BotCommands.DEGRADED, bc.handle("/quota", 1L)!!.text)
     }
 

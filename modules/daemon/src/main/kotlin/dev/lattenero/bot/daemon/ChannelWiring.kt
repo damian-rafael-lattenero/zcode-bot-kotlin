@@ -17,6 +17,7 @@ import dev.lattenero.bot.channel.LiveOrphanStore
 import dev.lattenero.bot.channel.LivePublisher
 import dev.lattenero.bot.channel.LiveTelegram
 import dev.lattenero.bot.channel.Poller
+import dev.lattenero.bot.channel.OpencodeQuota
 import dev.lattenero.bot.channel.QuotaDirect
 import dev.lattenero.bot.channel.QueryAnswer
 import dev.lattenero.bot.channel.ServerFrame
@@ -45,15 +46,6 @@ import dev.lattenero.bot.transport.LastPh
 import dev.lattenero.bot.transport.TgApi
 import dev.lattenero.bot.transport.TgConfig
 import io.github.oshai.kotlinlogging.KotlinLogging
-import io.ktor.client.HttpClient
-import io.ktor.client.engine.HttpClientEngineFactory
-import io.ktor.client.engine.cio.CIO
-import io.ktor.client.plugins.HttpTimeout
-import io.ktor.client.request.get
-import io.ktor.client.request.header
-import io.ktor.client.statement.bodyAsText
-import io.ktor.http.HttpHeaders
-import io.ktor.http.isSuccess
 import kotlinx.coroutines.delay
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -62,7 +54,6 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.put
 import java.io.File
-import java.io.IOException
 import kotlin.time.Duration.Companion.seconds
 
 private val logger = KotlinLogging.logger {}
@@ -94,66 +85,67 @@ internal suspend fun feedAndResync(hub: LiveHub, frame: ServerFrame.StreamEvent,
     hub.apply(frame, nowMs, SEQUENCE_LINE_DIFFER)
 }
 
-/** /quota's direct leg budget: ONE attempt, short — the channel fallback is the retry. */
-private val ZAI_QUOTA_TIMEOUT = 5.seconds
+
 
 /**
- * /quota's DIRECT rung, wired (incident 30/10): the z.ai monitor endpoint
- * with the coding-plan key from bot-provider.json (Python's
- * _quota_api_key path — config.providerConfigRules.providerRules[] →
- * config.access, type zhipu-coding-plan-api-key). Every failure — no
- * file, no key, dead network, bad shape — is QuotaDirect's honest null
- * and the commands' ladder falls through to the channel path; a THROWN
- * one is caught there too. The key never logs: it rides the fetch's
- * header only.
+ * /quota's DIRECT rung, wired — PROVIDER-AWARE (owner's 3/11: «estoy
+ * usando la api de open code… me gustaría que me muestre los límites
+ * disponibles de opencode go»). The active conversation's providerId
+ * decides the meter: an OpenCode provider gets its OWN `/usage` windows
+ * ([OpencodeQuota] — the app's provider_config.json carries the key),
+ * anything else keeps the z.ai monitor endpoint (Python's _quota_api_key
+ * path: config.providerConfigRules.providerRules[] → config.access, type
+ * zhipu-coding-plan-api-key). Both files share the rules' shape, so the
+ * legacy hook snapshot stays as the fallback reader. Every failure — no
+ * file, no key, dead network, bad shape — is the rung's honest null and
+ * the commands' ladder falls through; a THROWN one is caught there too.
+ * The keys never log: they ride the fetch's header only.
  */
-private fun quotaDirectRung(cfg: DaemonConfig): suspend () -> String? = {
-    QuotaDirect.report(
-        providerJson = {
-            runCatching {
-                File(cfg.baseDir, "hooks/bot-provider.json")
-                    .takeIf { it.isFile }?.readText()
-            }.getOrNull()
-        },
-        fetch = { url, token -> zaiQuotaGet(url, token) },
-    )
+private fun quotaDirectRung(cfg: DaemonConfig): suspend (String?) -> String? = { providerId ->
+    val opencodeJson = providerConfigText(cfg, OPENCODE_CONFIG_FILES)
+    val opencode = providerId != null &&
+        opencodeJson()?.let { OpencodeQuota.isOpenCodeProvider(it, providerId) } == true
+    if (opencode) {
+        OpencodeQuota.report(
+            providerJson = opencodeJson,
+            providerId = providerId,
+            fetch = { url, token -> quotaBearerGet(url, token, headers = OPENCODE_HEADERS, service = "opencode") },
+        )
+    } else {
+        QuotaDirect.report(
+            providerJson = providerConfigText(cfg, ZAI_CONFIG_FILES),
+            fetch = { url, token -> zaiQuotaGet(url, token) },
+        )
+    }
 }
 
-/**
- * /quota's direct leg (incident 30/10): ONE Bearer GET against z.ai's
- * monitor endpoint — TgApi's own Ktor shape (CIO engine, explicit status,
- * `expectSuccess = false`), a 5 s budget, and the REDACTION LAW: the key
- * rides a request HEADER (never a URL), and the thrown messages carry
- * neither URL, body nor headers — nothing that could log it. The client
- * is SCOPED: the rare /quota pays its own setup and nothing outlives the
- * call (no daemon-lifecycle plumbing for a command typed by hand).
- * Failures THROW — [QuotaDirect.report] is the honest-null boundary.
- */
-@Suppress("TooGenericExceptionCaught") // every transport failure must pass the redaction law — none flies raw
-internal suspend fun zaiQuotaGet(
-    url: String,
-    token: String,
-    engine: HttpClientEngineFactory<*> = CIO,
-): String {
-    val client = HttpClient(engine) {
-        expectSuccess = false
-        install(HttpTimeout) { requestTimeoutMillis = ZAI_QUOTA_TIMEOUT.inWholeMilliseconds }
-    }
-    return client.use {
-        val resp = try {
-            it.get(url) {
-                header(HttpHeaders.Authorization, "Bearer $token")
-                header(HttpHeaders.Accept, "application/json")
-            }
-        } catch (e: Exception) {
-            // the exception's own text may embed anything — the class name
-            // is the only witness the log gets (TgApi's law, header-flavored)
-            throw IOException("z.ai quota fetch failed: ${e::class.simpleName}", e)
+/** The provider config's reader: the first existing candidate file, its text (or null). */
+private fun providerConfigText(cfg: DaemonConfig, names: List<String>): () -> String? = {
+    names.asSequence()
+        .mapNotNull { name ->
+            runCatching { File(cfg.baseDir, name).takeIf { it.isFile }?.readText() }.getOrNull()
         }
-        if (!resp.status.isSuccess()) throw IOException("z.ai quota HTTP ${resp.status.value}")
-        resp.bodyAsText()
-    }
+        .firstOrNull()
 }
+
+/** OpenCode's live config first (3/11), the hook's legacy snapshot after. */
+private val OPENCODE_CONFIG_FILES = listOf("v2/provider_config.json", "hooks/bot-provider.json")
+
+/** z.ai's coding-plan key lives in the hook's snapshot; the live config is the fallback. */
+private val ZAI_CONFIG_FILES = listOf("hooks/bot-provider.json", "v2/provider_config.json")
+
+/**
+ * OpenCode's edge sits behind Cloudflare (error 1010 without a
+ * browser-ish signature — measured 3/11): the app's own UA/version
+ * headers are the pass. Nothing secret rides here — the key goes in the
+ * Authorization header, never in these values.
+ */
+private val OPENCODE_HEADERS = mapOf(
+    "User-Agent" to "ZCode/3.12.1",
+    "X-ZCode-App-Version" to "3.12.1",
+)
+
+
 
 /**
  * B3b's composition. The channel CLIENT always runs (degraded LOUD while

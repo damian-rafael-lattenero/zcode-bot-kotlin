@@ -101,7 +101,19 @@ class ContextWindowTest {
             """{"model":"m","usedTokens":123456,"windowTokens":1000000}""",
             "t",
         )
-        assertTrue("123K de 1000K (12%)" in text)
+        assertTrue("123K de 1M (12%)" in text)
+    }
+
+    @Test
+    fun millionsRenderAsMNeverAsThousandsOfK() {
+        // the owner's 3/11: «en vez de 1000k me gustaría que diga 1M»
+        fun meter(used: Long, window: Long): String = BotCommands.renderContextWindow(
+            """{"model":"m","usedTokens":$used,"windowTokens":$window}""",
+            "t",
+        )
+        assertTrue("347K de 1M (35%)" in meter(347_000, 1_000_000), "the owner's own reading")
+        assertTrue("1.2M de 2M (60%)" in meter(1_200_000, 2_000_000), "one decimal M, trimmed when whole")
+        assertTrue("999K de 1M (100%)" in meter(999_000, 1_000_000), "below the M rung it stays K")
     }
 
     @Test
@@ -113,7 +125,7 @@ class ContextWindowTest {
             """{"model":"m","usedTokens":200000,"windowTokens":1000000,"windowSource":"owner_default"}""",
             "t",
         )
-        assertTrue("200K de 1000K (~) (20%)" in approx)
+        assertTrue("200K de 1M (~) (20%)" in approx)
         // a REAL window (model registry / runtime) never carries the marker
         val real = BotCommands.renderContextWindow(
             """{"model":"m","usedTokens":200000,"windowTokens":1000000,"windowSource":"model"}""",

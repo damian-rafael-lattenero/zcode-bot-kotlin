@@ -154,15 +154,17 @@ class BotCommands(
     /** The questions' board (the answer round-trip) — null = unwired: the taps answer honestly. */
     private val board: QuestionBoard? = null,
     /**
-     * /quota's DIRECT rung (incident 30/10): the z.ai monitor endpoint with
-     * the coding-plan key from bot-provider.json — the REAL pools when the
-     * fork's usage provider says not_configured. A null answer (no key,
+     * /quota's DIRECT rung, PROVIDER-AWARE (owner's 3/11: «estoy usando la
+     * api de open code… me gustaría que me muestre los límites disponibles
+     * de opencode go» — the old z.ai-hardcoded leg answered the retired
+     * coding plan): the argument is the ACTIVE conversation's providerId,
+     * and the daemon's wiring serves that provider's own meter (z.ai's
+     * monitor endpoint or OpenCode Go's /usage). A null answer (no key,
      * dead network, bad shape) or no wiring = the channel path answers as
      * always; a THROWN answer is caught here — the ladder never throws at
-     * the user. The daemon's wiring composes it ([QuotaDirect.report]);
-     * tests inject fakes.
+     * the user. Tests inject fakes.
      */
-    private val quotaDirect: (suspend () -> String?)? = null,
+    private val quotaDirect: (suspend (String?) -> String?)? = null,
     /**
      * The collapsed CoT blocks' taps (the cb: buttons): the publisher's
      * registry — expand/fold IN PLACE on the block's own message. Null
@@ -1825,13 +1827,18 @@ class BotCommands(
      * whatever provider the app has active): 1) the channel's quota query
      * (the Start-Plan buckets through the fork's usage service — the active
      * conversation's taskId rides along for the provider classification),
-     * 2) the direct z.ai report ([QuotaDirect], the coding-plan pools) when
-     * the channel cannot answer (not_configured / failed / down), 3) the
-     * channel's own honest word last.
+     * 2) the DIRECT rung OF THE ACTIVE PROVIDER ([quotaDirect] gets the
+     * providerId from the conversation's own model selection — the owner's
+     * 3/11: OpenCode Go users must see their /usage windows, never the z.ai
+     * plan), 3) the channel's own honest word last — and, for an OpenCode
+     * provider whose meter could not be read, a line that names the real
+     * suspect (key/red) instead of the fork's misleading not_configured.
      */
     @Suppress("ReturnCount") // one return per rung — the ladder's own shape
     private suspend fun quota(): String {
-        val taskId = (contextAnswer() as? ContextAnswer.Ctx)?.value?.activeTaskId
+        val ctx = contextAnswer() as? ContextAnswer.Ctx
+        val taskId = ctx?.value?.activeTaskId
+        val providerId = planViews(ctx?.value?.workspacePath)?.let { it.plan ?: it.defaultPlan }
         val channel = when (val answer = ops.query(ChannelQuery.Quota(taskId = taskId))) {
             is QueryAnswer.Ok -> renderQuota(answer.resultJson, clock())
             is QueryAnswer.Unavailable -> DEGRADED
@@ -1839,9 +1846,13 @@ class BotCommands(
         }
         if (channelUsable(channel)) return channel
         quotaDirect?.let { run ->
-            runCatching { run() }.getOrNull()?.let { return it }
+            runCatching { run(providerId) }.getOrNull()?.let { return it }
         }
-        return channel
+        return if (providerId != null && providerId.contains("opencode", ignoreCase = true)) {
+            QUOTA_OPENCODE_UNREADABLE
+        } else {
+            channel
+        }
     }
 
     /** The channel's word is final unless it is the honest not_configured / degraded / failed one. */
@@ -2620,7 +2631,7 @@ class BotCommands(
             "steer" to "steers the RUNNING turn — the text enters the live turn",
             "stop" to "stops the active task's turn",
             "nuclear" to "emergency: stops EVERYTHING and resets the bot",
-            "quota" to "coding plan credits",
+            "quota" to "the active plan's limits — z.ai pools or OpenCode Go windows",
             "usage" to "token usage of the active conversation — real, cumulative",
             "ctx" to "context % per conversation — the real meter list",
             "subagents" to "the active subagents · «inactivos» shows today's ended",
@@ -2676,7 +2687,7 @@ class BotCommands(
             val window = root.long("windowTokens")
             val windowSource = root.str("windowSource")
             val line = if (window == null || window <= 0) {
-                "Modelo <b>${PyText.esc(model)}</b>: ${fmtK(used)} · ventana desconocida"
+                "Modelo <b>${PyText.esc(model)}</b>: ${fmtTokens(used)} · ventana desconocida"
             } else {
                 // Rounded to the nearest whole percent; >100% is honest (the window is gone).
                 val pct = ((used * CTX_PERCENT_SCALE + window / 2) / window).toInt()
@@ -2687,13 +2698,27 @@ class BotCommands(
                 // the owner's own 1M calibration when nothing exposes the
                 // window — rendered approximate, never as a hard fact
                 val approx = if (windowSource == "owner_default") " (~)" else ""
-                "Modelo <b>${PyText.esc(model)}</b>: ${fmtK(used)} de ${fmtK(window)}$approx ($pct%)\n$bar"
+                "Modelo <b>${PyText.esc(model)}</b>: ${fmtTokens(used)} de ${fmtTokens(window)}$approx ($pct%)\n$bar"
             }
             return "$header\n$line"
         }
 
-        /** nK for the meter: one decimal below 100K (45.3K), whole K at or above (123K). */
-        private fun fmtK(tokens: Long): String = when {
+        /**
+         * The meter's number ladder (owner's 3/11: «en vez de 1000k me
+         * gustaría que diga 1M»): ≥1M renders as M (1M, 1.2M — one
+         * decimal, trimmed when whole), ≥100K as whole K (123K), below as
+         * one-decimal K (45.3K). The unit moves up only when the value
+         * IS that magnitude — never a rounded lie at a lower rung.
+         */
+        private fun fmtTokens(tokens: Long): String = when {
+            tokens >= CTX_M_DIVISOR -> {
+                val tenths = (tokens * CTX_M_TENTHS + CTX_M_DIVISOR / CTX_M_TENTHS / 2) / CTX_M_DIVISOR
+                if (tenths % CTX_M_TENTHS == 0L) {
+                    "${tenths / CTX_M_TENTHS}M"
+                } else {
+                    String.format(Locale.ROOT, "%.1f", tenths.toDouble() / CTX_M_TENTHS) + "M"
+                }
+            }
             tokens >= CTX_K_DECIMAL_LIMIT -> "${(tokens + CTX_K_ROUND_HALF) / CTX_K_DIVISOR}K"
             else -> String.format(Locale.ROOT, "%.1f", tokens.toDouble() / CTX_K_DIVISOR) + "K"
         }
@@ -2723,6 +2748,14 @@ class BotCommands(
         internal const val USAGE_UNPARSEABLE =
             "⚠️ No pude leer la respuesta de uso (shape inesperado del host)"
 
+        /**
+         * An OpenCode provider whose own meter could not be read (3/11):
+         * the fork's `not_configured` would blame the wrong thing — the
+         * provider key or the network is the real suspect.
+         */
+        internal const val QUOTA_OPENCODE_UNREADABLE =
+            "📊 <b>OpenCode</b>: no pude leer el uso — revisá la key del proveedor o la red, y reintentá."
+
         /** A zero TOTAL is a fresh conversation's truth — no tokens spent yet. */
         internal const val USAGE_EMPTY =
             "📭 Aún sin uso registrado — cuando la conversación consuma tokens, el total aparece acá."
@@ -2745,6 +2778,10 @@ class BotCommands(
         private const val CTX_PERCENT_SCALE = 100L
         private const val CTX_PERCENT_HALF = 50L
         private const val CTX_K_DIVISOR = 1000L
+
+        /** The M rung (3/11): ≥1M renders in millions, tenths-of-a-million rounded. */
+        private const val CTX_M_DIVISOR = 1_000_000L
+        private const val CTX_M_TENTHS = 10L
 
         /** The K rendering switch: one decimal below, whole K from here up. */
         private const val CTX_K_DECIMAL_LIMIT = 100_000L
