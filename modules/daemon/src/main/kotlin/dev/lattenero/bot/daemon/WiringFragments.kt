@@ -1,15 +1,21 @@
 package dev.lattenero.bot.daemon
 
 import dev.lattenero.bot.channel.BotCommands
+import dev.lattenero.bot.channel.ChannelQuery
+import dev.lattenero.bot.channel.QueryAnswer
 import dev.lattenero.bot.contracts.PyText
 import dev.lattenero.bot.channel.ToolLive
 import dev.lattenero.bot.channel.ToolOutputPages
 import dev.lattenero.bot.daemon.spectator.ToolBox
+import kotlinx.coroutines.delay
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.longOrNull
+import java.io.File
+import java.sql.DriverManager
+import java.util.Properties
 
 /**
  * ATTACHMENTS IN's gate: the Bot API's own download law — the bot's token
@@ -85,3 +91,69 @@ private const val OUTPUT_TAIL_CP = 800
 
 /** taskSnapshot → the last ASSISTANT message (the turn's answer, from the store). */
 internal fun snapshotAnswerOf(resultJson: String): String? = BotCommands.snapshotLastAnswer(resultJson)
+
+/** The final-answer window: one bounded retry after the first miss (the CLI's persist race). */
+internal const val FINAL_ANSWER_ATTEMPTS = 2
+internal const val FINAL_ANSWER_RETRY_MS = 400L
+
+/**
+ * taskSnapshot → the turn's answer, asked with the task's OWN workspace.
+ *
+ * Measured 2026-11-03: both consumers (the live view's seal and the bus
+ * producer's turn.completed) queried TaskSnapshot WITHOUT a workspacePath,
+ * and the fork throws "workspacePath is required when the daemon bot has
+ * no active context" — the QueryAnswer came back non-Ok, the answer
+ * silently became null, and every seal logged `answer=0` for hours while
+ * the phone showed the card but never the conclusion. The fix speaks the
+ * same source /last and /mode already trust: the index's own
+ * workspace_path for the task, one bounded retry for the CLI's
+ * write-after-terminal-frame race, and a loud warn on EVERY non-Ok —
+ * silence here is what hid the bug.
+ */
+internal suspend fun finalAnswerOf(
+    taskId: String,
+    query: suspend (ChannelQuery) -> QueryAnswer,
+    workspaceOf: suspend (String) -> String?,
+    delayMs: suspend (Long) -> Unit = { delay(it) },
+    log: (String) -> Unit,
+): String? {
+    val ws = runCatching { workspaceOf(taskId) }.getOrNull()
+    repeat(FINAL_ANSWER_ATTEMPTS) { attempt ->
+        val attemptNo = attempt + 1
+        when (val answer = query(ChannelQuery.TaskSnapshot(taskId, ws))) {
+            is QueryAnswer.Ok -> {
+                val text = snapshotAnswerOf(answer.resultJson)
+                if (text != null) return text
+                log(
+                    "taskSnapshot($taskId, ws=${ws != null}) has no assistant message yet — " +
+                        "the CLI has not persisted the answer (attempt $attemptNo/$FINAL_ANSWER_ATTEMPTS)",
+                )
+            }
+            else -> log(
+                "taskSnapshot($taskId, ws=${ws != null}) answered ${answer::class.simpleName} — " +
+                    "the seal's answer stays empty (attempt $attemptNo/$FINAL_ANSWER_ATTEMPTS)",
+            )
+        }
+        if (attemptNo < FINAL_ANSWER_ATTEMPTS) delayMs(FINAL_ANSWER_RETRY_MS)
+    }
+    return null
+}
+
+/**
+ * The index's own workspace for a task — the same read-only, short-lived
+ * xerial pattern as every other read here (mode=ro, zero writes).
+ */
+internal fun workspacePathOf(baseDir: File, sid: String): String? {
+    val index = File(baseDir, "v2").resolve("tasks-index.sqlite")
+    if (!index.exists()) return null
+    return runCatching {
+        DriverManager.getConnection("jdbc:sqlite:${index.absolutePath}", indexRoProps()).use { conn ->
+            conn.prepareStatement("SELECT workspace_path FROM tasks WHERE task_id=?").use { ps ->
+                ps.setString(1, sid)
+                ps.executeQuery().use { rs -> if (rs.next()) rs.getString(1)?.takeIf { it.isNotBlank() } else null }
+            }
+        }
+    }.getOrNull()
+}
+
+private fun indexRoProps(): Properties = Properties().apply { put("open_mode", "1") } // SQLITE_READONLY

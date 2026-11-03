@@ -321,10 +321,12 @@ internal fun wireChannel(
         busTaps = BusProducer(
             sink = sink,
             finalAnswer = { taskId ->
-                when (val answer = client.query(ChannelQuery.TaskSnapshot(taskId))) {
-                    is QueryAnswer.Ok -> snapshotAnswerOf(answer.resultJson)
-                    else -> null
-                }
+                finalAnswerOf(
+                    taskId,
+                    query = { q -> client.query(q) },
+                    workspaceOf = { sid -> workspacePathOf(cfg.baseDir, sid) },
+                    log = { message -> logger.warn { message } },
+                )
             },
             log = { message -> logger.warn { message } },
         )
@@ -428,6 +430,7 @@ internal fun wireChannel(
         File(File(cfg.homeDir, "state"), LIVE_ORPHAN_FILE),
         history,
         verbosity,
+        workspaceOf = { sid -> workspacePathOf(cfg.baseDir, sid) },
     )
     val poller = buildPoller(
         cfg,
@@ -484,6 +487,7 @@ private fun buildLiveView(
     orphanFile: File,
     history: TasksHistory,
     verbosity: VerbositySetting,
+    workspaceOf: suspend (String) -> String?,
 ): LivePublisher? {
     val lane = lanes.live
     if (lane == null || !send.ownsSpectator) return null
@@ -516,10 +520,12 @@ private fun buildLiveView(
         // VERBATIM output tail (the owner's «leer los commands de bash»)
         toolBox = { tool -> feedBoxOf(tool) },
         finalAnswer = { taskId ->
-            when (val answer = client.query(ChannelQuery.TaskSnapshot(taskId))) {
-                is QueryAnswer.Ok -> snapshotAnswerOf(answer.resultJson)
-                else -> null
-            }
+            finalAnswerOf(
+                taskId,
+                query = { q -> client.query(q) },
+                workspaceOf = workspaceOf,
+                log = { message -> logger.warn { message } },
+            )
         },
         // the per-action verbs: the spectator's own classification, injected
         verbs = LIVE_VERBS,
