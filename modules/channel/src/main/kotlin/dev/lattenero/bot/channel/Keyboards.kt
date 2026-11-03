@@ -246,6 +246,24 @@ object Keyboards {
         }
     }
 
+    /**
+     * B6's /deploy confirmation row (Python's _cmd_deploy two-step, the
+     * datas the mission pins): the go can only be produced by THIS button.
+     * The wiring intercepts `dep:` taps BEFORE the callback fallback — the
+     * sst: law: a stray data must never ride to the agent as the owner's
+     * own words.
+     */
+    fun deployConfirm(): JsonObject = buildJsonObject {
+        putJsonArray("inline_keyboard") {
+            add(
+                buildJsonArray {
+                    add(button("🚀 Deploy", "dep:go"))
+                    add(button("❌ No", "dep:no"))
+                },
+            )
+        }
+    }
+
     /** Python's exact ☢️ confirmation row (handlers_system._cmd_nuclear) — ONE row, both buttons. */
     fun nuclearConfirm(): JsonObject = buildJsonObject {
         putJsonArray("inline_keyboard") {
