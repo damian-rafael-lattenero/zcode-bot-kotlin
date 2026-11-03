@@ -479,9 +479,13 @@ class BotCommands(
         (contextAnswer() as? ContextAnswer.Ctx)?.value?.activeTaskId
 
     /** `cl:<planId>` — re-read the offer (the truth may have moved) and ask the ✅. */
+    @Suppress("ReturnCount") // one guard per honest tier (gone, already captcha-gated, armed)
     private suspend fun giftClaimConfirm(planId: String): BotReply {
         val offer = giftsFor(activeTaskId()).offers.firstOrNull { it.planId == planId }
             ?: return BotReply("🤷 Esa oferta ya no está — corré /quota de nuevo.")
+        // already learned: this plan needs a captcha the build cannot make —
+        // skip the doomed attempt and hand the browser door directly
+        if (planId in captchaGatedPlans) return webDoor()
         pendingGift = PendingGift("claim", planId, null, null, offer.displayName, clock())
         logger.info { "gift: claim ARMED for ${offer.planId} — waiting the ✅" }
         return BotReply(GiftsMenu.claimConfirmation(offer), markup = GiftsMenu.confirmKeyboard("cly:"))
@@ -496,9 +500,20 @@ class BotCommands(
         return when (val answer = ops.query(ChannelQuery.ClaimCodingPlan(p.planId.orEmpty()))) {
             is QueryAnswer.Ok -> BotReply(GiftsMenu.claimResult(answer.resultJson, p.name))
             is QueryAnswer.Unavailable -> BotReply(DEGRADED)
-            is QueryAnswer.Failed -> giftFailure("reclamar", answer)
+            is QueryAnswer.Failed -> {
+                if (answer.message?.contains("captcha", ignoreCase = true) == true) {
+                    p.planId?.let(captchaGatedPlans::add)
+                }
+                giftFailure("reclamar", answer)
+            }
         }
     }
+
+    /** The browser door: ONE line + a real url button (the only way a bot opens a browser). */
+    private fun webDoor(): BotReply = BotReply(
+        GIFT_CAPTCHA,
+        markup = GiftsMenu.webDoorKeyboard("🌐 Abrir la web (planes)", GIFT_CLAIM_URL),
+    )
 
     /** `gf:<type>` — how many are left and how soon the earliest dies; then the ✅. */
     private suspend fun giftResetConfirm(type: String): BotReply {
@@ -551,10 +566,7 @@ class BotCommands(
         // STUBBED, so no proof can ever be produced here — answer with the
         // browser door (a url button), not a wall of text
         if (message.contains("captcha", ignoreCase = true)) {
-            return BotReply(
-                GIFT_CAPTCHA,
-                markup = GiftsMenu.webDoorKeyboard("🌐 Abrir la web (planes)", GIFT_CLAIM_URL),
-            )
+            return webDoor()
         }
         return if (answer.code == UNKNOWN_QUERY_CODE) {
             BotReply(GIFT_OLD_FORK)
@@ -1620,6 +1632,14 @@ class BotCommands(
 
     @Volatile
     private var pendingGift: PendingGift? = null
+
+    /**
+     * Plans whose claim the server refused with a CAPTCHA (measured 3/11):
+     * this build can NEVER produce the proof, so the bot stops asking —
+     * the next 🎁 tap goes straight to the browser door instead of burning
+     * another attempt. Session-scoped: the truth is re-learned on restart.
+     */
+    private val captchaGatedPlans = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
     /** The pending gift inside its TTL, or null (and the slot cleared). */
     private fun livePendingGift(kind: String): PendingGift? {
