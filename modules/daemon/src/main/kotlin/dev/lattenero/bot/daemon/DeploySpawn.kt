@@ -1,6 +1,7 @@
 package dev.lattenero.bot.daemon
 
 import io.github.oshai.kotlinlogging.KotlinLogging
+import kotlinx.coroutines.delay
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -42,8 +43,14 @@ class DeploySpawn(
     private val javaHome: String = System.getProperty("java.home"),
     private val home: String = System.getProperty("user.home"),
     private val launchctl: Launchctl = Launchctl { args -> runLaunchctl(args) },
-    /** The beat between a failed bootstrap and its one retry (injected: tests never sleep). */
-    private val beat: (Long) -> Unit = { Thread.sleep(it) },
+    /**
+     * The beat between a failed bootstrap and its one retry (injected:
+     * tests never sleep). A NON-BLOCKING delay (kap-first sweep 2): the
+     * spawn runs on the daemon's coroutine world and a parked thread was
+     * a Thread the poller could be needing — the timing is the same
+     * [BOOTOUT_BEAT_MS], the waiting is a suspension.
+     */
+    private val beat: suspend (Long) -> Unit = { delay(it) },
 ) {
 
     /**
@@ -104,7 +111,7 @@ class DeploySpawn(
      * Any failure to write or to bootstrap throws: [DeployFlow]'s catch
      * turns it into the phone's LOUD failure and THIS daemon stays up.
      */
-    fun spawn(): LaunchctlResult {
+    suspend fun spawn(): LaunchctlResult {
         plistFile.parentFile?.mkdirs()
         plistFile.writeText(plist())
         logFile.parentFile?.mkdirs()

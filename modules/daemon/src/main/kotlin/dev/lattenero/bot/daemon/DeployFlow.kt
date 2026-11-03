@@ -30,7 +30,7 @@ private val logger = KotlinLogging.logger {}
 class DeployFlow(
     private val machine: DeployCommand,
     private val say: suspend (String, Boolean, JsonObject?) -> Long?,
-    private val spawn: () -> Unit,
+    private val spawn: suspend () -> Unit,
     /** The config's owner, read PER USE (the config cadence); null = nobody confirms. */
     private val ownerUserId: () -> Long?,
 ) {

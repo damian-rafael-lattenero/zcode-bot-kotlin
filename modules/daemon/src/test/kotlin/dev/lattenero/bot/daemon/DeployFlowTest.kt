@@ -37,7 +37,7 @@ class DeployFlowTest {
             announceLands
         }
 
-        val spawn: () -> Unit = {
+        val spawn: suspend () -> Unit = {
             events.add("spawn")
             spawnThrows?.let { throw it }
             spawns++

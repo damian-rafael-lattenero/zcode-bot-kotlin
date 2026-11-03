@@ -1,5 +1,6 @@
 package dev.lattenero.bot.daemon
 
+import kotlinx.coroutines.test.runTest
 import java.io.File
 import java.nio.file.Files
 import kotlin.test.AfterTest
@@ -80,7 +81,7 @@ class DeploySpawnTest {
     }
 
     @Test
-    fun spawnBootstrapsASiblingJobAfterClearingAPreviousOne() {
+    fun spawnBootstrapsASiblingJobAfterClearingAPreviousOne() = runTest {
         val calls = mutableListOf<List<String>>()
         val fake = Launchctl { args ->
             calls += args
@@ -99,7 +100,7 @@ class DeploySpawnTest {
     }
 
     @Test
-    fun aRacingBootoutIsRetriedOnceSoASecondDeployOfTheDayStillLands() {
+    fun aRacingBootoutIsRetriedOnceSoASecondDeployOfTheDayStillLands() = runTest {
         // measured 2/11 22:20: the job was still loaded from the 22:11 run,
         // bootout had not finished, and the bootstrap bounced with error 5
         var bootstraps = 0
@@ -130,7 +131,7 @@ class DeploySpawnTest {
     }
 
     @Test
-    fun aRaceLostTwiceStillFailsLoudly() {
+    fun aRaceLostTwiceStillFailsLoudly() = runTest {
         var bootstraps = 0
         val fake = Launchctl { args ->
             if (args.first() == "bootstrap") {
@@ -155,7 +156,7 @@ class DeploySpawnTest {
     }
 
     @Test
-    fun aFailedBootstrapThrowsLoudlySoThePhoneHearsIt() {
+    fun aFailedBootstrapThrowsLoudlySoThePhoneHearsIt() = runTest {
         val fake = Launchctl { args ->
             if (args.first() == "bootstrap") {
                 LaunchctlResult(5, "Bootstrap failed: 5: Input/output error")
