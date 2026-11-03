@@ -18,6 +18,11 @@ subprojects {
         // ADT) resolves from this machine's mavenLocal until the Central
         // release — the dogfooding dependency is real, the publication is not
         // ours to make. Delete this line the moment kap 5.0.0 hits Central.
+        //
+        // Probed 3/11 (kap-first sweep 2): Central's maven-metadata.xml still
+        // lists 4.2.0 as the release (lastUpdated 2026-10-29) and the
+        // kap-core/5.0.0 POM answers 404 — mavenLocal stays the documented
+        // fallback until the publication lands.
         mavenLocal()
         mavenCentral()
     }
