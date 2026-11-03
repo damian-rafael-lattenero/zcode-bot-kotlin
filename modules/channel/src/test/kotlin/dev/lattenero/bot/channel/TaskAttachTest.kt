@@ -586,8 +586,12 @@ class TaskAttachTest {
     fun theFireGateHoldsWhenTheChildVanishesWhilePinned() = runBlocking {
         val ops = FakeOps(boundStatus).apply { answers["activeTaskIds"] = """[]""" }
         val hub = LiveHub()
-        // the store NAMES the child (the session attach's verification set)
-        val history = FakeHistory(rows).apply { runningSubs = listOf("sess_subagent_agent_x") }
+        // the store NAMES the child (the session attach's verification set,
+        // and the pulse gate's own fresh row — the SAME store fact)
+        val history = FakeHistory(rows).apply {
+            runningSubs = listOf("sess_subagent_agent_x")
+            runningTitled = listOf(RunningSubagent("sess_subagent_agent_x", "helper", lastMs = 940_000L))
+        }
         val bc = BotCommands(
             ops = ops,
             hub = hub,

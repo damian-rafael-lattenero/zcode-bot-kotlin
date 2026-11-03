@@ -1390,14 +1390,41 @@ class BotCommands(
      * buttons or none) applied to the arming itself. Null flies; the
      * reply refuses, BEFORE any attach: a refused arm leaves no pipe.
      */
+    @Suppress("ReturnCount") // one exit per honest shape: dead lane, unnamed, no-row, pulse
     private suspend fun orderGateRefusal(tail: String): BotReply? {
-        val pin = hub.peekPin() ?: return null
-        // the RAW tools list: a CLOSED lane is the death certificate the
-        // pulse reads (dispatchLanes filters it out — open-only by design)
-        val pulse = SubagentStop.orderTarget(hub.peek()?.tools.orEmpty(), runningRows(), pin, clock())
-        val name = hub.peek()?.tools?.lastOrNull { it.toolId.endsWith(tail) }
-            ?.let { Keyboards.subagentName(it) }
-            ?: pin.takeLast(SID_TAIL)
+        // THE TAPPED ROW IS THE TARGET (measured 2/11 23:04: the gate read
+        // the hub's PIN instead — the owner tapped ✍️ on the fresh dummy
+        // while pinned to the PREVIOUS one, and the arm bounced «💀 ya
+        // terminó» about an agent he never pointed at).
+        val state = hub.peek()
+        val rows = runningRows()
+        val raw = state?.tools.orEmpty()
+        val lane = raw.lastOrNull { it.toolId.endsWith(tail) }
+        val name: String
+        val sid: String
+        if (lane != null) {
+            name = Keyboards.subagentName(lane)
+            if (lane.status != null) return BotReply(
+                "💀 «${PyText.esc(name)}» ya terminó — el ✍️ no arma órdenes a subagentes muertos.",
+            )
+            sid = lane.subagentAgentId?.let { "$SUBAGENT_SESSION_PREFIX$it" }
+                ?: return BotReply(
+                    "🤔 «${PyText.esc(name)}» todavía no da una sesión (falta su ACK) — el ✍️ no arma a ciegas.",
+                )
+        } else {
+            val row = rows.firstOrNull { it.sid.endsWith(tail) }
+            if (row != null) {
+                name = row.title.ifBlank { row.sid.takeLast(SID_TAIL) }
+                sid = row.sid
+            } else {
+                // a STALE tail (an old keyboard): the hub's pin is the only
+                // clue left — and a ghost pin still refuses (the 20:34 law)
+                val pin = hub.peekPin() ?: return null
+                name = pin.takeLast(SID_TAIL)
+                sid = pin
+            }
+        }
+        val pulse = SubagentStop.orderTarget(raw, rows, sid, clock())
         return when (pulse) {
             OrderPulse.Alive -> null
             OrderPulse.Ended -> BotReply(
@@ -1423,6 +1450,12 @@ class BotCommands(
         // an order flies ONLY to a REAL session id (the fork's inbound
         // taskId) — the lane-scope fallback has none and is honestly refused
         val (sessionId, title) = when {
+            // THE LANE'S OWN ID WINS over the hub's pin: the pin may belong
+            // to a PREVIOUS attach (the same 23:04 drill: the arm pointed
+            // at the old dummy while the owner tapped the fresh one)
+            lane != null && lane.subagentAgentId != null ->
+                "$SUBAGENT_SESSION_PREFIX${lane.subagentAgentId}" to Keyboards.subagentName(lane)
+
             lane != null && pin != null -> pin to Keyboards.subagentName(lane)
             lane != null -> return BotReply(
                 "👁 «${PyText.esc(Keyboards.subagentName(lane))}» attachada por lane, pero el fork no nombra su " +
