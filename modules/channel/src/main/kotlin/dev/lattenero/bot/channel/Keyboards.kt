@@ -202,8 +202,30 @@ object Keyboards {
         inactiveView: Boolean,
         nowMs: Long = 0,
     ): JsonObject = buildJsonObject {
+        // THE ACTIVE VIEW SPEAKS ONLY WHAT RUNS NOW (owner, 2/11 22:38:
+        // «hay muchísimos botones de más… agentes que no están corriendo
+        // ahora mismo»). The store never closes a KILLED agent's row, so a
+        // 432-minute-old row rendered as a ⏸️ button that could do nothing;
+        // it belongs to «inactivos», not here.
+        val fresh = dbRunning.filter { dbRunningFresh(it, nowMs) }
+        val storedSids = fresh.map { it.sid }.toSet()
+        // ONE ROW PER AGENT: a lane whose child already has a store row is
+        // the SAME agent twice (the owner's two drill rows). The store row
+        // wins — its sid is what ✍️/⏹️ can actually address; an open lane
+        // with no agentId has no address at all (its ✍️ was the dead
+        // «fork viejo» button). With the store silent, the lanes are the
+        // ONLY witness and all of them speak (the bus-can-die law).
+        val laneOnly = if (fresh.isEmpty()) {
+            lanes
+        } else {
+            lanes.filter { lane ->
+                lane.status != null || // a closed lane is the memory row, never a duplicate
+                    (lane.subagentAgentId?.let { "${BotCommands.SUBAGENT_SESSION_PREFIX}$it" }
+                        ?.let { it !in storedSids } ?: false)
+            }
+        }
         putJsonArray("inline_keyboard") {
-            lanes.forEach { lane ->
+            laneOnly.forEach { lane ->
                 add(
                     buildJsonArray {
                         add(button(subagentLabel(lane), "sn:${lane.toolId.takeLast(LANE_TAIL)}"))
@@ -217,24 +239,17 @@ object Keyboards {
                     },
                 )
             }
-            // the store's running sessions — visible even when the bus died
-            // before their lane streamed (each sid tail IS the attach target)
-            dbRunning.forEach { r ->
+            // the store's FRESH running sessions — visible even when the bus
+            // died before their lane streamed (each sid tail IS the address)
+            fresh.forEach { r ->
                 add(
                     buildJsonArray {
                         val label = r.title.takeIf { it.isNotBlank() }?.take(TITLE_CAP) ?: r.sid.takeLast(LANE_TAIL)
-                        val saData = "sn:${r.sid.takeLast(LANE_TAIL)}"
-                        // the store never closes a KILLED agent's row: its
-                        // frozen lastMs is the ghost marker — rendered honest
-                        add(button("$SUBAGENT_MARK $label ${dbRunningMark(r, nowMs)}", saData))
-                        // the ✍️ rides ONLY a fresh row — same law as the ⏹️
-                        if (dbRunningFresh(r, nowMs)) {
-                            add(button("✍️", "so:${r.sid.takeLast(LANE_TAIL)}"))
-                        }
-                        // the ⏹️ rides ONLY a fresh row — a ghost's stop is decoration
-                        if (dbRunningFresh(r, nowMs)) {
-                            add(button(STOP_BUTTON, "sst:${r.sid.takeLast(LANE_TAIL)}"))
-                        }
+                        val tail = r.sid.takeLast(LANE_TAIL)
+                        add(button("$SUBAGENT_MARK $label ${dbRunningMark(r, nowMs)}", "sn:$tail"))
+                        // every rendered row IS running now: it earns both actions
+                        add(button("✍️", "so:$tail"))
+                        add(button(STOP_BUTTON, "sst:$tail"))
                     },
                 )
             }

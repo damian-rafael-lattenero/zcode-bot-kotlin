@@ -1988,6 +1988,10 @@ class BotCommands(
         val text = rest.trim()
         if (text.isEmpty()) return BotReply(STEER_USAGE)
         val ctx = contextAnswer() as? ContextAnswer.Ctx ?: return BotReply(noConversationOrDown())
+        // THE PIN SPEAKS (A4's delegating door): after 👁 attaching a
+        // subagent, /steer steers THE CHILD — the active conversation's
+        // turn is not the one in front of the owner.
+        hub.peekPin()?.takeIf { it.startsWith(SUBAGENT_SESSION_PREFIX) }?.let { return steerSubagent(it, text) }
         val taskId = ctx.value.activeTaskId
             ?: return BotReply("📭 No active conversation — /tasks n picks one; its answers come back here.")
         val title = history.ctxTasks(SCOPE_FOR_PICK).firstOrNull { it.sid == taskId }
@@ -2013,6 +2017,39 @@ class BotCommands(
                     BotReply(STEER_OLD_FORK)
                 } else {
                     BotReply("⚠️ Steer falló (${answer.code}): ${PyText.esc(answer.message ?: "?")}")
+                }
+
+            SteerAnswer.Unavailable -> BotReply(DEGRADED)
+        }
+    }
+
+    /**
+     * /steer's subagent half — the pinned child is the target. A4's fork
+     * routes `steer` carrying a `sess_subagent_<agentId>` taskId to the
+     * owner's runtime (the child's own turn), so the text enters the
+     * RUNNING child exactly like the ✍️ order does. The reply NAMES the
+     * child: the owner must know which turn heard it.
+     */
+    private suspend fun steerSubagent(child: String, text: String): BotReply {
+        val name = hub.peek()?.tools
+            ?.lastOrNull { lane -> lane.subagentAgentId?.let { "$SUBAGENT_SESSION_PREFIX$it" } == child }
+            ?.let { Keyboards.subagentName(it) }
+            ?: runningRows().firstOrNull { it.sid == child }?.title?.takeIf { it.isNotBlank() }
+            ?: child.takeLast(SID_TAIL)
+        return when (val answer = ops.steer(child, text)) {
+            SteerAnswer.Delivered -> {
+                logger.info { "steer: ${text.length} chars to SUBAGENT $child" }
+                BotReply(
+                    "🌀 Steer entregado a «${PyText.esc(name)}» — entra DENTRO del turno del subagente " +
+                        "(se inyecta en el próximo límite de herramienta).",
+                )
+            }
+
+            is SteerAnswer.Failed ->
+                if (answer.code == UNKNOWN_REQUEST_CODE) {
+                    BotReply(STEER_OLD_FORK)
+                } else {
+                    BotReply("⚠️ Steer al subagente falló (${answer.code}): ${PyText.esc(answer.message ?: "?")}")
                 }
 
             SteerAnswer.Unavailable -> BotReply(DEGRADED)

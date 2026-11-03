@@ -243,13 +243,13 @@ class SubagentStopTest {
         // a DEAD lane's row: the name card survives as a memory; the ✍️
         // and the ⏹️ die with it (dead-end buttons are decoration)
         assertEquals(listOf("sn:toolu_dead"), rows[1])
-        // fresh store row carries its stop, the ghost earns none
-        assertEquals("sst:" + "sess_subagent_agent-3".takeLast(Keyboards.LANE_TAIL), rows[2].last())
-        // the GHOST row: the name card survives, the ✍️ and the ⏹️ die with it
-        assertEquals(
-            listOf("sn:" + "sess_subagent_killed".takeLast(Keyboards.LANE_TAIL)),
-            rows[3],
-        )
+        // a FRESH store row is running now: it earns both actions
+        val freshTail = "sess_subagent_agent-3".takeLast(Keyboards.LANE_TAIL)
+        assertEquals(listOf("sn:$freshTail", "so:$freshTail", "sst:$freshTail"), rows[2])
+        // the GHOST row is NOT here at all (owner, 2/11 22:38: the 432m
+        // rows were noise — only what runs NOW belongs to the active view)
+        assertEquals(listOf("sao:"), rows[3])
+        assertEquals(4, rows.size, "2 lanes + 1 fresh row + the switch — the ghost is gone")
         // the datas are tiny — the 64-byte law never even breathes
         assertTrue(Keyboards.callbackDataValid(rows[2].last()))
     }
