@@ -1,4 +1,12 @@
-# Observability — E2: the daemon's metrics (Micrometer/Prometheus)
+# Observability — the daemon's E2 metrics and E3 traces
+
+Written 2026-11-03 (E2; E3 same day). The daemon exposes a Prometheus
+scrape endpoint when the `metrics` knob is on; every metric below derives
+from a real event that already exists in the code — the honest-indicators
+law. No decorative counters, no cached gauges: a gauge reads its truth at
+scrape time. E3 adds the TRACES half: OpenTelemetry spans behind the
+`otel` knob, the same honest law. E2 measures, E3 traces — the two never
+double-instrument a tap.
 
 Written 2026-11-03 (E2). The daemon exposes a Prometheus scrape endpoint
 when the `metrics` knob is on; every metric below derives from a real
@@ -66,6 +74,93 @@ the stateful turn tap is simply never built) and the Micrometer-backed
 one when ON. Micrometer lives ONLY in `modules/daemon` — the channel
 and transport modules stay standard-library-pure (the poller's tap is a
 plain lambda).
+
+## E3 — the traces (OpenTelemetry, shipped OFF)
+
+The ladder's E3 rung: one trace per turn, exported as OTLP/HTTP. The
+spans derive from the SAME real stream frames the bus producer taps (the
+daemon's own wiring, one tap point — `TurnSpanTracker` folds the frames
+into the sealed `SpanTapEvent` union, `OtelSpanTaps` turns events into
+spans). Nothing is re-queried, nothing is invented, and the channel
+module never learns a span exists.
+
+### The knobs (read ONCE at boot, same `daemon.json`)
+
+- `"otel": true|false` — **shipped OFF**. OFF is the strict zero: no SDK,
+  no exporter, no batch thread, no tracker — the daemon is byte-for-byte
+  the pre-E3 one (the OFF test proves even the exporter factory is never
+  constructed). A typo is OFF loudly (one warn line in `daemon.jsonl`).
+- `"otel_endpoint": "http://127.0.0.1:4318/v1/traces"` — the OTLP HTTP
+  endpoint spans are POSTed to. Read even with the switch off (a typo
+  must be loud whatever the switch says). Absent → the OTLP standard
+  (port 4318, `/v1/traces`); a non-http(s) URL falls back to the default
+  loudly. The daemon **exports and never binds** — unlike the `/metrics`
+  listener, there is no socket of ours anywhere.
+
+### What a trace looks like
+
+One trace per real turn — root span `bot.turn` with a child `bot.tool`
+per tool call:
+
+    bot.turn  (sid=conv-1, bot.turn.fork_turn=t7, bot.turn.title=…,
+               bot.turn.outcome=completed, duration = the turn's own)
+      bot.tool  (bot.tool.name=Bash, bot.tool.ok=true, bot.tool.chars=6)
+      bot.tool  (bot.tool.name=Write, bot.tool.ok=true, bot.tool.chars=120)
+
+Attribute inventory — each present ONLY when a real frame carried the
+value: root has `bot.sid` (always; the frame's own task id),
+`bot.turn.fork_turn`, `bot.turn.title` (the stream's
+`session_info_update`), `bot.turn.midflight=true` (see below),
+`bot.turn.outcome` (`completed`/`failed`), `bot.turn.error` (the failed
+seal's own text), status ERROR on a failed seal; a child has `bot.sid`,
+`bot.tool.name`, `bot.tool.ok` (the close's own verdict —
+`completed` vs everything else, the bus's law), `bot.tool.chars` (the
+close's content length in code points), `bot.tool.unclosed=true` (the
+turn sealed before the tool's verdict arrived — the span ends at the
+seal, the verdict honestly unknown), status ERROR only on a real failed
+verdict. **No `model` attribute**: the stream frames never name the
+model, and a per-turn cli-db read is I/O E3 refuses — the honest absence.
+
+The timestamps are the events' own stamps: the span's duration IS the
+real thing's duration (the birth's `startedAt` when the frame carried
+it; the seal and the tool closes at their reception stamps).
+
+**The mid-flight choice (documented, tested):** a turn the daemon never
+saw born (a subscription attached mid-turn, e.g. a `/task` pick) still
+gets its root span — starting at the WITNESSING moment, with
+`bot.turn.midflight=true` and no backdating from the terminal frame's
+`startedAt` (E2's nothing-invented law; that stamp's turn-vs-task
+semantics are unverified). The reader gets the observation window, not a
+lie about the turn's length. A tool the daemon never saw OPEN gets no
+span (its start would be invented); a replayed frame (resubscribe burst,
+already-sealed turn) spans nothing — the bus producer's dedupe laws,
+ported verbatim.
+
+### Export: batch OTLP, telemetry never breaks a turn
+
+The SDK runs a `BatchSpanProcessor` → `OtlpHttpSpanExporter` → the
+configured endpoint. Spans queue in memory; the batch's OWN thread
+POSTs them — a slow or dead collector is one log line (the batch
+worker's), never a broken turn (the live-io invariant, guarded twice:
+the thread's isolation plus `GuardedSpanTaps`, which turns any edge
+failure into one warn line). The daemon's shutdown hook closes the
+provider: the batch's last export lands before the JVM dies.
+
+### Pointing it at a collector / Jaeger locally
+
+Jaeger all-in-one speaks OTLP/HTTP on 4318 natively:
+
+    docker run --rm -p 16686:16686 -p 4318:4318 jaegertracing/all-in-one:latest
+
+then in `~/.zcode/bot-kotlin/daemon.json`:
+
+    { "otel": true, "otel_endpoint": "http://127.0.0.1:4318/v1/traces" }
+
+…kickstart the daemon (a knob change is a restart) and open
+http://127.0.0.1:16686 — service `zcode-bot-daemon`. Any OTel-collector
+compatible backend works the same way (point `otel_endpoint` at the
+collector's `/v1/traces`); the daemon only ever POSTs, so the collector
+being down costs nothing but one log line per failed batch.
 
 ## The Grafana half (E4, later)
 

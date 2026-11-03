@@ -47,6 +47,7 @@ import dev.lattenero.bot.daemon.history.TasksHistoryIo
 import dev.lattenero.bot.daemon.metrics.Metrics
 import dev.lattenero.bot.daemon.metrics.NoopMetrics
 import dev.lattenero.bot.daemon.metrics.TurnMetricsTap
+import dev.lattenero.bot.daemon.otel.TurnSpanTracker
 import dev.lattenero.bot.daemon.notifications.NotificationsWire
 import dev.lattenero.bot.daemon.notifications.SubagentNotifs
 import dev.lattenero.bot.daemon.nuclear.MacProcessEdge
@@ -193,6 +194,8 @@ internal fun wireChannel(
     metrics: Metrics = NoopMetrics,
     /** 🔔 the owner's key-moment notifications — read once at boot in Main; OFF builds nothing. */
     notificationsOn: Boolean = false,
+    /** E3: the span tracker — null with the `otel` knob off (zero cost, byte-identical daemon). */
+    otel: TurnSpanTracker? = null,
 ): ChannelStack {
     val hub = LiveHub()
     val tokenFile = File(cfg.baseDir, ChannelSpec.TOKEN_FILENAME)
@@ -272,6 +275,9 @@ internal fun wireChannel(
             // view folds — the tap never changes what the bot says or does
             busTaps?.onFrame(frame)
             turnTaps?.onFrame(frame)
+            // E3: the span tree derives from the SAME real events — one
+            // owner per tap point, the channel module never sees a span
+            otel?.onFrame(frame)
             // THE ANSWER ROUND-TRIP: the stream carries the questions AND
             // their resolutions — the board messages the owner on the
             // former (dedupe inside), seals honestly on the latter (the
