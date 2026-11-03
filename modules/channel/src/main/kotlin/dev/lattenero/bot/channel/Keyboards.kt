@@ -268,6 +268,22 @@ object Keyboards {
      * sst: law: a stray data must never ride to the agent as the owner's
      * own words.
      */
+    /**
+     * The ⚡/⏳ question's row (the owner's law, 2/11 23:12: «quiero que me
+     * pregunte empujar o encolar»): a busy child is never cut or queued by
+     * our own judgment — ONE tap decides, and the pending text flies then.
+     */
+    fun pushOrQueue(): JsonObject = buildJsonObject {
+        putJsonArray("inline_keyboard") {
+            add(
+                buildJsonArray {
+                    add(button("⚡ Empujar", "odp:1"))
+                    add(button("⏳ Encolar", "odq:1"))
+                },
+            )
+        }
+    }
+
     fun deployConfirm(): JsonObject = buildJsonObject {
         putJsonArray("inline_keyboard") {
             add(
