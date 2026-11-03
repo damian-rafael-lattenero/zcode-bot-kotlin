@@ -23,9 +23,9 @@ instead.
 |---|---|
 | 🟢 | conversation row (tasks lists) |
 | 🔵 | subagent lane (every list, every card) |
-| ▶️ | alive: open lane mark · «activos» view switch · resumed run |
+| ▶️ | alive: open lane mark · «activos» view switch · resumed run · «sigue en background» (the parked card) |
 | ⏹️ | stop: the `sst:` button · closed lane mark · «inactivos» view switch |
-| ⏸️ | the ghost — a store row gone stale: «⏸️ hace Xm — probablemente terminó» |
+| ⏸️ | paused: the park button on the live card (`bg:`) · the ghost mark — a store row gone stale («⏸️ hace Xm») — the surface disambiguates, button vs row mark |
 | 💀 | ended / hard stop: `stop:go`, «ya terminó», the kill ladder |
 | ☢️ | nuclear: the confirmation row and its go |
 | 🗑 | discard ONE queued text (`qd:`) |
@@ -62,6 +62,8 @@ instead.
 | 🔄 | running stamp on a list row / the restart leg of the nuclear ladder |
 | ⚔️ | order delivered · 🌀 steer · 🚧 project boundary · 🪦 bound and gone |
 | 📄 | /last pointer · ✂️ an honest cut («the tail was cut») |
+| 🔔 | a key-moment notification (the subagent's end, the turn's seal, the parked card's promise) — the loud line, never a button |
+| 🏁 | the sealed turn's notification mark — the conclusion the park's promise names |
 | 🔌 ✏️ | stream verbs only: MCP · writing/editing (`ToolBox.familyOf` — frozen) |
 
 ## Row grammar
@@ -97,6 +99,33 @@ instead.
 6. Caps announce their cut: «✂️ …the tail was cut», the preview's own ….
 7. Numbers only through `tokenRaw`/`fmtNum` — the number law is NOT this
    guide's to change; renders call them, never hand-format.
+
+## The live card's own row — the ⏸️ park (`bg:`)
+
+The live card carries its OWN keyboard: ONE row, ONE button — «⏸️ A
+background», data `bg:<taskId>` (43 bytes at the worst sid; the 64-byte
+law never breathes). It is the card's only button — the fold buttons
+(📖/📜) ride their own collapsed messages below the card, never the card
+itself — so the row grammar's primary action owns the whole row.
+
+- The tap (owner-only like every tap) answers its toast ONCE with the
+  honest words: «▶️ A background — te aviso al terminar» (owner-approved,
+  verbatim). A second tap is the honest no-op ack; an unknown or expired
+  card answers «🤷 …no hay cartel vivo que aparcar» — it names what did
+  NOT happen, never a lie.
+- The behavior: the card freezes with «⏸️ «título» — ▶️ sigue en
+  background» as its LAST edit, plus the honest note that the 🏁 arrives
+  when the turn seals. The turn keeps running and streaming into the
+  fold; the parked card receives NO more edits and the transcript feed
+  stays silent (that noise is what he is escaping). When the turn seals,
+  the seal speaks ONCE — through the existing 🔔 notification, which
+  carries the conclusion. No knob: owner-approved behavior of the live
+  view, landed daemon-side ahead of U5c's `Park` event
+  (docs/u5-render-design.md — additive).
+- One-shot per card: the park dies WITH its card (the seal, the
+  replaced-seal, a ☢️ nuclear) — a NEW turn for the same task is never
+  parked. There is NO unpark: a new phone message re-binds and a fresh
+  card is born.
 
 ## Proceso / dato
 
