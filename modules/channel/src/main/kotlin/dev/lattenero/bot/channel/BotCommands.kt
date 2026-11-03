@@ -1541,7 +1541,8 @@ class BotCommands(
         val current = ctx.value.activeTaskId
         if (current != null && current != sid && isRunning(current, ctx.value.workspacePath)) {
             logger.warn { "pick $sid refused: ${current} still runs (taskRunning)" }
-            return "⏳ The previous task's turn is still running — /stop first, then pick again."
+            return "⏳ The previous task's turn is still running — the switch did NOT happen. " +
+                "/stop first, then pick again."
         }
         val row = history.ctxTasks(SCOPE_FOR_PICK).firstOrNull { it.sid == sid }
         when (val bind = bindTo(sid, updateId)) {
@@ -1567,7 +1568,7 @@ class BotCommands(
     private suspend fun newConversation(tag: String): String {
         if (tag.isNotEmpty()) {
             return "⚠️ /tasks new opens it in the ACTIVE project — switching projects from " +
-                "the phone is a next hot-fix."
+                "the phone is a next hot-fix. No conversation was opened."
         }
         val ws = (contextAnswer() as? ContextAnswer.Ctx)?.value?.workspacePath
         if (ws == null || ops.sendInbound("/new", "tg-new-${clock()}", clock()) != InboundReceipt.FIRED) {
@@ -1653,7 +1654,7 @@ class BotCommands(
         val workspace = (contextAnswer() as? ContextAnswer.Ctx)?.value?.workspacePath
         val stopped = when (val answer = ops.query(ChannelQuery.StopAll(workspace))) {
             is QueryAnswer.Ok -> parseStringsOf(answer.resultJson, "stopped")
-            else -> return "⚠️ Stop failed — the channel is down?"
+            else -> return "⚠️ Stop failed — the channel is down? Nothing was stopped."
         }
         return "💀 Hard stop: ${stopped.size} run(s) stopped — every active task's turn."
     }
@@ -2050,7 +2051,7 @@ class BotCommands(
 
     /** The vb: tap: set the level — the toast's reply is the confirmation. */
     private fun verbosityTap(arg: String): BotReply {
-        val level = FeedVerbosity.of(arg) ?: return BotReply("🤷 Ese nivel no existe — /verbosity.")
+        val level = FeedVerbosity.of(arg) ?: return BotReply("🤷 Ese nivel no existe — nada cambió. /verbosity.")
         verbosity.set(level)
         logger.info { "callback 📣 vb:$arg — level=${level.name}" }
         return BotReply(verbosityLine(level) + "\n✅ Aplicado — el próximo mensaje del feed ya obedece.")
