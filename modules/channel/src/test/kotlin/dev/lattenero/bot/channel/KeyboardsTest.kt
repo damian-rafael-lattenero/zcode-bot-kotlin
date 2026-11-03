@@ -81,7 +81,10 @@ class KeyboardsTest {
     }
 
     @Test
-    fun tasksKeyboardCarriesTheStoreRunningSubagentsWithTheGhostMark() {
+    fun tasksKeyboardSkipsTheStoreGhostsAndCarriesTheFreshOnes() {
+        // the owner's 3/11: two «MISSION:» ghosts of a killed batch rode
+        // every /tasks as blue buttons — a stale store row is a DEAD agent
+        // the CLI never closed; /subagents «inactivos» is its only home
         val kb = Keyboards.tasksKeyboard(
             rows = emptyList(),
             running = emptySet(),
@@ -89,12 +92,12 @@ class KeyboardsTest {
             subagents = emptyList(),
             dbRunning = listOf(
                 RunningSubagent(sid = "sess_fresh", title = "root-cause hunter", lastMs = 2_000_000L),
-                RunningSubagent(sid = "sess_ghost", title = "killed box agent", lastMs = 2_000_000L - 20 * 60_000),
+                RunningSubagent(sid = "sess_ghost", title = "MISSION: killed box agent", lastMs = 2_000_000L - 20 * 60_000),
             ),
             nowMs = 2_000_000L,
         )!!
         val keyboard = kb.jsonObject["inline_keyboard"]!!.jsonArray
-        assertEquals(2, keyboard.size)
+        assertEquals(1, keyboard.size, "the ghost earns NO row at all")
         val fresh = keyboard[0].jsonArray[0].jsonObject
         assertEquals("🔵 root-cause hunter ▶️", fresh["text"]!!.jsonPrimitive.content)
         assertEquals("sn:sess_fresh", fresh["callback_data"]!!.jsonPrimitive.content)
@@ -103,10 +106,25 @@ class KeyboardsTest {
         assertEquals("⏹️", keyboard[0].jsonArray[1].jsonObject["text"]!!.jsonPrimitive.content)
         assertEquals("sst:sess_fresh", keyboard[0].jsonArray[1].jsonObject["callback_data"]!!.jsonPrimitive.content)
         assertTrue(Keyboards.callbackDataValid("sst:sess_fresh"))
-        // the GHOST earns no stop — a ⏸️ hace 20m row is the dead agent it renders as
-        val ghost = keyboard[1].jsonArray[0].jsonObject
-        assertEquals("🔵 killed box agent ⏸️ hace 20m", ghost["text"]!!.jsonPrimitive.content)
-        assertEquals(1, keyboard[1].jsonArray.size, "the ghost row has no ⏹️")
+    }
+
+    @Test
+    fun aKeyboardOfOnlyGhostsIsNoKeyboardAtAll() {
+        val now = 10_000_000L
+        assertNull(
+            Keyboards.tasksKeyboard(
+                rows = emptyList(),
+                running = emptySet(),
+                activeSid = null,
+                subagents = emptyList(),
+                dbRunning = listOf(
+                    RunningSubagent("sess_ghost", "MISSION: one", lastMs = now - 60 * 60_000),
+                    RunningSubagent("sess_ghost2", "MISSION: two", lastMs = now - 99 * 60_000),
+                ),
+                nowMs = now,
+            ),
+            "nothing alive and no rows → no keyboard (silence, not a ghost)",
+        )
     }
 
     @Test
@@ -271,8 +289,8 @@ class KeyboardsTest {
         assertTrue(PyText.cpLength(task) <= 46, "task row over cap: ${PyText.cpLength(task)}")
         val lane = labels.first { it.startsWith("🔵") && it.endsWith("▶️") }
         assertTrue(PyText.cpLength(lane) <= 40, "lane row over cap: ${PyText.cpLength(lane)}")
-        val ghost = labels.first { "⏸️" in it }
-        assertTrue(PyText.cpLength(ghost) <= 48, "ghost row over cap: ${PyText.cpLength(ghost)}")
+        // the stale store row is a GHOST: it earns no label at all (3/11)
+        assertTrue(labels.none { "⏸️" in it }, "a ghost never reaches a task list: $labels")
         val queue = buttons(Keyboards.queueKeyboard(listOf(QueuedText(long, "tg-1", 1L)))).first().first
         assertEquals(28, PyText.cpLength(queue), "queue preview over cap: $queue")
     }

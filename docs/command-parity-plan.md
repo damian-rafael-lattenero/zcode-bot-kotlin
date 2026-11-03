@@ -96,6 +96,14 @@ post-U2.5 hot-fix queue, NOT a re-order of the compass) and
   the real vocabulary and sends NOTHING (a typo must never downgrade a
   conversation); an old host gets the fork-deploy line. The read asks for
   ONE message (`messageLimit=1` — meta only).
+- **/tasks's ghost rows** (the owner's 3/11: «dos botones azules… MISSION:…
+  y no sé qué son»): they were two subagent sessions of yesterday's batch
+  killed before the CLI wrote `last_outcome` — the store lists them as
+  running forever (ghosts). /subagents already hid stale rows; /tasks's
+  keyboard still rendered them (⏸️ hace 991m). Now `tasksKeyboard` applies
+  the SAME freshness law: a stale store row earns NO row at all (and a
+  keyboard with nothing alive and no rows is null) — the app's DB is
+  read-only to the bot, so the filter is the whole fix.
 - **The ORDER pulse gate + the sn: detail card** (66d6a7e, the owner's
   live proof 20:34): two orders into the ⏹️ agent's dead session bounced
   nothing — now the ✍️ arm and the fire both ask the tri-state pulse
