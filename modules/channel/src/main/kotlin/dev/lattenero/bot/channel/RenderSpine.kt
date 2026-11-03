@@ -1,0 +1,411 @@
+package dev.lattenero.bot.channel
+
+import kap.Backpressure
+import kap.Kap
+import kap.KapStream
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.mapNotNull
+import kotlinx.serialization.json.JsonObject
+
+/**
+ * U5a's EVENT SPINE (docs/u5-render-design.md, law 1): the channel's
+ * `ServerFrame` stream classified into the render's OWN vocabulary — a
+ * sealed [RenderEvent] ADT — and folded by a pure reducer into the
+ * [RenderState]. The imperative fold this replaces lived as a mutable
+ * cell mutated by frame callbacks ([LiveHub] before U5a); the spine makes
+ * the state a VALUE: every event in, one new state out, no mutation
+ * anywhere but the fold's own step.
+ *
+ * The classifier ([classify], wrapped by [mapKap]) and the reducer are
+ * PURE: no clock of their own (`nowMs` is injected — the events carry no
+ * clock), no effects, no I/O. The socket stays [ChannelClient]'s, the
+ * phone stays [LivePublisher]'s; this file is the thing in between.
+ */
+sealed interface RenderEvent {
+
+    /**
+     * A frame-carried event: the fork's seq and BOTH clocks ride along.
+     * `atMs` is the fork's own stamp (0 = absent — the receive clock wins,
+     * the honest fallback the reducer has always used); `nowMs` is the
+     * host's receive clock (the events carry no clock of their own).
+     */
+    sealed interface FromFrame : RenderEvent {
+        val taskId: String
+        val seq: Long
+        val atMs: Long
+        val nowMs: Long
+    }
+
+    /** `task_run_started` — a fresh turn's first signal. */
+    data class Started(
+        override val taskId: String,
+        override val seq: Long,
+        override val atMs: Long,
+        override val nowMs: Long,
+    ) : FromFrame
+
+    /**
+     * `agent_thought_chunk` — a CoT char chunk. THE STAGE THAT CONFLATES
+     * (the design's law 3: only the latest matters; the fold's counter
+     * says so) — one delta of the thinking stream, main lane or subagent
+     * lane by [parentToolUseId].
+     */
+    data class Thought(
+        override val taskId: String,
+        override val seq: Long,
+        override val atMs: Long,
+        override val nowMs: Long,
+        val delta: String,
+        val parentToolUseId: String?,
+    ) : FromFrame
+
+    /** `agent_message_chunk` — the answer's own char stage. */
+    data class Answering(
+        override val taskId: String,
+        override val seq: Long,
+        override val atMs: Long,
+        override val nowMs: Long,
+        val delta: String,
+    ) : FromFrame
+
+    /**
+     * A tool lane opens or its input streams: the final `tool_call` (the
+     * authority input) or the `tool_call_update`/pending partial. EXACT
+     * stage — a line counter that drops is a lie.
+     */
+    data class ToolOpen(
+        override val taskId: String,
+        override val seq: Long,
+        override val atMs: Long,
+        override val nowMs: Long,
+        val tool: ToolCall,
+        val final: Boolean,
+    ) : FromFrame
+
+    /** `tool_call_update` with a terminal status — the lane's verdict. EXACT stage. */
+    data class ToolClose(
+        override val taskId: String,
+        override val seq: Long,
+        override val atMs: Long,
+        override val nowMs: Long,
+        val tool: ToolCall,
+    ) : FromFrame
+
+    /**
+     * `task_complete` / `task_error` — THE SEAL (the design's `Seal`): the
+     * turn's terminal, the typed error riding when the fork sent one. The
+     * 🔔 notification and the `bot_turns_sealed_*` metric hang off this
+     * event's fold.
+     */
+    data class Sealed(
+        override val taskId: String,
+        override val seq: Long,
+        override val atMs: Long,
+        override val nowMs: Long,
+        val stopReason: String,
+        val usageTokens: Long?,
+        val error: TypedErrorPill?,
+    ) : FromFrame
+
+    /** `permission_request` / `elicitation_request` — the turn blocks on the owner. */
+    data class InteractionAsked(
+        override val taskId: String,
+        override val seq: Long,
+        override val atMs: Long,
+        override val nowMs: Long,
+        val kind: String,
+        val title: String?,
+    ) : FromFrame
+
+    /** The interaction's own response — the 🔐/❓ lift. */
+    data class InteractionResolved(
+        override val taskId: String,
+        override val seq: Long,
+        override val atMs: Long,
+        override val nowMs: Long,
+    ) : FromFrame
+
+    /**
+     * `session_info_update` — the fork's pill patch (absent = untouched,
+     * null = clear) and the turn's REAL title when the session reports one.
+     */
+    data class SessionInfo(
+        override val taskId: String,
+        override val seq: Long,
+        override val atMs: Long,
+        override val nowMs: Long,
+        val title: String?,
+        val retry: ApiRetryText.ApiRetryPatch,
+    ) : FromFrame
+
+    /** `task_network_debug_status` — the raw status's own pill patch. */
+    data class NetworkDebug(
+        override val taskId: String,
+        override val seq: Long,
+        override val atMs: Long,
+        override val nowMs: Long,
+        val retry: ApiRetryText.ApiRetryPatch,
+    ) : FromFrame
+
+    /**
+     * THE ADDITIVE FRAME (the design's `Frame*`): a stream event the fold
+     * folds for FRESHNESS only — `usage_update`, the union's unknown types,
+     * an in-progress tool update. Nothing visible changes; the card's age
+     * does (silence is data, and this frame is signal).
+     */
+    data class Frame(
+        override val taskId: String,
+        override val seq: Long,
+        override val atMs: Long,
+        override val nowMs: Long,
+        val type: String?,
+    ) : FromFrame
+
+    /**
+     * THE STALENESS TICK (the design's law 2): the ticker's event, folded
+     * like any other — the card's age is STATE, not a side channel. It
+     * moves NOTHING the frames own (lastSeq/lastEventAtMs never move on a
+     * tick: the ticker proves nothing about the model).
+     */
+    data class Tick(val nowMs: Long) : RenderEvent
+
+    /** The REAL title, resolved OUTSIDE the stream (the history's tasks-index). */
+    data class Retitle(val taskId: String, val title: String) : RenderEvent
+
+    /** A reconnect's resync — the lost events stay lost, the state re-baselines. */
+    data class Resync(val taskId: String) : RenderEvent
+
+    /**
+     * The stream heartbeat's seq accounting — NOTHING else moves. The
+     * keepalive consumes the connection's seq counter (the fork's own law)
+     * and proves the BUS, never the model.
+     */
+    data class Keepalive(val taskId: String, val seq: Long) : RenderEvent
+
+    /** A sa: attach — the card speaks ONLY that subagent's stream from here. */
+    data class ScopeLane(val laneId: String) : RenderEvent
+
+    /** Back to the whole task's stream (a t: attach clears any lane scope). */
+    data object WatchTask : RenderEvent
+
+    /** The turn is spent (the seal's cleanup, a ☢️ nuclear): the fold's reset. */
+    data object Clear : RenderEvent
+}
+
+/**
+ * One tool frame's extraction — what ONE frame carries about a lane (the
+ * merge with the lane's existing state is the REDUCER's law, which is where
+ * the `?: existing` fallbacks live; the classifier invents nothing).
+ */
+data class ToolCall(
+    val toolId: String?,
+    /** The frame's own name; null = it did not name the tool (the lane keeps its own). */
+    val name: String?,
+    val title: String?,
+    val parentToolUseId: String?,
+    val subagentAgentId: String?,
+    val input: JsonObject?,
+    /** Lines written so far per THIS frame's input (content/new_string); 0 when nothing streamed. */
+    val streamedLines: Int,
+    /** raw.streamingRawInputLength — the chars the model actually emitted; null = absent. */
+    val rawChars: Int?,
+    val isMcp: Boolean,
+    /** The close's terminal status (completed/failed/denied/stopped); null on an open. */
+    val status: String? = null,
+    /** The close's output in lines — string content only; null = structured payload invents no count. */
+    val outputLines: Int? = null,
+    /** The close's output VERBATIM (the result update's `content`); null = none/structured. */
+    val output: String? = null,
+)
+
+/**
+ * THE PURE CLASSIFIER (the design's law 1): one channel frame → its
+ * [RenderEvent], or null when the frame is not render material at all
+ * (hello/pong/acks — the additive rule says the reader ignores what it
+ * does not understand). Extracts EXACTLY what the fold reads — the same
+ * readers [StreamEvents] has always used — and nothing more.
+ */
+// one branch per wire kind — the union IS the shape (the reducer's own table)
+fun classify(frame: ServerFrame, nowMs: Long): RenderEvent? = when (frame) {
+    is ServerFrame.KeepAlive -> RenderEvent.Keepalive(frame.taskId, frame.seq)
+
+    is ServerFrame.StreamEvent -> classifyStream(frame, nowMs)
+
+    else -> null // hello/pong/acks: not render material — the additive rule's own drop
+}
+
+// one branch per wire type — the union IS the shape (the reducer's own table)
+@Suppress("CyclomaticComplexMethod")
+private fun classifyStream(frame: ServerFrame.StreamEvent, nowMs: Long): RenderEvent {
+    val event = frame.event
+    val taskId = frame.taskId
+    val seq = frame.seq
+    val atMs = frame.at
+    return when (StreamEvents.type(event)) {
+        StreamEvents.RUN_STARTED -> RenderEvent.Started(taskId, seq, atMs, nowMs)
+
+        StreamEvents.THOUGHT -> RenderEvent.Thought(
+            taskId = taskId,
+            seq = seq,
+            atMs = atMs,
+            nowMs = nowMs,
+            delta = StreamEvents.content(event),
+            parentToolUseId = StreamEvents.parentToolUseId(event),
+        )
+
+        StreamEvents.MESSAGE -> RenderEvent.Answering(taskId, seq, atMs, nowMs, StreamEvents.content(event))
+
+        StreamEvents.TOOL_CALL, StreamEvents.TOOL_UPDATE -> classifyTool(frame, nowMs)
+
+        StreamEvents.COMPLETE, StreamEvents.ERROR -> classifyTerminal(frame, nowMs)
+
+        StreamEvents.PERMISSION -> RenderEvent.InteractionAsked(
+            taskId,
+            seq,
+            atMs,
+            nowMs,
+            kind = "permission",
+            title = StreamEvents.title(event),
+        )
+
+        StreamEvents.ELICITATION -> RenderEvent.InteractionAsked(
+            taskId,
+            seq,
+            atMs,
+            nowMs,
+            kind = "elicitation",
+            title = StreamEvents.title(event),
+        )
+
+        StreamEvents.PERMISSION_RESPONSE, StreamEvents.ELICITATION_RESPONSE ->
+            RenderEvent.InteractionResolved(taskId, seq, atMs, nowMs)
+
+        StreamEvents.SESSION_INFO -> RenderEvent.SessionInfo(
+            taskId = taskId,
+            seq = seq,
+            atMs = atMs,
+            nowMs = nowMs,
+            title = event.str("title")?.takeIf { it.isNotEmpty() },
+            retry = ApiRetryText.fromPatch(event),
+        )
+
+        StreamEvents.NETWORK_DEBUG -> RenderEvent.NetworkDebug(
+            taskId = taskId,
+            seq = seq,
+            atMs = atMs,
+            nowMs = nowMs,
+            retry = ApiRetryText.fromNetworkDebug(event, atMs.takeIf { it > 0 } ?: nowMs),
+        )
+
+        else -> RenderEvent.Frame(taskId, seq, atMs, nowMs, StreamEvents.type(event))
+    }
+}
+
+/** The tool ladder: the open/stream/close shapes of `tool_call` + `tool_call_update`. */
+private fun classifyTool(frame: ServerFrame.StreamEvent, nowMs: Long): RenderEvent {
+    val taskId = frame.taskId
+    val seq = frame.seq
+    val atMs = frame.at
+    val type = StreamEvents.type(frame.event)
+    return when (type) {
+        StreamEvents.TOOL_CALL ->
+            RenderEvent.ToolOpen(taskId, seq, atMs, nowMs, openToolCall(frame.event), final = true)
+
+        StreamEvents.TOOL_UPDATE -> when (StreamEvents.status(frame.event)) {
+            "pending" -> RenderEvent.ToolOpen(taskId, seq, atMs, nowMs, openToolCall(frame.event), final = false)
+
+            "completed", "failed", "denied", "stopped" ->
+                RenderEvent.ToolClose(taskId, seq, atMs, nowMs, closeToolCall(frame.event))
+
+            else -> RenderEvent.Frame(taskId, seq, atMs, nowMs, type)
+        }
+
+        else -> RenderEvent.Frame(taskId, seq, atMs, nowMs, type)
+    }
+}
+
+/** The turn's terminal: the clean seal's stop reason + usage, the error's typed pill. */
+private fun classifyTerminal(frame: ServerFrame.StreamEvent, nowMs: Long): RenderEvent {
+    val event = frame.event
+    return when (StreamEvents.type(event)) {
+        StreamEvents.COMPLETE -> RenderEvent.Sealed(
+            taskId = frame.taskId,
+            seq = frame.seq,
+            atMs = frame.at,
+            nowMs = nowMs,
+            stopReason = StreamEvents.stopReason(event),
+            usageTokens = StreamEvents.usageTokens(event),
+            error = null,
+        )
+
+        else -> {
+            val pill = StreamEvents.typedErrorOf(event)
+            RenderEvent.Sealed(
+                frame.taskId,
+                frame.seq,
+                frame.at,
+                nowMs,
+                stopReason = pill.error,
+                usageTokens = null,
+                error = pill,
+            )
+        }
+    }
+}
+
+/** The OPEN side's extraction (a final `tool_call` or a pending update). */
+private fun openToolCall(event: JsonObject): ToolCall {
+    val name = event.str("toolName")
+    return ToolCall(
+        toolId = StreamEvents.toolId(event),
+        name = name,
+        title = StreamEvents.title(event),
+        parentToolUseId = StreamEvents.parentToolUseId(event),
+        subagentAgentId = StreamEvents.subagentAgentId(event),
+        input = StreamEvents.input(event),
+        streamedLines = StreamEvents.writtenLines(event),
+        rawChars = StreamEvents.streamingRawInputLength(event),
+        // the frame's own markers only — the lane's existing isMcp wins in the fold
+        isMcp = StreamEvents.isMcp(event, name ?: ""),
+    )
+}
+
+/** The CLOSE side's extraction (the terminal `tool_call_update`). */
+private fun closeToolCall(event: JsonObject): ToolCall = ToolCall(
+    toolId = StreamEvents.toolId(event),
+    name = event.str("toolName"),
+    title = null,
+    parentToolUseId = null,
+    subagentAgentId = null,
+    input = StreamEvents.input(event),
+    streamedLines = 0,
+    rawChars = null,
+    isMcp = false,
+    status = StreamEvents.status(event),
+    outputLines = StreamEvents.outputLines(event),
+    output = StreamEvents.outputText(event),
+)
+
+/**
+ * THE SPINE'S HEAD (the design's law 1, verbatim shape): the channel's
+ * `ServerFrame` stream lifted into KapStream and classified by the pure
+ * [classify] through the stream's OWN mapKap stage. The classifier's null
+ * (not render material) leaves the spine here — the additive rule's drop.
+ *
+ * `frames` must be multicast-safe (a SharedFlow — the channel client's
+ * stream is one): the spine's stages below each collect it.
+ */
+fun mapKap(frames: Flow<ServerFrame>, nowMs: () -> Long): KapStream<RenderEvent> {
+    val classified = KapStream.from(frames)
+        // EXACT at this stage by definition: classify is pure and total —
+        // a frame's event exists before the stage is even named.
+        .mapKap { f -> Kap { classify(f, nowMs()) } }
+    return KapStream.from(classified.asFlow().mapNotNull { it })
+}
+
+/** The spine's first named stage: the classified stream with slack, exact. */
+internal fun KapStream<RenderEvent>.withStageSlack(slots: Int = SPINE_SLOTS): KapStream<RenderEvent> =
+    withBackpressure(Backpressure.Buffer(slots))
+
+/** The spine's default slack — bursts ride, the exact law never bends. */
+internal const val SPINE_SLOTS = 64
