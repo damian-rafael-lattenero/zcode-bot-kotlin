@@ -355,14 +355,21 @@ class LivePublisher(
      */
     suspend fun tick() = tickMutex.withLock { tickLocked() }
 
-    // the tick ladder (boot seal → title → birth → replace → seal → edit)
+    // the tick ladder (boot seal → title → birth → replace → seal → park → edit)
     // IS the publisher: one guard per step, splitting it hides the order
     @Suppress("ReturnCount", "CyclomaticComplexMethod")
     private suspend fun tickLocked() {
         val cfg = config()
         if (!cfg.configured) return
         sealOrphan(cfg) // the first tick's boot duty, before anything else
-        var state = hub.peek() ?: return
+        val peeked = hub.peek()
+        if (peeked == null) {
+            // the hub went empty (a spent seal's cleanup, a ☢️ nuclear): no
+            // park outlives the world — a fresh card is never parked
+            parks.worldEnded()
+            return
+        }
+        var state: TurnLive = peeked
         val now = clock()
         refreshGifts(now)
         if (statusMessageId == null && state.phase != TurnPhase.Idle) {
@@ -417,12 +424,24 @@ class LivePublisher(
             seal(cfg, mid, state, now)
             return
         }
+        // ⏸️ THE PARK GATE (the owner's 3/11): a parked card receives NO
+        // more edits — no redraw, no feed (the live-stream noise he is
+        // escaping). The fold above kept consuming every event (the seal's
+        // facts stay complete), the watchdog above kept the bus alive; the
+        // seal below still runs and the 🔔 carries the conclusion. One-shot:
+        // the seal itself drops the park with the card.
+        if (parks.isParked(state.taskId)) {
+            if (!parkRenderLanded) landParkedRender(cfg, mid, state) // the cooldown's deferred render
+            return
+        }
         drainFeed(cfg, state, now)
         val liveMid = statusMessageId ?: return // the swap's re-birth is throttled: the card returns next tick
         redrawCard(cfg, state, now, liveMid)
     }
 
-    /** The task-switch corpse seal: the watched turn was replaced — the old card speaks once and dies. */
+    /** The task-switch corpse seal: the watched turn was replaced — the old card speaks once and dies.
+     *  The honest correction outranks the park (a frozen «sigue en background» would lie); the park
+     *  dies with the card — the one-shot's law. */
     private suspend fun sealReplaced(cfg: TgConfig, mid: Long) {
         telegram.edit(
             cfg,
@@ -430,6 +449,7 @@ class LivePublisher(
             "⛓️ turno reemplazado — esta vista era de otra tarea; la nueva tiene su propio cartel.",
         )
         logger.info { "live view REPLACED: old taskId=$statusTaskId message_id=$mid" }
+        statusTaskId?.let { parks.endCard(it) }
         statusMessageId = null
         statusTaskId = null
         lastText = ""
@@ -631,7 +651,18 @@ class LivePublisher(
             if (level == FeedVerbosity.SUMMARY) emptyList() else TranscriptFeed.pendingFlush(state)
         if (feed.isNotEmpty() && telegram.throttled()) return
         sealed = true
-        if (feed.isEmpty()) {
+        // ⏸️ THE PARKED SEAL: the card keeps its frozen «▶️ sigue en
+        // background» (its LAST edit already landed) and the transcript
+        // stays silent — the seal speaks ONCE, through the 🔔 (the seal
+        // tap below always fires; the notification carries the
+        // conclusion). The cleanup below runs exactly as always.
+        val parked = parks.isParked(state.taskId)
+        if (parked) {
+            logger.info {
+                "live view sealed (PARKED): taskId=${state.taskId} — the card stays frozen, " +
+                    "the 🔔 carries the conclusion"
+            }
+        } else if (feed.isEmpty()) {
             telegram.edit(cfg, mid, LiveTurn.sealText(state, now))
         } else {
             telegram.delete(cfg, mid)
@@ -642,11 +673,11 @@ class LivePublisher(
         // the store's answer is RAW markdown/content — Telegram's HTML law
         // requires the escape (measured 31/10: a literal tag in the content
         // 400'd the send every tick until the breaker opened)
-        if (answer != null) speak(PyText.esc(answer), null)
+        if (answer != null && !parked) speak(PyText.esc(answer), null)
         logger.info {
             "live view sealed: taskId=${state.taskId} reason=${(state.phase as TurnPhase.Done).stopReason} " +
                 "thought=${state.thoughtChars} tools=${state.doneTools} answer=${answer?.length ?: 0} chars " +
-                "feed=${feed.size}"
+                "feed=${feed.size} parked=$parked"
         }
         sealTap(state, answer, now)
         // THE REGISTRY SURVIVES THE SEAL (the collapsed buttons keep
@@ -654,6 +685,7 @@ class LivePublisher(
         // only the entry cap prunes it. The PIN dies only if THIS turn is
         // its card: the parent sealing must not steal a child's pin.
         hub.clear(state.taskId)
+        parks.endCard(state.taskId) // THE ONE-SHOT: the park dies with its card — a new turn is never parked
         orphanStore?.clear()
         statusMessageId = null
         statusTaskId = null

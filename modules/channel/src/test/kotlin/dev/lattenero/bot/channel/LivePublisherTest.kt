@@ -686,8 +686,176 @@ class LivePublisherTest {
         // the ack flies (the toast is not the edit), the render waits for the window
         assertEquals(ParkTapTexts.ACK, publisher.park(taskId))
         assertEquals(edits, wire.bodies.count { it.second == "editMessageText" }, "the parked render obeys the cooldown")
+        // THE WINDOW LIFTS: the tick lands the deferred render (the same
+        // edit-throat) and then the gate holds — no redraw behind it
         nowSec = 5_000.0
-        publisher.park(taskId) // the no-op ack — the retry is the tick's (the gate's law, unit 3)
+        publisher.tick()
+        val parked = wire.bodies.last { it.second == "editMessageText" }.first
+        assertTrue("sigue en background" in parked, "the deferred render landed once the window lifted")
+        val afterLift = wire.bodies.size
+        publisher.tick() // a quiet parked tick
+        assertEquals(afterLift, wire.bodies.size, "the parked card receives NO more edits")
+    }
+
+    @Test
+    fun aParkedCardReceivesNoMoreEditsWhileTheFoldKeepsConsuming() = runTest {
+        val taskId = "task-9"
+        val hub = LiveHub()
+        hub.apply(frame(taskId, "task_run_started", at = 1_000), nowMs = 1_000)
+        hub.apply(frame(taskId, "agent_thought_chunk", at = 1_050, "content" to JsonPrimitive("arranco")), nowMs = 1_050)
+        val wire = Wire()
+        val spoken = mutableListOf<String>()
+        val publisher = publisher(wire, hub, spoken)
+        publisher.tick() // the birth
+        assertEquals(ParkTapTexts.ACK, publisher.park(taskId)) // the parked render lands with the tap
+        val afterPark = wire.bodies.size
+        // the stream KEEPS ARRIVING (the turn runs on) and the ticks keep ticking:
+        // the card receives nothing — no redraw, no feed, no deletes
+        hub.apply(frame(taskId, "agent_thought_chunk", at = 1_100, "content" to JsonPrimitive("sigo")), nowMs = 1_100)
+        publisher.tick()
+        hub.apply(
+            frame(
+                taskId,
+                "tool_call_update",
+                at = 1_200,
+                "status" to JsonPrimitive("pending"),
+                "toolId" to JsonPrimitive("t1"),
+                "toolName" to JsonPrimitive("Bash"),
+                "input" to buildJsonObject { put("command", "git status") },
+            ),
+            nowMs = 1_200,
+        )
+        publisher.tick()
+        hub.apply(
+            frame(
+                taskId,
+                "tool_call_update",
+                at = 1_300,
+                "status" to JsonPrimitive("completed"),
+                "toolId" to JsonPrimitive("t1"),
+                "content" to JsonPrimitive("on branch master"),
+            ),
+            nowMs = 1_300,
+        )
+        publisher.tick()
+        assertEquals(afterPark, wire.bodies.size, "a parked card receives NO more edits (nor feed, nor deletes)")
+        assertEquals(emptyList(), spoken.toList(), "the parked chat hears nothing — that is the escape")
+        publisher.tick() // a quiet parked tick touches nothing either
+        assertEquals(afterPark, wire.bodies.size)
+    }
+
+    @Test
+    fun theParkedSealIsSilentAndTheBellCarriesTheConclusion() = runTest {
+        val taskId = "task-9"
+        val hub = LiveHub()
+        hub.apply(frame(taskId, "task_run_started", at = 1_000), nowMs = 1_000)
+        hub.apply(frame(taskId, "agent_thought_chunk", at = 1_050, "content" to JsonPrimitive("arranco")), nowMs = 1_050)
+        val wire = Wire()
+        val spoken = mutableListOf<String>()
+        val received = mutableListOf<SealFacts>()
+        val publisher = publisher(
+            wire,
+            hub,
+            spoken,
+            finalAnswer = { "LA RESPUESTA" },
+            onSeal = { received.add(it) },
+        )
+        publisher.tick() // the birth
+        assertEquals(ParkTapTexts.ACK, publisher.park(taskId))
+        val afterPark = wire.bodies.size
+        // the stream keeps folding while parked: a tool arrives and closes
+        // unseen (the seal's facts must be complete)
+        hub.apply(
+            frame(
+                taskId,
+                "tool_call_update",
+                at = 1_090,
+                "status" to JsonPrimitive("pending"),
+                "toolId" to JsonPrimitive("t1"),
+                "toolName" to JsonPrimitive("Bash"),
+                "input" to buildJsonObject { put("command", "git status") },
+            ),
+            nowMs = 1_090,
+        )
+        hub.apply(
+            frame(
+                taskId,
+                "tool_call_update",
+                at = 1_100,
+                "status" to JsonPrimitive("completed"),
+                "toolId" to JsonPrimitive("t1"),
+                "content" to JsonPrimitive("on branch master"),
+            ),
+            nowMs = 1_100,
+        )
+        // the turn completes unseen by the chat: the seal runs, the 🔔 fires,
+        // and NOTHING is edited, deleted or spoken
+        hub.apply(frame(taskId, "task_complete", at = 9_999, "stopReason" to JsonPrimitive("end_turn")), nowMs = 9_999)
+        publisher.tick() // the seal tick
+        assertEquals(afterPark, wire.bodies.size, "the parked seal touches no message — the card keeps its promise")
+        assertEquals(emptyList(), spoken.toList(), "no record, no answer message — the seal speaks ONCE, via 🔔")
+        assertEquals(1, received.size, "the seal tap still fires")
+        val facts = received[0]
+        assertEquals(taskId, facts.taskId)
+        assertEquals("end_turn", facts.stopReason)
+        assertEquals(1, facts.doneTools, "the fold kept consuming while parked — the facts are complete")
+        assertEquals("LA RESPUESTA", facts.answer, "the conclusion rides the 🔔")
+        assertEquals(null, hub.peek(), "the seal's cleanup ran exactly as always")
+        // the one-shot: the park died with the card — a second tap is the refusal
+        assertEquals(ParkTapTexts.REFUSAL, publisher.park(taskId), "the card is gone; the button never lies")
+    }
+
+    @Test
+    fun aNewTurnForTheSameTaskUnparksByConstruction() = runTest {
+        val taskId = "task-9"
+        val hub = LiveHub()
+        hub.apply(frame(taskId, "task_run_started", at = 1_000), nowMs = 1_000)
+        hub.apply(frame(taskId, "agent_thought_chunk", at = 1_050, "content" to JsonPrimitive("arranco")), nowMs = 1_050)
+        val wire = Wire()
+        val publisher = publisher(wire, hub)
+        publisher.tick() // the birth
+        assertEquals(ParkTapTexts.ACK, publisher.park(taskId))
+        hub.apply(frame(taskId, "task_complete", at = 9_000, "stopReason" to JsonPrimitive("end_turn")), nowMs = 9_000)
+        publisher.tick() // the parked seal — the park dies with its card
+        val afterSeal = wire.bodies.size
+        // A NEW TURN for the same task: the fresh card is born, and the
+        // stream's edits FLOW — no park survived the seal
+        hub.apply(frame(taskId, "task_run_started", at = 10_000), nowMs = 10_000)
+        hub.apply(frame(taskId, "agent_thought_chunk", at = 10_100, "content" to JsonPrimitive("vuelvo")), nowMs = 10_100)
+        publisher.tick()
+        val reborn = wire.bodies.last { it.second == "sendMessage" }.first
+        assertTrue("⏸️ A background" in reborn, "the fresh card carries its own ⏸️")
+        assertTrue("⏳ <b>Working" in reborn, "the fresh card renders the new turn — unparked by construction")
+        assertTrue(wire.bodies.size > afterSeal)
+        // the gate is open for real: a further event redraws the fresh card
+        val afterRebirth = wire.bodies.size
+        hub.apply(frame(taskId, "agent_thought_chunk", at = 10_200, "content" to JsonPrimitive("más")), nowMs = 10_200)
+        publisher.tick()
+        assertTrue(wire.bodies.size > afterRebirth, "the new turn's edits flow — the park was one-shot")
+    }
+
+    @Test
+    fun aReplacedCardLosesItsParkAndTheFreshCardFlows() = runTest {
+        val hub = LiveHub()
+        hub.apply(frame("task-9", "task_run_started", at = 1_000), nowMs = 1_000)
+        hub.apply(frame("task-9", "agent_thought_chunk", at = 1_050, "content" to JsonPrimitive("a")), nowMs = 1_050)
+        val wire = Wire()
+        val publisher = publisher(wire, hub)
+        publisher.tick()
+        assertEquals(ParkTapTexts.ACK, publisher.park("task-9"))
+        // the owner re-binds: the hub replaces the watched turn — the corpse
+        // seal speaks ONCE (the honest correction outranks the park) and the
+        // park dies with the card
+        hub.apply(frame("task-2", "task_run_started", at = 2_000), nowMs = 2_000)
+        hub.apply(frame("task-2", "agent_thought_chunk", at = 2_050, "content" to JsonPrimitive("b")), nowMs = 2_050)
+        publisher.tick()
+        val replaced = wire.bodies.last { it.second == "editMessageText" }.first
+        assertTrue("turno reemplazado" in replaced, "the replaced card's honest end")
+        // the fresh card for task-2 flows: edits happen (no park behind it)
+        val after = wire.bodies.size
+        hub.apply(frame("task-2", "agent_thought_chunk", at = 2_100, "content" to JsonPrimitive("c")), nowMs = 2_100)
+        publisher.tick()
+        assertTrue(wire.bodies.size > after, "the new card is never parked")
     }
 
     private companion object {
