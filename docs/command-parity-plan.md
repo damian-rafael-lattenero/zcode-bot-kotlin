@@ -233,3 +233,32 @@ U1b (BusEvent producer + memory_inject port → enables /brain /memory) →
 kap 4.3 (TgBreaker → kap CircuitBreaker) → E2 (metrics) → E3 (OTel) →
 U4+. Stale docs (README build section, fork-interface-map TOP-5) get
 repaired along the way.
+
+## 2026-11-03 progress — U1a + U1b landed and deployed; kap 4.3 + 5.0 done
+
+- **U1a**: `index-repos` (`f505c41`) + brain-mcp installed (`de8db22`,
+  manual registry install — the `zcode` CLI is not on PATH); the full
+  5-repo index runs as the one-shot LaunchAgent
+  `com.zcode.agent-brain-index`.
+- **U1b**: BusEvent producer behind `event_bus` (`329699a`), `/brain` +
+  `/memory` (`5fe5675`), `memory_inject` (`6f0ea49`); deployed 11:40 with
+  both knobs ON (21 commands, channel caps=22, 888 tests). The bus ingests
+  real events (0 malformed, 0 duplicates) and `rag_query` answers via MCP
+  with real citations; `memories` waits for the owner's first phone turn,
+  and the «remembered the next day» gate runs tomorrow.
+- **kap 4.3** merged to master (`7b3836d`): CircuitBreaker
+  `successThreshold`/`retryAfter`, `Schedule.delays`/`delayBy`, `Ref`,
+  `kap-detekt-rules` (ManualWaitLoop) — 1,134 tests, gate green.
+- **kap 5.0** merged to master (`0177877`): Schedule semiring,
+  Supervisor (OneForOne/AllForOne), the `kap-stream` module, JMH suite
+  (flatMap 1.02x raw Flow; map/filter 1.39x/1.08x of a suspend call per
+  element — documented honestly in the benchmark and CHANGELOG).
+- **agent-brain Phase A** merged + deployed (`458d7b6`): Brain as a
+  Resource graph, the three loops as supervised Processes, liveness from
+  `ProcessHandle` (`/bus/status` reports `restarts`/`heartbeatAgeMs`).
+  Phase C is in flight on `agent/phase-c`.
+- **U11** in flight on `agent/kap-u11`: the five DX issues (#14 #16 #19
+  #20 #18), the stale root `blog-draft.md` retired (the post is live),
+  the `Ref` KDoc example fixed.
+- Next: merge U11 + Phase C → dogfooding 5.0 (KapStream as the brain's
+  event tailer, Phase G) → E2 metrics → E3 OTel → U5 render core.

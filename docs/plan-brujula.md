@@ -1,43 +1,41 @@
 # Plan Brujula — un solo sistema, cinco repos, cinco cosas
 
-> Creado: 2026-10-30 · Estado: v1.16 — cierre de ciclo al 2026-11-02 (ver «Estado real» abajo)
+> Creado: 2026-10-30 · Estado: v1.17 — actualizado al 2026-11-03 tarde (ver «Estado real» abajo)
 > Orden de ejecución decidido: **U0 → U1a (paralelo) → U2 → U1b → U3 → U4 → U5 → U6 → U7 → U8 → U9 → U10 → U11**
 > La brújula: Fazt, «Para ser ingeniero de IA no necesitas crear tu propio ChatGPT» (27/10/2026, 2:56) — https://www.youtube.com/watch?v=dWyB3EcpNLQ
 > Este plan unifica y obedece la doctrina ya existente: `docs/parity-and-engineering.md` §7 · `~/Projects/bot/docs/kap-first-migration.md` (+ ADRs 021-025) · `~/Projects/agent-brain/plan.md` (+ ADRs 001-008) · `~/Projects/kap/SPEC-5.0-concurrency.md` · `~/Projects/ZCode/FORK.md` + `docs/fork/ARCHITECTURE.md`.
 
-## Estado real al 2026-11-02 (cierre de ciclo)
+## Estado real al 2026-11-03 (tarde)
 
 > Este bloque manda sobre los checkboxes de abajo: varios quedaron sin tildar
 > aunque el trabajo está hecho y deployado. Verificado contra repos, código y
 > la Mac, no contra el texto del plan.
 
 **Vivo hoy**
-- `daemon.json` = `send: live`, `poll: true`; el daemon Kotlin es el único lector de getUpdates.
+- `daemon.json` = `send: live`, `poll: true`, `event_bus: true`, `memory_inject: true`; el daemon Kotlin es el único lector de getUpdates. Menú de 21 comandos, canal UP (`hello_ok` v1, caps=22), app del fork corriendo 3.17.2.
 - Python retirado: 0 LaunchAgents `telegram-*`/`bot-healer` cargados. El repo `bot` queda como referencia de paridad y puerta de rollback.
-- Fork instalado con el canal daemon-local (`caps=16`); app reconstruida y deployada.
-- Beacon healthchecks.io sano; comparador diario escribiendo reportes.
-- `agent-brain`: Postgres + Redpanda arriba, `test` + `bbLocal` + `detektAll` + eval 20/20 verdes. `serve` y brain-mcp todavía no instalados.
-- Nushell: los 13 `.sh` propios son `.nu` tipados; nightly `0.116.2-nightly.28` pineada por shebang; `nu-check --debug` limpio en los 20 archivos.
-- Deploy 2/11: autómata `--real` rc=0 (6/6), tag `damian-v3.16.2-20261102` sobre `bac786e5`, `verify-deploy.nu` PASS, Diff Ask 0.9.20 instalado, canal `hello_ok` caps=16, `hb-channel`/`hb-poller` y beacon sanos, Python sin LaunchAgents.
-- Caveat medido en la verificación y **corregido en el hot-fix 2/11**: `/plan` con la app recién abierta y **sin task activa** devuelve `botStatus.context=null`; el daemon ahora responde «📭 No hay conversación activa — abrí una en ZCode o usá /tasks n» en vez de culpar al deploy. Con conversación activa el contexto existe (el hot-fix loop lo usó el 31/10). Los demás comandos que dependen del contexto (`/last`, `/compact`, `/context_window`, `/queue`, `/steer`, `/subagents`, `/stop` soft, `/diff`) también piden una conversación activa; `/tasks`, `/all_tasks`, `/quota`, `/help`, `/verbosity`, `/file` y `/nuclear` funcionan sin ella.
+- Beacon healthchecks.io sano; healer propio del daemon (`com.zcode.bot-healer`) tickeando; comparador diario escribiendo reportes.
+- `agent-brain`: Postgres+Redpanda en colima (arrancado FUERA de ZCode), `serve` como LaunchAgent `com.zcode.agent-brain`, brain-mcp instalado en ZCode (registry manual, MCP stdio verificado), eval 20/20; el índice completo de los 5 repos corre como LaunchAgent one-shot `com.zcode.agent-brain-index`.
+- Bus verificado en vivo: eventos reales ingestados (0 malformados, 0 duplicados) y `rag_query` por MCP devolviendo chunks reales con citas. `memories` en 0 hasta el primer turno real de teléfono (los eventos actuales son tool calls de la sesión de Mac, sin `turn.completed`).
+- kap: 4.3 + 5.0 en master (`7b3836d` → `0177877`; semiring de Schedule, Supervisor OneForOne/AllForOne, módulo kap-stream, JMH vs RxJava 3 — 1.188 tests). agent-brain Fase A deployada: `/bus/status` ya reporta `restarts`/`heartbeatAgeMs` del `ProcessHandle`.
+- Nushell: los scripts propios son `.nu` tipados con nightly pineada por shebang.
+- Regla operativa (3/11): todo proceso que deba sobrevivir a ZCode corre AFUERA — pestaña de Ghostty para trabajos interactivos, LaunchAgent para servicios, colima incluido.
 
 **Fases**
-- U0 cerrado salvo kap 4.3 (sigue pendiente).
-- U1a no empezado: indexador de repos + `make plugin` + instalar brain-mcp.
-- U1b replanteado: Python ya no existe, así que no hay knob `event_bus` que prender. El daemon Kotlin no publica `BusEvent` (`BusEvent.kt` es solo lectura). Hay que portar el productor o elegir otra fuente; `memory_inject` también hay que portarlo.
-- U2 cerrado salvo E2 (métricas Micrometer/Prometheus).
-- U2.5 completo (los checkboxes de abajo quedaron desactualizados).
-- U3: canal y live mode hechos; faltan `/mode live|headless` y E3 (OTel).
-- U4 a U11 no empezados; U5 tiene el render core B4 como riesgo mayor.
-- `zcode-diff-ask` 0.9.20 cerrado y verificado (unit + check + e2e).
-- Worktrees `zcode-bot-feed` y `zcode-bot-superset` eliminados (ramas ya mergeadas).
+- U0 cerrado (kap 4.3 incluido).
+- U1a HECHO: `index-repos` + brain-mcp instalado; el índice completo sigue corriendo.
+- U1b HECHO y deployado (3/11): productor BusEvent (`event_bus` ON), `/brain` `/memory`, `memory_inject` ON. RAG verificado; falta el turno de teléfono real → memoria.
+- U2/U2.5 cerrados. U3: canal y live mode hechos; faltan E3 (OTel) y decidir el destino de `/mode live|headless` (probablemente obsoleto: el modelo headless fue descartado).
+- kap 4.3 y 5.0 HECHOS. U11 en curso (los 5 issues de DX; el blog ya está publicado y vivo en gh-pages).
+- agent-brain: Fase A HECHA y deployada; Fase C en curso; quedan D, E y G (G consume kap 5.0: Ref/Supervisor/KapStream).
+- U5 render core = el próximo riesgo mayor.
 
 **Próximo checkpoint (en orden)**
-1. U1a: indexador de `~/Projects` + `make plugin` + instalar brain-mcp en ZCode.
-2. U1b: decidir y portar el productor del bus + `memory_inject` al daemon Kotlin.
-3. kap 4.3 quick unlocks.
-4. agent-brain fase A (ya desbloqueada por kap 4.2).
-5. kap 5.0 + render core B4.
+1. Cerrar U1b en vivo: turno de teléfono → `memories > 0`; el gate «recordada al día siguiente» se verifica mañana.
+2. Mergear U11 (kap) + Fase C (agent-brain); deploy del brain si toca.
+3. Dogfooding 5.0: KapStream alimentando el event tailer del brain (condición del SPEC para dar 5.0 por «done»).
+4. E2 métricas / E3 OTel del daemon.
+5. U5 render core B4.
 
 ## 0. La brújula (el video)
 
@@ -108,19 +106,19 @@ Sí, es el consenso 2026 — los roadmaps vigentes (roadmap.sh/ai-engineer, Kode
 - [x] **Barrido while(true)/concurrencia manual** (audit hecho 30/10): 3 MUST-FIX en zcode-bot-kotlin (Outbox flock `while(true)` en el WIP, SpectatorWatch polling-loop, TgBreaker casero Mutex+vars), 1 leve en agent-brain (Traces `AtomicLong` global — espera kap `Ref`), 0 en kap (solo un example-documentación aparte). `GlobalScope`: cero en los tres repos. **SendPolicy: uso canónico de `kap.Schedule`** (no duplica el álgebra).
 - [x] Fixes del audit en zcode-bot-kotlin (hechos 30/10): Outbox flock → `Kap.retry(doWhile and spaced(100ms).withMaxDuration(10s))` con el IOException exacto (semántica verificada contra Schedule.kt de kap; en `7f00b28`) · gate anti-while(true)/do{} en ci.yml (hit clasificado: recorder, exento) · SpectatorTurn → tick ADT `Keep/MarkerGone/Takeover` bajo `repeat(doUntil and spaced(1s) and times(2099))` — el cap de 35 min ahora tiene test propio (en `60980ed`) · daemon re-deployado. Pendiente chico: refactor del `do{}`+`Thread.sleep` del recorder (CLI dev-only; launchd es dueño de la cadencia).
 - [x] **Divergencia #2 del comparator** (cazada 30/10 día 1; resuelta mismo día, commit `e455af8`): (a) zconn — el porte era fiel; las **memorias diferían**: Python cargaba un `first_down` rancio de las 10:12 (wart que nunca se limpia) y trató el corte de 11 s como sputter silencioso, mientras el shadow nació 11:23 con track virgen y anunció (un Python renacido habría anunciado igual) → fix: el primer arm del shadow **adopta el track vivo de Python** (`hooks/state/zconn.json`, lectura one-shot, `armTrack` pura); (b) spectator — **bug del comparator**: el pin de Python cayó 0.468 s «antes de cobertura» (pwlog trunca a segundos, el header del turno era el coverageStart) → fix: *coverage never separates twins* (rescue-match en la zona boundary, in-coverage primero, no-steal pineado en test). 6 tests con los números reales del día (suite 174). Ventana reiniciada limpia: pre-fix archivado en `shadow-archive/`, shadow re-armado por adopción, daemon+comparator re-deployados, veredicto INSUFFICIENT 0/0 — **la semana acumula desde cero**.
-- [ ] **kap 4.3 «quick unlocks»** (candidatos del audit + B2a — con leyes + bump, ideal antes del cutover B2): `CircuitBreaker(successThreshold=2, retryAfter)` para jubilar TgBreaker (Python F79e exige 2 éxitos en half-open; kap cierra con 1 y no reporta retryAfter) · `Schedule.delays(0,1,3)` (tabla finita de delays — las fórmulas spaced/exponential/linear/fibonacci no son lista) · **operador valor→delay con semántica de reemplazo** (el 429 nombra la ventana: `ra+0.5 capped 60` PISA el delay de la tabla; `and`/`or`/`zipWith` mergean por max/min y no pueden expresarlo) · `Ref` (lo pide brain: Traces y las métricas `@Volatile`/AtomicLong) · **módulo kap-detekt-rules** con la regla «manual wait loop» (while-true / while+delay / do-while+sleep en src/main fuera de kap) — el gate ecosystem-wide; el grep F1 de brain tiene puntos ciegos (solo el literal con un espacio, no ve polling no-literal ni do-while, módulos hardcodeados).
+- [x] **kap 4.3 «quick unlocks»** — **HECHO 3/11** (merge `7b3836d`, gate `build detektAll` verde, 1.134 tests): `CircuitBreaker(successThreshold, retryAfter)` (alias deprecado `resetTimeout` por compatibilidad) · `Schedule.delays(Array/List)` — el `vararg Duration` es imposible por value class — · operador valor→delay `Schedule.delayBy(f)` · `Ref<A>` en kap-core · módulo `kap-detekt-rules` con la regla `ManualWaitLoop` (import-aware, no publicado). Origen del ítem: (candidatos del audit + B2a): `CircuitBreaker(successThreshold=2, retryAfter)` para jubilar TgBreaker (Python F79e exige 2 éxitos en half-open; kap cierra con 1 y no reporta retryAfter) · `Schedule.delays(0,1,3)` (tabla finita de delays — las fórmulas spaced/exponential/linear/fibonacci no son lista) · **operador valor→delay con semántica de reemplazo** (el 429 nombra la ventana: `ra+0.5 capped 60` PISA el delay de la tabla; `and`/`or`/`zipWith` mergean por max/min y no pueden expresarlo) · `Ref` (lo pide brain: Traces y las métricas `@Volatile`/AtomicLong) · **módulo kap-detekt-rules** con la regla «manual wait loop» (while-true / while+delay / do-while+sleep en src/main fuera de kap) — el gate ecosystem-wide; el grep F1 de brain tiene puntos ciegos (solo el literal con un espacio, no ve polling no-literal ni do-while, módulos hardcodeados).
 - Gate de salida: los dos repos limpios, CI verde, semana de paridad corriendo sola.
 
 ### U1a — El cerebro en modo lectura (en paralelo con U0/U2; NO toca el bot en vivo)
-- [ ] **RAG de repos**: indexador de `~/Projects` (kap, bot, zcode-bot-kotlin, ZCode, agent-brain — docs y código) como fuente nueva de agent-brain (fuera del bus), consultable con `rag_query` desde ZCode y Telegram. La ingesta respeta los ADRs (pgvector único, dedup en SQL).
-- [ ] `make plugin` + instalar brain-mcp en el ZCode de Damian → `rag_query`/`memory_search` desde el chat.
+- [x] **RAG de repos** — **HECHO 3/11**: `index-repos [--dry-run] [--repo NAME]` sobre `$HOME/Projects/{kap,bot,zcode-bot-kotlin,ZCode,agent-brain}` (commit `f505c41`); heap `-Xmx768m` tras un OOM real (17.450 docs / 154,7 MB); doc ids = serial de Postgres por `uri`. Corriendo como LaunchAgent one-shot. (indexador de `~/Projects` (kap, bot, zcode-bot-kotlin, ZCode, agent-brain — docs y código) como fuente nueva de agent-brain (fuera del bus), consultable con `rag_query` desde ZCode y Telegram. La ingesta respeta los ADRs (pgvector único, dedup en SQL).)
+- [x] `make plugin` + instalar brain-mcp en el ZCode de Damian — **HECHO 3/11** (`de8db22` doc + registro manual del plugin, MCP stdio verificado) → `rag_query`/`memory_search` desde el chat. Gate: **CUMPLIDO** — `rag_query` por MCP responde con citas reales de los repos propios.
 - Gate: `rag_query` respondiendo con citas sobre los repos propios, desde ZCode.
 
 ### U1b — Encender bus y memoria (replanteado 2026-11-02: el cutover ya pasó y Python ya no existe)
 **El plan original decía «activar `"event_bus": true` en `~/.zcode/telegram-remote.json`». Eso era un knob del bot Python, que está retirado. El daemon Kotlin NO publica `BusEvent`: `modules/contract-types/.../BusEvent.kt` es solo el contrato de lectura y `~/.zcode/agent-brain/bus-events.jsonl` no existe. U1b no es prender un knob; es construir el productor.**
-- [ ] **Decidir el productor**: portar `bus.py` al daemon Kotlin (recomendado: el daemon ya ve los turnos y los eventos del canal), o un sidecar mínimo, o otra fuente (el stream del canal). Sin esto, RAG y memoria no tienen datos vivos.
-- [ ] Portar `memory_inject` al bot Kotlin (hoy solo existe en el Python retirado): `/brain` y `/memory` desde Telegram, memoria inyectada en los turnos.
-- [ ] Verificación: una conversación real queda recordada (memoria) y consultable (RAG) al día siguiente.
+- [x] **Decidir el productor** — **HECHO 3/11**: portado al daemon Kotlin detrás del knob `event_bus` (commit `329699a`; taps: user.prompt/turn.started/tool.call/tool.result/turn.completed/turn.failed, `reply` real desde TaskSnapshot, BusSink O_APPEND). Verificado en vivo: eventos reales ingestados sin malformados.
+- [x] Portar `memory_inject` al bot Kotlin — **HECHO 3/11** (`5fe5675` `/brain` `/memory`; `6f0ea49` memory_inject ≤1500 cp, top-3, 1.5 s, knobs ON).
+- [ ] Verificación: una conversación real queda recordada (memoria) y consultable (RAG) al día siguiente. *En curso 3/11: RAG verificado por MCP; falta el turno real de teléfono (memoria) y el gate del día siguiente.*
 - Gate: memoria citada en un turno real + `/brain` respondiendo en Telegram.
 
 ### U2 — B2: el transport — **CUTOVER HECHO 30/10 (commit `56a7229`)**: el daemon es el dueño del send
@@ -156,16 +154,16 @@ El camino final (cuatro corridas, cada fallo un pothole medido y fixeado): B2 fl
 
 ### U3 — Live mode (B3a + B3b)
 - [x] `ZCode` fork: canal «daemon local» (unix socket): `handleInboundMessage` + stream `bot-channel-continuous` + service queries (listTasks/quota/meta).
-- [ ] `zcode-bot-kotlin`: routing live|headless, `/mode live|headless`.
+- [ ] `zcode-bot-kotlin`: routing live|headless, `/mode live|headless`. *Probablemente OBOLETO: el modelo headless fue descartado explícitamente en la doctrina — confirmar y borrar del plan y del código.*
 - [ ] E3: OTel spans (span por turno, child por tool call).
 - Gate: un turno desde el teléfono viaja por la conversación real (no headless).
 
 ### U4 — kap 5.0 (K1): el dogfooding manda
-- [ ] `Supervisor` (OneForOne/AllForOne) con leyes — lo necesita agent-brain (C2) y el daemon.
-- [ ] `agent-brain` fase A encima: Brain como `Resource.zip`, los tres loops como `Process`, shutdown con `Kap.awaiting`.
-- [ ] `KapStream` (backpressure como valores) + `Schedule` semiring + benchmarks (≤2x raw Flow).
-- [ ] `agent-brain` C y D (ADTs sellados + kap-arrow; estado-como-valores).
-- Gate: SPEC-5.0 completo + usado en superficie real (el contrato de dogfooding).
+- [x] `Supervisor` (OneForOne/AllForOne) con leyes — **HECHO 3/11** (kap 5.0, `401b05c`; 17 tests).
+- [x] `agent-brain` fase A encima: Brain como `Resource.zip`, los tres loops como `Process`, shutdown con `Kap.awaiting` — **HECHO 3/11** (merge `458d7b6`, deployado; `/bus/status` reporta `restarts`/`heartbeatAgeMs`).
+- [x] `KapStream` (backpressure como valores) + `Schedule` semiring + benchmarks — **HECHO 3/11** (kap 5.0; JMH: flatMap 1.02x raw Flow; map/filter 3.0x/2.4x de raw pero 1.39x/1.08x de una llamada suspend por elemento — documentado en el benchmark y CHANGELOG).
+- [ ] `agent-brain` C y D (ADTs sellados + kap-arrow; estado-como-valores). *C en curso 3/11 (`agent/phase-c`).*
+- Gate: SPEC-5.0 completo + usado en superficie real (el contrato de dogfooding). *(SPEC completo 3/11; el dogfooding — KapStream en el event tailer del brain — queda para la Fase G.)*
 
 ### U5 — Render (B4)
 - [ ] Render core (~4.9k LOC: cajitas, línea parpadeante, agent live) sobre KapStream. *El riesgo mayor del plan.*
