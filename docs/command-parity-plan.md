@@ -36,6 +36,23 @@ post-U2.5 hot-fix queue, NOT a re-order of the compass) and
   spent by /retry; armed-order one-shot fix (49e88db).
 - **B3 ❌ DROPPED** (owner decision): /handshake + /ping leave the batch
   and the phone checklist.
+- **B4 ✅** — /usage + /ctx merged (751feb8; cf1bc84 + db5c1ca): the
+  fork's `taskUsage` VERDICT = REAL data (agent SQLite `model_usage`
+  aggregate); /ctx renders the REAL contextWindow meter per conversation.
+  Honest gaps: no today-filter (session-lifetime cumulative only), no
+  compacted flag — never faked.
+- **B5 ✅** — /run merged (402ec79; dfb556e): fresh-conversation
+  guarantee achieved CHANNEL-SIDE (awaited `/new` → botStatus confirms
+  the draft → fire with the create intent); no createTask cap needed —
+  the A4 fork package stays additive-only.
+- **The ORDER pulse gate + the sn: detail card** (66d6a7e, the owner's
+  live proof 20:34): two orders into the ⏹️ agent's dead session bounced
+  nothing — now the ✍️ arm and the fire both ask the tri-state pulse
+  (closed lane = death certificate; open lane never vouches — the sa:
+  pin freezes the parent's fold; only the store's fresh row speaks life;
+  stale row = silence, not proof). Tapping a row's name opens the FULL
+  uncapped name + fresh action buttons; a dead agent's card is a pure
+  memory (the name survives, the buttons don't).
 - **Landed alongside**: ⏹️ stop-subagent on live lanes (2c9a73d), the
   Working-bar faithful mirror + collapsed CoT (📖/🙈 in-place toggle),
   ⏹️ buttons only on fresh rows (honest-indicator law).
