@@ -125,8 +125,14 @@ object GiftsMenu {
     }
 
     private fun offerLine(offer: Offer): String {
+        // the billing preview supplies the name; a marketing-only offer has
+        // NONE (the banner's «ZCODE GLOBAL BUILD» lives in its image, not in
+        // the API answer) — say «Oferta reclamable» + the real plan id
+        // instead of pretending the id is a title
+        val title = offer.name?.let { "Reclamable: ${PyText.esc(it)}" }
+            ?: "Oferta reclamable (${PyText.esc(offer.planId)})"
         val body = buildString {
-            append("🔴 <b>Reclamable: ${PyText.esc(offer.displayName)}</b>")
+            append("🔴 <b>$title</b>")
             offer.tokens?.let { append(" — ${BotCommands.tokenRaw(it)} tokens") }
             offer.entitlement?.let { append(" · ${PyText.esc(it)}") }
             offer.period?.let { append(" ($it)") }
