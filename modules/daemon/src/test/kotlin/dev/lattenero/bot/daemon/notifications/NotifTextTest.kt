@@ -70,6 +70,24 @@ class NotifTextTest {
     }
 
     @Test
+    fun aSpokenAnswerIsNeverRepeatedByTheBell() {
+        val facts = SealFacts(
+            taskId = "task-9",
+            title = "arreglá el login",
+            stopReason = "end_turn",
+            startedAtMs = 0,
+            sealedAtMs = 192_000L,
+            doneTools = 7,
+            failedTools = 0,
+            answer = "listo, el login valida de nuevo",
+            answerSpoken = true, // the live card just spoke the full answer
+        )
+        val text = NotifText.turnSealed(facts)!!
+        assertTrue(text.contains("terminó (3m12s, 7 herramientas)"), "the moment still speaks")
+        assertTrue("listo, el login" !in text, "the single-source law: the 🔔 never repeats the card's answer")
+    }
+
+    @Test
     fun oneToolIsSingular() {
         val facts = SealFacts("t", "título", "end_turn", 0, 5_000L, doneTools = 1, failedTools = 0, answer = null)
         assertTrue(NotifText.turnSealed(facts)!!.contains("1 herramienta)"))
