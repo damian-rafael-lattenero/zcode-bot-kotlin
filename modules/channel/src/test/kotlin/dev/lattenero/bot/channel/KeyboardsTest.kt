@@ -129,6 +129,18 @@ class KeyboardsTest {
     }
 
     @Test
+    fun deployConfirmIsTheB6Row() {
+        val row = Keyboards.deployConfirm().jsonObject["inline_keyboard"]!!.jsonArray[0].jsonArray
+        assertEquals("🚀 Deploy", row[0].jsonObject["text"]!!.jsonPrimitive.content)
+        assertEquals("dep:go", row[0].jsonObject["callback_data"]!!.jsonPrimitive.content)
+        assertEquals("❌ No", row[1].jsonObject["text"]!!.jsonPrimitive.content)
+        assertEquals("dep:no", row[1].jsonObject["callback_data"]!!.jsonPrimitive.content)
+        // the datas ride the 64-byte law with room to spare
+        assertTrue(Keyboards.callbackDataValid("dep:go"))
+        assertTrue(Keyboards.callbackDataValid("dep:no"))
+    }
+
+    @Test
     fun buttonIsPythonsShape() {
         val b: JsonObject = Keyboards.button("x", "y")
         assertEquals("x", b["text"]!!.jsonPrimitive.content)
