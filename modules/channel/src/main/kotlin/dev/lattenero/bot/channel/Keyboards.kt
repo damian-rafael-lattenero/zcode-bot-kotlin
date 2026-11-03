@@ -62,7 +62,7 @@ object Keyboards {
                 subagents.forEach { lane ->
                     add(
                         buildJsonArray {
-                            add(button(subagentLabel(lane), "sa:${lane.toolId.takeLast(LANE_TAIL)}"))
+                            add(button(subagentLabel(lane), "sn:${lane.toolId.takeLast(LANE_TAIL)}"))
                             // the ⏹️ stops the child's generation (sst:) —
                             // only an OPEN lane earns it
                             if (lane.status == null) add(button(STOP_BUTTON, "sst:${lane.toolId.takeLast(LANE_TAIL)}"))
@@ -76,7 +76,7 @@ object Keyboards {
                     add(
                         buildJsonArray {
                             val label = r.title.takeIf { it.isNotBlank() }?.take(TITLE_CAP) ?: r.sid.takeLast(LANE_TAIL)
-                            val saData = "sa:${r.sid.takeLast(LANE_TAIL)}"
+                            val saData = "sn:${r.sid.takeLast(LANE_TAIL)}"
                             add(button("$SUBAGENT_MARK $label ${dbRunningMark(r, nowMs)}", saData))
                             // the ⏹️ rides ONLY a fresh row — a ghost's stop is decoration
                             if (dbRunningFresh(r, nowMs)) {
@@ -132,13 +132,69 @@ object Keyboards {
             ?: lane.name
 
     /**
+     * The FULL name — the detail card's whole point (the 2/11 complaint:
+     * the spawn descriptions are longísimos and the row label caps at
+     * TITLE_CAP). The same fallback ladder as subagentName, uncapped.
+     */
+    internal fun subagentFullName(lane: ToolLive): String =
+        (lane.input?.get("description") as? JsonPrimitive)?.takeIf { it.isString }?.content
+            ?.takeIf { it.isNotBlank() }
+            ?: lane.title?.takeIf { it.isNotBlank() && it != lane.name }
+            ?: lane.name
+
+    /**
+     * The detail card's body (the sn: tap): the row's own marks, the
+     * UNCAPPED name, one honest status line. Raw text — the caller escapes
+     * it for the message body.
+     */
+    internal fun subagentDetailText(lane: ToolLive, nowMs: Long): String =
+        "$SUBAGENT_MARK «${subagentFullName(lane)}»\n" + if (lane.status == null) {
+            "⏳ vivo hace ${(nowMs - lane.openedAtMs) / MINUTE_MS}m"
+        } else {
+            "💀 terminó"
+        }
+
+    /** The store row's detail body — the full title + the frozen-ghost honesty. */
+    internal fun dbRowDetailText(r: RunningSubagent, nowMs: Long): String =
+        "$SUBAGENT_MARK «${r.title.ifBlank { r.sid.takeLast(LANE_TAIL) }}»\n" + if (dbRunningFresh(r, nowMs)) {
+            "▶️ corriendo"
+        } else {
+            "⏸️ hace ${(nowMs - r.lastMs) / MINUTE_MS}m — probablemente terminó"
+        }
+
+    /**
+     * The detail card's action row: attach · order · stop, built FRESH at
+     * tap time — a dead agent earns no buttons and its card stays a pure
+     * memory (reading the full name survives the agent; ordering into its
+     * dead inbox never resurrects it — the honest law).
+     */
+    fun subagentDetailKeyboard(alive: Boolean, tail: String): JsonObject? =
+        if (!alive) {
+            null
+        } else {
+            buildJsonObject {
+                putJsonArray("inline_keyboard") {
+                    add(
+                        buildJsonArray {
+                            add(button("👁 attach", "sa:$tail"))
+                            add(button("✍️ orden", "so:$tail"))
+                            add(button(STOP_BUTTON, "sst:$tail"))
+                        },
+                    )
+                }
+            }
+        }
+
+    /**
      * /subagents' ACTIVE view keyboard: one row per open dispatch lane —
-     * the 🔵 `sa:` tap attaches that subagent's stream (the session attach
-     * when the fork names it, lane-scope otherwise), the ✍️ `so:` tap
-     * ARMS the next free text as an ORDER direct to it, and the ⏹️ `sst:`
-     * tap stops the child's generation live — then the view-switch row.
-     * The «inactivos» view stays text-only: ended sessions have no stream
-     * to attach to, no ear to hear an order, nothing left to stop.
+     * the name tap (`sn:`) opens the DETAIL CARD (the full uncapped name
+     * + the attach/order/stop row, rendered fresh at tap time; the row
+     * label caps at TITLE_CAP and the spawn descriptions are longísimos),
+     * the ✍️ `so:` tap ARMS the next free text as an ORDER direct to it,
+     * and the ⏹️ `sst:` tap stops the child's generation live — then the
+     * view-switch row. The «inactivos» view stays text-only: ended
+     * sessions have no stream to attach to, no ear to hear an order,
+     * nothing left to stop.
      */
     fun subagentsKeyboard(
         lanes: List<ToolLive>,
@@ -150,9 +206,11 @@ object Keyboards {
             lanes.forEach { lane ->
                 add(
                     buildJsonArray {
-                        add(button(subagentLabel(lane), "sa:${lane.toolId.takeLast(LANE_TAIL)}"))
-                        // the ✍️ arms the next free text as an ORDER to that subagent
-                        add(button("✍️", "so:${lane.toolId.takeLast(LANE_TAIL)}"))
+                        add(button(subagentLabel(lane), "sn:${lane.toolId.takeLast(LANE_TAIL)}"))
+                        // the ✍️ arms the next free text as an ORDER — only
+                        // an OPEN lane earns it (the pulse gate would refuse
+                        // a dead one; a dead-end button is decoration)
+                        if (lane.status == null) add(button("✍️", "so:${lane.toolId.takeLast(LANE_TAIL)}"))
                         // the ⏹️ stops the child's generation live (sst:) —
                         // only an OPEN lane earns it
                         if (lane.status == null) add(button(STOP_BUTTON, "sst:${lane.toolId.takeLast(LANE_TAIL)}"))
@@ -165,11 +223,14 @@ object Keyboards {
                 add(
                     buildJsonArray {
                         val label = r.title.takeIf { it.isNotBlank() }?.take(TITLE_CAP) ?: r.sid.takeLast(LANE_TAIL)
-                        val saData = "sa:${r.sid.takeLast(LANE_TAIL)}"
+                        val saData = "sn:${r.sid.takeLast(LANE_TAIL)}"
                         // the store never closes a KILLED agent's row: its
                         // frozen lastMs is the ghost marker — rendered honest
                         add(button("$SUBAGENT_MARK $label ${dbRunningMark(r, nowMs)}", saData))
-                        add(button("✍️", "so:${r.sid.takeLast(LANE_TAIL)}"))
+                        // the ✍️ rides ONLY a fresh row — same law as the ⏹️
+                        if (dbRunningFresh(r, nowMs)) {
+                            add(button("✍️", "so:${r.sid.takeLast(LANE_TAIL)}"))
+                        }
                         // the ⏹️ rides ONLY a fresh row — a ghost's stop is decoration
                         if (dbRunningFresh(r, nowMs)) {
                             add(button(STOP_BUTTON, "sst:${r.sid.takeLast(LANE_TAIL)}"))

@@ -23,6 +23,19 @@ sealed interface SubagentStopTarget {
     data object Gone : SubagentStopTarget
 }
 
+/**
+ * The ORDER's pulse (the ✍️ gate, 2/11): the owner typed AT a subagent —
+ * the bot owes them the truth about whether anyone is there to read it.
+ * Alive flies; Ended bounces with the death notice; Unknown refuses to
+ * guess (a stale row is silence, not proof — the child may be grinding a
+ * long mission past the freshness window).
+ */
+sealed interface OrderPulse {
+    data object Alive : OrderPulse
+    data object Ended : OrderPulse
+    data object Unknown : OrderPulse
+}
+
 internal object SubagentStop {
 
     /**
@@ -49,5 +62,32 @@ internal object SubagentStop {
         val row = dbRunning.firstOrNull { it.sid.endsWith(tail) } ?: return SubagentStopTarget.Gone
         if (!Keyboards.dbRunningFresh(row, nowMs)) return SubagentStopTarget.Gone
         return SubagentStopTarget.Ready(row.sid, row.title.ifBlank { row.sid.takeLast(Keyboards.LANE_TAIL) })
+    }
+
+    /**
+     * The order target's pulse, resolved from the SAME facts as resolve
+     * (the dispatch lanes, the store's fresh rows). The LAW (the 2/11
+     * swallow, proven live): a CLOSED lane is the death certificate —
+     * but an OPEN lane never vouches for the inbox (the sa: pin freezes
+     * the parent's fold: a lane can read open forever), so only the
+     * STORE's fresh row speaks life; a stale row is silence, not proof.
+     * Task conversations (no subagent prefix) always pulse Alive — a
+     * task session resumes; a finished CHILD's inbox is read by nobody.
+     */
+    fun orderTarget(
+        lanes: List<ToolLive>,
+        dbRunning: List<RunningSubagent>,
+        sid: String,
+        nowMs: Long,
+    ): OrderPulse {
+        if (!sid.startsWith(BotCommands.SUBAGENT_SESSION_PREFIX)) return OrderPulse.Alive
+        val agentId = sid.removePrefix(BotCommands.SUBAGENT_SESSION_PREFIX)
+        val laneDeath = lanes.lastOrNull { it.subagentAgentId == agentId }?.let {
+            if (it.status != null) OrderPulse.Ended else null
+        }
+        val rowPulse = dbRunning.firstOrNull { it.sid == sid }?.let {
+            if (Keyboards.dbRunningFresh(it, nowMs)) OrderPulse.Alive else OrderPulse.Unknown
+        }
+        return laneDeath ?: rowPulse ?: OrderPulse.Unknown
     }
 }

@@ -239,12 +239,17 @@ class SubagentStopTest {
         )
         val rows = buttonDatas(reply)
         // alive lane: attach + order + stop — the closed lane: no ⏹️
-        assertEquals(listOf("sa:toolu_alive", "so:toolu_alive", "sst:toolu_alive"), rows[0])
-        assertEquals(listOf("sa:toolu_dead", "so:toolu_dead"), rows[1])
+        assertEquals(listOf("sn:toolu_alive", "so:toolu_alive", "sst:toolu_alive"), rows[0])
+        // a DEAD lane's row: the name card survives as a memory; the ✍️
+        // and the ⏹️ die with it (dead-end buttons are decoration)
+        assertEquals(listOf("sn:toolu_dead"), rows[1])
         // fresh store row carries its stop, the ghost earns none
         assertEquals("sst:" + "sess_subagent_agent-3".takeLast(Keyboards.LANE_TAIL), rows[2].last())
-        assertEquals(listOf("sa:" + "sess_subagent_killed".takeLast(Keyboards.LANE_TAIL), "so:" +
-            "sess_subagent_killed".takeLast(Keyboards.LANE_TAIL)), rows[3])
+        // the GHOST row: the name card survives, the ✍️ and the ⏹️ die with it
+        assertEquals(
+            listOf("sn:" + "sess_subagent_killed".takeLast(Keyboards.LANE_TAIL)),
+            rows[3],
+        )
         // the datas are tiny — the 64-byte law never even breathes
         assertTrue(Keyboards.callbackDataValid(rows[2].last()))
     }
@@ -260,9 +265,9 @@ class SubagentStopTest {
             nowMs = now,
         )!!
         val rows = buttonDatas(kb)
-        assertEquals(listOf("sa:toolu_alive", "sst:toolu_alive"), rows[0])
+        assertEquals(listOf("sn:toolu_alive", "sst:toolu_alive"), rows[0])
         assertEquals(
-            listOf("sa:" + "sess_subagent_agent-3".takeLast(Keyboards.LANE_TAIL),
+            listOf("sn:" + "sess_subagent_agent-3".takeLast(Keyboards.LANE_TAIL),
                 "sst:" + "sess_subagent_agent-3".takeLast(Keyboards.LANE_TAIL)),
             rows[1],
         )
@@ -346,5 +351,80 @@ class SubagentStopTest {
         assertTrue("ya no está vivo" in reply.text, reply.text)
         assertTrue(o.queries.none { it is ChannelQuery.Stop }, "no session, no stop query")
         assertTrue(o.inbounds.isEmpty(), "the tail NEVER rides to the agent as the owner's words")
+    }
+
+    // ---- the ORDER's pulse (the ✍️ gate — the 2/11 swallow the owner proved live) ---
+
+    private val sid = "sess_subagent_agent-9"
+
+    @Test
+    fun anOpenLaneAloneNeverVouchesTheInbox() {
+        // the sa: pin freezes the parent's fold — a lane can read open
+        // forever; only the store's fresh row speaks life
+        val pulse = SubagentStop.orderTarget(
+            lanes = listOf(lane("dispatch-1", agentId = "agent-9")),
+            dbRunning = emptyList(),
+            sid = sid,
+            nowMs = now,
+        )
+        assertEquals(OrderPulse.Unknown, pulse)
+    }
+
+    @Test
+    fun aClosedLaneIsTheDeathCertificate() {
+        val pulse = SubagentStop.orderTarget(
+            lanes = listOf(lane("dispatch-1", agentId = "agent-9", status = "completed")),
+            dbRunning = emptyList(),
+            sid = sid,
+            nowMs = now,
+        )
+        assertEquals(OrderPulse.Ended, pulse)
+    }
+
+    @Test
+    fun aFreshStoreRowPulsesAliveWithoutAnyLane() {
+        val pulse = SubagentStop.orderTarget(
+            lanes = emptyList(),
+            dbRunning = listOf(RunningSubagent(sid, "hunter", lastMs = now - 60_000)),
+            sid = sid,
+            nowMs = now,
+        )
+        assertEquals(OrderPulse.Alive, pulse)
+    }
+
+    @Test
+    fun aStaleRowIsSilenceNotProof() {
+        // the child may legitimately grind past the freshness window —
+        // refusing to guess is the honest shape (Unknown, never Ended)
+        val pulse = SubagentStop.orderTarget(
+            lanes = emptyList(),
+            dbRunning = listOf(RunningSubagent(sid, "hunter", lastMs = now - 20 * 60_000)),
+            sid = sid,
+            nowMs = now,
+        )
+        assertEquals(OrderPulse.Unknown, pulse)
+    }
+
+    @Test
+    fun noSignalAtAllIsUnknown() {
+        val pulse = SubagentStop.orderTarget(
+            lanes = emptyList(),
+            dbRunning = emptyList(),
+            sid = sid,
+            nowMs = now,
+        )
+        assertEquals(OrderPulse.Unknown, pulse)
+    }
+
+    @Test
+    fun taskConversationsAlwaysPulseAlive() {
+        // a task session resumes; the gate is for CHILDREN only
+        val pulse = SubagentStop.orderTarget(
+            lanes = emptyList(),
+            dbRunning = emptyList(),
+            sid = "task-77",
+            nowMs = now,
+        )
+        assertEquals(OrderPulse.Alive, pulse)
     }
 }
