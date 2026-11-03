@@ -97,18 +97,25 @@ internal const val FINAL_ANSWER_ATTEMPTS = 3
 internal const val FINAL_ANSWER_RETRY_MS = 600L
 
 /**
- * taskSnapshot → the turn's answer, asked with the task's OWN workspace.
+ * taskSnapshot → the turn's answer, asked with the task's OWN workspace and
+ * a ONE-MESSAGE limit.
  *
- * Measured 2026-11-03: both consumers (the live view's seal and the bus
- * producer's turn.completed) queried TaskSnapshot WITHOUT a workspacePath,
- * and the fork throws "workspacePath is required when the daemon bot has
- * no active context" — the QueryAnswer came back non-Ok, the answer
- * silently became null, and every seal logged `answer=0` for hours while
- * the phone showed the card but never the conclusion. The fix speaks the
- * same source /last and /mode already trust: the index's own
- * workspace_path for the task, one bounded retry for the CLI's
- * write-after-terminal-frame race, and a loud warn on EVERY non-Ok —
- * silence here is what hid the bug.
+ * Measured 2026-11-03, three bugs deep:
+ * 1. both consumers (the live view's seal and the bus producer's
+ *    turn.completed) queried TaskSnapshot WITHOUT a workspacePath, and the
+ *    fork throws "workspacePath is required when the daemon bot has no
+ *    active context" — the QueryAnswer came back non-Ok, the answer
+ *    silently became null, and every seal logged `answer=0` for hours.
+ * 2. with the workspace fixed the fork still answered
+ *    `Failed(code=timeout, message=no answer in 15s)`: this conversation
+ *    is gigabytes long, and a limit-less snapshot projects EVERY message
+ *    of it. The fork's own contextWindow path uses `messageLimit: 1` with
+ *    the comment "1 mensaje mantiene el paquete liviano" — and the fork's
+ *    limit keeps the TAIL (`messages.slice(-limit)`), exactly the last
+ *    assistant message this resolver reads. The parser only ever needed
+ *    one message; asking for all of them was the timeout.
+ * 3. the loud warn on EVERY non-Ok is what exposed both — silence here is
+ *    what hid the first bug for hours.
  */
 internal suspend fun finalAnswerOf(
     taskId: String,
@@ -120,7 +127,7 @@ internal suspend fun finalAnswerOf(
     val ws = runCatching { workspaceOf(taskId) }.getOrNull()
     repeat(FINAL_ANSWER_ATTEMPTS) { attempt ->
         val attemptNo = attempt + 1
-        when (val answer = query(ChannelQuery.TaskSnapshot(taskId, ws))) {
+        when (val answer = query(ChannelQuery.TaskSnapshot(taskId, ws, messageLimit = 1))) {
             is QueryAnswer.Ok -> {
                 val text = snapshotAnswerOf(answer.resultJson)
                 if (text != null) return text
