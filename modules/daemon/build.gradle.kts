@@ -26,6 +26,11 @@ dependencies {
     implementation(libs.ktor.client.cio)
     implementation(libs.micrometer.core)
     implementation(libs.micrometer.registry.prometheus)
+    // E3: OpenTelemetry lives ONLY in the daemon — the channel and transport
+    // modules stay standard-library-pure (the span taps are injected lambdas)
+    implementation(libs.opentelemetry.api)
+    implementation(libs.opentelemetry.sdk)
+    implementation(libs.opentelemetry.exporter.otlp)
     implementation(libs.logback.classic)
     implementation(libs.logstash.logback.encoder)
     implementation(libs.xerial.sqlite.jdbc)
