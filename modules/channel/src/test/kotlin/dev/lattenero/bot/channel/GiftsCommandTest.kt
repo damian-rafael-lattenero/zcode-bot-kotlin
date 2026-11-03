@@ -27,6 +27,7 @@ class GiftsCommandTest {
         )
         var resetAnswer: QueryAnswer = QueryAnswer.Ok("""{"used":true}""")
         var claimPlanId: String? = null
+        var claimPlanIdCount = 0
         var resetQuery: ChannelQuery.UseCodingPlanReset? = null
 
         override suspend fun query(query: ChannelQuery): QueryAnswer {
@@ -34,6 +35,7 @@ class GiftsCommandTest {
             when (query) {
                 is ChannelQuery.ClaimCodingPlan -> {
                     claimPlanId = query.planId
+                    claimPlanIdCount += 1
                     return claimAnswer
                 }
                 is ChannelQuery.UseCodingPlanReset -> {
@@ -292,6 +294,12 @@ class GiftsCommandTest {
             "the app's trusted-URL contract requires both params",
         )
         assertNull(row["callback_data"], "a url button opens the browser — no callback to answer")
+        // learned: the SAME plan never burns another attempt — the next 🎁
+        // tap goes straight to the browser door, no confirmation, no server hit
+        val again = bc.onCallback("cl:global-build", 4L)!!
+        assertEquals(BotCommands.GIFT_CAPTCHA, again.text)
+        assertTrue(again.markup != null, "the door rides along")
+        assertEquals(1, o.claimPlanIdCount, "exactly ONE claim hit the server")
     }
 
     @Test
