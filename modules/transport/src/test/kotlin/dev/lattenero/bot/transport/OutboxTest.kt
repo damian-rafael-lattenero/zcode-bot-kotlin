@@ -146,4 +146,15 @@ class OutboxTest {
             child.destroyForcibly().waitFor()
         }
     }
+
+    @Test
+    fun depthReadsTheParkedBox() = runTest {
+        val ob = outbox()
+        assertEquals(0, ob.depth(), "the missing box is the empty default — a lie about nothing parked")
+        ob.put("uno")
+        ob.put("dos")
+        assertEquals(2, ob.depth())
+        assertEquals(2, ob.takeAll()!!.size)
+        assertEquals(0, ob.depth(), "the swap emptied the box; the gauge reads the truth")
+    }
 }

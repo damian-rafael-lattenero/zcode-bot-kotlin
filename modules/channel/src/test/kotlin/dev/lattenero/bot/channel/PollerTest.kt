@@ -182,4 +182,23 @@ class PollerTest {
         assertEquals("t:ses_abc", cb.data)
         assertEquals(11L, outcome.offset)
     }
+
+    /** E2's tap: every completed pass — whatever it fetched — reports its outcome. */
+    @Test
+    fun everyCompletedPassReportsItsOutcome() = runTest {
+        val dir = tempDir()
+        val outcomes = mutableListOf<PollOutcome>()
+        val api = TgApi({ cfg }, engineFactory = factory("""{"result":[${update(10, "hola")}]}"""))
+        val poller = Poller(
+            api = api,
+            offsetFile = File(dir, "tg-offset"),
+            dispatch = { _, _ -> },
+            onCycle = { outcomes.add(it) },
+        )
+        poller.cycle(cfg)
+        poller.cycle(TgConfig()) // unconfigured: still a pass of the reader
+        assertEquals(2, outcomes.size)
+        assertEquals(1, outcomes[0].messages)
+        assertEquals(0, outcomes[1].messages)
+    }
 }

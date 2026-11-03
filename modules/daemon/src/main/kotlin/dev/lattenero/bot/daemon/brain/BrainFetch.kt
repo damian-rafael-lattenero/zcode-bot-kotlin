@@ -2,6 +2,8 @@ package dev.lattenero.bot.daemon.brain
 
 import dev.lattenero.bot.channel.BrainGateway
 import dev.lattenero.bot.channel.BrainReply
+import dev.lattenero.bot.daemon.metrics.Metrics
+import dev.lattenero.bot.daemon.metrics.NoopMetrics
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.HttpClientEngineFactory
 import io.ktor.client.engine.cio.CIO
@@ -67,10 +69,15 @@ object BrainEndpoint {
  * command's honesty ladder: a timeout is ⏱️, everything else that never
  * produced an HTTP answer is 📡. Cancellation still propagates — the
  * memory inject's own 1.5 s window cancels the request, never the daemon.
+ *
+ * E2's taps ride the same leg: EVERY completed request's real latency on
+ * the `brain.request` timer (a deadline cut included — the finally
+ * records it and the cancellation still propagates) and one
+ * `brain.failures` per request that produced no usable answer (timeout,
+ * dead brain, non-2xx).
  */
 // every transport failure is classified, none flies raw; the timeout classes
 // ARE the answer (⏱️), nothing is lost by not rethrowing them
-@Suppress("TooGenericExceptionCaught", "SwallowedException")
 internal suspend fun brainCall(
     baseUrl: String,
     method: HttpMethod,
@@ -78,6 +85,26 @@ internal suspend fun brainCall(
     body: JsonObject? = null,
     timeout: Duration = COMMAND_TIMEOUT,
     engine: HttpClientEngineFactory<*> = CIO,
+    metrics: Metrics = NoopMetrics,
+): BrainReply {
+    val reply = metrics.brainRequest {
+        brainCallRaw(baseUrl, method, path, body, timeout, engine)
+    }
+    if (reply is BrainReply.Response && reply.status in HTTP_SUCCESS) return reply
+    metrics.brainFailed()
+    return reply
+}
+
+// every transport failure is classified, none flies raw; the timeout classes
+// ARE the answer (⏱️), nothing is lost by not rethrowing them
+@Suppress("TooGenericExceptionCaught", "SwallowedException")
+private suspend fun brainCallRaw(
+    baseUrl: String,
+    method: HttpMethod,
+    path: String,
+    body: JsonObject?,
+    timeout: Duration,
+    engine: HttpClientEngineFactory<*>,
 ): BrainReply {
     val client = HttpClient(engine) {
         expectSuccess = false
@@ -116,24 +143,35 @@ internal suspend fun brainCall(
 /** The commands' budget (§ the spec's ~5 s). */
 val COMMAND_TIMEOUT: Duration = 5.seconds
 
+private val HTTP_SUCCESS = 200..299
+
 private const val DETAIL_CAP = 200
 
 /** The production gateway: agent-brain over localhost HTTP, no auth (P2's contract). */
 internal fun brainGateway(
     endpoint: BrainEndpointReading,
     engine: HttpClientEngineFactory<*> = CIO,
+    metrics: Metrics = NoopMetrics,
 ): BrainGateway = BrainGateway(
     url = endpoint.url,
     ragQuery = { query, k ->
-        brainCall(endpoint.url, HttpMethod.Post, "/rag/query", body = queryBody(query, k), engine = engine)
+        brainCall(
+            endpoint.url, HttpMethod.Post, "/rag/query",
+            body = queryBody(query, k), engine = engine, metrics = metrics,
+        )
     },
-    ragStats = { brainCall(endpoint.url, HttpMethod.Get, "/rag/stats", engine = engine) },
-    busStatus = { brainCall(endpoint.url, HttpMethod.Get, "/bus/status", engine = engine) },
+    ragStats = { brainCall(endpoint.url, HttpMethod.Get, "/rag/stats", engine = engine, metrics = metrics) },
+    busStatus = { brainCall(endpoint.url, HttpMethod.Get, "/bus/status", engine = engine, metrics = metrics) },
     memorySearch = { query, k ->
-        brainCall(endpoint.url, HttpMethod.Post, "/memory/search", body = queryBody(query, k), engine = engine)
+        brainCall(
+            endpoint.url, HttpMethod.Post, "/memory/search",
+            body = queryBody(query, k), engine = engine, metrics = metrics,
+        )
     },
-    memoryRecent = { limit -> brainCall(endpoint.url, HttpMethod.Get, "/memory/recent?limit=$limit", engine = engine) },
-    memoryStatus = { brainCall(endpoint.url, HttpMethod.Get, "/memory/status", engine = engine) },
+    memoryRecent = { limit ->
+        brainCall(endpoint.url, HttpMethod.Get, "/memory/recent?limit=$limit", engine = engine, metrics = metrics)
+    },
+    memoryStatus = { brainCall(endpoint.url, HttpMethod.Get, "/memory/status", engine = engine, metrics = metrics) },
 )
 
 /** The two POST bodies share the same {query, k} shape (agent-brain's request types). */

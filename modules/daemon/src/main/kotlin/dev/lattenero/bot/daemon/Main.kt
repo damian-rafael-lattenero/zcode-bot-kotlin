@@ -3,6 +3,9 @@ package dev.lattenero.bot.daemon
 import dev.lattenero.bot.channel.BotCommands
 import dev.lattenero.bot.daemon.brain.MemoryInjectKnob
 import dev.lattenero.bot.daemon.bus.EventBusKnob
+import dev.lattenero.bot.daemon.metrics.Lane
+import dev.lattenero.bot.daemon.metrics.MetricsKnob
+import dev.lattenero.bot.daemon.metrics.MetricsStack
 import dev.lattenero.bot.daemon.send.DaemonSend
 import dev.lattenero.bot.daemon.send.LiveLane
 import dev.lattenero.bot.daemon.send.SendKnob
@@ -89,6 +92,20 @@ fun main(args: Array<String>) {
     if (memoryKnob.warning != null) logger.warn { "memory_inject knob $knobFile: ${memoryKnob.warning}" }
     logger.info { "memory_inject knob: on=${memoryKnob.on} (file=$knobFile)" }
 
+    // E2's metrics knob: read ONCE at boot, SHIPPED OFF. OFF is the strict
+    // zero — the no-op facade, no registry, no listener; the daemon is
+    // byte-for-byte the pre-E2 one. ON builds the Micrometer registry and
+    // (below) the 127.0.0.1-only /metrics listener.
+    val metricsKnob = MetricsKnob.load(knobFile)
+    if (metricsKnob.warning != null) logger.warn { "metrics knob $knobFile: ${metricsKnob.warning}" }
+    logger.info { "metrics knob: on=${metricsKnob.on} port=${metricsKnob.port} (file=$knobFile)" }
+    val metricsStack = MetricsStack.fromKnob(metricsKnob)
+    val metrics = metricsStack.metrics
+    val metricsServer = metricsStack.startEndpoint()
+    if (metricsServer != null) {
+        logger.info { "metrics endpoint ON: http://127.0.0.1:${metricsKnob.port}/metrics (loopback only)" }
+    }
+
     val stateDir = File(cfg.homeDir, "state")
     val shadowLog = ShadowLog(File(cfg.homeDir, "shadow"))
     val pythonState = File(File(cfg.baseDir, "hooks"), "state")
@@ -116,6 +133,7 @@ fun main(args: Array<String>) {
         pollKnob.on,
         eventBusOn = busKnob.on,
         memoryInjectOn = memoryKnob.on,
+        metrics = metrics,
     )
 
     val clock = { System.currentTimeMillis() / MILLIS_PER_SECOND }
@@ -123,9 +141,26 @@ fun main(args: Array<String>) {
     val hbZconn = File(stateDir, HB_ZCONN)
     val hbSpectator = File(stateDir, HB_SPECTATOR)
 
+    // E2's scrape-time gauges: the lanes' real outboxes and cooldowns and
+    // zconn's persisted state — read when Prometheus asks, never cached
+    lanes.mainOutbox?.let { outbox -> metrics.outboxDepth(Lane.MAIN) { outbox.depth() } }
+    lanes.fireOutbox?.let { outbox -> metrics.outboxDepth(Lane.FIREHOSE) { outbox.depth() } }
+    lanes.mainCooldown?.let { cooldown -> metrics.cooldownActive(Lane.MAIN) { cooldown.active() } }
+    lanes.fireCooldown?.let { cooldown -> metrics.cooldownActive(Lane.FIREHOSE) { cooldown.active() } }
+    metrics.zconnDown { zconnWatch.downNow() }
+
     val zconn = Kap {
         withContext(MDCContext(mapOf(COMPONENT_KEY to WATCHER))) {
-            zconnWatch.speak(zconnWatch.pass())
+            val outcome = zconnWatch.pass()
+            zconnWatch.speak(outcome)
+            // E2: the episode machine's SPOKEN transitions — the same
+            // notices the chat already receives, counted
+            outcome.decisions.forEach { d ->
+                when (d.decision) {
+                    "down" -> metrics.zconnTransition(down = true)
+                    "up" -> metrics.zconnTransition(down = false)
+                }
+            }
         }
     }
         .repeat(Schedule.spaced(cfg.interval))
@@ -212,6 +247,7 @@ fun main(args: Array<String>) {
                 liveHandle?.stop()
                 pingHandle.stop()
                 channelHandle.stop()
+                metricsServer?.stop(SERVER_STOP_DELAY) // the /metrics listener dies with the daemon
                 stack.bus?.close() // in-flight bus reply reads die with the daemon
                 stack.client.close() // unblocks the session's read so the process can end
                 api?.close() // the live leg's client — no sends outlive the daemon
@@ -350,6 +386,9 @@ private const val HB_ZCONN = "hb-zconn-shadow"
 
 /** Telegram's 403: the bot was never /started by the chat's user. */
 private const val NOT_STARTED_403 = 403
+
+/** HttpServer.stop's grace (seconds) — a scrape in flight gets to finish. */
+private const val SERVER_STOP_DELAY = 0
 private const val HB_SPECTATOR = "hb-spectator"
 private const val HB_CHANNEL = "hb-channel"
 private const val HB_LIVE_VIEW = "hb-live-view"
