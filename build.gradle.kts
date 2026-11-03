@@ -13,7 +13,14 @@ subprojects {
     group = rootProject.group
     version = rootProject.version
 
-    repositories { mavenCentral() }
+    repositories {
+        // TEMPORARY (U5a, 3/11): kap 5.0.0 (kap-stream with its Backpressure
+        // ADT) resolves from this machine's mavenLocal until the Central
+        // release — the dogfooding dependency is real, the publication is not
+        // ours to make. Delete this line the moment kap 5.0.0 hits Central.
+        mavenLocal()
+        mavenCentral()
+    }
 
     // detekt 2.0 runs its analysis in isolated workers on any JDK >= 17 —
     // the whole build is one JVM now (toolchain 25, same as kap), no

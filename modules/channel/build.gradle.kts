@@ -15,6 +15,7 @@ dependencies {
     implementation(libs.kotlinx.coroutines.slf4j)
     implementation(libs.kap.core)
     implementation(libs.kap.resilience)
+    implementation(libs.kap.stream)
     implementation(libs.kotlin.logging)
     testImplementation(kotlin("test"))
     testImplementation(libs.kotlinx.coroutines.test)
