@@ -98,6 +98,12 @@ Micrometer/Prometheus registry and a `GET /metrics` listener on
 derives from a real event that already exists, and OFF is byte-for-byte
 the pre-E2 daemon. The full inventory: [docs/observability.md](docs/observability.md).
 
+The `otel` knob (E3, also **shipped OFF**) adds OpenTelemetry TRACES —
+one `bot.turn` span per turn, one `bot.tool` child per tool call —
+batch-exported as OTLP/HTTP to `otel_endpoint`. It EXPORTS and binds
+nothing; a dead collector is one log line, never a broken turn. The
+span tree and the local-Jaeger recipe: [docs/observability.md](docs/observability.md).
+
 One-line rollback of the send flip (knob back + Python's send on):
 
 ```bash
