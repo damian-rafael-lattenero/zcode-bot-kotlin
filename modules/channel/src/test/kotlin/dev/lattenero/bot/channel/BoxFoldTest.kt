@@ -242,6 +242,34 @@ class BoxFoldTest {
     }
 
     @Test
+    fun aSealedTurnsBoxStillOpensItsPagesUntilNuclear() = runTest {
+        // THE OWNER'S USE (3/11): he taps a paged output AFTER the turn
+        // ended. The fold's live state resets at the seal; the MESSAGE (and
+        // its button) stays in the chat, so the box must stay readable.
+        val hub = LiveHub()
+        hub.apply(frame(taskId, "task_run_started", at = 1_000), nowMs = 1_000)
+        hub.apply(frame(taskId, "agent_thought_chunk", at = 1_050, "content" to JsonPrimitive("arranco")), nowMs = 1_050)
+        val wire = Wire()
+        val publisher = publisher(wire, hub, mutableListOf())
+        publisher.tick()
+        bashClose(hub, (1..27).joinToString("\n", transform = ::lineOf))
+        publisher.tick()
+        val box = hub.peek()!!.boxes.single()
+
+        // the seal: the live world dies, the chat's box does not
+        hub.clear(taskId)
+        assertEquals(null, hub.peek(), "the live state is gone — the seal's own law")
+        val edits = wire.bodies.count { it.second == "editMessageText" }
+        assertEquals(null, publisher.open(box.boxId, 0), "the sealed box still opens — no miss")
+        assertEquals(edits + 1, wire.bodies.count { it.second == "editMessageText" })
+        assertEquals(box.messageId, lastEdit(wire).messageId, "it edits the SAME message")
+
+        // ☢️ nuclear: nothing survives it
+        hub.clear()
+        assertEquals(BoxTaps.MISS, publisher.open(box.boxId, 0))
+    }
+
+    @Test
     fun aThrottledTapFlipsNothingInTheFold() = runTest {
         val hub = LiveHub()
         hub.apply(frame(taskId, "task_run_started", at = 1_000), nowMs = 1_000)
