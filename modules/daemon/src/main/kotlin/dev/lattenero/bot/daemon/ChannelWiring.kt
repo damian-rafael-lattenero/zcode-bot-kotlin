@@ -8,6 +8,7 @@ import dev.lattenero.bot.channel.ChannelOps
 import dev.lattenero.bot.channel.ChannelQuery
 import dev.lattenero.bot.channel.ChannelSpec
 import dev.lattenero.bot.channel.ClientFrame
+import dev.lattenero.bot.channel.GiftsMenu
 import dev.lattenero.bot.channel.InboundAttachment
 import dev.lattenero.bot.channel.InboundReceipt
 import dev.lattenero.bot.channel.InboundUpdate
@@ -445,6 +446,15 @@ private fun buildLiveView(
         orphanStore = LiveOrphanStore(orphanFile),
         // the transcript feed's level — the SAME store the commands write
         verbosity = verbosity,
+        // THE PRIZE LINE (the owner, 3/11): one cached read of the coding
+        // plan's gifts; the publisher renders «Premios» while a turn runs,
+        // /quota keeps the detail and the taps. Channel down → null.
+        gifts = {
+            when (val answer = client.query(ChannelQuery.CodingPlanGifts())) {
+                is QueryAnswer.Ok -> GiftsMenu.parse(answer.resultJson, System.currentTimeMillis())
+                else -> null
+            }
+        },
     )
 }
 

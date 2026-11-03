@@ -742,4 +742,16 @@ class LiveTurnTest {
         assertTrue("ls" !in text) // the inner lane left the card
         assertTrue("subagente" !in text) // its thought counter left with it
     }
+
+    @Test
+    fun thePrizeLineRidesTheWorkingCardOnly() {
+        var s = reduce(null, thought("pienso"))
+        val prize = "🎁 <b>Premios</b> · 1 reset 5h — /quota"
+        val thinking = LiveTurn.render(s!!, nowMs = now, channelAlive = true, giftsLine = prize)
+        assertTrue("Premios" in thinking)
+
+        s = reduce(s, ev("task_complete", "stopReason" to str("end_turn")))
+        val done = LiveTurn.render(s!!, nowMs = now, channelAlive = true, giftsLine = prize)
+        assertTrue("Premios" !in done) // a Done card is a verdict, not a shelf
+    }
 }
