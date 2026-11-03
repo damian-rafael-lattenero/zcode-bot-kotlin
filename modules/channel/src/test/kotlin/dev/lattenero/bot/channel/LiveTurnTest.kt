@@ -754,4 +754,26 @@ class LiveTurnTest {
         val done = LiveTurn.render(s!!, nowMs = now, channelAlive = true, giftsLine = prize)
         assertTrue("Premios" !in done) // a Done card is a verdict, not a shelf
     }
+
+    @Test
+    fun theParkedRenderPromisesTheSealAndNeverInventsTimers() {
+        // THE PARKED CARD (the owner's ⏸️, 3/11): «▶️ sigue en background»
+        // as the card's LAST edit + the honest note that the 🏁 arrives at
+        // seal. No timers: a parked card receives no more edits, and a
+        // frozen «hace Xm» would read as a dead live clock.
+        var s = reduce(null, thought("pensando el render"))
+        s = reduce(s, ev("task_complete", "stopReason" to str("end_turn")))
+        s = s!!.copy(title = "el render en vivo")
+        val parked = LiveTurn.parkText(s)
+        assertTrue("sigue en background" in parked, "the owner's own words ride: $parked")
+        assertTrue("🏁" in parked, "the note names the seal's promise: $parked")
+        assertTrue("«el render en vivo»" in parked, "the card wears its honest name: $parked")
+        assertTrue("hace" !in parked, "no frozen timers on a parked card: $parked")
+        // the title escapes (the HTML law) and the card wears the honest name
+        s = s.copy(title = "arreglá <el> login")
+        assertTrue(
+            "«arreglá &lt;el&gt; login»" in LiveTurn.parkText(s),
+            "the interpolated title goes through PyText.esc",
+        )
+    }
 }
