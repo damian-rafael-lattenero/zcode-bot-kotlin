@@ -23,6 +23,7 @@ import dev.lattenero.bot.channel.Poller
 import dev.lattenero.bot.channel.OpencodeQuota
 import dev.lattenero.bot.channel.QuotaDirect
 import dev.lattenero.bot.channel.QueryAnswer
+import dev.lattenero.bot.channel.SealFacts
 import dev.lattenero.bot.channel.ServerFrame
 import dev.lattenero.bot.channel.TasksHistory
 import dev.lattenero.bot.channel.ToolLive
@@ -42,6 +43,8 @@ import dev.lattenero.bot.daemon.brain.brainGateway
 import dev.lattenero.bot.daemon.history.LIVE_VERBS
 import dev.lattenero.bot.daemon.history.SEQUENCE_LINE_DIFFER
 import dev.lattenero.bot.daemon.history.TasksHistoryIo
+import dev.lattenero.bot.daemon.notifications.NotificationsWire
+import dev.lattenero.bot.daemon.notifications.SubagentNotifs
 import dev.lattenero.bot.daemon.nuclear.MacProcessEdge
 import dev.lattenero.bot.daemon.nuclear.NuclearLadder
 import dev.lattenero.bot.daemon.queue.InboundQueue
@@ -76,6 +79,8 @@ internal class ChannelStack(
     val hub: LiveHub,
     /** U1b's producer — null with the `event_bus` knob off (zero I/O). */
     val bus: BusProducer? = null,
+    /** 🔔 the subagent watcher — null with the `notifications` knob off (zero I/O). */
+    val notifs: SubagentNotifs? = null,
 )
 
 /**
@@ -180,6 +185,8 @@ internal fun wireChannel(
     eventBusOn: Boolean = false,
     /** U3: the `memory_inject` knob — OFF means the send path never touches the brain. */
     memoryInjectOn: Boolean = false,
+    /** 🔔 the owner's key-moment notifications — read once at boot in Main; OFF builds nothing. */
+    notificationsOn: Boolean = false,
 ): ChannelStack {
     val hub = LiveHub()
     val tokenFile = File(cfg.baseDir, ChannelSpec.TOKEN_FILENAME)
@@ -337,6 +344,13 @@ internal fun wireChannel(
     }
     val promptTap = PromptTap(busTaps, { activePromptContext(client) }, injector)
 
+    // 🔔 THE OWNER'S KEY-MOMENT NOTIFICATIONS — one guarded block, the
+    // merge stays a one-line conflict at worst. The subagent watcher rides
+    // the stack as its own Process; the seal tap rides the live view's OWN
+    // seal (the facts the card already computed — nothing re-queried).
+    // OFF = both null and the daemon is byte-for-byte the pre-feature one.
+    val notifs = NotificationsWire.build(cfg, send, notificationsOn)
+
     drainQueue = {
         val pending = queue.drain()
         if (pending.isNotEmpty()) {
@@ -415,6 +429,7 @@ internal fun wireChannel(
         File(File(cfg.homeDir, "state"), LIVE_ORPHAN_FILE),
         history,
         verbosity,
+        onSeal = notifs?.onSeal ?: NotificationsWire.noSeal,
     )
     val poller = buildPoller(
         cfg,
@@ -434,7 +449,7 @@ internal fun wireChannel(
         promptTap = promptTap,
         brain = brain,
     )
-    return ChannelStack(client, liveView, poller, hub, busTaps)
+    return ChannelStack(client, liveView, poller, hub, busTaps, notifs?.watcher)
 }
 
 private const val QUEUE_FILE = "inbound-queue.json"
@@ -470,6 +485,8 @@ private fun buildLiveView(
     orphanFile: File,
     history: TasksHistory,
     verbosity: VerbositySetting,
+    /** 🔔 the seal tap — the notifications' hook on the card's own seal. */
+    onSeal: suspend (SealFacts) -> Unit = NotificationsWire.noSeal,
 ): LivePublisher? {
     val lane = lanes.live
     if (lane == null || !send.ownsSpectator) return null
@@ -526,6 +543,7 @@ private fun buildLiveView(
                 else -> null
             }
         },
+        onSeal = onSeal,
     )
 }
 
