@@ -548,8 +548,14 @@ class BotCommands(
     private fun giftFailure(verb: String, answer: QueryAnswer.Failed): BotReply {
         val message = answer.message.orEmpty()
         // the server's captcha gate: this fork build has the security edition
-        // STUBBED, so no proof can ever be produced here — say where it CAN
-        if (message.contains("captcha", ignoreCase = true)) return BotReply(GIFT_CAPTCHA)
+        // STUBBED, so no proof can ever be produced here — answer with the
+        // browser door (a url button), not a wall of text
+        if (message.contains("captcha", ignoreCase = true)) {
+            return BotReply(
+                GIFT_CAPTCHA,
+                markup = GiftsMenu.webDoorKeyboard("🌐 Abrir la web (planes)", GIFT_CLAIM_URL),
+            )
+        }
         return if (answer.code == UNKNOWN_QUERY_CODE) {
             BotReply(GIFT_OLD_FORK)
         } else {
@@ -2968,12 +2974,16 @@ class BotCommands(
          * The claim's captcha gate (measured live 3/11): the server refuses
          * without an anti-bot proof, and THIS fork build ships the security
          * edition as a stub (no captcha code exists in the tree) — so the
-         * app's own Claim fails the same way. Name the working door.
+         * app's own Claim fails the same way. The answer is ONE line + the
+         * browser door (the app's own trusted URL, params included).
          */
         internal const val GIFT_CAPTCHA =
-            "🛡 El server pide un <b>CAPTCHA</b> para reclamar, y este build del fork no trae esa " +
-                "verificación (la edición de seguridad es un stub). Reclamá desde la app oficial o la " +
-                "web: https://zcode.z.ai/en/rewards — después /quota ya muestra el plan y /plan lo puede usar."
+            "🛡 Requiere CAPTCHA y este build no lo tiene — la vía segura es la app oficial. " +
+                "La web, por si la oferta aparece ahí:"
+
+        /** The app's OWN rewards URL (its trusted-URL contract requires both params). */
+        internal const val GIFT_CLAIM_URL =
+            "https://zcode.z.ai/en/rewards?embedded=app&theme=zai-dark"
 
         /** The confirmation's one-shot window (the pending slot's TTL). */
         internal const val PENDING_GIFT_TTL_MS = 5 * 60 * 1000L
