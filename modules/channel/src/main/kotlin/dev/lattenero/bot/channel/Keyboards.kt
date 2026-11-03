@@ -32,9 +32,10 @@ object Keyboards {
      * button_of: stamp + n + title[:34], callback `t:<sid>`), then the
      * blue 🔵 subagent rows — ALWAYS visible (the owner's 2/11 law: the
      * list is tasks AND subagents, tap-selectable): the live dispatch
-     * lanes first, then the store's running sessions (stream-independent,
-     * each with the honest ⏸️ ghost mark). Each row is its OWN array —
-     * Telegram's inline_keyboard is an array of rows.
+     * lanes first, then the store's FRESH running sessions
+     * (stream-independent; a stale row is a dead agent and stays out —
+     * the owner's 3/11). Each row is its OWN array — Telegram's
+     * inline_keyboard is an array of rows.
      */
     fun tasksKeyboard(
         rows: List<TaskRow>,
@@ -44,7 +45,13 @@ object Keyboards {
         dbRunning: List<RunningSubagent> = emptyList(),
         nowMs: Long = 0,
     ): JsonObject? {
-        if (rows.isEmpty() && subagents.isEmpty() && dbRunning.isEmpty()) return null
+        // The store's rows obey the SAME freshness law /subagents learned
+        // (the owner's 3/11: two «MISSION:» ghosts of a killed batch rode
+        // every /tasks as blue buttons). A stale row is a dead agent the
+        // store never closed — its only home is /subagents «inactivos»,
+        // never a task list: silence beats a ghost.
+        val freshRows = dbRunning.filter { dbRunningFresh(it, nowMs) }
+        if (rows.isEmpty() && subagents.isEmpty() && freshRows.isEmpty()) return null
         return buildJsonObject {
             putJsonArray("inline_keyboard") {
                 rows.forEachIndexed { i, t ->
@@ -69,19 +76,16 @@ object Keyboards {
                         },
                     )
                 }
-                // the store's running sessions — visible even when the bus
-                // died before their lane streamed (the /subagents law, now on
-                // every list; the frozen lastMs is the ghost marker)
-                dbRunning.forEach { r ->
+                // the store's FRESH running sessions — visible even when the
+                // bus died before their lane streamed; the row is alive, so
+                // it carries its ⏹️ (the stop of a dead child is decoration)
+                freshRows.forEach { r ->
                     add(
                         buildJsonArray {
-                            val label = r.title.takeIf { it.isNotBlank() }?.take(TITLE_CAP) ?: r.sid.takeLast(LANE_TAIL)
-                            val saData = "sn:${r.sid.takeLast(LANE_TAIL)}"
-                            add(button("$SUBAGENT_MARK $label ${dbRunningMark(r, nowMs)}", saData))
-                            // the ⏹️ rides ONLY a fresh row — a ghost's stop is decoration
-                            if (dbRunningFresh(r, nowMs)) {
-                                add(button(STOP_BUTTON, "sst:${r.sid.takeLast(LANE_TAIL)}"))
-                            }
+                            val tail = r.sid.takeLast(LANE_TAIL)
+                            val label = r.title.takeIf { it.isNotBlank() }?.take(TITLE_CAP) ?: tail
+                            add(button("$SUBAGENT_MARK $label ${dbRunningMark(r, nowMs)}", "sn:$tail"))
+                            add(button(STOP_BUTTON, "sst:$tail"))
                         },
                     )
                 }
