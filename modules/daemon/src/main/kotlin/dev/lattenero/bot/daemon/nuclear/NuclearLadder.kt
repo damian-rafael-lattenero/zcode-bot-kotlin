@@ -269,7 +269,7 @@ class NuclearLadder(
         return hello
     }
 
-    /** The hello poll: bounded by BOTH a poll count and the wall clock — never a while(true). */
+    /** The hello poll: bounded by BOTH a poll count and the wall clock — never a hand-rolled wait loop. */
     @Suppress("ReturnCount") // one verdict per early exit: hello landed, clock ran out, polls ran out
     private suspend fun pollHello(deadlineMs: Long): Boolean {
         for (poll in 1..HELLO_POLLS) {
@@ -304,7 +304,7 @@ class NuclearLadder(
     companion object {
         const val DAEMON_LABEL = "com.zcode.bot-daemon"
 
-        /** The kill ladder is TWO rungs — TERM then KILL, bounded, never a while(true). */
+        /** The kill ladder is TWO rungs — TERM then KILL, bounded, never a hand-rolled wait loop. */
         const val KILL_RUNGS = 2
         val TERM_GRACE = 2.seconds
         val KILL_GRACE = 1.seconds
