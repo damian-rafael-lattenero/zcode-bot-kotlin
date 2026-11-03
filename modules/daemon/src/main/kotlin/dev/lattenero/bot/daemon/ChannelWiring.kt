@@ -37,6 +37,7 @@ import dev.lattenero.bot.daemon.bus.BusSink
 import dev.lattenero.bot.daemon.bus.PromptTap
 import dev.lattenero.bot.daemon.bus.activePromptContext
 import dev.lattenero.bot.daemon.brain.BrainEndpoint
+import dev.lattenero.bot.daemon.brain.MemoryInjector
 import dev.lattenero.bot.daemon.brain.brainGateway
 import dev.lattenero.bot.daemon.history.LIVE_VERBS
 import dev.lattenero.bot.daemon.history.SEQUENCE_LINE_DIFFER
@@ -177,6 +178,8 @@ internal fun wireChannel(
     pollOn: Boolean,
     /** U1b: the `event_bus` knob, read once at boot — OFF means the producer is never built. */
     eventBusOn: Boolean = false,
+    /** U3: the `memory_inject` knob — OFF means the send path never touches the brain. */
+    memoryInjectOn: Boolean = false,
 ): ChannelStack {
     val hub = LiveHub()
     val tokenFile = File(cfg.baseDir, ChannelSpec.TOKEN_FILENAME)
@@ -314,16 +317,25 @@ internal fun wireChannel(
         )
         logger.info { "event_bus ON — appending to ${File(File(cfg.baseDir, "agent-brain"), BUS_FILE)}" }
     }
-    val promptTap = PromptTap(busTaps) { activePromptContext(client) }
-
     // U2 — /brain + /memory: agent-brain's localhost HTTP (no auth). The
     // endpoint is `brain_url` in the same daemon.json (read once; absent =
     // agent-brain's own 8765). The commands render the reading list; the
     // transport lives here, never in the channel module.
     val brainEndpoint = BrainEndpoint.load(File(cfg.homeDir, SendKnob.FILE_NAME))
     if (brainEndpoint.warning != null) logger.warn { "brain endpoint: ${brainEndpoint.warning}" }
-    val brain = BrainCommands(brainGateway(brainEndpoint))
+    val gateway = brainGateway(brainEndpoint)
+    val brain = BrainCommands(gateway)
     logger.info { "brain commands wired: ${brainEndpoint.url}" }
+
+    // U3 — memory_inject (ADR-020): the knob is read at boot in Main. OFF =
+    // no injector and the send path is byte-for-byte the pre-U1b one.
+    val injector = if (memoryInjectOn) {
+        logger.info { "memory_inject ON — top-k ${MemoryInjector.TOP_K}, deadline ${MemoryInjector.DEFAULT_TIMEOUT}" }
+        MemoryInjector(gateway.memorySearch, log = { message -> logger.info { message } })
+    } else {
+        null
+    }
+    val promptTap = PromptTap(busTaps, { activePromptContext(client) }, injector)
 
     drainQueue = {
         val pending = queue.drain()
@@ -331,7 +343,8 @@ internal fun wireChannel(
             delay(QUEUE_DRAIN_DELAY) // let the session's phase settle before the next prompt
             pending.forEachIndexed { i, p ->
                 val token = promptTap.begin(p.text)
-                val fired = client.sendInbound(p.text, "${p.messageId}-q$i", System.currentTimeMillis())
+                val outbound = promptTap.prepare(p.text)
+                val fired = client.sendInbound(outbound, "${p.messageId}-q$i", System.currentTimeMillis())
                 if (fired == InboundReceipt.FIRED) promptTap.fired(token) else promptTap.dropped(token)
                 logger.info {
                     "queue drained: ${p.messageId} (…) ${if (fired == InboundReceipt.FIRED) "fired" else "FAILED"}"
@@ -573,7 +586,8 @@ private fun buildPoller(
                     attachments: List<InboundAttachment>,
                 ): InboundReceipt {
                     val token = promptTap.begin(text)
-                    val receipt = client.sendInbound(text, messageId, receivedAt, attachments = attachments)
+                    val outbound = promptTap.prepare(text)
+                    val receipt = client.sendInbound(outbound, messageId, receivedAt, attachments = attachments)
                     if (receipt == InboundReceipt.FIRED) promptTap.fired(token) else promptTap.dropped(token)
                     return receipt
                 }
@@ -588,7 +602,8 @@ private fun buildPoller(
                     taskId: String,
                 ): InboundAnswer {
                     val token = promptTap.begin(text, knownSid = taskId)
-                    val answer = client.sendOrderAwait(text, messageId, receivedAt, taskId)
+                    val outbound = promptTap.prepare(text)
+                    val answer = client.sendOrderAwait(outbound, messageId, receivedAt, taskId)
                     if (answer is InboundAnswer.Answered) promptTap.fired(token) else promptTap.dropped(token)
                     return answer
                 }
@@ -607,7 +622,8 @@ private fun buildPoller(
                     bindTaskId: String?,
                 ): InboundAnswer {
                     val token = promptTap.begin(text, knownSid = bindTaskId)
-                    val answer = client.sendInboundAwait(text, messageId, receivedAt, bindTaskId)
+                    val outbound = promptTap.prepare(text)
+                    val answer = client.sendInboundAwait(outbound, messageId, receivedAt, bindTaskId)
                     if (answer is InboundAnswer.Answered) promptTap.fired(token) else promptTap.dropped(token)
                     return answer
                 }
@@ -746,8 +762,9 @@ private suspend fun dispatchAttachment(
             localPath = target.absolutePath,
         )
         val token = prompts.begin(update.caption)
+        val outbound = prompts.prepare(update.caption)
         val fired = client.sendInbound(
-            update.caption,
+            outbound,
             "tg-${update.updateId}-att",
             System.currentTimeMillis(),
             attachments = listOf(att),

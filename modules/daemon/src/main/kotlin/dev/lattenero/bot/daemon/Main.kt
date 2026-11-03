@@ -1,6 +1,7 @@
 package dev.lattenero.bot.daemon
 
 import dev.lattenero.bot.channel.BotCommands
+import dev.lattenero.bot.daemon.brain.MemoryInjectKnob
 import dev.lattenero.bot.daemon.bus.EventBusKnob
 import dev.lattenero.bot.daemon.send.DaemonSend
 import dev.lattenero.bot.daemon.send.LiveLane
@@ -82,6 +83,12 @@ fun main(args: Array<String>) {
     if (busKnob.warning != null) logger.warn { "event_bus knob $knobFile: ${busKnob.warning}" }
     logger.info { "event_bus knob: on=${busKnob.on} (file=$knobFile)" }
 
+    // U3's memory knob (ADR-020): read ONCE at boot, SHIPPED OFF. OFF means
+    // the send path never touches the brain (byte-for-byte the old prompt).
+    val memoryKnob = MemoryInjectKnob.load(knobFile)
+    if (memoryKnob.warning != null) logger.warn { "memory_inject knob $knobFile: ${memoryKnob.warning}" }
+    logger.info { "memory_inject knob: on=${memoryKnob.on} (file=$knobFile)" }
+
     val stateDir = File(cfg.homeDir, "state")
     val shadowLog = ShadowLog(File(cfg.homeDir, "shadow"))
     val pythonState = File(File(cfg.baseDir, "hooks"), "state")
@@ -101,7 +108,15 @@ fun main(args: Array<String>) {
 
     // B3b: the channel stack (client always; live view when the daemon owns
     // the send; poller only at the retirement knob)
-    val stack = wireChannel(cfg, send, lanes, pythonState, pollKnob.on, eventBusOn = busKnob.on)
+    val stack = wireChannel(
+        cfg,
+        send,
+        lanes,
+        pythonState,
+        pollKnob.on,
+        eventBusOn = busKnob.on,
+        memoryInjectOn = memoryKnob.on,
+    )
 
     val clock = { System.currentTimeMillis() / MILLIS_PER_SECOND }
     val zconnWatch = ZconnShadow(cfg.baseDir, stateDir, shadowLog, clock, pythonState, send.leg)
