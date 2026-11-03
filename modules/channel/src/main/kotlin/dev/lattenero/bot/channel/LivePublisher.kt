@@ -191,6 +191,9 @@ class LiveHub {
  * never hidden), NORMAL collapsed blocks + closes, VERBOSE adds the tool
  * OPEN one-liners. Verbose is the DEFAULT.
  */
+// The publisher's ladder: one function per duty (birth, feed, seal, watchdog,
+// prize cache) — the split is the state machine's shape, not duplication.
+@Suppress("TooManyFunctions")
 class LivePublisher(
     private val hub: LiveHub,
     private val telegram: LiveTelegram,
@@ -229,6 +232,13 @@ class LivePublisher(
      * file-backed store; tests and unwired daemons the in-memory default).
      */
     private val verbosity: VerbositySetting = VolatileVerbosity(),
+    /**
+     * THE PRIZE SOURCE (the owner, 3/11): a CACHED read of the coding
+     * plan's gifts (the daemon injects the channel query). Refreshed every
+     * [GIFTS_REFRESH_MS]; the card shows «Premios» while a turn runs and
+     * the snapshot is younger than [GIFTS_STALE_MS]. Null/empty = silence.
+     */
+    private val gifts: suspend () -> GiftsMenu.Gifts? = { null },
 ) : CoTTaps {
 
     /** the message being edited — the publisher's only mutable cell (§7 escape hatch). */
@@ -243,6 +253,10 @@ class LivePublisher(
     private var lastWatchdogAtMs: Long = 0
     /** The feed's seen pointer — the last turn snapshot the transcript already spoke. */
     private var feedSeen: TurnLive? = null
+    /** The prize snapshot + its freshness stamps (see [gifts]). */
+    private var giftsSnapshot: GiftsMenu.Gifts? = null
+    private var giftsAttemptAtMs: Long = 0
+    private var giftsOkAtMs: Long = 0
 
     /**
      * THE CoT REGISTRY (the collapsed blocks' tap world) — built lazily
@@ -281,6 +295,30 @@ class LivePublisher(
     }
 
     /**
+     * The prize cache's refresh: ONE read per [GIFTS_REFRESH_MS]. A failed
+     * read keeps the last snapshot only while it is younger than
+     * [GIFTS_STALE_MS] — after that the card says nothing (honest silence,
+     * never a stale claim).
+     */
+    private suspend fun refreshGifts(nowMs: Long) {
+        if (nowMs - giftsAttemptAtMs < GIFTS_REFRESH_MS) return
+        giftsAttemptAtMs = nowMs
+        val snapshot = runCatching { gifts() }.getOrNull() ?: return
+        giftsSnapshot = snapshot
+        giftsOkAtMs = nowMs
+    }
+
+    /** The card's prize line — rendered per tick (live countdown), age-gated. */
+    private fun giftsForCard(nowMs: Long): String? {
+        val snapshot = giftsSnapshot
+        return if (snapshot == null || nowMs - giftsOkAtMs > GIFTS_STALE_MS) {
+            null
+        } else {
+            GiftsMenu.workingLine(snapshot, nowMs)
+        }
+    }
+
+    /**
      * One tick of the never-silence clock. MUTEXED: the scheduled ~3s
      * process and (once the CoT collapse lands) the block taps all land
      * here — the cells (statusMessageId, lastText, the CoT registry) are
@@ -297,6 +335,7 @@ class LivePublisher(
         sealOrphan(cfg) // the first tick's boot duty, before anything else
         var state = hub.peek() ?: return
         val now = clock()
+        refreshGifts(now)
         if (statusMessageId == null && state.phase != TurnPhase.Idle) {
             // THE REAL TITLE (the owner's 30/10 verdict: «644150daf013» in
             // his card's head): ONE resolution attempt per turn, exactly at
@@ -314,7 +353,7 @@ class LivePublisher(
             }
             // the FIRST message is already the process card: the render,
             // not a placeholder
-            tryBirth(cfg, state, LiveTurn.render(state, now, channelAlive(), verbs))
+            tryBirth(cfg, state, LiveTurn.render(state, now, channelAlive(), verbs, giftsForCard(now)))
         }
         // THE STREAM WATCHDOG: a live turn with a long silence is the fork's
         // dead bus, not a quiet model (measured 30/10 twice — burst on
@@ -379,7 +418,7 @@ class LivePublisher(
      * and the next tick re-draws when the window lifts.
      */
     private suspend fun redrawCard(cfg: TgConfig, state: TurnLive, now: Long, liveMid: Long) {
-        val text = LiveTurn.render(state, now, channelAlive(), verbs)
+        val text = LiveTurn.render(state, now, channelAlive(), verbs, giftsForCard(now))
         if (text == lastText) return // nothing visible changed: the card stays
         if (telegram.throttled()) return
         telegram.delete(cfg, liveMid)
@@ -422,7 +461,7 @@ class LivePublisher(
             speakFeed(feed, state)
             // the card re-born LAST with its CURRENT render — above
             // nothing, below everything
-            tryBirth(cfg, state, LiveTurn.render(state, now, channelAlive(), verbs))
+            tryBirth(cfg, state, LiveTurn.render(state, now, channelAlive(), verbs, giftsForCard(now)))
         }
         logger.info {
             "transcript feed: ${feed.size} message(s) spoken " +
@@ -580,5 +619,9 @@ class LivePublisher(
         const val STREAM_WATCHDOG_SILENCE_MS = 60_000L
         const val MS_PER_SEC = 1000L
         const val TASK_ID_TAIL = 8
+
+        /** The prize cache: one read per 5 min; a line older than 15 min goes silent. */
+        const val GIFTS_REFRESH_MS = 300_000L
+        const val GIFTS_STALE_MS = 900_000L
     }
 }

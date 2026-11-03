@@ -368,4 +368,44 @@ class GiftsCommandTest {
         }
         assertTrue(Json.parseToJsonElement(kb.toString()).jsonObject["inline_keyboard"] != null)
     }
+
+    // ── the working card's prize line (the owner, 3/11) ──
+
+    @Test
+    fun theWorkingLineIsSilentWithoutPrizes() {
+        assertNull(GiftsMenu.workingLine(GiftsMenu.EMPTY, 1_000L))
+    }
+
+    @Test
+    fun theWorkingLineCountsBothWindowsAndCarriesTheEarliestExpiry() {
+        val gifts = GiftsMenu.parse(
+            """{"reset":{"fiveHour":[{"expireAt":1000000},{"expireAt":2000000}],
+                       "week":[{"expireAt":3000000}]}}""",
+            1_000L,
+        )
+        val line = GiftsMenu.workingLine(gifts, 1_000L)!!
+        assertTrue("2 resets 5h" in line)
+        assertTrue("1 reset semanal" in line)
+        assertTrue("expira en" in line) // a REAL expireAt, never invented
+        assertTrue("/quota" in line) // the detail's door
+    }
+
+    @Test
+    fun theWorkingLineNamesTheOfferWithItsTokens() {
+        val line = GiftsMenu.workingLine(GiftsMenu.parse(giftsJson, 1_000L), 1_000L)!!
+        assertTrue("ZCODE GLOBAL BUILD" in line)
+        assertTrue("300M tokens" in line)
+        assertTrue("reclamable" in line)
+    }
+
+    @Test
+    fun theWorkingLineWithoutANameDoesNotPoseThePlanIdAsATitle() {
+        val gifts = GiftsMenu.parse(
+            """{"offers":[{"planId":"zcode-v3-start-plan-1103","label":"","campaignId":"c"}]}""",
+            1_000L,
+        )
+        val line = GiftsMenu.workingLine(gifts, 1_000L)!!
+        assertTrue("oferta" in line)
+        assertFalse("zcode-v3-start-plan-1103" in line)
+    }
 }

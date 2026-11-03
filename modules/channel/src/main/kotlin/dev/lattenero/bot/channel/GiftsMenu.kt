@@ -141,6 +141,32 @@ object GiftsMenu {
     }
 
     /**
+     * THE WORKING CARD's compact prize line (the owner, 3/11: «una pequeña
+     * seccion que diga premios… mientras se recarga y te muestras los
+     * segundos y los cots»): ONE line riding the always-last process card —
+     * the detail (and the taps) stay in /quota. Silence when there is
+     * nothing: absence is not a prize. Resets carry their REAL earliest
+     * expiry; a plan offer has NO expiry field, so the line never invents
+     * one.
+     */
+    fun workingLine(gifts: Gifts, nowMs: Long): String? {
+        if (gifts.isEmpty) return null
+        val parts = mutableListOf<String>()
+        val five = gifts.resets.count { it.type == FIVE_HOUR }
+        if (five > 0) parts += "🎁 ${if (five == 1) "1 reset 5h" else "$five resets 5h"}"
+        val week = gifts.resets.count { it.type == WEEK }
+        if (week > 0) parts += "🎁 ${if (week == 1) "1 reset semanal" else "$week resets semanales"}"
+        gifts.offers.firstOrNull()?.let { offer ->
+            val name = offer.name?.let { PyText.esc(it) } ?: "oferta"
+            val tokens = offer.tokens?.let { " · ${BotCommands.tokenRaw(it)} tokens" }.orEmpty()
+            parts += "🔴 $name$tokens reclamable"
+        }
+        val earliest = gifts.resets.minOfOrNull { it.expireAt }
+        val expiry = earliest?.let { " · ${expiringWord(it, nowMs)}" }.orEmpty()
+        return "🎁 <b>Premios</b> · ${parts.joinToString(" · ")}$expiry — /quota"
+    }
+
+    /**
      * The taps of a usable card: one 🎁 Reclamar per offer (the planId is
      * short by contract; a long one degrades to no button rather than a
      * broken callback) and one 🎁 Usar reset per window with gifts.

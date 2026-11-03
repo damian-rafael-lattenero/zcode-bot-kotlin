@@ -666,6 +666,13 @@ object LiveTurn {
         nowMs: Long,
         channelAlive: Boolean,
         verbs: ToolVerbifier = ToolVerbs.MINIMAL,
+        /**
+         * The daemon's cached PRIZE line (GiftsMenu.workingLine) — the
+         * owner's «pequeña sección premios»: it rides the process card
+         * while the turn runs, one line, never the detail (/quota owns
+         * that). Null = nothing claimable, or the read is not fresh.
+         */
+        giftsLine: String? = null,
     ): String {
         // THE OWNER'S RULE («los segundos no deben correr»): when reality
         // is not advancing — silence, a dead channel, an error pill — every
@@ -721,6 +728,12 @@ object LiveTurn {
         state.typedError?.let { pill ->
             val quota = if (pill.isQuota) " · 💳 CUOTA" else ""
             lines.add("💀 <b>error:</b> ${pill.line()}$quota")
+        }
+        // THE OWNER'S PRIZE SECTION (3/11): while the turn runs, the card
+        // says a prize can be claimed — the WORKING states only (a Done
+        // card is a verdict, not a shelf); /quota carries the detail.
+        if (state.phase is TurnPhase.Thinking || state.phase is TurnPhase.Writing) {
+            giftsLine?.takeIf { it.isNotBlank() }?.let(lines::add)
         }
         // the lanes, BOUNDED (the owner's 30/10 corpse card: a dead
         // subagent's bash lane ticked «43m23s» forever): only the most
