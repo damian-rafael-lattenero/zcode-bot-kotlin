@@ -250,6 +250,12 @@ class BotCommands(
         // the ⏹️ tap (sst:<tail>) — intercepted HERE, never left to the
         // callbackText fallback: a stray tail falling through would ride
         // to the agent as the owner's own words (the graver bug)
+        // the ⚡/⏳ question's taps (2/11 23:12): the owner decides PER
+        // MESSAGE whether a busy child gets pushed or queued
+        data.startsWith("odp:") -> resolvePending(push = true)
+
+        data.startsWith("odq:") -> resolvePending(push = false)
+
         data.startsWith("sst:") -> subagentStop(data.removePrefix("sst:"))
 
         // LA PREGUNTA's taps (the answer round-trip): qa:<sid>:<i> answers
@@ -454,6 +460,15 @@ class BotCommands(
      * background WITH the text as its input. Answers true when a turn was
      * actually cut (so the ack can say what happened).
      */
+    private suspend fun isBusyChild(sid: String): Boolean =
+        sid.startsWith(SUBAGENT_SESSION_PREFIX) &&
+            SubagentStop.orderTarget(
+                hub.peek()?.tools.orEmpty(),
+                runningRows(),
+                sid,
+                clock(),
+            ) == OrderPulse.Alive
+
     private suspend fun interruptChild(sid: String): Boolean {
         val alive = sid.startsWith(SUBAGENT_SESSION_PREFIX) &&
             SubagentStop.orderTarget(
@@ -553,6 +568,7 @@ class BotCommands(
      * by NOBODY, and silence is the worst lie) — the shot is spent either
      * way, the bounce says so.
      */
+    @Suppress("ReturnCount") // gate, the ⚡/⏳ question, the flight — one exit each
     private suspend fun fireArmedOrder(order: ArmedOrder, text: String, updateId: Long): BotReply {
         armedOrder = null // ONE shot: se consume al volar — el siguiente texto vuelve al router
         val gate: BotReply? = when (
@@ -575,29 +591,44 @@ class BotCommands(
         logger.info {
             "route: ORDER to ${order.sessionId} («${order.title}»): ${text.take(ORDER_LOG_PREVIEW)}"
         }
-        // EMPUJAR (the owner's law, 2/11): a message to a subagent must be
-        // READ, not queued behind a nine-minute tool. The fork's steer is
-        // delivery:"guide" (next safe boundary) — so a busy child gets its
-        // turn CANCELLED first and the text starts the fresh one.
-        val interrupted = interruptChild(order.sessionId)
+        // THE OWNER'S CHOICE (2/11 23:12: «quiero que me pregunte empujar o
+        // encolar»): a BUSY child never gets an automatic interrupt — the
+        // question IS the door. An idle child is delivered at once (there
+        // is nothing to cut and nothing to wait for).
+        if (isBusyChild(order.sessionId)) {
+            pendingDelivery = PendingDelivery(order.sessionId, order.title, text, steer = false, updateId, clock())
+            logger.info { "route: ORDER to ${order.sessionId} HELD — asking empujar/encolar" }
+            return BotReply(askPushOrQueue(order.title), markup = Keyboards.pushOrQueue())
+        }
+        return deliverOrder(order.sessionId, order.title, text, updateId, interrupted = false)
+    }
+
+    /** The order's real flight — shared by the idle path and the ⚡ tap. */
+    private suspend fun deliverOrder(
+        sid: String,
+        title: String,
+        text: String,
+        updateId: Long,
+        interrupted: Boolean,
+    ): BotReply {
         return when (
             val answer = ops.sendOrder(
                 text,
                 messageId = "tg-$updateId-ord",
                 receivedAt = clock(),
-                taskId = order.sessionId,
+                taskId = sid,
             )
         ) {
             is InboundAnswer.Answered -> BotReply(
                 if (interrupted) {
-                    "⚡ Le corté el turno a «${PyText.esc(order.title)}» y le entregué la orden — la lee AHORA."
+                    "⚡ Le corté el turno a «${PyText.esc(title)}» y le entregué la orden — la lee AHORA."
                 } else {
-                    "⚔️ Orden entregada a «${PyText.esc(order.title)}» — su respuesta llega en la carta attachada."
+                    "⚔️ Orden entregada a «${PyText.esc(title)}» — su respuesta llega en la carta attachada."
                 },
             )
 
             is InboundAnswer.Failed -> BotReply(
-                "⚠️ La orden NO entró («${PyText.esc(order.title)}»): ${PyText.esc(answer.code)} — " +
+                "⚠️ La orden NO entró («${PyText.esc(title)}»): ${PyText.esc(answer.code)} — " +
                     // the verdict sits at the message's TAIL (…sendText rejected
                     // (proto.sessionNotFound)) — the head is just the echo
                     PyText.esc((answer.message ?: "?").takeLast(ORDER_FAIL_TAIL)) +
@@ -1378,6 +1409,23 @@ class BotCommands(
     private var armedOrder: ArmedOrder? = null
 
     /**
+     * A delivery waiting on the owner's choice (2/11 23:12: «quiero que me
+     * pregunte empujar o encolar»): the text, its address and its kind —
+     * ONE shot, like the arm. The buttons (`odp:` ⚡ / `odq:` ⏳) answer it.
+     */
+    private data class PendingDelivery(
+        val sid: String,
+        val title: String,
+        val text: String,
+        val steer: Boolean,
+        val updateId: Long,
+        val atMs: Long,
+    )
+
+    @Volatile
+    private var pendingDelivery: PendingDelivery? = null
+
+    /**
      * A subagent's ORDER tap (`so:<tail>` — the ✍️ next to the 🔵 attach):
      * ATTACHES the subagent's stream (the full form when the fork names the
      * child, lane-scope otherwise — [laneAttach]'s semantics) AND arms the
@@ -2101,28 +2149,67 @@ class BotCommands(
             ?.let { Keyboards.subagentName(it) }
             ?: runningRows().firstOrNull { it.sid == child }?.title?.takeIf { it.isNotBlank() }
             ?: child.takeLast(SID_TAIL)
-        val interrupted = interruptChild(child)
-        return when (val answer = ops.steer(child, text)) {
-            SteerAnswer.Delivered -> {
-                logger.info { "steer: ${text.length} chars to SUBAGENT $child (interrupted=$interrupted)" }
-                BotReply(
-                    if (interrupted) {
-                        "⚡ Le corté el turno a «${PyText.esc(name)}» y le pasé el steer — lo lee AHORA."
-                    } else {
-                        "🌀 Steer entregado a «${PyText.esc(name)}» — entra DENTRO del turno del subagente " +
-                            "(se inyecta en el próximo límite de herramienta)."
-                    },
-                )
+        // THE OWNER'S CHOICE: a BUSY child is never cut on our own judgment
+        if (isBusyChild(child)) {
+            pendingDelivery = PendingDelivery(child, name, text, steer = true, updateId = 0L, atMs = clock())
+            logger.info { "steer: to SUBAGENT $child HELD — asking empujar/encolar" }
+            return BotReply(askPushOrQueue(name), markup = Keyboards.pushOrQueue())
+        }
+        return deliverSteer(child, name, text, interrupted = false)
+    }
+
+    /** The steer's real flight — shared by the idle path and the ⚡ tap. */
+    private suspend fun deliverSteer(
+        child: String,
+        name: String,
+        text: String,
+        interrupted: Boolean,
+    ): BotReply = when (val answer = ops.steer(child, text)) {
+        SteerAnswer.Delivered -> {
+            logger.info { "steer: ${text.length} chars to SUBAGENT $child (interrupted=$interrupted)" }
+            BotReply(
+                if (interrupted) {
+                    "⚡ Le corté el turno a «${PyText.esc(name)}» y le pasé el steer — lo lee AHORA."
+                } else {
+                    "🌀 Steer entregado a «${PyText.esc(name)}» — entra DENTRO del turno del subagente " +
+                        "(se inyecta en el próximo límite de herramienta)."
+                },
+            )
+        }
+
+        is SteerAnswer.Failed ->
+            if (answer.code == UNKNOWN_REQUEST_CODE) {
+                BotReply(STEER_OLD_FORK)
+            } else {
+                BotReply("⚠️ Steer al subagente falló (${answer.code}): ${PyText.esc(answer.message ?: "?")}")
             }
 
-            is SteerAnswer.Failed ->
-                if (answer.code == UNKNOWN_REQUEST_CODE) {
-                    BotReply(STEER_OLD_FORK)
-                } else {
-                    BotReply("⚠️ Steer al subagente falló (${answer.code}): ${PyText.esc(answer.message ?: "?")}")
-                }
+        SteerAnswer.Unavailable -> BotReply(DEGRADED)
+    }
 
-            SteerAnswer.Unavailable -> BotReply(DEGRADED)
+    /** The ⚡/⏳ question's words — the title rides escaped. */
+    private fun askPushOrQueue(title: String): String =
+        "🕹 «${PyText.esc(title)}» está trabajando. ¿Cómo le va el mensaje?\n" +
+            "⚡ Empujar — le corto el turno y lo lee ya.\n" +
+            "⏳ Encolar — lo lee cuando termine."
+
+    /** The ⚡/⏳ tap: the pending delivery's ONE shot. */
+    @Suppress("ReturnCount") // expired, stale, the flight — one exit each
+    private suspend fun resolvePending(push: Boolean): BotReply {
+        val p = pendingDelivery ?: return BotReply("⌛ Esa pregunta ya venció — mandá el mensaje de nuevo.")
+        pendingDelivery = null
+        if (clock() - p.atMs > PENDING_DELIVERY_TTL_MS) {
+            return BotReply("⌛ Pasaron más de 5 minutos — mandá el mensaje de nuevo.")
+        }
+        val interrupted = push && interruptChild(p.sid)
+        logger.info {
+            "callback ${if (push) "⚡" else "⏳"} ${if (p.steer) "STEER" else "ORDER"} to ${p.sid} " +
+                "(interrupted=$interrupted)"
+        }
+        return if (p.steer) {
+            deliverSteer(p.sid, p.title, p.text, interrupted)
+        } else {
+            deliverOrder(p.sid, p.title, p.text, p.updateId, interrupted)
         }
     }
 
@@ -2490,6 +2577,9 @@ class BotCommands(
 
         /** The armed order's log preview cap. */
         private const val ORDER_LOG_PREVIEW = 60
+
+        /** The ⚡/⏳ question's window: an answer older than this is stale. */
+        internal const val PENDING_DELIVERY_TTL_MS = 5 * 60 * 1000L
 
         /** The failure message's shown tail — the v4 verdict lives at the end. */
         private const val ORDER_FAIL_TAIL = 140

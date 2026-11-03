@@ -441,8 +441,11 @@ class TaskAttachTest {
         val arm = bc.onCallback("so:$laneTail", 9L)!!
         assertTrue("Armado" in arm.text) // the arm rides the attach
         assertEquals(1, ops.subscribed.size) // the tap ALSO attaches
-        // the FIRST free text after the arm is the ORDER — direct to the session
-        val ack = bc.handle("cambiale el título a la carta", 10L)!!
+        // the FIRST free text after the arm is the ORDER — a BUSY child
+        // earns the ⚡/⏳ question first, then the tap flies
+        val question = bc.handle("cambiale el título a la carta", 10L)!!
+        assertTrue("Empujar" in question.text, "got: $question")
+        val ack = bc.onCallback("odp:1", 10L)!!
         assertTrue("Orden entregada" in ack.text, "got: $ack")
         assertEquals(listOf("cambiale el título a la carta" to "sess_subagent_agent_x"), ops.orders)
         // the arm is ONE shot: the next text rides the normal routing again
@@ -482,10 +485,51 @@ class TaskAttachTest {
             1_000_000L,
         )
         bc.onCallback("so:$laneTail", 9L)!!
-        val ack = bc.handle("cortá y leé esto", 10L)!!
+        // BUSY → the bot ASKS (the owner's 23:12 law), never cuts on its own
+        val question = bc.handle("cortá y leé esto", 10L)!!
+        assertTrue("Empujar" in question.text, "got: $question")
+        assertTrue("Encolar" in question.text, question.text)
+        assertEquals(0, ops.orders.size, "nothing flew before the owner's choice")
+        val ack = bc.onCallback("odp:1", 11L)!!
         assertTrue("Le corté el turno" in ack.text, "got: $ack")
         assertTrue("AHORA" in ack.text, ack.text)
         assertEquals(listOf("cortá y leé esto" to "sess_subagent_agent_x"), ops.orders)
+    }
+
+    @Test
+    fun theQueueTapDeliversWithoutCuttingTheChild() = runBlocking {
+        // the ⏳ half of the owner's question: same order, NO interrupt
+        val ops = FakeOps(boundStatus).apply {
+            answers["activeTaskIds"] = """[]"""
+            answers["stop"] = """{"stopped":true}"""
+        }
+        val history = FakeHistory(rows).apply {
+            runningSubs = listOf("sess_subagent_agent_x")
+            runningTitled = listOf(RunningSubagent("sess_subagent_agent_x", "helper", lastMs = 1_000_000L))
+        }
+        val hub = LiveHub()
+        val bc = BotCommands(
+            ops = ops,
+            hub = hub,
+            daemonReset = { "fake ladder" },
+            clock = { 1_000_000L },
+            history = history,
+            defaultWorkspacePath = "/Users/damian/.zcode/workspace/default",
+        )
+        hub.apply(
+            streamEvent(
+                "task-02",
+                """{"type":"tool_call","toolId":"$laneId","toolName":"Task","subagentAgentId":"agent_x"}""",
+                1,
+            ),
+            1_000_000L,
+        )
+        bc.onCallback("so:$laneTail", 9L)!!
+        bc.handle("dejalo para después", 10L)!!
+        val ack = bc.onCallback("odq:1", 11L)!!
+        assertTrue("Orden entregada" in ack.text, "got: $ack")
+        assertTrue("Le corté el turno" !in ack.text)
+        assertEquals(listOf("dejalo para después" to "sess_subagent_agent_x"), ops.orders)
     }
 
     @Test
@@ -757,7 +801,10 @@ class TaskAttachTest {
             code = "internal",
             message = "order to sess_subagent_agent_x failed: v4 command sendText rejected (proto.sessionNotFound)",
         )
-        val ack = bc.handle("hace un resumen", 10L)!!
+        // the child is BUSY: the bot asks first (⚡/⏳) — the ⚡ tap flies
+        val question = bc.handle("hace un resumen", 10L)!!
+        assertTrue("Empujar" in question.text, "got: $question")
+        val ack = bc.onCallback("odp:1", 11L)!!
         assertTrue("NO entró" in ack.text, "got: $ack")
         assertTrue("sessionNotFound" in ack.text, "the verbatim rides: ${ack.text}")
         assertTrue("NO voló" in ack.text)
