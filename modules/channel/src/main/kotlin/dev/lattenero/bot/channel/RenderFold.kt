@@ -74,6 +74,41 @@ fun reduce(
 
     RenderEvent.WatchTask -> state?.copy(watchedLane = null)
 
+    is RenderEvent.BoxBorn -> when {
+        // the feed speaks only the watched turn's boxes: a foreign task's
+        // birth is ignored (the Retitle law — the state stays, never a null
+        // that would spend the card)
+        state?.taskId == event.taskId -> state.copy(
+            boxes = (
+                state.boxes.filterNot { it.boxId == event.boxId } + // a reborn id never doubles
+                    BoxLive(
+                        boxId = event.boxId,
+                        header = event.header,
+                        pages = event.pages,
+                        messageId = event.messageId,
+                    )
+                ).takeLast(BOX_CAP), // the registry's own ceiling — the newest survive
+        )
+
+        else -> state
+    }
+
+    is RenderEvent.Page -> state?.let { s ->
+        // THE PAGER'S MIRROR (U5b): the page the message actually shows.
+        // The clamp is the reducer's own defense too (an out-of-range page
+        // can only arrive as the tap edge's already-clamped index — the
+        // fold re-clamps rather than trusting the wire).
+        s.copy(
+            boxes = s.boxes.map { box ->
+                if (box.boxId == event.boxId) {
+                    box.copy(page = event.page.coerceIn(BoxLive.FOLDED, box.pages.size - 1))
+                } else {
+                    box
+                }
+            },
+        )
+    }
+
     RenderEvent.Clear -> null // the turn is spent: the fold's own reset
 }
 
@@ -332,6 +367,14 @@ private fun phaseSince(phase: TurnPhase, state: RenderState, nowMs: Long): Long 
  * replays — legitimate small repeats (separators, short tokens) pass.
  */
 internal const val REPLAY_GUARD_MIN_CP = 24
+
+/**
+ * The box ceiling (U5b) — the same 120-entry cap the registry kept (a
+ * daemon running for weeks must not hoard every box): the fold keeps the
+ * NEWEST [BOX_CAP] boxes; eviction takes the oldest (the lowest ids), so
+ * the next id's max-read never regresses.
+ */
+internal const val BOX_CAP = 120
 
 /**
  * The dispatch tool names (the channel-side law — the same set the

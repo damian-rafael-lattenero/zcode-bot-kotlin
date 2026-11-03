@@ -104,6 +104,78 @@ class RenderFoldTest {
         assertNull(reduce(state, RenderEvent.Clear), "the turn is spent — the fold's own reset")
     }
 
+    // ---- the tool boxes (U5b) ------------------------------------------------------
+
+    private fun boxBorn(boxId: Int, pages: Int = 2): RenderEvent.BoxBorn = RenderEvent.BoxBorn(
+        taskId = "task-9",
+        boxId = boxId,
+        header = "⚡ <b>Bash</b> — <code>ls</code> · $pages líneas\n<i>📜 tocar para ver</i>",
+        pages = (1..pages).map { "   $it│ línea $it" },
+        messageId = 1_000L + boxId,
+    )
+
+    @Test
+    fun aBornBoxLandsInTheFoldClosed() {
+        val state = reduce(null, thought("pensando"))
+        val born = reduce(state, boxBorn(boxId = 7, pages = 3))!!
+        val box = born.boxes.single()
+        assertEquals(7, box.boxId)
+        assertEquals(3, box.pages.size)
+        assertEquals(1_007L, box.messageId)
+        assertEquals(BoxLive.FOLDED, box.page, "a box is born CLOSED — the header + its one button")
+        // the birth moves nothing else the turn owns
+        assertEquals(state!!.tools, born.tools)
+        assertEquals(state.cotPending, born.cotPending)
+    }
+
+    @Test
+    fun aRebornIdNeverDoublesAndAForeignBirthIsIgnored() {
+        val state = reduce(null, thought("pensando"))
+        val once = reduce(state, boxBorn(boxId = 7))!!
+        assertEquals(1, once.boxes.size)
+        val twice = reduce(once, boxBorn(boxId = 7, pages = 5))!!
+        assertEquals(1, twice.boxes.size, "a reborn id replaces, never doubles")
+        assertEquals(5, twice.boxes.single().pages.size)
+        assertEquals(
+            once,
+            reduce(once, RenderEvent.BoxBorn("other-task", 7, "h", listOf("p"), 1L)),
+            "a foreign task's box birth is ignored — the watched turn stays",
+        )
+    }
+
+    @Test
+    fun theBoxCeilingKeepsTheNewestAndTheMaxIdSurvives() {
+        var state = reduce(null, thought("pensando"))
+        val ids = 1..(BOX_CAP + 1)
+        state = ids.fold(state) { acc, id -> reduce(acc, boxBorn(boxId = id)) }
+        assertEquals(BOX_CAP, state!!.boxes.size, "the registry's own ceiling")
+        assertEquals(2, state.boxes.minOf { it.boxId }, "eviction takes the oldest (the first born)")
+        assertEquals(BOX_CAP + 1, state.boxes.maxOf { it.boxId }, "the max id survives — the next id never regresses")
+    }
+
+    @Test
+    fun thePagerTapMirrorsThePageTheMessageShows() {
+        var state = reduce(reduce(null, thought("pensando")), boxBorn(boxId = 7, pages = 3))
+        state = reduce(state, RenderEvent.Page(7, 1))!!
+        assertEquals(1, state!!.boxes.single().page, "the fold mirrors the landed edit")
+        // the clamp is the reducer's own defense: an out-of-range page lands at the last
+        assertEquals(2, reduce(state, RenderEvent.Page(7, 99))!!.boxes.single().page)
+        // the fold-back returns the header
+        assertEquals(
+            BoxLive.FOLDED,
+            reduce(state, RenderEvent.Page(7, BoxLive.FOLDED))!!.boxes.single().page,
+        )
+        // an unknown box moves nothing; a page on one box leaves its siblings
+        val seeded = reduce(null, thought("pensando"))
+        val two = reduce(reduce(seeded, boxBorn(boxId = 7)), boxBorn(boxId = 8))!!
+        val flipped = reduce(two, RenderEvent.Page(8, 0))!!
+        assertEquals(BoxLive.FOLDED, flipped.boxes.first { it.boxId == 7 }.page)
+        assertEquals(0, flipped.boxes.first { it.boxId == 8 }.page)
+        assertEquals(two, reduce(two, RenderEvent.Page(99, 0)), "an unknown box's tap is a no-op")
+        // a page event with no state stays nothing
+        assertNull(reduce(null, RenderEvent.Page(7, 0)))
+    }
+
     // ---- the staleness tick ------------------------------------------------------
 
     @Test
@@ -157,6 +229,176 @@ class RenderFoldTest {
         val taken = KapStream.from(flowOf(*ticks.toTypedArray())).dropOldest(1).asFlow().toList()
         assertTrue(taken.size < ticks.size, "an old tick is worthless — the backlog drops it")
         assertEquals(3L, taken.last(), "the freshest tick is the only one that never drops")
+    }
+
+    // ---- U5b: the exact lane's priority + the lane separation ----------------------
+
+    private fun toolOpenEvent(
+        toolId: String,
+        name: String = "Bash",
+        parent: String? = null,
+        seq: Long = 1,
+    ): RenderEvent.ToolOpen = RenderEvent.ToolOpen(
+        taskId = "task-9",
+        seq = seq,
+        atMs = seq,
+        nowMs = seq,
+        tool = ToolCall(
+            toolId = toolId,
+            name = name,
+            parentToolUseId = parent,
+            streamedLines = 0,
+            rawChars = null,
+            isMcp = false,
+        ),
+        final = true,
+    )
+
+    private fun toolCloseEvent(toolId: String, output: String, seq: Long = 2): RenderEvent.ToolClose =
+        RenderEvent.ToolClose(
+            taskId = "task-9",
+            seq = seq,
+            atMs = seq,
+            nowMs = seq,
+            tool = ToolCall(
+                toolId = toolId,
+                name = null,
+                streamedLines = 0,
+                rawChars = null,
+                isMcp = false,
+                status = "completed",
+                outputLines = 1,
+                output = output,
+            ),
+        )
+
+    @Test
+    fun aTwoHundredEventBurstLandsWholeThroughTheExactLane() = runTest {
+        // THE EXACT LANE'S PRICE (the U5a/U5b decision): the stage's slack
+        // is 64 slots — a 200-event burst overflows it and the producer
+        // SUSPENDS. Waiting is the only cost; a dropped tool line would be
+        // a lie, so nothing drops and the order stays the upstream's.
+        val burst = (1..200).map { n -> toolOpenEvent(toolId = "t$n", seq = n.toLong()) }
+        val taken = KapStream.from(flowOf(*burst.toTypedArray())).withStageSlack().asFlow().toList()
+        assertEquals(burst, taken, "200 > 64: the producer waits — every tool line lands, in order")
+    }
+
+    @Test
+    fun aSpineBurstLosesNoToolLineWhileThoughtsMayConflate() = runTest {
+        // THE COORDINATOR'S LAW, end to end: the exact lane has priority
+        // over the conflated one — a mixed burst of thoughts, tool opens,
+        // tool closes and a typed seal folds EVERY tool line (counters,
+        // order, verdicts) and the seal's pill; the CoT lane may lag/drop
+        // (its counter is a lower bound, never an invention).
+        val frames = buildList {
+            var seq = 0L
+            fun next(): Long = ++seq
+            add(
+                ServerFrame.StreamEvent(
+                    "task-9", next(), 1_000,
+                    buildJsonObject { put("type", "task_run_started") },
+                ),
+            )
+            (1..30).forEach { n ->
+                add(
+                    ServerFrame.StreamEvent(
+                        "task-9", next(), 1_000 + seq,
+                        buildJsonObject {
+                            put("type", "agent_thought_chunk")
+                            put("content", JsonPrimitive("t".repeat(n)))
+                        },
+                    ),
+                )
+            }
+            (1..10).forEach { n ->
+                add(
+                    ServerFrame.StreamEvent(
+                        "task-9", next(), 1_000 + seq,
+                        buildJsonObject {
+                            put("type", "tool_call")
+                            put("toolId", JsonPrimitive("t$n"))
+                            put("toolName", JsonPrimitive("Bash"))
+                            put("input", buildJsonObject { put("content", JsonPrimitive((1..n).joinToString("\n") { "line$it" })) })
+                            put("raw", buildJsonObject { put("streamingRawInputLength", JsonPrimitive(n)) })
+                        },
+                    ),
+                )
+            }
+            (1..30).forEach { n ->
+                add(
+                    ServerFrame.StreamEvent(
+                        "task-9", next(), 1_000 + seq,
+                        buildJsonObject {
+                            put("type", "agent_thought_chunk")
+                            put("content", JsonPrimitive("u".repeat(n)))
+                        },
+                    ),
+                )
+            }
+            (1..10).forEach { n ->
+                add(
+                    ServerFrame.StreamEvent(
+                        "task-9", next(), 1_000 + seq,
+                        buildJsonObject {
+                            put("type", "tool_call_update")
+                            put("toolId", JsonPrimitive("t$n"))
+                            put("status", JsonPrimitive("completed"))
+                            put("content", JsonPrimitive((1..n).joinToString("\n") { "out$it" }))
+                        },
+                    ),
+                )
+            }
+            add(
+                ServerFrame.StreamEvent(
+                    "task-9", next(), 1_000 + seq,
+                    buildJsonObject {
+                        put("type", "task_error")
+                        put("error", JsonPrimitive("usage cap exceeded"))
+                        put("code", JsonPrimitive("fault.provider.quotaExhausted"))
+                    },
+                ),
+            )
+        }
+        val states = spine(flowOf(*frames.toTypedArray()), ticker = flowOf(), nowMs = { 5_000L }).toList()
+        assertTrue(states.isNotEmpty())
+        val final = states.last()!!
+        assertEquals(
+            (1..10).map { "t$it" },
+            final.tools.map { it.toolId },
+            "every tool OPEN landed, in birth order — the exact lane never drops",
+        )
+        assertEquals(
+            (1..10).sumOf { it },
+            final.tools.sumOf { it.lines },
+            "the exact line counters survived the burst whole",
+        )
+        assertEquals(10, final.doneTools, "every CLOSE landed")
+        assertTrue(final.typedError != null && final.typedError.isQuota, "the seal's pill survives the burst")
+        // the thoughts may conflate: their total never EXCEEDS what streamed (no invention)
+        assertTrue(final.thoughtChars <= (1..30).sumOf { it } * 2, "conflate drops only — it never invents")
+    }
+
+    @Test
+    fun aSubagentsOutputNeverFallsIntoTheParentsLaneAndViceVersa() {
+        // THE LANE SEPARATION: the parent's narration and a subagent's never
+        // share a counter, and each tool lane keeps its OWN output — a
+        // subagent's close never stamps the parent's lane and vice versa.
+        var s = reduce(null, thought("main narration", parent = null))
+        s = reduce(s, thought("sub narration", parent = "lane-A"))!!
+        assertEquals("main narration".length, s!!.thoughtChars, "the subagent's thought never grows the parent's counter")
+        assertEquals("sub narration".length, s.subagentThought["lane-A"], "the subagent's own lane grows")
+        assertEquals(setOf("lane-A"), s.subagentThought.keys, "the parent's thought never grows a lane")
+        // the tool lanes: each side keeps its own output and verdict
+        s = reduce(s, toolOpenEvent(toolId = "t-main", name = "Edit", parent = null, seq = 10))!!
+        s = reduce(s, toolOpenEvent(toolId = "t-sub", name = "Bash", parent = "lane-A", seq = 11))!!
+        s = reduce(s, toolCloseEvent(toolId = "t-main", output = "parent output", seq = 12))!!
+        s = reduce(s, toolCloseEvent(toolId = "t-sub", output = "sub output", seq = 13))!!
+        val main = s.tools.first { it.toolId == "t-main" }
+        val sub = s.tools.first { it.toolId == "t-sub" }
+        assertNull(main.parentToolUseId, "the parent's lane stays the parent's")
+        assertEquals("lane-A", sub.parentToolUseId, "the subagent's lane stays the subagent's")
+        assertEquals("parent output", main.output)
+        assertEquals("sub output", sub.output, "the subagent's output never falls into the parent's lane")
     }
 
     // ---- the spine, end to end ----------------------------------------------------

@@ -161,7 +161,39 @@ class LiveHub {
         mutex.withLock { fold(RenderEvent.Tick(nowMs), SimpleLineDiffer) }
     }
 
+    /**
+     * A collapsed output box was born (U5b): the feed spoke it, the send
+     * flew — the born fact (id, header, pages, message id) folds.
+     */
+    suspend fun boxBorn(taskId: String, boxId: Int, header: String, pages: List<String>, messageId: Long) {
+        mutex.withLock { fold(RenderEvent.BoxBorn(taskId, boxId, header, pages, messageId), SimpleLineDiffer) }
+    }
+
+    /**
+     * THE PAGER'S TAP (U5b): the box's message shows [pageIndex] now — the
+     * edit landed; the fold mirrors it (the fact, not the request).
+     */
+    suspend fun page(boxId: Int, pageIndex: Int) {
+        mutex.withLock { fold(RenderEvent.Page(boxId, pageIndex), SimpleLineDiffer) }
+    }
+
     suspend fun peek(): TurnLive? = mutex.withLock { states.value }
+
+    /**
+     * THE SEALED BOXES' ARCHIVE: a box's MESSAGE outlives the turn that
+     * spoke it — its buttons must keep opening pages after the seal (the
+     * old registry survived it; the fold's Clear is the LIVE world's
+     * reset, not the chat's). A box id is turn-unique by construction
+     * (task hash + birth order), so merging seals never collides. /nuclear
+     * (clear with no sealedTaskId) wipes it: nothing survives a ☢️.
+     */
+    private var sealedBoxes: List<BoxLive> = emptyList()
+
+    /** A box by wire id — the LIVE turn's first, then the sealed archive. */
+    suspend fun box(boxId: Int): BoxLive? = mutex.withLock {
+        states.value?.boxes?.firstOrNull { it.boxId == boxId }
+            ?: sealedBoxes.firstOrNull { it.boxId == boxId }
+    }
 
     /**
      * After the seal is published the turn is spent; /nuclear also lands
@@ -172,8 +204,19 @@ class LiveHub {
      * null keeps the nuclear semantics (everything dies).
      */
     suspend fun clear(sealedTaskId: String? = null): Unit = mutex.withLock {
+        sealedBoxes = if (sealedTaskId == null) {
+            emptyList()
+        } else {
+            // newest seal first; the archive is bounded like the live list
+            (states.value?.boxes.orEmpty() + sealedBoxes).distinctBy { it.boxId }.take(SEALED_BOX_CAP)
+        }
         fold(RenderEvent.Clear, SimpleLineDiffer)
         if (sealedTaskId == null || pinnedTaskId == sealedTaskId) pinnedTaskId = null
+    }
+
+    private companion object {
+        /** The sealed archive's ceiling — the chat's own scrollback is the real limit. */
+        const val SEALED_BOX_CAP = 120
     }
 }
 
@@ -294,17 +337,10 @@ class LivePublisher(
      * THE CoT REGISTRY (the collapsed blocks' tap world) — built lazily
      * on the publisher's telegram edit leg. All access rides [tickMutex]
      * (the taps land here too): the registry itself stays a plain holder.
+     * (The TOOL OUTPUT boxes' world is NOT a registry anymore — U5b moved
+     * it into the fold: [RenderState.boxes].)
      */
     private val cotBlocks = CotBlocks { messageId, text, markup ->
-        telegram.edit(config(), messageId, text, markup)
-    }
-
-    /**
-     * THE OUTPUT PAGER's registry (the owner, 3/11): each collapsed shell
-     * output's message, header and numbered pages; the tap opens/flips a
-     * page IN PLACE. Same mutex contract as [cotBlocks].
-     */
-    private val boxPages = BoxPages { messageId, text, markup ->
         telegram.edit(config(), messageId, text, markup)
     }
 
@@ -537,18 +573,17 @@ class LivePublisher(
     }
 
     /**
-     * Speaks the feed's diff and REGISTERS every collapsed CoT message
-     * (via the registry's own speak-and-register): the message id (the
-     * tap's edit target), the block's number, its FULL text (the tap
-     * renders it whole) — the collapsed header is all the chat sees
-     * until the owner asks.
+     * Speaks the feed's diff and REGISTERS every collapsed message: a CoT
+     * block via its registry, a tool output box BY FOLDING its birth (U5b
+     * — the fold names the id, the send names the message). The collapsed
+     * header is all the chat sees until the owner asks.
      */
     private suspend fun speakFeed(feed: List<FeedMessage>, state: TurnLive) {
         feed.forEach { msg ->
             // a COLLAPSED tool output: the header speaks with its one
-            // button; the registry keeps the numbered pages for the taps
+            // button; the fold keeps the numbered pages for the taps
             msg.pages?.let { pages ->
-                boxPages.speakCollapsed(pages) { markup -> speak(msg.text, markup) }
+                speakBox(state, pages) { markup -> speak(msg.text, markup) }
                 return@forEach
             }
             val block = msg.block ?: run {
@@ -569,6 +604,26 @@ class LivePublisher(
     }
 
     /**
+     * Speaks ONE collapsed output box and folds its birth (U5b): the fold
+     * names the wire id — turn-unique by construction (the task's hash
+     * base + the birth order, so an old turn's button can never alias a
+     * new turn's box) — the send flies, and the born fact (the message id
+     * included) folds. A send that never flew folds NOTHING: there is no
+     * message to edit, the tap on it is an honest miss.
+     */
+    private suspend fun speakBox(
+        state: TurnLive,
+        pages: ToolOutputPages.Pages,
+        send: suspend (markup: JsonObject?) -> Long?,
+    ) {
+        val base = state.taskId.hashCode() and BOX_ID_MASK
+        val boxId = (hub.peek()?.boxes?.maxOfOrNull { it.boxId } ?: base) + 1
+        val mid = send(Keyboards.boxOpen(boxId)) ?: return
+        hub.boxBorn(state.taskId, boxId, pages.header, pages.pages, mid)
+        logger.info { "box born: id=$boxId message_id=$mid pages=${pages.pages.size}" }
+    }
+
+    /**
      * THE TAP (the owner's 2/11 refinement, verbatim): «el lugar para que
      * aparezca el texto ES EN EL BOTÓN del CoT» — the collapsed block's
      * message expands IN PLACE with the block WHOLE; another tap folds it
@@ -585,23 +640,50 @@ class LivePublisher(
         }
     }
 
-    /** The pager's tap: open/flip a page of the numbered output, in place. */
+    /**
+     * The pager's tap (U5b): render FROM the fold — the box's own header,
+     * numbered pages and message id — edit the message in place, and fold
+     * the [RenderEvent.Page] fact on success (a throttled edit flips
+     * NOTHING: the message keeps its page, the fold keeps its truth). A
+     * box the fold does not know (an old turn, a restart) answers the
+     * honest miss; null = the toast is silence (the edit speaks).
+     */
     override suspend fun open(registryId: Int, page: Int): String? = tickMutex.withLock {
         val cfg = config()
         if (!cfg.configured) {
             "📡 Sin Telegram configurado — no hay mensaje que abrir."
         } else {
-            boxPages.open(registryId, page)
+            val box = hub.box(registryId) ?: return@withLock BoxTaps.MISS
+            val index = page.coerceIn(0, box.pages.size - 1)
+            val ok = telegram.edit(
+                cfg,
+                box.messageId,
+                ToolOutputPages.renderPage(box.header, box.pages, index),
+                Keyboards.boxPages(registryId, index, box.pages.size),
+            )
+            if (ok) hub.page(registryId, index) // the mirror: the message shows page `index` now
+            logger.info {
+                val verdict = if (ok) "open" else "edit BLOCKED (throttle)"
+                "box tap: id=$registryId page=${index + 1}/${box.pages.size} -> $verdict"
+            }
+            null
         }
     }
 
-    /** The pager's way back: the message folds to its one-line header. */
+    /**
+     * The pager's way back: the message folds to its one-line header and
+     * the fold mirrors it ([BoxLive.FOLDED]) — same fact law as [open].
+     */
     override suspend fun fold(registryId: Int): String? = tickMutex.withLock {
         val cfg = config()
         if (!cfg.configured) {
             "📡 Sin Telegram configurado — no hay mensaje que abrir."
         } else {
-            boxPages.fold(registryId)
+            val box = hub.box(registryId) ?: return@withLock BoxTaps.MISS
+            val ok = telegram.edit(cfg, box.messageId, box.header, Keyboards.boxOpen(registryId))
+            if (ok) hub.page(registryId, BoxLive.FOLDED)
+            logger.info { "box tap: id=$registryId -> ${if (ok) "folded" else "fold BLOCKED (throttle)"}" }
+            null
         }
     }
 
@@ -804,5 +886,8 @@ class LivePublisher(
         /** The prize cache: one read per 5 min; a line older than 15 min goes silent. */
         const val GIFTS_REFRESH_MS = 300_000L
         const val GIFTS_STALE_MS = 900_000L
+
+        /** The box id's mask — the task's hash, kept non-negative for the wire. */
+        private const val BOX_ID_MASK = 0x7FFFFFFF
     }
 }

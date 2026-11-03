@@ -345,14 +345,15 @@ class BotCommands(
 
         // THE OUTPUT PAGER (the owner, 3/11): bp:<id>:<page> opens/flips a
         // numbered page IN PLACE; bf:<id> folds the message back to its
-        // header. The registry lives in the publisher; unwired or expired
-        // ids answer the honest miss (the toast), never silence.
+        // header. The boxes' state lives in the fold (U5b) and the tap edge
+        // is the publisher's; unwired or unknown ids answer the honest miss
+        // (the toast), never silence.
         data.startsWith("bp:") -> {
             val parts = data.removePrefix("bp:").split(":")
             val id = parts.getOrNull(0)?.toIntOrNull()
             val page = parts.getOrNull(1)?.toIntOrNull() ?: 0
             if (id == null || boxTaps == null) {
-                BotReply(BoxPages.MISS)
+                BotReply(BoxTaps.MISS)
             } else {
                 boxTaps.open(id, page)?.let { BotReply(it) }
             }
@@ -361,7 +362,7 @@ class BotCommands(
         data.startsWith("bf:") -> {
             val id = data.removePrefix("bf:").toIntOrNull()
             if (id == null || boxTaps == null) {
-                BotReply(BoxPages.MISS)
+                BotReply(BoxTaps.MISS)
             } else {
                 boxTaps.fold(id)?.let { BotReply(it) }
             }
