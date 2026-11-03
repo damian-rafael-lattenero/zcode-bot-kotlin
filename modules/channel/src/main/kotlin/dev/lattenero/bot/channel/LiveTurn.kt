@@ -931,6 +931,19 @@ object LiveTurn {
             error
     }
 
+    /**
+     * THE PARKED CARD's render — the owner's ⏸️ (3/11): the process card
+     * freezes here («▶️ sigue en background» as its LAST edit) and the
+     * honest note names the promise the 🔔 keeps: the 🏁 arrives when the
+     * turn seals. No timers on purpose — a parked card receives no more
+     * edits, and a frozen «hace 3m» would read as a live clock that died.
+     * The 🏁 lands as its own message right below this card, so the pair
+     * reads as the promise and its keeping.
+     */
+    fun parkText(state: TurnLive): String =
+        "⏸️ <b>«${PyText.esc(state.title)}»</b> — ▶️ sigue en background\n" +
+            "🔔 te aviso al terminar: el 🏁 llega cuando el turno selle"
+
     /** Seconds → «42s» / «3m12s» / «1h02m» — the timers' one spelling. */
     fun fmtDur(ms: Long): String {
         val totalSeconds = ms / 1000
