@@ -1,62 +1,127 @@
 package dev.lattenero.bot.daemon
 
 import java.io.File
+import java.nio.file.Files
+import kotlin.test.AfterTest
 import kotlin.test.Test
+import kotlin.test.assertContains
 import kotlin.test.assertEquals
-import kotlin.test.assertSame
+import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
- * B6's deploy edge pinned WITHOUT ever exec'ing a deploy: the builder's
- * detached flags are the contract — nohup in front of the script (the
- * shebang's interpreter, SIGHUP ignored), stdin from /dev/null, stdout+
- * stderr APPENDED to the deploy log (no pipe to a dying parent), errors
- * merged, and the cwd the script's own repo. The knob's ladder is here
- * too: the default repo script, the daemon.json override, the honest
- * degrade on garbage.
+ * B6's deploy edge pinned WITHOUT ever touching launchd: the job's plist
+ * is the contract. The owner's live /deploy (2/11 22:02) proved the old
+ * nohup+ProcessBuilder spawn died at the script's own bootout — launchd
+ * tears down the job's whole tree — so the script must be a SIBLING
+ * launchd job. The knob's ladder is here too: the default repo script,
+ * the daemon.json override, the honest degrade on garbage.
  */
 class DeploySpawnTest {
 
+    // a REAL writable tree: spawn() writes the plist and the log marker
+    private val tmp: File = Files.createTempDirectory("b6-deploy").toFile()
     private val script = File("/Users/fake/Projects/zcode-bot-kotlin/scripts/deploy-daemon.nu")
-    private val log = File("/Users/fake/.zcode/bot-kotlin/logs/deploy-daemon.log")
+    private val log = File(tmp, "logs/deploy-daemon.log")
+    private val plist = File(tmp, "state/deploy-job.plist")
+
+    @AfterTest
+    fun wipe() {
+        tmp.deleteRecursively()
+    }
+
+    private fun edge(launchctl: Launchctl = Launchctl { LaunchctlResult(0, "") }) = DeploySpawn(
+        script,
+        log,
+        plist,
+        uid = "501",
+        javaHome = "/jdk-25",
+        home = "/Users/fake",
+        launchctl = launchctl,
+    )
 
     @Test
-    fun theBuilderIsNohupOverTheScriptWithHerPinnedInterpreter() {
-        val cmd = DeploySpawn(script, log).builder().command()
-        assertEquals(listOf("/usr/bin/nohup", script.absolutePath), cmd)
+    fun theScriptIsItsOwnLaunchdJobNeverTheDaemonsChild() {
+        val p = edge().plist()
+        assertContains(p, "<string>${DeploySpawn.JOB_LABEL}</string>")
+        // the label is independent of the daemon's (the survival IS the point)
+        assertFalse(DeploySpawn.JOB_LABEL == "com.zcode.bot-daemon")
+        // one shot: RunAtLoad runs it once; KeepAlive would loop a deploy
+        assertContains(p, "<key>RunAtLoad</key>")
+        assertFalse(p.contains("<key>KeepAlive</key>"))
     }
 
     @Test
-    fun theBuildersStdioIsDetached() {
-        val b = DeploySpawn(script, log).builder()
-        // stdin: /dev/null — the script never reads a dying parent's pipe
-        assertEquals(ProcessBuilder.Redirect.Type.READ, b.redirectInput().type())
-        assertEquals("/dev/null", b.redirectInput().file()!!.path)
-        // stdout+stderr: ONE append stream into the deploy log — /file can fetch it later
-        assertEquals(ProcessBuilder.Redirect.Type.APPEND, b.redirectOutput().type())
-        assertSame(log, b.redirectOutput().file())
-        assertEquals(true, b.redirectErrorStream())
+    fun theJobRunsTheScriptFromItsOwnDirectory() {
+        val p = edge().plist()
+        assertContains(p, "<string>${script.absolutePath}</string>")
+        assertContains(p, "<string>${script.parentFile.path}</string>")
     }
 
     @Test
-    fun theBuilderRunsFromTheScriptsOwnDirectory() {
-        val b = DeploySpawn(script, log).builder()
-        assertEquals(script.parentFile, b.directory())
+    fun thePlistCarriesWhatLaunchdWouldNotInherit() {
+        val p = edge().plist()
+        // HOME: nu's home dir; JAVA_HOME: gradlew's JVM; PATH: launchctl/stat/cp + the JDK
+        assertContains(p, "<string>/Users/fake</string>")
+        assertContains(p, "<string>/jdk-25</string>")
+        assertContains(p, "/jdk-25/bin")
+        assertContains(p, "/usr/bin")
+        assertContains(p, "/Users/fake/.local/bin")
     }
 
     @Test
-    fun theLogLivesInTheDaemonsOwnLogsDir() {
-        // the name is the /file contract the spawned-note names
+    fun theLogIsTheJobsStdioAndTheFileNameIsFileSContract() {
+        val p = edge().plist()
+        assertEquals(2, Regex(Regex.escape(log.absolutePath)).findAll(p).count())
+        assertContains(p, "<key>StandardOutPath</key>")
+        assertContains(p, "<key>StandardErrorPath</key>")
         assertEquals("deploy-daemon.log", DeploySpawn.LOG_FILE_NAME)
-        assertTrue(DeploySpawn(script, log).builder().redirectOutput().file()!!.path.endsWith(".log"))
+    }
+
+    @Test
+    fun spawnBootstrapsASiblingJobAfterClearingAPreviousOne() {
+        val calls = mutableListOf<List<String>>()
+        val fake = Launchctl { args ->
+            calls += args
+            LaunchctlResult(0, "")
+        }
+        val out = edge(fake).spawn()
+
+        assertEquals(0, out.exit)
+        assertEquals(2, calls.size)
+        // bootout first (bootstrap refuses a loaded label), then bootstrap THIS plist
+        assertEquals(listOf("bootout", "gui/501", DeploySpawn.JOB_LABEL), calls[0])
+        assertEquals(listOf("bootstrap", "gui/501", plist.absolutePath), calls[1])
+        // the rendered plist is on disk — launchctl reads the FILE, not a string
+        assertTrue(plist.exists())
+        assertContains(plist.readText(), DeploySpawn.JOB_LABEL)
+    }
+
+    @Test
+    fun aFailedBootstrapThrowsLoudlySoThePhoneHearsIt() {
+        val fake = Launchctl { args ->
+            if (args.first() == "bootstrap") {
+                LaunchctlResult(5, "Bootstrap failed: 5: Input/output error")
+            } else {
+                LaunchctlResult(0, "")
+            }
+        }
+        val e = assertFailsWith<IllegalStateException> { edge(fake).spawn() }
+        assertContains(e.message.orEmpty(), "Input/output error")
+        assertContains(e.message.orEmpty(), DeploySpawn.JOB_LABEL)
+    }
+
+    @Test
+    fun theDomainIsTheDaemonsOwnGuiDomain() {
+        assertEquals("gui/501", edge().domain())
     }
 
     @Test
     fun theKnobDefaultsToTheRepoCheckoutWhenTheConfigIsSilent() {
         val missing = File("/nonexistent/daemon.json")
         assertEquals(DeployScriptKnob.DEFAULT, DeployScriptKnob.load(missing))
-        val silent = tempJson("{}")
-        assertEquals(DeployScriptKnob.DEFAULT, DeployScriptKnob.load(silent))
+        assertEquals(DeployScriptKnob.DEFAULT, DeployScriptKnob.load(tempJson("{}")))
     }
 
     @Test
