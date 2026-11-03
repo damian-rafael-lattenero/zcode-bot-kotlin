@@ -90,6 +90,9 @@ sealed interface InboundAnswer {
     data object Unavailable : InboundAnswer
 
     data class TimedOut(val waitedMs: Long) : InboundAnswer
+
+    /** The v4 command's own rejection, verbatim (sessionNotFound & friends). */
+    data class Failed(val code: String, val message: String?) : InboundAnswer
 }
 
 /** One live connection: serialized writes + the pending-request table, correlated by id. */
@@ -502,6 +505,52 @@ class ChannelClient(
                     InboundAnswer.Answered(duplicate = false, replies = listOf("${frame.code}: ${frame.message ?: ""}"))
 
                 else -> InboundAnswer.Answered(duplicate = false, emptyList())
+            }
+        } catch (e: ChannelDown) {
+            InboundAnswer.Unavailable
+        } catch (e: TimeoutCancellationException) {
+            InboundAnswer.TimedOut(timeout.inWholeMilliseconds)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            InboundAnswer.Unavailable
+        }
+    }
+
+    /**
+     * La ORDEN awaited (la ✍️ armada): el frame Inbound lleva `taskId`
+     * (el destino directo — NO el bindTaskId del bind) y ESPERA el
+     * veredicto del fork. Fire-and-forget aquí es una MENTIRA: el
+     * 2/11 lo probó — el frame sale, el fork rechaza 7ms después
+     * (proto.sessionNotFound) y el dueño ya leyó «Orden entregada».
+     * El ChannelError vuelve tipado ([InboundAnswer.Failed]) con el
+     * verbatim del host.
+     */
+    @Suppress("TooGenericExceptionCaught", "SwallowedException") // best-effort mirrors sendInboundAwait
+    suspend fun sendOrderAwait(
+        text: String,
+        messageId: String,
+        receivedAt: Long,
+        taskId: String,
+        timeout: Duration = INBOUND_ANSWER_TIMEOUT,
+    ): InboundAnswer {
+        val live = session ?: return InboundAnswer.Unavailable
+        val id = "r${ids.incrementAndGet()}"
+        return try {
+            when (
+                val frame = live.request(
+                    ClientFrame.Inbound(id, text, messageId, receivedAt, taskId = taskId),
+                    id,
+                    timeout,
+                )
+            ) {
+                is ServerFrame.InboundResult ->
+                    InboundAnswer.Answered(duplicate = frame.duplicate, replies = frame.replies)
+
+                is ServerFrame.ChannelError ->
+                    InboundAnswer.Failed(code = frame.code, message = frame.message)
+
+                else -> InboundAnswer.Answered(duplicate = false, replies = emptyList())
             }
         } catch (e: ChannelDown) {
             InboundAnswer.Unavailable

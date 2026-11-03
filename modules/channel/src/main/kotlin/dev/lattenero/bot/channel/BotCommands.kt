@@ -60,12 +60,15 @@ interface ChannelOps {
 
     /**
      * An ORDER direct to one session (the fork's inbound taskId — the ✍️
-     * armed shot at an attached subagent). The honest default for wiring
-     * that never learned orders: UNAVAILABLE — an order must NEVER ride
-     * the ordinary inbound and land in the wrong conversation.
+     * armed shot at an attached subagent), AWAITED: the answer is the
+     * fork's own truth — [InboundAnswer.Failed] carries the v4 rejection
+     * verbatim (the 2/11 lie: fire-and-forget said «entregada» while the
+     * fork rejected 7ms later). The honest default for wiring that never
+     * learned orders: UNAVAILABLE — an order must NEVER ride the ordinary
+     * inbound and land in the wrong conversation.
      */
-    suspend fun sendOrder(text: String, messageId: String, receivedAt: Long, taskId: String): InboundReceipt =
-        InboundReceipt.UNAVAILABLE
+    suspend fun sendOrder(text: String, messageId: String, receivedAt: Long, taskId: String): InboundAnswer =
+        InboundAnswer.Unavailable
 
     /**
      * STEER: redirigir el turno EN CURSO (la frame `steer` del canal —
@@ -550,13 +553,31 @@ class BotCommands(
             "route: ORDER to ${order.sessionId} («${order.title}»): ${text.take(ORDER_LOG_PREVIEW)}"
         }
         return when (
-            ops.sendOrder(text, messageId = "tg-$updateId-ord", receivedAt = clock(), taskId = order.sessionId)
+            val answer = ops.sendOrder(
+                text,
+                messageId = "tg-$updateId-ord",
+                receivedAt = clock(),
+                taskId = order.sessionId,
+            )
         ) {
-            InboundReceipt.FIRED -> BotReply(
+            is InboundAnswer.Answered -> BotReply(
                 "⚔️ Orden entregada a «${PyText.esc(order.title)}» — su respuesta llega en la carta attachada.",
             )
 
-            InboundReceipt.UNAVAILABLE -> BotReply(RouteTexts.CHANNEL_DOWN)
+            is InboundAnswer.Failed -> BotReply(
+                "⚠️ La orden NO entró («${PyText.esc(order.title)}»): ${PyText.esc(answer.code)} — " +
+                    // the verdict sits at the message's TAIL (…sendText rejected
+                    // (proto.sessionNotFound)) — the head is just the echo
+                    PyText.esc((answer.message ?: "?").takeLast(ORDER_FAIL_TAIL)) +
+                    "\nLa orden NO voló; el ✍️ queda libre.",
+            )
+
+            is InboundAnswer.TimedOut -> BotReply(
+                "🤔 El fork no contestó en ${answer.waitedMs}ms — estado de la orden desconocido. " +
+                    "Mirá la carta antes de reintentar.",
+            )
+
+            InboundAnswer.Unavailable -> BotReply(RouteTexts.CHANNEL_DOWN)
         }
     }
 
@@ -595,6 +616,12 @@ class BotCommands(
                 // no verdict in the window: the frame MAY have flown —
                 // never re-send (double delivery); speak the doubt
                 logger.warn { "route: atomic bind to ${plan.sid} TIMED OUT after ${answer.waitedMs}ms" }
+                BotReply(RouteTexts.BIND_FAILED)
+            }
+
+            is InboundAnswer.Failed -> {
+                // the fork's own rejection, verbatim (sessionNotFound & friends)
+                logger.warn { "route: atomic bind to ${plan.sid} REJECTED (${answer.code})" }
                 BotReply(RouteTexts.BIND_FAILED)
             }
         }
@@ -942,6 +969,7 @@ class BotCommands(
         val replies = when (sent) {
             is InboundAnswer.Answered -> sent.replies
             is InboundAnswer.Unavailable -> return BindOutcome.Failed("channel down")
+            is InboundAnswer.Failed -> return BindOutcome.Failed(sent.code)
             is InboundAnswer.TimedOut -> {
                 logger.warn { "bind: /task $taskId answered nothing in ${sent.waitedMs}ms — polling botStatus" }
                 emptyList()
@@ -2354,6 +2382,9 @@ class BotCommands(
 
         /** The armed order's log preview cap. */
         private const val ORDER_LOG_PREVIEW = 60
+
+        /** The failure message's shown tail — the v4 verdict lives at the end. */
+        private const val ORDER_FAIL_TAIL = 140
         internal const val NAMES_IN_NUCLEAR = 3
 
         /** Python's caps: /task lists 10, /all_tasks 20, picks resolve against 30. */

@@ -68,14 +68,17 @@ class TaskAttachTest {
 
         val orders = mutableListOf<Pair<String, String>>() // text to taskId
 
+        /** The fork's verdict for the next order — the awaited truth. */
+        var orderAnswer: InboundAnswer = InboundAnswer.Answered(duplicate = false, replies = emptyList())
+
         override suspend fun sendOrder(
             text: String,
             messageId: String,
             receivedAt: Long,
             taskId: String,
-        ): InboundReceipt {
+        ): InboundAnswer {
             orders.add(text to taskId)
-            return InboundReceipt.FIRED
+            return orderAnswer
         }
     }
 
@@ -678,6 +681,46 @@ class TaskAttachTest {
         val card = bc.onCallback("sn:$laneTail", 9L)!!
         assertTrue("💀 terminó" in card.text, "got: ${card.text}")
         assertEquals(null, card.markup, "a dead card earns no buttons")
+    }
+
+    @Test
+    fun aForkRejectionRidesBackHonestNeverAsEntregada() = runBlocking {
+        // the 2/11 lie, typed: the fork rejected the order 7ms after the
+        // wire (proto.sessionNotFound) while the bot said «Orden entregada».
+        // The awaited order speaks the fork's verdict VERBATIM instead.
+        val ops = FakeOps(boundStatus).apply { answers["activeTaskIds"] = """[]""" }
+        val history = FakeHistory(rows).apply {
+            runningSubs = listOf("sess_subagent_agent_x")
+            runningTitled = listOf(RunningSubagent("sess_subagent_agent_x", "helper", lastMs = 1_000_000L))
+        }
+        val hub = LiveHub()
+        val bc = BotCommands(
+            ops = ops,
+            hub = hub,
+            daemonReset = { "fake ladder" },
+            clock = { 1_000_000L },
+            history = history,
+            defaultWorkspacePath = "/Users/damian/.zcode/workspace/default",
+        )
+        hub.apply(
+            streamEvent(
+                "task-02",
+                """{"type":"tool_call","toolId":"$laneId","toolName":"Task","subagentAgentId":"agent_x"}""",
+                1,
+            ),
+            1_000_000L,
+        )
+        val arm = bc.onCallback("so:$laneTail", 9L)!!
+        assertTrue("Armado" in arm.text)
+        ops.orderAnswer = InboundAnswer.Failed(
+            code = "internal",
+            message = "order to sess_subagent_agent_x failed: v4 command sendText rejected (proto.sessionNotFound)",
+        )
+        val ack = bc.handle("hace un resumen", 10L)!!
+        assertTrue("NO entró" in ack.text, "got: $ack")
+        assertTrue("sessionNotFound" in ack.text, "the verbatim rides: ${ack.text}")
+        assertTrue("NO voló" in ack.text)
+        assertEquals(1, ops.orders.size, "the attempt happened")
     }
 
     @Test

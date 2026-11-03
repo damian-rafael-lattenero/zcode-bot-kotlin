@@ -465,13 +465,15 @@ private fun buildPoller(
                     attachments: List<InboundAttachment>,
                 ) = client.sendInbound(text, messageId, receivedAt, attachments = attachments)
 
-                // the ✍️ armed order: direct to the named session (the fork's inbound taskId)
+                // the ✍️ armed order: direct to the named session (the fork's
+                // inbound taskId), AWAITED — the fork's rejection is the reply
+                // (fire-and-forget said «entregada» to a sessionNotFound, 2/11)
                 override suspend fun sendOrder(
                     text: String,
                     messageId: String,
                     receivedAt: Long,
                     taskId: String,
-                ) = client.sendInbound(text, messageId, receivedAt, taskId)
+                ) = client.sendOrderAwait(text, messageId, receivedAt, taskId)
 
                 // STEER: the running turn's redirection (the fork's `steer` frame, awaited)
                 override suspend fun steer(taskId: String, text: String) = client.steer(taskId, text)
