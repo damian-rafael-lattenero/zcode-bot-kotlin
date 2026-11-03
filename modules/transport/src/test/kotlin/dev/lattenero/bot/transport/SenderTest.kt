@@ -16,6 +16,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import org.junit.jupiter.api.io.TempDir
 import java.io.File
 import java.io.IOException
+import kotlin.time.Duration.Companion.seconds
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -34,7 +35,7 @@ class SenderTest {
     @TempDir
     lateinit var dir: File
 
-    private var clock = 1000.0
+    private val clock = kotlin.time.TestTimeSource()
     private val cfg = TgConfig(token = "T0K", chatId = JsonPrimitive(555))
     private val requests = mutableListOf<HttpRequestData>()
     private var behavior: suspend MockRequestHandleScope.(Int) -> HttpResponseData = {
@@ -55,7 +56,7 @@ class SenderTest {
             Cooldown(readFile = { cooldownFile }, writeFile = { cooldownFile }),
             Outbox(outboxFile),
             LastPh({ lastPhFile }),
-            TgBreaker(time = { clock }),
+            TgBreaker(timeSource = clock),
         )
     }
 
@@ -252,7 +253,7 @@ class SenderTest {
         assertEquals(15, requests.size, "the OPEN breaker rejects before the wire — to the outbox")
         assertEquals(6, parkedTexts().size)
 
-        clock += TgBreaker.BREAKER_OPEN_S // the open window passes
+        clock += TgBreaker.BREAKER_OPEN_S.seconds // the open window passes
         behavior = { respond("""{"result": {"message_id": 9}}""") }
         assertIs<SendResult.Sent>(s.send(cfg, "the probe"))
         assertEquals("HALF_OPEN", s.breakerState, "one clean send is not two")
