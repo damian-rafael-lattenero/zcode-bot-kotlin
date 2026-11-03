@@ -240,7 +240,8 @@ class BotCommandsTest {
         val o = ops().apply { answers["activeTaskIds"] = """["task-77"]""" }
         val (bc, _) = commands(o)
         assertEquals(
-            "⏳ The previous task's turn is still running — /stop first, then pick again.",
+            "⏳ The previous task's turn is still running — the switch did NOT happen. " +
+                "/stop first, then pick again.",
             bc.reply("/tasks @task-02", 1L),
         )
         assertTrue(o.inbound.isEmpty()) // the doomed bind never fires
