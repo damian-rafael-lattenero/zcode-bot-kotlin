@@ -53,7 +53,12 @@ sealed interface ChannelQuery {
 
     data class TaskMeta(val taskId: String, val workspacePath: String? = null) : ChannelQuery
 
-    data class TaskSnapshot(val taskId: String, val workspacePath: String? = null) : ChannelQuery
+    data class TaskSnapshot(
+        val taskId: String,
+        val workspacePath: String? = null,
+        /** The fork's own window knob: /mode reads `meta` and asks for ONE message. */
+        val messageLimit: Int? = null,
+    ) : ChannelQuery
 
     /**
      * The /context_window command's read: the conversation's REAL context
@@ -99,6 +104,15 @@ sealed interface ChannelQuery {
     ) : ChannelQuery
 
     data class Stop(val taskId: String) : ChannelQuery
+
+    /**
+     * /mode's write (the A4 fork cap `control:setMode`): the conversation's
+     * collaboration mode through the SAME switch the desktop toolbar uses.
+     * The fork validates the vocabulary at the edge — an unknown mode is a
+     * `bad_request` there, never a silent downgrade (the adapter's
+     * historical `?? "build"` fallback is exactly what A4 gated).
+     */
+    data class SetMode(val taskId: String, val mode: String) : ChannelQuery
 
     data class StopAll(val workspacePath: String? = null) : ChannelQuery
 
@@ -298,6 +312,7 @@ private fun encodeQuery(query: ChannelQuery): JsonObject = when (query) {
         put("kind", "taskSnapshot")
         put("taskId", query.taskId)
         if (query.workspacePath != null) put("workspacePath", query.workspacePath)
+        if (query.messageLimit != null) put("messageLimit", query.messageLimit)
     }
 
     is ChannelQuery.ContextWindow -> buildJsonObject {
@@ -337,6 +352,12 @@ private fun encodeQuery(query: ChannelQuery): JsonObject = when (query) {
     is ChannelQuery.Stop -> buildJsonObject {
         put("kind", "stop")
         put("taskId", query.taskId)
+    }
+
+    is ChannelQuery.SetMode -> buildJsonObject {
+        put("kind", "setMode")
+        put("taskId", query.taskId)
+        put("mode", query.mode)
     }
 
     is ChannelQuery.StopAll -> buildJsonObject {
@@ -547,6 +568,7 @@ fun queryKind(query: ChannelQuery): String = when (query) {
     is ChannelQuery.Stop -> "stop"
     is ChannelQuery.StopAll -> "stopAll"
     is ChannelQuery.Compact -> "compact"
+    is ChannelQuery.SetMode -> "setMode"
 }
 
 // ---- tiny JSON readers (JsonObject's stdlib accessors made shorter) ----------

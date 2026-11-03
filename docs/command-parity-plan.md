@@ -85,6 +85,17 @@ post-U2.5 hot-fix queue, NOT a re-order of the compass) and
   it, and the bootstrap flew milliseconds later. `DeploySpawn.spawn` now
   retries once after 2 s (lib/deploy.nu's measured fix) and writes its
   receipt line only AFTER a successful bootstrap.
+- **/mode** (owner's «Si», 3/11): the last unit of the batch. `setMode`
+  rides the A4 cap (`control:setMode`) — the SAME switch the desktop
+  toolbar uses, so phone and app can never disagree. Five modes (the
+  fork's `DAEMON_CHANNEL_MODES`, Python's plan/yolo first; labels copied
+  from the app's en-US i18n: 🗺/🔓/🛠/📝/🛡), the current one READ from
+  `taskSnapshot.meta.mode` through the adapter's own aliases
+  (default/acceptEdits → build, bypassPermissions/dontAsk → yolo), five
+  `mo:` rows with 🎯 on the one in force. An unknown word is refused with
+  the real vocabulary and sends NOTHING (a typo must never downgrade a
+  conversation); an old host gets the fork-deploy line. The read asks for
+  ONE message (`messageLimit=1` — meta only).
 - **The ORDER pulse gate + the sn: detail card** (66d6a7e, the owner's
   live proof 20:34): two orders into the ⏹️ agent's dead session bounced
   nothing — now the ✍️ arm and the fire both ask the tri-state pulse
