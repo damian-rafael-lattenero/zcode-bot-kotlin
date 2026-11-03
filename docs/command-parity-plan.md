@@ -147,6 +147,23 @@ post-U2.5 hot-fix queue, NOT a re-order of the compass) and
   moved to `QuotaFetch.kt` with the same redaction law. Same commit: the
   context meter climbs to M — the owner's «en vez de 1000k me gustaría que
   diga 1M» (1M, 1.2M; below the rung it stays K).
+- **The prize line, the output pager and the line-number law** (the
+  owner's 3/11 four-item order; the fork merge is its item 1): the
+  WORKING card carries a small «🎁 Premios» line while a turn runs —
+  reset counts per window with their REAL earliest expiry, the claimable
+  offer's name/tokens when known, silence when there is nothing; the
+  detail and the taps stay in /quota (the publisher caches one
+  `codingPlanGifts` read per 5 min, 15-min freshness ceiling). Shell
+  outputs now travel COMPRESSED behind ONE button (`bp:<id>:<page>`):
+  the tap opens the numbered output IN PLACE, page buttons flip it, the
+  fold returns the header — no wall of text in the chat. And every file
+  the bot shows carries its REAL line numbers (the owner: «no sé bien lo
+  que estoy leyendo a qué línea corresponde»): bash/read pages number
+  from 1 / from the read's offset, write lines already did, the Edit
+  diffs now emit their `@@` hunks into `colorizeDiff` (Python's bare
+  circles were the parity ceiling) and `/diff` numbers every `+`/`−` line
+  with its old/new position. The Python golden keeps the tool boxes byte
+  for byte; its 9 diff vectors were regenerated under the new law.
 
 ## Execution doctrine
 

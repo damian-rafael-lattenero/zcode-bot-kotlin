@@ -153,16 +153,32 @@ internal object MiniDiff {
         }
         val ops = ops(beforeLines ?: emptyList(), afterLines)
         val out = mutableListOf<String>()
-        out.add("@@ -${beforeLines?.size ?: 0} +${afterLines.size} @@")
+        // THE OWNER'S LINE-NUMBER LAW (3/11): every body line carries its
+        // REAL position — new file for +, old file for − — so a hunk read
+        // on the phone is never an anonymous snippet. No @@ header: the
+        // file's own +A/−D head already speaks the totals.
+        var oldNo = 1
+        var newNo = 1
         for (op in ops) {
             when (op) {
-                is Op.Add -> out.add("+ ${op.line}")
-                is Op.Del -> out.add("− ${op.line}")
-                is Op.Same -> {}
+                is Op.Add -> {
+                    out.add("+ $newNo│ ${op.line}")
+                    newNo++
+                }
+
+                is Op.Del -> {
+                    out.add("− $oldNo│ ${op.line}")
+                    oldNo++
+                }
+
+                is Op.Same -> {
+                    oldNo++
+                    newNo++
+                }
             }
             if (out.size >= maxLines) return out.take(maxLines) + listOf("✂️ …")
         }
-        if (out.size == 1) out.add("(sin cambios de texto)")
+        if (out.isEmpty()) out.add("(sin cambios de texto)")
         return out
     }
 

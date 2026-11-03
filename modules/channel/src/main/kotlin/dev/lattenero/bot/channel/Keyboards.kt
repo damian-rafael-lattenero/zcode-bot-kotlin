@@ -418,6 +418,42 @@ object Keyboards {
     }
 
     /**
+     * A COLLAPSED tool output's one door (the owner, 3/11: «los outputs de
+     * bash comprimidos en un único botón»): the registry id rides the data
+     * (`bp:<id>:0`), a few bytes — the 64-byte law never breathes.
+     */
+    fun boxOpen(registryId: Int): JsonObject = buildJsonObject {
+        putJsonArray("inline_keyboard") {
+            add(buildJsonArray { add(button("📜 Ver salida", "bp:$registryId:0")) })
+        }
+    }
+
+    /**
+     * The OPENED output's navigator: one numbered button per page in rows
+     * of [PAGES_PER_ROW] (▸ marks the page in view), then the way back
+     * (`bf:<id>`). Every page of the output is one tap away — never one
+     * wall of text in the chat.
+     */
+    fun boxPages(registryId: Int, index: Int, count: Int): JsonObject = buildJsonObject {
+        putJsonArray("inline_keyboard") {
+            val rows = (0 until count).chunked(PAGES_PER_ROW)
+            for (row in rows) {
+                add(
+                    buildJsonArray {
+                        for (i in row) {
+                            val label = if (i == index) "▸${i + 1}" else "${i + 1}"
+                            add(button(label, "bp:$registryId:$i"))
+                        }
+                    },
+                )
+            }
+            add(buildJsonArray { add(button("🔙 Cerrar", "bf:$registryId")) })
+        }
+    }
+
+    private const val PAGES_PER_ROW = 5
+
+    /**
      * /queue's rows: one per parked text, 🚀 launch + 🗑 discard on the
      * same row (the owner decides per text, not per queue). The preview
      * is one line, capped; `ql:tg-<updateId>` worst case ≈ 20 bytes —

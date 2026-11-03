@@ -378,7 +378,10 @@ class LivePublisherTest {
             nowMs = 1_600,
         )
         publisher.tick()
-        assertTrue(spoken.any { it == "BOX(Bash)" }, "NORMAL: the close speaks the injected box")
+        assertTrue(
+            spoken.any { "⚡ <b>Bash</b>" in it && "tocar para ver" in it },
+            "NORMAL: the close collapses behind its button (the owner's 3/11)",
+        )
     }
 
     @Test
@@ -497,7 +500,10 @@ class LivePublisherTest {
         publisher.tick() // the seal tick
         // the remainder first (the unseen close + the unsealed thought tail
         // COLLAPSED — the tap opens it), then the record, then the answer LAST
-        assertTrue(spoken.any { it == "BOX(Bash)" }, "the unseen close speaks at the seal")
+        assertTrue(
+            spoken.any { "⚡ <b>Bash</b>" in it && "tocar para ver" in it },
+            "the unseen close speaks (collapsed) at the seal",
+        )
         val tail = spoken.firstOrNull { "sin sellar" in it }
         assertTrue(tail != null, "the unsealed tail loses nothing — it travels collapsed")
         assertTrue("tocar para leer" in tail!!)

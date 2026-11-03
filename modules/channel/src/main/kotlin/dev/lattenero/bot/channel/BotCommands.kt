@@ -172,6 +172,12 @@ class BotCommands(
      */
     private val blockTaps: CoTTaps? = null,
     /**
+     * The collapsed TOOL OUTPUTS' taps (the `bp:`/`bf:` buttons): the
+     * publisher's pager registry — open a numbered page in place, fold it
+     * back. Null (unwired) = the honest miss.
+     */
+    private val boxTaps: BoxTaps? = null,
+    /**
      * The last fired prompt's store (Python's F22): the SAVE rides the
      * free-text fire path's success branch, /retry reads it back. Null =
      * unwired (tests): /retry answers the honest «nada» and the save is
@@ -318,6 +324,30 @@ class BotCommands(
                 BotReply("📖 Ese botón quedó de otro turno — los bloques CoT se abren en sus propios mensajes.")
             } else {
                 blockTaps.toggle(id)?.let { BotReply(it) }
+            }
+        }
+
+        // THE OUTPUT PAGER (the owner, 3/11): bp:<id>:<page> opens/flips a
+        // numbered page IN PLACE; bf:<id> folds the message back to its
+        // header. The registry lives in the publisher; unwired or expired
+        // ids answer the honest miss (the toast), never silence.
+        data.startsWith("bp:") -> {
+            val parts = data.removePrefix("bp:").split(":")
+            val id = parts.getOrNull(0)?.toIntOrNull()
+            val page = parts.getOrNull(1)?.toIntOrNull() ?: 0
+            if (id == null || boxTaps == null) {
+                BotReply(BoxPages.MISS)
+            } else {
+                boxTaps.open(id, page)?.let { BotReply(it) }
+            }
+        }
+
+        data.startsWith("bf:") -> {
+            val id = data.removePrefix("bf:").toIntOrNull()
+            if (id == null || boxTaps == null) {
+                BotReply(BoxPages.MISS)
+            } else {
+                boxTaps.fold(id)?.let { BotReply(it) }
             }
         }
 

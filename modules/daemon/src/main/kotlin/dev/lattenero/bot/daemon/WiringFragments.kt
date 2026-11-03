@@ -3,6 +3,7 @@ package dev.lattenero.bot.daemon
 import dev.lattenero.bot.channel.BotCommands
 import dev.lattenero.bot.contracts.PyText
 import dev.lattenero.bot.channel.ToolLive
+import dev.lattenero.bot.channel.ToolOutputPages
 import dev.lattenero.bot.daemon.spectator.ToolBox
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -70,7 +71,11 @@ internal fun feedBoxOf(tool: ToolLive): String {
     val tail = if (out.isNullOrBlank() || alreadyShown) {
         ""
     } else {
-        "\n↳ <pre>${PyText.esc(PyText.htmlClip(out, OUTPUT_TAIL_CP))}</pre>"
+        // the tail's lines carry their REAL numbers (the owner, 3/11) —
+        // numbering happens BEFORE the cap, so a clipped tail still says
+        // which lines it is showing
+        val numbered = ToolOutputPages.pages(out, pageCp = OUTPUT_TAIL_CP).first()
+        "\n↳ <pre>${PyText.esc(numbered)}</pre>"
     }
     return box + tail
 }

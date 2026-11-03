@@ -578,6 +578,9 @@ private fun buildPoller(
         board = board,
         quotaDirect = quotaDirectRung(cfg),
         blockTaps = liveView,
+        // the collapsed outputs' pager (the same publisher owns both
+        // registries: the tap edits the message it spoke)
+        boxTaps = liveView,
         lastPrompt = lastPrompt,
     )
     return Poller(
