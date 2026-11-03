@@ -6,6 +6,8 @@ import dev.lattenero.bot.daemon.bus.EventBusKnob
 import dev.lattenero.bot.daemon.metrics.Lane
 import dev.lattenero.bot.daemon.metrics.MetricsKnob
 import dev.lattenero.bot.daemon.metrics.MetricsStack
+import dev.lattenero.bot.daemon.otel.OtelKnob
+import dev.lattenero.bot.daemon.otel.OtelStack
 import dev.lattenero.bot.daemon.send.DaemonSend
 import dev.lattenero.bot.daemon.send.LiveLane
 import dev.lattenero.bot.daemon.send.SendKnob
@@ -106,6 +108,20 @@ fun main(args: Array<String>) {
     if (metricsServer != null) {
         logger.info { "metrics endpoint ON: http://127.0.0.1:${metricsKnob.port}/metrics (loopback only)" }
     }
+
+    // E3's otel knob: read ONCE at boot, SHIPPED OFF. OFF is the strict
+    // zero — no SDK, no exporter, no batch thread, no tracker; the daemon
+    // is byte-for-byte the pre-E3 one. ON builds the SDK and the batch
+    // OTLP exporter: it EXPORTS to the endpoint (the batch's own thread —
+    // a dead collector is one log line, never a broken turn) and binds
+    // nothing.
+    val otelKnob = OtelKnob.load(knobFile)
+    if (otelKnob.warning != null) logger.warn { "otel knob $knobFile: ${otelKnob.warning}" }
+    logger.info { "otel knob: on=${otelKnob.on} endpoint=${otelKnob.endpoint} (file=$knobFile)" }
+    val otelStack = OtelStack.fromKnob(otelKnob, log = { message -> logger.warn { message } })
+    if (otelStack.tracker != null) {
+        logger.info { "otel ON: batch OTLP → ${otelKnob.endpoint} (exports only, binds nothing)" }
+    }
     // The owner's key-moment notifications (🔔): read ONCE at boot. The
     // house knobs' INVERSE: garbage stays ON (the owner's explicit order
     // makes ON the safe default) and only an explicit false silences.
@@ -143,6 +159,7 @@ fun main(args: Array<String>) {
         memoryInjectOn = memoryKnob.on,
         metrics = metrics,
         notificationsOn = notifKnob.on,
+        otel = otelStack.tracker,
     )
 
     val clock = { System.currentTimeMillis() / MILLIS_PER_SECOND }
@@ -263,6 +280,7 @@ fun main(args: Array<String>) {
                 pingHandle.stop()
                 channelHandle.stop()
                 metricsServer?.stop(SERVER_STOP_DELAY) // the /metrics listener dies with the daemon
+                otelStack.close() // the batch's last export lands before the JVM dies
                 stack.bus?.close() // in-flight bus reply reads die with the daemon
                 stack.client.close() // unblocks the session's read so the process can end
                 api?.close() // the live leg's client — no sends outlive the daemon
