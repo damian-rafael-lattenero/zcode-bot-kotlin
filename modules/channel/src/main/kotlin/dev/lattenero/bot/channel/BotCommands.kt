@@ -756,7 +756,7 @@ class BotCommands(
     }
 
     /**
-     * /run <prompt> — Python's _cmd_run (handlers_tasks.py:343): a FRESH
+     * /run «prompt» — Python's _cmd_run (handlers_tasks.py:343): a FRESH
      * conversation and the prompt in it, ONE shot. The channel-side
      * guarantee (B5's make-or-break, closed with existing caps — no
      * createTask needed): /new (the fork's own bot-chat command, it rides
@@ -2345,7 +2345,7 @@ class BotCommands(
 
         /** /run's usage (Python's line; the project tag honestly retired — /tasks new's law). */
         internal const val RUN_USAGE =
-            "⚠️ /run <prompt> — abre una conversación NUEVA en el proyecto activo y manda el prompt. " +
+            "⚠️ /run «prompt» — abre una conversación NUEVA en el proyecto activo y manda el prompt. " +
                 "(Cambiar de proyecto desde el phone es el próximo hot-fix.)"
 
         /** /run with no bot context at all: nothing to spawn from (the fork's inbound needs the context). */
@@ -2419,7 +2419,7 @@ class BotCommands(
             "compact" to "shrinks the active conversation's context",
             "context_window" to "context window used — tokens, model window and percent",
             "queue" to "the parked texts — launch or discard",
-            "run" to "opens a NEW conversation in the active project and sends the prompt — /run <prompt>",
+            "run" to "opens a NEW conversation in the active project and sends the prompt — /run «prompt»",
             "steer" to "steers the RUNNING turn — the text enters the live turn",
             "stop" to "stops the active task's turn",
             "nuclear" to "emergency: stops EVERYTHING and resets the bot",
@@ -2439,7 +2439,7 @@ class BotCommands(
                 "",
                 "Anything else is TEXT: it goes to the ACTIVE conversation (live mode) " +
                     "and the live view shows every thought, tool and line as it happens. " +
-                    "Free text never opens a new one — /tasks new or /run <prompt> do.",
+                    "Free text never opens a new one — /tasks new or /run «prompt» do.",
             )).joinToString("\n")
 
         /**
