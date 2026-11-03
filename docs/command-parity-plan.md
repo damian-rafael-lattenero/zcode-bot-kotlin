@@ -96,6 +96,23 @@ post-U2.5 hot-fix queue, NOT a re-order of the compass) and
 - **Landed alongside**: ⏹️ stop-subagent on live lanes (2c9a73d), the
   Working-bar faithful mirror + collapsed CoT (📖/🙈 in-place toggle),
   ⏹️ buttons only on fresh rows (honest-indicator law).
+- **/quota goes provider-aware + the 1M rung** (owner's 3/11): the ladder's
+  direct leg was z.ai-hardcoded, so an OpenCode Go conversation still read
+  the retired coding plan. Measured live that the provider publishes its
+  own meter — `GET https://opencode.ai/zen/go/v1/usage` (Bearer = the
+  app's provider key) answers `{"usage":{rolling,weekly,monthly:{status,
+  percent,resetsAt}}}`; `zen/v1/usage` = 404 (Go only), and Cloudflare
+  needs the app's UA/version headers (error 1010 otherwise). New
+  `OpencodeQuota.kt` (pure parse/render/rule-pick + injected fetch) and
+  the rung now takes the ACTIVE conversation's providerId (from
+  `modelSelection`) and serves that provider's meter — z.ai conversations
+  keep QuotaDirect, OpenCode ones get ⏱/📅/🗓 windows with ⚠️≥75%, ⛔100%,
+  and an unreadable OpenCode meter says «key/red», never the fork's
+  misleading `not_configured`. The key comes from the app's live
+  `v2/provider_config.json` (the hook snapshot stays as fallback); the GET
+  moved to `QuotaFetch.kt` with the same redaction law. Same commit: the
+  context meter climbs to M — the owner's «en vez de 1000k me gustaría que
+  diga 1M» (1M, 1.2M; below the rung it stays K).
 
 ## Execution doctrine
 
