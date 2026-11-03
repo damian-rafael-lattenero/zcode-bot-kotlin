@@ -107,12 +107,23 @@ class Poller(
     /** The bot explains its own silences: a long getUpdates failure window ends with the apology. */
     private val onReconnected: suspend (MuteWindow) -> Unit = {},
     private val clock: () -> Long = System::currentTimeMillis,
+    /**
+     * The wiring's E2 tap: one call per completed pass with its outcome
+     * (a plain lambda — this module stays stdlib-pure).
+     */
+    private val onCycle: (PollOutcome) -> Unit = {},
 ) {
     private val mute = MuteTracker(clock)
 
     /** One cycle: fetch → filter → dispatch → confirm the offset. */
-    @Suppress("TooGenericExceptionCaught", "SwallowedException", "ReturnCount") // poison must not crash-loop (F35b)
     suspend fun cycle(cfg: TgConfig): PollOutcome {
+        val outcome = runCycle(cfg)
+        onCycle(outcome)
+        return outcome
+    }
+
+    @Suppress("TooGenericExceptionCaught", "SwallowedException", "ReturnCount") // poison must not crash-loop (F35b)
+    private suspend fun runCycle(cfg: TgConfig): PollOutcome {
         if (!cfg.configured) return PollOutcome(TgOffset.current(offsetFile), 0)
         val offset = TgOffset.current(offsetFile)
         val (next, messages) = try {

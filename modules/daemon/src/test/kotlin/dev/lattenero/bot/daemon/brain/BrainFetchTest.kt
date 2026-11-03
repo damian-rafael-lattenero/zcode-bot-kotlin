@@ -1,6 +1,9 @@
 package dev.lattenero.bot.daemon.brain
 
 import dev.lattenero.bot.channel.BrainReply
+import dev.lattenero.bot.daemon.metrics.MicrometerMetrics
+import io.micrometer.prometheusmetrics.PrometheusConfig
+import io.micrometer.prometheusmetrics.PrometheusMeterRegistry
 import io.ktor.client.engine.HttpClientEngine
 import io.ktor.client.engine.HttpClientEngineFactory
 import io.ktor.client.engine.mock.MockEngine
@@ -129,4 +132,32 @@ class BrainFetchTest {
         assertEquals(BrainEndpoint.DEFAULT_URL, garbage.url)
         assertTrue(garbage.warning!!.contains("unreadable"))
     }
+
+    /** E2's taps: EVERY request's latency on the timer; non-2xx, timeout and down counted as failures. */
+    @Test
+    fun theMetricsTapTimesTheRequestsAndCountsTheFailures() = runBlocking {
+        val reg = PrometheusMeterRegistry(PrometheusConfig.DEFAULT)
+        val m = MicrometerMetrics(reg)
+        brainCall(
+            baseUrl = "http://127.0.0.1:8765", method = HttpMethod.Get, path = "/rag/stats",
+            engine = mockFactory { respond("{}", HttpStatusCode.OK) }, metrics = m,
+        )
+        brainCall(
+            baseUrl = "http://127.0.0.1:8765", method = HttpMethod.Get, path = "/bus/status",
+            engine = mockFactory { respond("{}", HttpStatusCode.InternalServerError) }, metrics = m,
+        )
+        brainCall(
+            baseUrl = "http://127.0.0.1:8765", method = HttpMethod.Get, path = "/memory/status",
+            engine = mockFactory { throw ConnectException("Connection refused") }, metrics = m,
+        )
+        val scrape = reg.scrape()
+        assertEquals(3.0, valueOf(scrape, "bot_brain_request_seconds_count"))
+        assertEquals(2.0, valueOf(scrape, "bot_brain_failures_total"), "500 and refused; the 200 was fine")
+    }
+
+    private fun valueOf(scrape: String, metric: String): Double? =
+        scrape.lineSequence()
+            .firstOrNull { it.startsWith(metric) }
+            ?.substringAfterLast(' ')
+            ?.toDoubleOrNull()
 }

@@ -42,6 +42,9 @@ import dev.lattenero.bot.daemon.brain.brainGateway
 import dev.lattenero.bot.daemon.history.LIVE_VERBS
 import dev.lattenero.bot.daemon.history.SEQUENCE_LINE_DIFFER
 import dev.lattenero.bot.daemon.history.TasksHistoryIo
+import dev.lattenero.bot.daemon.metrics.Metrics
+import dev.lattenero.bot.daemon.metrics.NoopMetrics
+import dev.lattenero.bot.daemon.metrics.TurnMetricsTap
 import dev.lattenero.bot.daemon.nuclear.MacProcessEdge
 import dev.lattenero.bot.daemon.nuclear.NuclearLadder
 import dev.lattenero.bot.daemon.queue.InboundQueue
@@ -180,6 +183,8 @@ internal fun wireChannel(
     eventBusOn: Boolean = false,
     /** U3: the `memory_inject` knob — OFF means the send path never touches the brain. */
     memoryInjectOn: Boolean = false,
+    /** E2: the `metrics` knob's facade — the no-op when OFF (zero cost, byte-identical daemon). */
+    metrics: Metrics = NoopMetrics,
 ): ChannelStack {
     val hub = LiveHub()
     val tokenFile = File(cfg.baseDir, ChannelSpec.TOKEN_FILENAME)
@@ -246,6 +251,10 @@ internal fun wireChannel(
     // U1b: the producer is assigned right after the client exists (its
     // final-answer read is a channel query) — the callback reads the holder.
     var busTaps: BusProducer? = null
+    // E2: the turn tap — built ONLY when the facade measures (the busTaps
+    // pattern); it counts the same frames the producer reads, never double-
+    // counting the sink (whose written/failures stay the one bus truth).
+    val turnTaps = if (metrics.measures) TurnMetricsTap(metrics) else null
     val client = ChannelClient(
         transportFactory = { UnixSocketTransport { socketFile } },
         tokenReader = { tokenFile.takeIf { it.exists() }?.readText() },
@@ -254,6 +263,7 @@ internal fun wireChannel(
             // ADR-019: the turn's lifecycle rides the same frames the live
             // view folds — the tap never changes what the bot says or does
             busTaps?.onFrame(frame)
+            turnTaps?.onFrame(frame)
             // THE ANSWER ROUND-TRIP: the stream carries the questions AND
             // their resolutions — the board messages the owner on the
             // former (dedupe inside), seals honestly on the latter (the
@@ -305,6 +315,9 @@ internal fun wireChannel(
             File(File(cfg.baseDir, "agent-brain"), BUS_FILE),
             log = { message -> logger.warn { message } },
         )
+        // E2: the sink's own counters ARE the bus truth — the gauges read
+        // them at scrape time, no second count anywhere
+        metrics.busGauges(written = { sink.written }, failures = { sink.failures })
         busTaps = BusProducer(
             sink = sink,
             finalAnswer = { taskId ->
@@ -323,7 +336,7 @@ internal fun wireChannel(
     // transport lives here, never in the channel module.
     val brainEndpoint = BrainEndpoint.load(File(cfg.homeDir, SendKnob.FILE_NAME))
     if (brainEndpoint.warning != null) logger.warn { "brain endpoint: ${brainEndpoint.warning}" }
-    val gateway = brainGateway(brainEndpoint)
+    val gateway = brainGateway(brainEndpoint, metrics = metrics)
     val brain = BrainCommands(gateway)
     logger.info { "brain commands wired: ${brainEndpoint.url}" }
 
@@ -331,7 +344,7 @@ internal fun wireChannel(
     // no injector and the send path is byte-for-byte the pre-U1b one.
     val injector = if (memoryInjectOn) {
         logger.info { "memory_inject ON — top-k ${MemoryInjector.TOP_K}, deadline ${MemoryInjector.DEFAULT_TIMEOUT}" }
-        MemoryInjector(gateway.memorySearch, log = { message -> logger.info { message } })
+        MemoryInjector(gateway.memorySearch, log = { message -> logger.info { message } }, metrics = metrics)
     } else {
         null
     }
@@ -433,6 +446,7 @@ internal fun wireChannel(
         liveView = liveView,
         promptTap = promptTap,
         brain = brain,
+        metrics = metrics,
     )
     return ChannelStack(client, liveView, poller, hub, busTaps)
 }
@@ -559,6 +573,9 @@ private fun buildPoller(
     promptTap: PromptTap = PromptTap(null),
     // U2: /brain + /memory (the brain's HTTP door). Null = the honest unwired reply.
     brain: BrainCommands? = null,
+    // E2: the metrics facade (the no-op when off) — the poller's cycles and
+    // the owner's accepted updates, counted at the wiring
+    metrics: Metrics = NoopMetrics,
 ): Poller? {
     if (!pollOn) return null
     val liveApi = api ?: TgApi({ TgConfig.load(remote) })
@@ -683,11 +700,14 @@ private fun buildPoller(
         // the bot explains its own silences: a long mute window ends with the
         // apology (loud — the owner must learn WHY it was quiet, from the bot)
         onReconnected = { window -> speak(window.render(), true, null) },
+        // E2: one completed pass of the reader — whatever it fetched
+        onCycle = { metrics.pollerCycle() },
         dispatch = { cfg, update ->
             // the buttons' dispatch: a tap is answered (the toast) and runs
             // as the owner's typed words; a message is the words themselves
             when (update) {
                 is InboundUpdate.Message -> {
+                    metrics.pollerInbound()
                     // F23: 👀 the second the words are in, ✅ once handled —
                     // feedback on the owner's own message, zero new messages
                     Ack.react(liveApi, cfg, update.messageId, Ack.RECEIVED)
@@ -701,10 +721,13 @@ private fun buildPoller(
                     Ack.react(liveApi, cfg, update.messageId, Ack.HANDLED)
                 }
 
-                is InboundUpdate.Attachment ->
+                is InboundUpdate.Attachment -> {
+                    metrics.pollerInbound()
                     dispatchAttachment(liveApi, cfg, pythonState, client, speak, prompts = promptTap, update = update)
+                }
 
                 is InboundUpdate.Callback -> {
+                    metrics.pollerCallback()
                     answerCallback(liveApi, update.callbackId)
                     when {
                         // B6 — the deploy taps: intercepted BEFORE the

@@ -113,6 +113,14 @@ class Outbox(
         }
     }
 
+    /**
+     * The parked depth as a scrape reads it (E2's gauge): the box's array
+     * size, 0 when the box is absent — the flush's own empty default. Read
+     * WITHOUT the flock: every write lands as an atomic rename, so a reader
+     * always sees one whole generation of the file.
+     */
+    fun depth(): Int = (read() as? JsonArray)?.size ?: 0
+
     // ── the AtomicStore pattern ───────────────────────────────────────────
 
     /**
