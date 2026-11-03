@@ -92,9 +92,9 @@ private const val OUTPUT_TAIL_CP = 800
 /** taskSnapshot → the last ASSISTANT message (the turn's answer, from the store). */
 internal fun snapshotAnswerOf(resultJson: String): String? = BotCommands.snapshotLastAnswer(resultJson)
 
-/** The final-answer window: one bounded retry after the first miss (the CLI's persist race). */
-internal const val FINAL_ANSWER_ATTEMPTS = 2
-internal const val FINAL_ANSWER_RETRY_MS = 400L
+/** The final-answer window: two bounded retries after the first miss (the CLI's persist race, a reconnect window). */
+internal const val FINAL_ANSWER_ATTEMPTS = 3
+internal const val FINAL_ANSWER_RETRY_MS = 600L
 
 /**
  * taskSnapshot → the turn's answer, asked with the task's OWN workspace.
@@ -130,7 +130,7 @@ internal suspend fun finalAnswerOf(
                 )
             }
             else -> log(
-                "taskSnapshot($taskId, ws=${ws != null}) answered ${answer::class.simpleName} — " +
+                "taskSnapshot($taskId, ws=${ws != null}) answered $answer — " +
                     "the seal's answer stays empty (attempt $attemptNo/$FINAL_ANSWER_ATTEMPTS)",
             )
         }
