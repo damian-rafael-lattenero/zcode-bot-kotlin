@@ -18,6 +18,27 @@ Mac (every 60 s)                         healthchecks.io (always watching)
 The gist is only for the manual diagnostic (`scripts/watchdog-check.nu`);
 it is not part of the healthchecks path.
 
+## The OTHER dead man's switch — the daemon's own healer
+
+The beacon watches the **machine**: it stays green while the Mac lives,
+even if the bot is dead. Measured 2026-11-02: a `/deploy` took the daemon
+down 22:02:37→22:06:03 and nothing noticed — the owner did.
+
+`scripts/bot-healer.nu` (LaunchAgent `com.zcode.bot-healer`, every 60 s)
+closes that hole: it reads `state/hb-channel` and, after 3 silent minutes,
+`launchctl kickstart -k`s the daemon (or `bootstrap`s it when the job is
+not loaded). Three doors keep it honest — freshness rather than
+`launchctl print`'s hollow "loaded"; hands off while `state/deploying` is
+fresh (the deploy is SUPPOSED to leave the daemon down); and one action
+per 5 minutes so a heal that does not take never becomes a restart loop.
+It writes `state/healer.json` + `logs/healer.log` and sends ONE Telegram
+line (send-only — it never touches getUpdates, so it cannot fight the
+daemon's monopoly).
+
+`--status` prints its whole view as JSON; `--dry-run` decides without
+acting; `--force` bypasses the doors (the live test that resurrects the
+real daemon).
+
 Detection: **~2 minutes** from the last heartbeat to the phone buzzing,
 with no dependency on GitHub Actions.
 

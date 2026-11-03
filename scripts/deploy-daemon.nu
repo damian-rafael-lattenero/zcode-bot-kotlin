@@ -17,6 +17,12 @@ def main []: nothing -> nothing {
     let dest = ($home | path join ".zcode/bot-daemon")
     let data = ($home | path join ".zcode/bot-kotlin")
 
+    # THE HEALER'S DOOR (bot-healer.nu): a deploy is SUPPOSED to leave the
+    # daemon down for a minute or two. The marker tells the healer to stand
+    # down; it ages out on its own (15 min) if this script never returns.
+    mkdir ($data | path join "state")
+    (date now | format date "%s") | save -f ($data | path join "state/deploying")
+
     step "building (Gradle daemon on 25)"
     cd $repo
     ^./gradlew -q :modules:daemon:installDist detekt test
@@ -29,6 +35,11 @@ def main []: nothing -> nothing {
     rm -rf ($dest | path join "bin") ($dest | path join "lib")
     let built = ($repo | path join "modules/daemon/build/install/daemon")
     ^/bin/cp -R $"($built)/." $"($dest)/"
+
+    # The healer is installed BEFORE the daemon's own restart: if the
+    # bootstrap below ever fails, this is the job that brings it back.
+    step "LaunchAgent com.zcode.bot-healer (the bot's own dead-man's switch)"
+    bootstrap-agent $repo "com.zcode.bot-healer"
 
     step $"LaunchAgent ($LABEL) \(KeepAlive: launchd is the dumb outer ring\)"
     let started = (date now | format date "%s" | into int)
@@ -71,6 +82,8 @@ def main []: nothing -> nothing {
     if ($last | length) > 0 {
         log $"log tail: ($last | first)"
     }
+    # the deploy is over: the healer owns the daemon again
+    rm -f ($data | path join "state/deploying")
     print 'done. Live daemon armed: channel + getUpdates poller + send (daemon.json is the knob).'
     print 'Health: ~/.zcode/bot-kotlin/state/hb-channel · hb-poller · hb-zconn-shadow; log: logs/daemon.jsonl.'
 }

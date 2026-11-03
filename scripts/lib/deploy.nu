@@ -36,6 +36,17 @@ export def bootout-agent [label: string]: nothing -> nothing {
     }
 }
 
+# A label can sit in launchd's persistent DISABLED list (the retired
+# Python healer left com.zcode.bot-healer there). bootstrap then answers
+# error 5 — "Input/output error", a lie about the cause — until the label
+# is enabled. Enabling a label we own is idempotent and safe.
+export def enable-agent [label: string]: nothing -> nothing {
+    let r = (do { ^launchctl enable $"gui/(user-id)/($label)" } | complete)
+    if $r.exit_code != 0 {
+        print -e $"⚠ launchctl enable ($label) failed: ($r.stderr | str trim)"
+    }
+}
+
 # Render the repo's <label>.plist (the __HOME__ placeholder) into
 # ~/Library/LaunchAgents and (re)bootstrap it. bootout's teardown races
 # the bootstrap (measured: error 5, "Input/output error"), so retry once
@@ -50,6 +61,7 @@ export def bootstrap-agent [repo: string, label: string]: nothing -> nothing {
     let rendered = (open --raw $src | str replace --all "__HOME__" $home)
     $rendered | save -f $dst
     bootout-agent $label
+    enable-agent $label
     let first = (do { ^launchctl bootstrap $"gui/(user-id)" $dst } | complete)
     if $first.exit_code != 0 {
         sleep 2sec
