@@ -79,9 +79,9 @@ class RetryCommandTest {
             messageId: String,
             receivedAt: Long,
             taskId: String,
-        ): InboundReceipt {
+        ): InboundAnswer {
             orders.add(text to taskId)
-            return InboundReceipt.FIRED
+            return InboundAnswer.Answered(duplicate = false, replies = emptyList())
         }
     }
 
