@@ -55,6 +55,36 @@ post-U2.5 hot-fix queue, NOT a re-order of the compass) and
   target's bootout, with HOME/JAVA_HOME/PATH and both stdio streams
   pinned in a pure, tested plist. A failed bootstrap throws with
   launchctl's words — the phone hears it and the daemon stays up.
+- **A4 ✅ MERGED** (`6cd2d579` on the fork's `damian`, agent branch
+  `feat/a4-child-sessions` d281b1ae + 26ce110d): the child-session
+  convention (`sess_subagent_<agentId>`) is REAL — the v4 failure was a
+  missing OWNER runtime record, not a wrong id. New native v4
+  `sendSubagentMessage` (child steered/queued, terminal child resumed)
+  + `stopGeneration` now resolves the owner and cancels background work;
+  capability `subagents` announced additively (the daemon needs NO
+  change). Plus the additive `setMode` query
+  (`build|edit|plan|yolo|guarded`, unknown → `bad_request`, cap
+  `control:setMode`) — /mode's door. **Pending the owner's ⌘Q fork
+  deploy.**
+- **A5 ✅ verdict PARCIAL** (`639b3ea` merge; doc
+  `docs/a5-gifts-promos.md`): the reset pill and the claimable-plan
+  banner DO exist in the fork, but both need the ZCode JWT + provider
+  OAuth (encrypted in credentials.json) — NOT reachable from the bot's
+  channel, and `/quota`'s direct API key cannot substitute. The
+  claimable offer carries no expiry field (the "expires in 2 days" copy
+  is server-side campaign text). Proposal: an additive
+  `codingPlanGifts` capability (no credentials, no mutations) + two
+  🎁/🔴 line groups with honest silence when the data is absent.
+- **The healer + /deploy's two live failures** (b42382b, 540a66a): the
+  beacon watched the Mac, not the bot — `scripts/bot-healer.nu`
+  (LaunchAgent, hb-channel freshness > 3 min → kickstart/bootstrap, one
+  action per 5 min, hands off during `state/deploying`, one send-only
+  Telegram line) closes it, live-tested by booting out the real daemon.
+  And the owner's second `/deploy` of the day bounced twice with
+  `error 5`: the deploy job was still loaded, bootout had not released
+  it, and the bootstrap flew milliseconds later. `DeploySpawn.spawn` now
+  retries once after 2 s (lib/deploy.nu's measured fix) and writes its
+  receipt line only AFTER a successful bootstrap.
 - **The ORDER pulse gate + the sn: detail card** (66d6a7e, the owner's
   live proof 20:34): two orders into the ⏹️ agent's dead session bounced
   nothing — now the ✍️ arm and the fire both ask the tri-state pulse
