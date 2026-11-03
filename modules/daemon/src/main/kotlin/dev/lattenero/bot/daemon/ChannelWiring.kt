@@ -2,6 +2,7 @@ package dev.lattenero.bot.daemon
 
 import dev.lattenero.bot.channel.Ack
 import dev.lattenero.bot.channel.BotCommands
+import dev.lattenero.bot.channel.BrainCommands
 import dev.lattenero.bot.channel.ChannelClient
 import dev.lattenero.bot.channel.DeployCommand
 import dev.lattenero.bot.channel.ChannelOps
@@ -35,6 +36,8 @@ import dev.lattenero.bot.daemon.bus.BusProducer
 import dev.lattenero.bot.daemon.bus.BusSink
 import dev.lattenero.bot.daemon.bus.PromptTap
 import dev.lattenero.bot.daemon.bus.activePromptContext
+import dev.lattenero.bot.daemon.brain.BrainEndpoint
+import dev.lattenero.bot.daemon.brain.brainGateway
 import dev.lattenero.bot.daemon.history.LIVE_VERBS
 import dev.lattenero.bot.daemon.history.SEQUENCE_LINE_DIFFER
 import dev.lattenero.bot.daemon.history.TasksHistoryIo
@@ -313,6 +316,15 @@ internal fun wireChannel(
     }
     val promptTap = PromptTap(busTaps) { activePromptContext(client) }
 
+    // U2 — /brain + /memory: agent-brain's localhost HTTP (no auth). The
+    // endpoint is `brain_url` in the same daemon.json (read once; absent =
+    // agent-brain's own 8765). The commands render the reading list; the
+    // transport lives here, never in the channel module.
+    val brainEndpoint = BrainEndpoint.load(File(cfg.homeDir, SendKnob.FILE_NAME))
+    if (brainEndpoint.warning != null) logger.warn { "brain endpoint: ${brainEndpoint.warning}" }
+    val brain = BrainCommands(brainGateway(brainEndpoint))
+    logger.info { "brain commands wired: ${brainEndpoint.url}" }
+
     drainQueue = {
         val pending = queue.drain()
         if (pending.isNotEmpty()) {
@@ -407,6 +419,7 @@ internal fun wireChannel(
         lastPrompt = lastPrompt,
         liveView = liveView,
         promptTap = promptTap,
+        brain = brain,
     )
     return ChannelStack(client, liveView, poller, hub, busTaps)
 }
@@ -531,6 +544,8 @@ private fun buildPoller(
     liveView: LivePublisher? = null,
     // U1b: the free-text prompt seam (ADR-019) — a no-op with the bus off
     promptTap: PromptTap = PromptTap(null),
+    // U2: /brain + /memory (the brain's HTTP door). Null = the honest unwired reply.
+    brain: BrainCommands? = null,
 ): Poller? {
     if (!pollOn) return null
     val liveApi = api ?: TgApi({ TgConfig.load(remote) })
@@ -644,6 +659,7 @@ private fun buildPoller(
         // registries: the tap edits the message it spoke)
         boxTaps = liveView,
         lastPrompt = lastPrompt,
+        brain = brain,
     )
     return Poller(
         api = liveApi,
