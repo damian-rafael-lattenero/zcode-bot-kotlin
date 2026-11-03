@@ -71,6 +71,8 @@ class LivePublisherTest {
         verbosity: VerbositySetting = VolatileVerbosity(),
         cooldown: Cooldown = Cooldown(readFile = { null }),
         finalAnswer: suspend (String) -> String? = { null },
+        // NOT last: the existing tests' trailing lambda binds resolveTitle
+        onSeal: suspend (SealFacts) -> Unit = {},
         resolveTitle: suspend (String) -> String? = { null },
     ): LivePublisher =
         LivePublisher(
@@ -87,6 +89,7 @@ class LivePublisherTest {
             clock = { TICK_MS },
             verbosity = verbosity,
             resolveTitle = resolveTitle,
+            onSeal = onSeal,
         )
 
     @Test
@@ -511,6 +514,71 @@ class LivePublisherTest {
         assertTrue("end_turn" in spoken[spoken.size - 2], "the record is second-to-last")
         assertEquals("LA RESPUESTA", spoken.last(), "the answer is the last word")
         assertEquals("deleteMessage", wire.bodies.last { it.second != "editMessageText" }.second)
+    }
+
+    @Test
+    fun theSealTapReceivesTheSealsOwnFactsExactlyOnce() = runTest {
+        val taskId = "task-9"
+        val hub = LiveHub()
+        hub.apply(frame(taskId, "task_run_started", at = 1_000), nowMs = 1_000)
+        hub.apply(frame(taskId, "agent_thought_chunk", at = 1_050, "content" to JsonPrimitive("pensando")), nowMs = 1_050)
+        // the lane arrives pending, then closes: the reducer counts the close
+        hub.apply(
+            frame(
+                taskId,
+                "tool_call_update",
+                at = 1_100,
+                "status" to JsonPrimitive("pending"),
+                "toolId" to JsonPrimitive("t1"),
+                "toolName" to JsonPrimitive("Bash"),
+                "input" to buildJsonObject { put("command", "git status") },
+            ),
+            nowMs = 1_100,
+        )
+        hub.apply(
+            frame(
+                taskId,
+                "tool_call_update",
+                at = 1_150,
+                "status" to JsonPrimitive("completed"),
+                "toolId" to JsonPrimitive("t1"),
+                "toolName" to JsonPrimitive("Bash"),
+                "input" to buildJsonObject { put("command", "git status") },
+            ),
+            nowMs = 1_150,
+        )
+        val received = mutableListOf<SealFacts>()
+        val publisher = publisher(
+            Wire(),
+            hub,
+            finalAnswer = { "LA RESPUESTA" },
+            onSeal = { received.add(it) },
+        )
+        publisher.tick() // birth
+        hub.apply(frame(taskId, "task_complete", at = 9_999, "stopReason" to JsonPrimitive("end_turn")), nowMs = 9_999)
+        publisher.tick() // the seal tick
+        assertEquals(1, received.size, "one seal, one tap")
+        val facts = received[0]
+        assertEquals(taskId, facts.taskId)
+        assertEquals("end_turn", facts.stopReason)
+        assertEquals(1_000L, facts.startedAtMs, "the turn's REAL start rides along")
+        assertEquals(1, facts.doneTools)
+        assertEquals("LA RESPUESTA", facts.answer, "the answer the seal already computed — no re-query")
+        // a broken tap never breaks the seal: the tick survives and the
+        // seal's own cleanup ran (the turn is spent, the hub is clear)
+        val hub2 = LiveHub()
+        hub2.apply(frame(taskId, "task_run_started", at = 1_000), nowMs = 1_000)
+        hub2.apply(frame(taskId, "agent_thought_chunk", at = 1_050, "content" to JsonPrimitive("pensando")), nowMs = 1_050)
+        val publisher2 = publisher(
+            Wire(),
+            hub2,
+            finalAnswer = { "R" },
+            onSeal = { error("the wire is down") },
+        )
+        publisher2.tick()
+        hub2.apply(frame(taskId, "task_complete", at = 9_999, "stopReason" to JsonPrimitive("end_turn")), nowMs = 9_999)
+        publisher2.tick() // must NOT throw
+        assertEquals(null, hub2.peek(), "the seal's cleanup ran past the broken tap")
     }
 
     @Test
