@@ -445,6 +445,29 @@ class BotCommands(
     }
 
     /**
+     * THE OWNER'S «EMPUJAR» (2/11 23:00: «que detenga lo que está haciendo
+     * y me lea el mensaje»). The fork's steer delivery is `guide` — the
+     * text enters at the current tool's safe boundary, so a child inside a
+     * nine-minute tool stays deaf for nine minutes. A busy child's turn is
+     * therefore CANCELLED first (the ⏹️ door) and the delivery that
+     * follows finds a TERMINAL task, which the runtime resumes in the
+     * background WITH the text as its input. Answers true when a turn was
+     * actually cut (so the ack can say what happened).
+     */
+    private suspend fun interruptChild(sid: String): Boolean {
+        val alive = sid.startsWith(SUBAGENT_SESSION_PREFIX) &&
+            SubagentStop.orderTarget(
+                hub.peek()?.tools.orEmpty(),
+                runningRows(),
+                sid,
+                clock(),
+            ) == OrderPulse.Alive
+        val stopped = alive && ops.query(ChannelQuery.Stop(sid)) is QueryAnswer.Ok
+        if (stopped) logger.info { "route: ⚡ child $sid INTERRUPTED before the delivery (empujar)" }
+        return stopped
+    }
+
+    /**
      * Free text → the ACTIVE conversation, NEVER a new one (Python's
      * `only_active_task` doctrine — Damian, 29/10: «probando probando»
      * opened a fresh conversation instead of landing in the open one).
@@ -552,6 +575,11 @@ class BotCommands(
         logger.info {
             "route: ORDER to ${order.sessionId} («${order.title}»): ${text.take(ORDER_LOG_PREVIEW)}"
         }
+        // EMPUJAR (the owner's law, 2/11): a message to a subagent must be
+        // READ, not queued behind a nine-minute tool. The fork's steer is
+        // delivery:"guide" (next safe boundary) — so a busy child gets its
+        // turn CANCELLED first and the text starts the fresh one.
+        val interrupted = interruptChild(order.sessionId)
         return when (
             val answer = ops.sendOrder(
                 text,
@@ -561,7 +589,11 @@ class BotCommands(
             )
         ) {
             is InboundAnswer.Answered -> BotReply(
-                "⚔️ Orden entregada a «${PyText.esc(order.title)}» — su respuesta llega en la carta attachada.",
+                if (interrupted) {
+                    "⚡ Le corté el turno a «${PyText.esc(order.title)}» y le entregué la orden — la lee AHORA."
+                } else {
+                    "⚔️ Orden entregada a «${PyText.esc(order.title)}» — su respuesta llega en la carta attachada."
+                },
             )
 
             is InboundAnswer.Failed -> BotReply(
@@ -2036,12 +2068,17 @@ class BotCommands(
             ?.let { Keyboards.subagentName(it) }
             ?: runningRows().firstOrNull { it.sid == child }?.title?.takeIf { it.isNotBlank() }
             ?: child.takeLast(SID_TAIL)
+        val interrupted = interruptChild(child)
         return when (val answer = ops.steer(child, text)) {
             SteerAnswer.Delivered -> {
-                logger.info { "steer: ${text.length} chars to SUBAGENT $child" }
+                logger.info { "steer: ${text.length} chars to SUBAGENT $child (interrupted=$interrupted)" }
                 BotReply(
-                    "🌀 Steer entregado a «${PyText.esc(name)}» — entra DENTRO del turno del subagente " +
-                        "(se inyecta en el próximo límite de herramienta).",
+                    if (interrupted) {
+                        "⚡ Le corté el turno a «${PyText.esc(name)}» y le pasé el steer — lo lee AHORA."
+                    } else {
+                        "🌀 Steer entregado a «${PyText.esc(name)}» — entra DENTRO del turno del subagente " +
+                            "(se inyecta en el próximo límite de herramienta)."
+                    },
                 )
             }
 
