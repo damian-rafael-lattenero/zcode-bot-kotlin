@@ -136,6 +136,36 @@ data class InteractionPending(val kind: String, val title: String?) {
     val emoji: String get() = if (kind == "permission") "🔐" else "❓"
 }
 
+/**
+ * One COLLAPSED tool output's fold state (U5b): the pager's whole world as
+ * immutable values — what the folded button knows (the header, the numbered
+ * pages), the Telegram message it lives on, and WHICH page is showing. The
+ * old registry's vars (its entries and per-box index) retired into here:
+ * the taps render FROM the fold and the fold mirrors what the message shows.
+ */
+data class BoxLive(
+    /**
+     * The wire id (`bp:<id>:<page>`): turn-unique by construction — the
+     * task's hash base + the birth order — so an old turn's button can
+     * never alias a new turn's box (the old registry's global seq, without
+     * the var).
+     */
+    val boxId: Int,
+    /** The always-visible collapsed header — the fold-back's render. */
+    val header: String,
+    /** The numbered pages (ToolOutputPages.pages), born once, read-only. */
+    val pages: List<String>,
+    /** The Telegram message the box lives on — the tap's edit target. */
+    val messageId: Long,
+    /** The page the message shows: [FOLDED] = the header + its one button. */
+    val page: Int = FOLDED,
+) {
+    companion object {
+        /** The folded mark: the message shows its header, no page open. */
+        const val FOLDED = -1
+    }
+}
+
 /** The whole visible turn, one immutable value per event. */
 data class TurnLive(
     val taskId: String,
@@ -159,6 +189,14 @@ data class TurnLive(
     /** The block currently filling: seals into [cotBlocks] at the cap. */
     val cotPending: String = "",
     val tools: List<ToolLive> = emptyList(),
+    /**
+     * THE COLLAPSED OUTPUT BOXES, FOLD STATE (U5b): every collapsed box
+     * message the feed spoke this turn, birth-ordered, capped (the reducer
+     * keeps the newest [RenderFold.BOX_CAP]). The +N/−M and the output
+     * lines ride the lanes above (the SEQUENCE_LINE_DIFFER port's verdict,
+     * U5a); the numbered pages and the open page ride HERE.
+     */
+    val boxes: List<BoxLive> = emptyList(),
     /** Subagent lanes: parentToolUseId → thought chars (the stream is ONE stream). */
     val subagentThought: Map<String, Int> = emptyMap(),
     /**

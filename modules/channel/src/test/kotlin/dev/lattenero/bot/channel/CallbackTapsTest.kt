@@ -223,7 +223,7 @@ class CallbackTapsTest {
         assertEquals(listOf("open:7:2", "fold:7"), calls)
 
         val bare = BotCommands(ops = FakeOps(), hub = LiveHub(), daemonReset = { "" }, clock = { 1L })
-        assertEquals(BoxPages.MISS, bare.onCallback("bp:7:0", 3L)!!.text)
-        assertEquals(BoxPages.MISS, bare.onCallback("bf:7", 4L)!!.text)
+        assertEquals(BoxTaps.MISS, bare.onCallback("bp:7:0", 3L)!!.text)
+        assertEquals(BoxTaps.MISS, bare.onCallback("bf:7", 4L)!!.text)
     }
 }
