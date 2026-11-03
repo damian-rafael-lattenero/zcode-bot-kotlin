@@ -184,6 +184,12 @@ class BotCommands(
      * a no-op — never a crash.
      */
     private val lastPrompt: LastPrompt? = null,
+    /**
+     * /brain + /memory (ADR-019/020): the agent-brain reading list. Null
+     * (the daemon has no brain client) = both commands answer honestly that
+     * they are not wired — never a crash and never invented results.
+     */
+    private val brain: BrainCommands? = null,
 ) {
 
     /** /nuclear's single-flight companion: the in-process half (the wiring adds the cross-restart mtime gate). */
@@ -220,6 +226,8 @@ class BotCommands(
             "run" -> runCmd(rest, updateId)
             "steer" -> steer(rest)
             "verbosity" -> verbosityCmd(rest)
+            "brain" -> BotReply(brain?.brain(rest) ?: BrainTexts.UNWIRED)
+            "memory" -> BotReply(brain?.memory(rest) ?: BrainTexts.UNWIRED)
             else -> BotReply(UNKNOWN)
         }
         logger.info {
@@ -2900,6 +2908,8 @@ class BotCommands(
             "ctx" to "context % per conversation — the real meter list",
             "subagents" to "the active subagents · «inactivos» shows today's ended",
             "verbosity" to "cuánto habla el feed en vivo — summary / normal / verbose",
+            "brain" to "pregunta al RAG de agent-brain — /brain status para el pulso",
+            "memory" to "recuerdos del brain — /memory «texto» · recent [k] · status",
             "help" to "all commands",
         )
 
