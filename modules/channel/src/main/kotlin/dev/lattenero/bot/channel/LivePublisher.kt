@@ -268,6 +268,17 @@ class LivePublisher(
     private var giftsOkAtMs: Long = 0
 
     /**
+     * ⏸️ THE PARK MACHINE (the owner's 3/11, owner-approved): which
+     * taskIds are parked — an in-memory set keyed by taskId, one-shot per
+     * card ([ParkGate]). A parked card receives NO more edits; the seal
+     * still runs and the 🔔 carries the conclusion.
+     */
+    private val parks = ParkGate()
+
+    /** The parked render's flag: false until the ONE final edit lands. */
+    private var parkRenderLanded: Boolean = false
+
+    /**
      * THE CoT REGISTRY (the collapsed blocks' tap world) — built lazily
      * on the publisher's telegram edit leg. All access rides [tickMutex]
      * (the taps land here too): the registry itself stays a plain holder.
@@ -557,6 +568,52 @@ class LivePublisher(
     }
 
     /**
+     * ⏸️ THE PARK TAP (bg:<taskId>, the owner's 3/11): the card PARKS —
+     * «▶️ sigue en background» as its LAST edit — the turn keeps running
+     * and streaming into the fold, and when the turn seals the owner gets
+     * the existing 🏁 notification with the conclusion (the seal tap
+     * always fires; the gate never touches it). MUTEXED with the tick
+     * like every tap. The answer is the TOAST's honest words: the ack,
+     * the already-parked no-op, or the refusal (an unknown/expired card
+     * never lies).
+     */
+    suspend fun park(taskId: String): String = tickMutex.withLock {
+        val cfg = config()
+        if (!cfg.configured) {
+            ParkTapTexts.NO_TELEGRAM
+        } else {
+            when (parks.park(taskId, statusTaskId)) {
+                ParkGate.Verdict.PARKED -> {
+                    parkRenderLanded = false
+                    val mid = statusMessageId
+                    val state = hub.peek()
+                    if (mid != null && state != null) landParkedRender(cfg, mid, state)
+                    logger.info {
+                        "live view PARKED: taskId=${taskId.takeLast(TASK_ID_TAIL)} — " +
+                            "no more edits; the 🔔 speaks at the seal"
+                    }
+                    ParkTapTexts.ACK
+                }
+
+                ParkGate.Verdict.ALREADY -> ParkTapTexts.ALREADY
+                ParkGate.Verdict.UNKNOWN -> ParkTapTexts.REFUSAL
+            }
+        }
+    }
+
+    /**
+     * The park's ONE final edit — the SAME edit-throat ([LiveTelegram.edit])
+     * and the SAME cooldown rules: under a 429 window it does not land, and
+     * the publisher's tick retries it (the parked card is never left
+     * without its honest render; it is also never edited twice).
+     */
+    private suspend fun landParkedRender(cfg: TgConfig, mid: Long, state: TurnLive) {
+        if (telegram.edit(cfg, mid, LiveTurn.parkText(state), Keyboards.liveCard(state.taskId))) {
+            parkRenderLanded = true
+        }
+    }
+
+    /**
      * The seal: the turn's record, the transcript's REMAINDER (closes and
      * blocks folded after the last drain — a late attach's history, the
      * events between two ticks), the unsealed thought tail, then the
@@ -644,7 +701,7 @@ class LivePublisher(
             birthCooldownTicks -= 1
             return
         }
-        val born = telegram.birth(cfg, text)
+        val born = telegram.birth(cfg, text, Keyboards.liveCard(state.taskId))
         if (born == null) {
             if (!birthFailLogged) {
                 logger.warn {

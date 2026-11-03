@@ -62,12 +62,16 @@ class LiveTelegram(
     private val lastPh: LastPh? = null,
 ) {
 
-    /** sendMessage that answers the message_id (the placeholder's birth). */
+    /**
+     * sendMessage that answers the message_id (the card's birth); [markup]
+     * is the card's own keyboard (the ⏸️ row).
+     */
     @Suppress("TooGenericExceptionCaught") // the live view never raises (Python's bare except)
-    suspend fun birth(cfg: TgConfig, text: String): Long? {
+    suspend fun birth(cfg: TgConfig, text: String, markup: JsonObject? = null): Long? {
         if (cooldown.active()) return null // throttled: the box is born dead — never critical
         return try {
-            val mid = messageIdOf(api.call("sendMessage", SendRequest.compose(cfg, text, loud = false)))
+            val wire = SendRequest.compose(cfg, text, loud = false, markup = markup)
+            val mid = messageIdOf(api.call("sendMessage", wire))
             mid?.let { lastPh?.note(it) } // a live box is a message too (F84b)
             mid
         } catch (e: CancellationException) {

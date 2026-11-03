@@ -496,6 +496,22 @@ object Keyboards {
     fun callbackDataValid(data: String): Boolean =
         data.isNotEmpty() && data.toByteArray().size <= CALLBACK_BYTES && !data.any { it.isWhitespace() }
 
+    /**
+     * THE LIVE CARD'S OWN KEYBOARD (the owner's ⏸️, 3/11): ONE button —
+     * the park-to-background tap (`bg:<taskId>`). The row grammar's
+     * primary action first: the card has no other buttons (the fold
+     * buttons ride their own collapsed messages below the card), so the
+     * ⏸️ owns its row alone. `bg:` is `t:` + 1 byte — the worst case
+     * stays `t:<sid>`'s 43; the 64-byte law never even breathes. The
+     * button SURVIVES the park: a second tap is the honest no-op ack
+     * ([ParkTapTexts.ALREADY]), never a lie.
+     */
+    fun liveCard(taskId: String): JsonObject = buildJsonObject {
+        putJsonArray("inline_keyboard") {
+            add(buildJsonArray { add(button(PARK_BUTTON, "bg:$taskId")) })
+        }
+    }
+
     private const val TASK_MARK = "🟢"
     private const val SUBAGENT_MARK = "🔵"
     private const val MARK_RUNNING = "🔄"
@@ -505,6 +521,9 @@ object Keyboards {
 
     /** The stop tap's own button — the ⏹️ beside the ▶️/✍️, the action it names. */
     private const val STOP_BUTTON = "⏹️"
+
+    /** The park tap's own button — the ⏸️ on the live card, the action it names. */
+    private const val PARK_BUTTON = "⏸️ A background"
     private const val TITLE_CAP = 34
 
     /** A store row untouched this long renders ⏸️ (a killed agent's ghost), not ▶️. */
