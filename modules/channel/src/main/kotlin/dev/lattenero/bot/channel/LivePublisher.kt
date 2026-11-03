@@ -697,7 +697,7 @@ class LivePublisher(
                 "thought=${state.thoughtChars} tools=${state.doneTools} answer=${answer?.length ?: 0} chars " +
                 "feed=${feed.size} parked=$parked"
         }
-        sealTap(state, answer, now)
+        sealTap(state, answer, now, answerSpoken = answer != null && !parked)
         // THE REGISTRY SURVIVES THE SEAL (the collapsed buttons keep
         // working after the turn ends — the owner reads the CoT calmly);
         // only the entry cap prunes it. The PIN dies only if THIS turn is
@@ -717,7 +717,7 @@ class LivePublisher(
      * seal's cleanup (below) always runs (cancellation still passes).
      */
     @Suppress("TooGenericExceptionCaught") // the bus's tap invariant: no failure reaches the seal
-    private suspend fun sealTap(state: TurnLive, answer: String?, now: Long) {
+    private suspend fun sealTap(state: TurnLive, answer: String?, now: Long, answerSpoken: Boolean) {
         try {
             onSeal(
                 SealFacts(
@@ -729,6 +729,7 @@ class LivePublisher(
                     doneTools = state.doneTools,
                     failedTools = state.failedTools,
                     answer = answer,
+                    answerSpoken = answerSpoken,
                 ),
             )
         } catch (e: CancellationException) {

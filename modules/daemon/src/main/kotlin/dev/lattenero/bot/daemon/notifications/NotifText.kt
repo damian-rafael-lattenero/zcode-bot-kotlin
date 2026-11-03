@@ -39,8 +39,11 @@ object NotifText {
     /**
      * 🔔 MOMENT 2 — the owner's bound conversation's turn sealed:
      * «🏁 <título> — terminó (X, N herramientas)» + the answer's first
-     * ~150 chars when there is one. A turn that produced NOTHING (answer
-     * blank AND zero tools) answers null — silence is data, no decoration.
+     * ~150 chars ONLY when the card did not speak the answer itself
+     * ([SealFacts.answerSpoken] — measured 3/11: repeating the head after
+     * a live card's full answer is exactly the duplication the owner
+     * reported). A turn that produced NOTHING (answer blank AND zero
+     * tools) answers null — silence is data, no decoration.
      */
     fun turnSealed(seal: SealFacts): String? {
         val raw = seal.answer
@@ -53,6 +56,7 @@ object NotifText {
             "($elapsed, $tools ${if (tools == 1) "herramienta" else "herramientas"})</b>"
         val answer = raw
             ?.takeIf { it.isNotBlank() }
+            ?.takeIf { !seal.answerSpoken } // the card already said it — the 🔔 never repeats (single-source law)
             ?.let { "\n" + PyText.esc(PyText.preview(it, ANSWER_PREVIEW_CP)) }
             .orEmpty()
         return head + answer
