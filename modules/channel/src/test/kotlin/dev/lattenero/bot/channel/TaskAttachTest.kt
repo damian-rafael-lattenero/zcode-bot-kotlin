@@ -452,6 +452,43 @@ class TaskAttachTest {
     }
 
     @Test
+    fun aBusyChildGetsItsTurnCUTBeforeTheOrder() = runBlocking {
+        // the owner's «empujar» (2/11 23:00): a message must STOP what the
+        // child is doing — the Stop flies BEFORE the order, and the delivery
+        // then finds a terminal task the runtime resumes WITH the text.
+        val ops = FakeOps(boundStatus).apply {
+            answers["activeTaskIds"] = """[]"""
+            answers["stop"] = """{"stopped":true}"""
+        }
+        val history = FakeHistory(rows).apply {
+            runningSubs = listOf("sess_subagent_agent_x")
+            runningTitled = listOf(RunningSubagent("sess_subagent_agent_x", "helper", lastMs = 1_000_000L))
+        }
+        val hub = LiveHub()
+        val bc = BotCommands(
+            ops = ops,
+            hub = hub,
+            daemonReset = { "fake ladder" },
+            clock = { 1_000_000L },
+            history = history,
+            defaultWorkspacePath = "/Users/damian/.zcode/workspace/default",
+        )
+        hub.apply(
+            streamEvent(
+                "task-02",
+                """{"type":"tool_call","toolId":"$laneId","toolName":"Task","subagentAgentId":"agent_x"}""",
+                1,
+            ),
+            1_000_000L,
+        )
+        bc.onCallback("so:$laneTail", 9L)!!
+        val ack = bc.handle("cortá y leé esto", 10L)!!
+        assertTrue("Le corté el turno" in ack.text, "got: $ack")
+        assertTrue("AHORA" in ack.text, ack.text)
+        assertEquals(listOf("cortá y leé esto" to "sess_subagent_agent_x"), ops.orders)
+    }
+
+    @Test
     fun theStoreRunningSubagentsAreVisibleAndAttachable() = runBlocking {
         // the bus died before the lane streamed: the ACTIVE view still shows
         // the running subagent FROM THE STORE and its tap attaches the session
