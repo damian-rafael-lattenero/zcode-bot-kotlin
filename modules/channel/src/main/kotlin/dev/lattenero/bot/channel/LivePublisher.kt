@@ -10,6 +10,7 @@ import kap.Schedule
 import kap.process
 import kap.repeat
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.JsonObject
@@ -20,17 +21,23 @@ private val logger = KotlinLogging.logger {}
 
 /**
  * The turn's state between the channel and the phone: ONE current turn
- * (the subscribed task), folded by the PURE [LiveTurn.reduce] under a
- * mutex. This is the visible escape hatch of policy §7 — the state is a
- * value, the holder is the thinnest mutable box, and every transition is
- * the reducer's (tested) decision, never an in-place mutation.
+ * (the subscribed task), folded by the PURE [reduce] over the
+ * [RenderEvent] spine under a mutex. U5a: THE HUB IS THE FOLD'S EDGE —
+ * every transition (a frame, a tap's retitle, a reconnect's resync, a
+ * heartbeat, the staleness tick) is a [RenderEvent] into the same pure
+ * step; no `.copy` mutation lives outside [reduce] anymore. This is the
+ * visible escape hatch of policy §7 — the state is a value, the holder is
+ * the scan's materialized accumulator (a StateFlow: the fold's output,
+ * held), and every transition is the reducer's (tested) decision.
  */
-// the hub is the thinnest mutable box over the turn value — one method per
-// honest verb (apply/pin/attach/retitle/resync…), none extractable
+// the hub is the fold's edge: one method per honest verb (apply/pin/
+// attach/retitle/resync…) that only ever EMITS the event — none extractable
 @Suppress("TooManyFunctions")
 class LiveHub {
     private val mutex = Mutex()
-    private var current: TurnLive? = null
+
+    /** THE SCAN'S ACCUMULATOR — the fold's state, held. Written ONLY by [fold]. */
+    private val states = MutableStateFlow<TurnLive?>(null)
 
     /** The lane scope (a sa: attach's fallback) — null watches the whole task's stream. */
     private var watchedLane: String? = null
@@ -43,6 +50,16 @@ class LiveHub {
      */
     private var pinnedTaskId: String? = null
 
+    /**
+     * The fold's one step — the ONLY writer of the accumulator. `differ`
+     * only matters for the frame events (an edit's +N/−M); the verbs fold
+     * with the house default, which they never touch.
+     */
+    private fun fold(event: RenderEvent, differ: LineDiffer): TurnLive? {
+        states.value = reduce(states.value, event, differ)
+        return states.value
+    }
+
     /** One stream event folded in; answers the state after the fold. */
     suspend fun apply(
         frame: ServerFrame.StreamEvent,
@@ -50,15 +67,15 @@ class LiveHub {
         differ: LineDiffer = SimpleLineDiffer,
     ): TurnLive? = mutex.withLock {
         // the pinned view owns the hub: drop everyone else's frames whole
-        if (pinnedTaskId != null && frame.taskId != pinnedTaskId) return@withLock current
+        if (pinnedTaskId != null && frame.taskId != pinnedTaskId) return@withLock states.value
         val fresh = when {
             // a new task's event replaces the watched turn (a /task pick or a
             // new subscribe): the old turn's status message stays sealed in the chat
-            current != null && current!!.taskId != frame.taskId -> {
+            states.value != null && states.value!!.taskId != frame.taskId -> {
                 watchedLane = null // a task switch is also a lane-switch: scope dies with the task
                 null
             }
-            else -> current
+            else -> states.value
         }
         // a lane-scoped card folds ONLY its subagent's events plus the root
         // tool's own lifecycle (arrival/close — the honest end signal)
@@ -66,9 +83,9 @@ class LiveHub {
             val ev = frame.event
             val passes = StreamEvents.parentToolUseId(ev) == watchedLane ||
                 StreamEvents.toolId(ev) == watchedLane
-            if (!passes) return@withLock current
+            if (!passes) return@withLock states.value
         }
-        LiveTurn.reduce(fresh, frame, nowMs, differ).also { current = it }
+        fold(classifyFrame(frame, nowMs), differ)
     }
 
     /** The sa: attach's full form: the card IS the subagent's own turn stream. */
@@ -88,7 +105,7 @@ class LiveHub {
     suspend fun attachLane(laneId: String) {
         mutex.withLock {
             watchedLane = laneId
-            current = current?.copy(watchedLane = laneId)
+            fold(RenderEvent.ScopeLane(laneId), SimpleLineDiffer)
         }
     }
 
@@ -96,7 +113,7 @@ class LiveHub {
     suspend fun watchTask() {
         mutex.withLock {
             watchedLane = null
-            current = current?.copy(watchedLane = null)
+            fold(RenderEvent.WatchTask, SimpleLineDiffer)
         }
     }
 
@@ -110,9 +127,7 @@ class LiveHub {
      * next tick renders and seals with the honest name.
      */
     suspend fun retitle(taskId: String, title: String) {
-        mutex.withLock {
-            if (current?.taskId == taskId) current = current?.copy(title = title)
-        }
+        mutex.withLock { fold(RenderEvent.Retitle(taskId, title), SimpleLineDiffer) }
     }
 
     /** A reconnect's resync: the lost events stay lost, the state re-baselines.
@@ -121,15 +136,7 @@ class LiveHub {
      *  the live windows die (a tail/pending spanning the gap would render
      *  a continuity that no longer exists). */
     suspend fun resync(taskId: String) {
-        mutex.withLock {
-            if (current?.taskId == taskId) {
-                current = current?.copy(
-                    cotTail = "",
-                    cotPending = "",
-                    phase = TurnPhase.Idle,
-                )
-            }
-        }
+        mutex.withLock { fold(RenderEvent.Resync(taskId), SimpleLineDiffer) }
     }
 
     /**
@@ -141,15 +148,20 @@ class LiveHub {
      * proves the BUS, not the model — a quiet model stays honestly quiet.
      */
     suspend fun keepalive(taskId: String, seq: Long) {
-        mutex.withLock {
-            val cur = current ?: return@withLock
-            if (cur.taskId != taskId) return@withLock
-            val base = cur.lastSeq ?: return@withLock
-            if (seq > base) current = cur.copy(lastSeq = seq)
-        }
+        mutex.withLock { fold(RenderEvent.Keepalive(taskId, seq), SimpleLineDiffer) }
     }
 
-    suspend fun peek(): TurnLive? = mutex.withLock { current }
+    /**
+     * THE STALENESS TICK (U5a, the design's law 2): the publisher's
+     * cadence folds a [RenderEvent.Tick] — the card's age becomes STATE
+     * ([TurnLive.staleMs]); the watchdog reads the fold's staleness, never
+     * computes its own.
+     */
+    suspend fun tick(nowMs: Long) {
+        mutex.withLock { fold(RenderEvent.Tick(nowMs), SimpleLineDiffer) }
+    }
+
+    suspend fun peek(): TurnLive? = mutex.withLock { states.value }
 
     /**
      * After the seal is published the turn is spent; /nuclear also lands
@@ -160,7 +172,7 @@ class LiveHub {
      * null keeps the nuclear semantics (everything dies).
      */
     suspend fun clear(sealedTaskId: String? = null): Unit = mutex.withLock {
-        current = null
+        fold(RenderEvent.Clear, SimpleLineDiffer)
         if (sealedTaskId == null || pinnedTaskId == sealedTaskId) pinnedTaskId = null
     }
 }
@@ -362,6 +374,11 @@ class LivePublisher(
         val cfg = config()
         if (!cfg.configured) return
         sealOrphan(cfg) // the first tick's boot duty, before anything else
+        // THE STALENESS TICK (U5a, the design's law 2): the tick is a
+        // RenderEvent — the fold reduces the card's age INTO the state; the
+        // watchdog below reads the fold's staleness, never computes its own.
+        val now = clock()
+        hub.tick(now)
         val peeked = hub.peek()
         if (peeked == null) {
             // the hub went empty (a spent seal's cleanup, a ☢️ nuclear): no
@@ -370,7 +387,6 @@ class LivePublisher(
             return
         }
         var state: TurnLive = peeked
-        val now = clock()
         refreshGifts(now)
         if (statusMessageId == null && state.phase != TurnPhase.Idle) {
             // THE REAL TITLE (the owner's 30/10 verdict: «644150daf013» in
@@ -397,7 +413,9 @@ class LivePublisher(
         // silence episode flushes a fresh burst and the card moves again; a
         // legitimately quiet stretch re-subscribes harmlessly (same task,
         // same stream); Done cards never bark.
-        val silenceMs = now - (state.lastEventAtMs ?: 0)
+        // the fold's own staleness (the Tick event reduced it) — the same
+        // clock the card renders with, held in state, not a side channel
+        val silenceMs = state.staleMs ?: (now - (state.lastEventAtMs ?: 0))
         if (
             state.phase !is TurnPhase.Done &&
             silenceMs > STREAM_WATCHDOG_SILENCE_MS &&
