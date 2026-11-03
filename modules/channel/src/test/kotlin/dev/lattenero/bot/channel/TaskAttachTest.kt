@@ -724,6 +724,23 @@ class TaskAttachTest {
     }
 
     @Test
+    fun theParentsSealDoesNotStealTheChildsPin() = runBlocking {
+        // measured live 2/11 22:48: the owner attached a child, the PARENT's
+        // turn sealed 6 s later, and the pin died — /steer flew to the parent
+        val hub = LiveHub()
+        hub.pin("sess_subagent_agent_x")
+        hub.clear("session_parent")
+        assertEquals("sess_subagent_agent_x", hub.peekPin(), "the parent's seal is not the child's")
+        // the child's OWN seal lifts its pin
+        hub.clear("sess_subagent_agent_x")
+        assertEquals(null, hub.peekPin())
+        // nuclear (no id) still wipes everything
+        hub.pin("sess_subagent_agent_y")
+        hub.clear()
+        assertEquals(null, hub.peekPin())
+    }
+
+    @Test
     fun theDetailTextKeepsTheFullDescriptionUncapped() {
         val longMission = "revisar el teclado completo del bot y unificar el vocabulario de filas"
         val lane = laneWith("Agent", laneId, longMission)
