@@ -9,8 +9,9 @@ import dev.lattenero.bot.contracts.PyText
  * bot shows carries its real position, so a snippet is never anonymous
  * («no sé bien lo que estoy leyendo a qué línea corresponde»).
  *
- * Pure: text in → header + pages out. The registry that owns message ids
- * and taps is [BoxPages]; this object never touches Telegram.
+ * Pure: text in → header + pages out. The state that owns message ids and
+ * pages is the fold's ([RenderState.boxes], U5b); this object never touches
+ * Telegram.
  */
 object ToolOutputPages {
 

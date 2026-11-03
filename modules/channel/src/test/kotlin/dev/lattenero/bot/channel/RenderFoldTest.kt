@@ -104,6 +104,55 @@ class RenderFoldTest {
         assertNull(reduce(state, RenderEvent.Clear), "the turn is spent — the fold's own reset")
     }
 
+    // ---- the tool boxes (U5b) ------------------------------------------------------
+
+    private fun boxBorn(boxId: Int, pages: Int = 2): RenderEvent.BoxBorn = RenderEvent.BoxBorn(
+        taskId = "task-9",
+        boxId = boxId,
+        header = "⚡ <b>Bash</b> — <code>ls</code> · $pages líneas\n<i>📜 tocar para ver</i>",
+        pages = (1..pages).map { "   $it│ línea $it" },
+        messageId = 1_000L + boxId,
+    )
+
+    @Test
+    fun aBornBoxLandsInTheFoldClosed() {
+        val state = reduce(null, thought("pensando"))
+        val born = reduce(state, boxBorn(boxId = 7, pages = 3))!!
+        val box = born.boxes.single()
+        assertEquals(7, box.boxId)
+        assertEquals(3, box.pages.size)
+        assertEquals(1_007L, box.messageId)
+        assertEquals(BoxLive.FOLDED, box.page, "a box is born CLOSED — the header + its one button")
+        // the birth moves nothing else the turn owns
+        assertEquals(state!!.tools, born.tools)
+        assertEquals(state.cotPending, born.cotPending)
+    }
+
+    @Test
+    fun aRebornIdNeverDoublesAndAForeignBirthIsIgnored() {
+        val state = reduce(null, thought("pensando"))
+        val once = reduce(state, boxBorn(boxId = 7))!!
+        assertEquals(1, once.boxes.size)
+        val twice = reduce(once, boxBorn(boxId = 7, pages = 5))!!
+        assertEquals(1, twice.boxes.size, "a reborn id replaces, never doubles")
+        assertEquals(5, twice.boxes.single().pages.size)
+        assertEquals(
+            once,
+            reduce(once, RenderEvent.BoxBorn("other-task", 7, "h", listOf("p"), 1L)),
+            "a foreign task's box birth is ignored — the watched turn stays",
+        )
+    }
+
+    @Test
+    fun theBoxCeilingKeepsTheNewestAndTheMaxIdSurvives() {
+        var state = reduce(null, thought("pensando"))
+        val ids = 1..(BOX_CAP + 1)
+        state = ids.fold(state) { acc, id -> reduce(acc, boxBorn(boxId = id)) }
+        assertEquals(BOX_CAP, state!!.boxes.size, "the registry's own ceiling")
+        assertEquals(2, state.boxes.minOf { it.boxId }, "eviction takes the oldest (the first born)")
+        assertEquals(BOX_CAP + 1, state.boxes.maxOf { it.boxId }, "the max id survives — the next id never regresses")
+    }
+
     // ---- the staleness tick ------------------------------------------------------
 
     @Test
