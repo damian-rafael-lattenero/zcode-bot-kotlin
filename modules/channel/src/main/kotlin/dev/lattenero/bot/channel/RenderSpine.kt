@@ -1,10 +1,14 @@
 package dev.lattenero.bot.channel
 
+import dev.lattenero.bot.contracts.PyText
 import kap.Backpressure
 import kap.Kap
 import kap.KapStream
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.mapNotNull
+import kotlinx.coroutines.flow.merge
+import kotlinx.coroutines.flow.scan
 import kotlinx.serialization.json.JsonObject
 
 /**
@@ -200,15 +204,15 @@ sealed interface RenderEvent {
 data class ToolCall(
     val toolId: String?,
     /** The frame's own name; null = it did not name the tool (the lane keeps its own). */
-    val name: String?,
-    val title: String?,
-    val parentToolUseId: String?,
-    val subagentAgentId: String?,
-    val input: JsonObject?,
+    val name: String? = null,
+    val title: String? = null,
+    val parentToolUseId: String? = null,
+    val subagentAgentId: String? = null,
+    val input: JsonObject? = null,
     /** Lines written so far per THIS frame's input (content/new_string); 0 when nothing streamed. */
     val streamedLines: Int,
     /** raw.streamingRawInputLength — the chars the model actually emitted; null = absent. */
-    val rawChars: Int?,
+    val rawChars: Int? = null,
     val isMcp: Boolean,
     /** The close's terminal status (completed/failed/denied/stopped); null on an open. */
     val status: String? = null,
@@ -229,10 +233,17 @@ data class ToolCall(
 fun classify(frame: ServerFrame, nowMs: Long): RenderEvent? = when (frame) {
     is ServerFrame.KeepAlive -> RenderEvent.Keepalive(frame.taskId, frame.seq)
 
-    is ServerFrame.StreamEvent -> classifyStream(frame, nowMs)
+    is ServerFrame.StreamEvent -> classifyFrame(frame, nowMs)
 
     else -> null // hello/pong/acks: not render material — the additive rule's own drop
 }
+
+/**
+ * The stream event's own classification — TOTAL (a StreamEvent is always
+ * render material, even if only for freshness). This is the fold-edge's
+ * entry: [LiveTurn.reduce] classifies through here.
+ */
+fun classifyFrame(frame: ServerFrame.StreamEvent, nowMs: Long): RenderEvent = classifyStream(frame, nowMs)
 
 // one branch per wire type — the union IS the shape (the reducer's own table)
 @Suppress("CyclomaticComplexMethod")
@@ -409,3 +420,62 @@ internal fun KapStream<RenderEvent>.withStageSlack(slots: Int = SPINE_SLOTS): Ka
 
 /** The spine's default slack — bursts ride, the exact law never bends. */
 internal const val SPINE_SLOTS = 64
+
+
+// ---- the spine's composition -----------------------------------------------
+
+/**
+ * THE SPINE, END TO END (the design's laws 1–3): the channel's frames →
+ * [mapKap] → the named backpressure stages → the pure fold's
+ * `scan(RenderState.empty, ::reduce)` → the states, one per event.
+ *
+ * THE STAGES — backpressure named per stage, the honesty law:
+ *
+ * - **THE CoT CHAR STAGE — `conflate()`.** What may drop: an older
+ *   buffered CoT delta when the fold lags behind a thinking burst — only
+ *   the latest matters; the fold's char counter says so (it becomes a
+ *   lower bound). What never: a tool line, a seal, a pill, a tick — they
+ *   ride the exact lane.
+ * - **THE EXACT LANE — [withStageSlack].** Tool-input lines EXACT: a line
+ *   counter that drops is a lie. The lane has slack for bursts and the
+ *   producer suspends when it fills — backpressure flows upstream, and
+ *   the verdicts (the +N/−M, the outputs, the 🔔's facts) lose NOTHING.
+ * - **THE STALENESS TICKER — `dropOldest(1)`.** An old tick is worthless:
+ *   only the freshest survives a backlog, and a tick drops no truth (it
+ *   moves no event clock).
+ *
+ * The two event lanes merge by readiness; within one burst the phase may
+ * reflect a tool line one event late and converges at the next event (the
+ * exact lane's OWN order and completeness are the upstream's, always).
+ * `frames` must be multicast-safe (a SharedFlow): each lane collects it,
+ * and the classifier is pure so a re-run is the same event.
+ */
+fun spine(
+    frames: Flow<ServerFrame>,
+    ticker: Flow<Long>,
+    nowMs: () -> Long,
+    differ: LineDiffer = SimpleLineDiffer,
+): Flow<RenderState?> {
+    val events = mapKap(frames, nowMs)
+    val thoughts = events
+        .filterKap { Kap { it is RenderEvent.Thought } }
+        .conflate() // THE CoT CHAR STAGE — the conflating lane
+    val exact = events
+        .filterKap { Kap { it !is RenderEvent.Thought } }
+        .withStageSlack() // THE EXACT LANE — tool lines, seals, pills: nothing drops
+    val ticks = KapStream.from(ticker)
+        .mapKap { ms -> Kap { RenderEvent.Tick(ms) } }
+        .dropOldest(1) // THE STALENESS TICKER — the freshest tick is the only one
+    return KapStream.from(merge(thoughts.asFlow(), exact.asFlow(), ticks.asFlow()))
+        .let { merged ->
+            KapStream.from(
+                merged.asFlow()
+                    // the scan's seed emission (the unborn state) is NOT an
+                    // event's state — the consumers' contract is ONE STATE
+                    // PER EVENT; the seed is the accumulator, never output
+                    .scan<RenderEvent, RenderState?>(RenderState.empty) { acc, e -> reduce(acc, e, differ) }
+                    .drop(1),
+            )
+        }
+        .asFlow()
+}

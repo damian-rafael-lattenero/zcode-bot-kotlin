@@ -177,7 +177,24 @@ data class TurnLive(
     val lastSeq: Long? = null,
     val lastEventAtMs: Long? = null,
     val usageTokens: Long? = null,
-)
+    /**
+     * THE CARD'S AGE, FOLD-REDUCED (U5a, the design's law 2): the staleness
+     * tick's verdict — `tickNow - lastEventAtMs` — carried in the state
+     * instead of computed at the edges. The [Tick] event moves NOTHING the
+     * frames own: the ticker proves nothing about the model.
+     */
+    val staleMs: Long? = null,
+) {
+    companion object {
+        /**
+         * THE FOLD'S SEED — `RenderState.empty` (docs/u5-render-design.md,
+         * law 2): the unborn turn, named by the first frame. The reducer's
+         * task-switch law treats any state whose taskId is not the event's
+         * as unborn, so the seed flows through the same branch.
+         */
+        val empty: TurnLive = TurnLive(taskId = "", title = "")
+    }
+}
 
 /**
  * One tool's live verb — the distinct-per-action contract. The channel
@@ -365,286 +382,18 @@ object LiveTurn {
      * of their own), the `differ` computes an edit's final +N/−M (the
      * daemon passes the SequenceMatcher port), and the seq gap check is
      * the caller's.
+     *
+     * U5a: THE FOLD LIVES ON THE SPINE — this is the frame edge's
+     * convenience (the hub's and the tests' entry point): classify the
+     * frame, then one pure step of [RenderSpine.reduce].
      */
-    // one branch per event type — the union IS the shape (BusEvents precedent)
-    @Suppress("CyclomaticComplexMethod", "LongMethod")
     fun reduce(
         state: TurnLive?,
         frame: ServerFrame.StreamEvent,
         nowMs: Long,
         differ: LineDiffer = SimpleLineDiffer,
-    ): TurnLive {
-        val event = frame.event
-        val base = state ?: TurnLive(
-            taskId = frame.taskId,
-            title = frame.taskId.takeLast(TITLE_TAIL),
-            startedAtMs = openedAt(frame, nowMs),
-        )
-        val refreshed = base.copy(
-            lastSeq = frame.seq,
-            lastEventAtMs = if (frame.at > 0) frame.at else nowMs,
-        )
-        val type = StreamEvents.type(event) ?: return refreshed
-        return when (type) {
-            StreamEvents.RUN_STARTED -> refreshed.copy(startedAtMs = frame.at.takeIf { it > 0 } ?: nowMs)
-
-            StreamEvents.THOUGHT -> reduceThought(refreshed, event, nowMs)
-
-            StreamEvents.MESSAGE -> {
-                val delta = StreamEvents.content(event)
-                val chars = refreshed.answerChars + delta.length
-                refreshed.copy(
-                    answerChars = chars,
-                    phase = when (val phase = refreshed.phase) {
-                        is TurnPhase.Done -> phase
-                        else -> TurnPhase.Writing(
-                            tool = null,
-                            toolId = null,
-                            lines = 0,
-                            rawChars = chars,
-                            sinceMs = phaseSince(phase, refreshed, nowMs),
-                        )
-                    },
-                    // real progress clears the retry pill (reasoning/text deltas)
-                    apiRetry = if (delta.isNotEmpty()) null else refreshed.apiRetry,
-                )
-            }
-
-            StreamEvents.TOOL_CALL -> reduceToolArrival(refreshed, event, nowMs, differ, final = true)
-
-            StreamEvents.TOOL_UPDATE -> when (StreamEvents.status(event)) {
-                "pending" -> reduceToolArrival(refreshed, event, nowMs, differ, final = false)
-
-                "completed", "failed", "denied", "stopped" -> reduceToolClose(refreshed, event, nowMs, differ)
-
-                else -> refreshed // in_progress and friends: nothing visible changes
-            }
-
-            StreamEvents.COMPLETE ->
-                refreshed.copy(
-                    phase = TurnPhase.Done(stopReason = StreamEvents.stopReason(event), atMs = nowMs),
-                    usageTokens = StreamEvents.usageTokens(event) ?: refreshed.usageTokens,
-                    interaction = null,
-                )
-
-            StreamEvents.ERROR -> {
-                val pill = StreamEvents.typedErrorOf(event)
-                refreshed.copy(
-                    phase = TurnPhase.Done(stopReason = pill.error, atMs = nowMs),
-                    typedError = pill,
-                    interaction = null,
-                )
-            }
-
-            StreamEvents.PERMISSION -> refreshed.copy(
-                interaction = InteractionPending("permission", StreamEvents.title(event)),
-            )
-
-            StreamEvents.ELICITATION -> refreshed.copy(
-                interaction = InteractionPending("elicitation", StreamEvents.title(event)),
-            )
-
-            StreamEvents.PERMISSION_RESPONSE, StreamEvents.ELICITATION_RESPONSE ->
-                refreshed.copy(interaction = null)
-
-            StreamEvents.SESSION_INFO -> {
-                // the fork's pill patch (absent = untouched, null = clear) + the
-                // turn's REAL title when the session reports one
-                val titled = event.str("title")?.takeIf { it.isNotEmpty() }
-                    ?.let { refreshed.copy(title = it) } ?: refreshed
-                when (val patch = ApiRetryText.fromPatch(event)) {
-                    ApiRetryText.ApiRetryPatch.Untouched -> titled
-                    ApiRetryText.ApiRetryPatch.Clear -> titled.copy(apiRetry = null)
-                    is ApiRetryText.ApiRetryPatch.Set -> titled.copy(apiRetry = patch.pill)
-                }
-            }
-
-            StreamEvents.NETWORK_DEBUG -> when (
-                val patch = ApiRetryText.fromNetworkDebug(event, frame.at.takeIf { it > 0 } ?: nowMs)
-            ) {
-                ApiRetryText.ApiRetryPatch.Untouched -> refreshed
-                ApiRetryText.ApiRetryPatch.Clear -> refreshed.copy(apiRetry = null)
-                is ApiRetryText.ApiRetryPatch.Set -> refreshed.copy(apiRetry = patch.pill)
-            }
-
-            else -> refreshed // usage_update and the rest of the union: additive rule
-        }
-    }
-
-    private fun openedAt(frame: ServerFrame.StreamEvent, nowMs: Long): Long =
-        if (frame.at > 0) frame.at else nowMs
-
-    /** agent_thought_chunk: main agent grows the tail; subagents grow their own lane —
-     *  EXCEPT on a lane-scoped card, where the watched lane's thoughts ARE the
-     *  main narration (subagent implements task: the identical UI). */
-    private fun reduceThought(state: TurnLive, event: JsonObject, nowMs: Long): TurnLive {
-        val delta = StreamEvents.content(event)
-        val parent = StreamEvents.parentToolUseId(event)
-        val isMain = parent == null || parent == state.watchedLane
-        return if (isMain) {
-            // Replay guard (measured live 30/10: the fork's stream recovery
-            // can re-emit the same chunk; the tail already ends with it — a
-            // duplicate would double-print the sentence in the cajita).
-            // Length-gated: tiny legitimate repeats (separators, short tokens)
-            // must pass — only sentence-sized re-emissions are replays.
-            if (delta.length >= REPLAY_GUARD_MIN_CP && state.cotTail.endsWith(delta)) return state
-            val chars = state.thoughtChars + delta.length
-            // THE BLOCKS (Python's CotSealer.feed, reasoning.py): the pending
-            // block seals EXACTLY at COT_BLOCK_CP code points — a delta may
-            // straddle the boundary, so the block closes AT it and the
-            // remainder opens the next one. CODE POINTS, not chars
-            // (PyText.cpLength is the house ruler); offsetByCodePoints never
-            // splits a surrogate pair.
-            var blocks = state.cotBlocks
-            var pending = state.cotPending + delta
-            while (PyText.cpLength(pending) >= COT_BLOCK_CP) {
-                val cut = pending.offsetByCodePoints(0, COT_BLOCK_CP)
-                blocks = blocks + pending.substring(0, cut)
-                pending = pending.substring(cut)
-            }
-            state.copy(
-                thoughtChars = chars,
-                cotBlocks = blocks,
-                cotPending = pending,
-                cotTail = takeLastCodePoints(state.cotTail + delta, COT_TAIL_CP),
-                phase = TurnPhase.Thinking(chars = chars, sinceMs = phaseSince(state.phase, state, nowMs)),
-                // REAL progress clears the retry pill (the fork's own recovery rule)
-                apiRetry = if (delta.isNotEmpty()) null else state.apiRetry,
-            )
-        } else {
-            state.copy(
-                subagentThought = state.subagentThought +
-                    (parent to (state.subagentThought[parent] ?: 0) + delta.length),
-            )
-        }
-    }
-
-    /**
-     * tool_call (final, input complete) opens-or-fills the lane with the
-     * authority input; tool_call_update/pending streams the partial input
-     * (lines from content/new_string, raw chars from raw.streamingRawInputLength).
-     * The +N/−M breathe: the differ runs per delta on the growing old/new
-     * pair; the close recomputes it on the complete input (the authority).
-     */
-    @Suppress("CyclomaticComplexMethod") // the tool lane lifecycle, one guard per field
-    private fun reduceToolArrival(
-        state: TurnLive,
-        event: JsonObject,
-        nowMs: Long,
-        differ: LineDiffer,
-        final: Boolean,
-    ): TurnLive {
-        val toolId = StreamEvents.toolId(event) ?: return state
-        val existing = state.tools.firstOrNull { it.toolId == toolId }
-        val name = StreamEvents.toolName(event, existing)
-        val streamed = StreamEvents.writtenLines(event)
-        // final tool_call: the input IS the authority. pending update: the
-        // partial projection only ever GROWS the count (sampling may stutter)
-        val lines = when {
-            final -> if (streamed > 0 || existing == null) streamed else existing.lines
-            streamed > 0 -> streamed
-            else -> existing?.lines ?: 0
-        }
-        val input = StreamEvents.input(event) ?: existing?.input
-        val liveDiff = liveEditDiff(input, differ)
-        val lane = ToolLive(
-            toolId = toolId,
-            name = name,
-            title = StreamEvents.title(event) ?: existing?.title,
-            parentToolUseId = StreamEvents.parentToolUseId(event) ?: existing?.parentToolUseId,
-            subagentAgentId = StreamEvents.subagentAgentId(event) ?: existing?.subagentAgentId,
-            openedAtMs = existing?.openedAtMs ?: nowMs,
-            lines = lines,
-            rawChars = StreamEvents.streamingRawInputLength(event) ?: existing?.rawChars ?: 0,
-            input = input,
-            status = existing?.status, // a closed lane does not reopen
-            isMcp = existing?.isMcp ?: StreamEvents.isMcp(event, name),
-            added = liveDiff?.first,
-            removed = liveDiff?.second,
-            lastUpdateAtMs = nowMs,
-        )
-        val tools = state.tools.filterNot { it.toolId == toolId } + lane
-        return state.copy(
-            tools = tools,
-            phase = when (state.phase) {
-                is TurnPhase.Done -> state.phase
-                else -> TurnPhase.Writing(
-                    tool = name,
-                    toolId = toolId,
-                    lines = lane.lines,
-                    rawChars = lane.rawChars,
-                    sinceMs = existing?.openedAtMs ?: nowMs,
-                )
-            },
-        )
-    }
-
-    // the close ladder: one guard per early exit, one branch per close shape — the reducer's own table
-    @Suppress("ReturnCount", "CyclomaticComplexMethod")
-    private fun reduceToolClose(
-        state: TurnLive,
-        event: JsonObject,
-        nowMs: Long,
-        differ: LineDiffer,
-    ): TurnLive {
-        val toolId = StreamEvents.toolId(event) ?: return state
-        val existing = state.tools.firstOrNull { it.toolId == toolId } ?: return state
-        val diff = liveEditDiff(existing.input ?: StreamEvents.input(event), differ)
-        val closed = existing.copy(
-            status = StreamEvents.status(event),
-            added = diff?.first,
-            removed = diff?.second,
-            outputLines = StreamEvents.outputLines(event) ?: existing.outputLines,
-            output = StreamEvents.outputText(event) ?: existing.output,
-            lastUpdateAtMs = nowMs,
-        )
-        val failed = closed.status == "failed"
-        // a dispatch lane's close folds its world: the child's inner lanes
-        // and its thought counter leave the card with it (the owner's 30/10
-        // corpse card kept orphan lanes ticking forever)
-        val dispatch = closed.name in DISPATCH_TOOLS
-        val tools = (if (dispatch) state.tools.filterNot { it.parentToolUseId == toolId } else state.tools)
-            .map { if (it.toolId == toolId) closed else it }
-        // a lane-scoped card's OWN root tool closed: the watched subagent is
-        // over — the honest Done seal (its next event never comes; a frozen
-        // "thinking" would be the lie the owner forbade)
-        val laneOver = state.watchedLane != null && toolId == state.watchedLane
-        // the next visible thing re-opens the phase; until then keep showing
-        // the sealed lane with its own timer frozen
-        return state.copy(
-            tools = tools,
-            doneTools = state.doneTools + 1,
-            failedTools = state.failedTools + if (failed) 1 else 0,
-            subagentThought = if (dispatch) state.subagentThought - toolId else state.subagentThought,
-            phase = when {
-                laneOver -> TurnPhase.Done(
-                    stopReason = "subagent ${closed.status ?: "ended"}",
-                    atMs = nowMs,
-                )
-                state.phase is TurnPhase.Done -> state.phase
-                else -> TurnPhase.Thinking(chars = state.thoughtChars, sinceMs = nowMs)
-            },
-        )
-    }
-
-    /**
-     * An edit's +N/−M: the input's old_string/new_string through the
-     * differ. Called per delta on the PARTIAL input (the counts grow live)
-     * and once more at close on the complete input (the authority).
-     */
-    @Suppress("ReturnCount") // one guard per absent side of the edit pair
-    private fun liveEditDiff(input: JsonObject?, differ: LineDiffer): Pair<Int, Int>? {
-        val old = input?.str("old_string") ?: return null
-        val new = input.str("new_string") ?: return null
-        return differ.of(old, new)
-    }
-
-    /** A phase's timer starts when the phase is ENTERED — not re-armed per event. */
-    private fun phaseSince(phase: TurnPhase, state: TurnLive, nowMs: Long): Long = when (phase) {
-        is TurnPhase.Thinking -> phase.sinceMs
-        is TurnPhase.Writing -> phase.sinceMs
-        is TurnPhase.Done -> phase.atMs
-        TurnPhase.Idle -> state.lastEventAtMs ?: state.startedAtMs ?: nowMs
+    ): TurnLive = checkNotNull(reduce(state, classifyFrame(frame, nowMs), differ)) {
+        "a frame never clears the turn — the fold's own law"
     }
 
     // ---- render ------------------------------------------------------------
@@ -978,21 +727,12 @@ object LiveTurn {
      */
     const val LANE_FROZEN_MS = 600_000L
 
-    /**
-     * The dispatch tool names (the channel-side law — the same set the
-     * /tasks keyboard filters by): closing one folds its inner lanes away.
-     */
-    private val DISPATCH_TOOLS = setOf("Task", "Agent")
-
-    /**
-     * The replay guard's floor: only sentence-sized re-emissions count as
-     * replays — legitimate small repeats (separators, short tokens) pass.
-     */
-    internal const val REPLAY_GUARD_MIN_CP = 24
     private const val TEN = 10L
     private const val SECONDS_PER_MINUTE = 60L
     private const val SECONDS_PER_HOUR = 3600L
-    private const val TITLE_TAIL = 12
+
+    /** The fallback title's length — the sid's tail («644150daf013»). */
+    internal const val TITLE_TAIL = 12
     private const val SUBAGENT_ID_TAIL = 6
     private const val K_FROM = 1000
     private const val K_DIVISOR = 1000.0
