@@ -68,9 +68,9 @@ class ParkGate {
 /**
  * The park tap's OWN WORDS — one home: the publisher's toasts and the
  * wiring's unwired refusal share them (the ack is the owner-approved
- * wording, verbatim).
+ * wording, verbatim). Public: the wiring lives in the daemon module.
  */
-internal object ParkTapTexts {
+object ParkTapTexts {
     /** The tap's toast (the owner-approved wording). */
     const val ACK = "▶️ A background — te aviso al terminar"
 

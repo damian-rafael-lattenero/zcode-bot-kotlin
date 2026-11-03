@@ -617,6 +617,79 @@ class LivePublisherTest {
         assertTrue("end_turn" in wire.bodies.last { it.second == "editMessageText" }.first, "the record edits in place")
     }
 
+    // ---- ⏸️ the park tap (bg:<taskId>, the owner's 3/11) ----------------------
+
+    @Test
+    fun theCardIsBornWithItsOwnParkButton() = runTest {
+        val taskId = "task-9"
+        val hub = LiveHub()
+        hub.apply(frame(taskId, "task_run_started", at = 1_000), nowMs = 1_000)
+        hub.apply(frame(taskId, "agent_thought_chunk", at = 1_050, "content" to JsonPrimitive("arranco")), nowMs = 1_050)
+        val wire = Wire()
+        val publisher = publisher(wire, hub)
+        publisher.tick() // the birth
+        val birth = wire.bodies.first { it.second == "sendMessage" }.first
+        assertTrue("⏸️ A background" in birth, "the card's own row: the park tap")
+        assertTrue("bg:task-9" in birth, "the data rides the taskId")
+    }
+
+    @Test
+    fun theParkTapAnswersItsHonestWordsAndLandsTheParkedRender() = runTest {
+        val taskId = "task-9"
+        val hub = LiveHub()
+        hub.apply(frame(taskId, "task_run_started", at = 1_000), nowMs = 1_000)
+        hub.apply(frame(taskId, "agent_thought_chunk", at = 1_050, "content" to JsonPrimitive("arranco")), nowMs = 1_050)
+        val wire = Wire()
+        val publisher = publisher(wire, hub)
+        publisher.tick() // the birth
+        // THE TAP: the owner-approved ack, and ONE final edit with the parked
+        // render (the same edit-throat) — the button survives it
+        assertEquals(ParkTapTexts.ACK, publisher.park(taskId))
+        val parked = wire.bodies.last { it.second == "editMessageText" }.first
+        assertTrue("sigue en background" in parked, "the parked render is the card's last shape")
+        assertTrue("bg:task-9" in parked, "the ⏸️ keeps its button — a second tap stays answerable")
+        // A SECOND TAP is an honest no-op: the ack confirms, nothing re-edits
+        val edits = wire.bodies.count { it.second == "editMessageText" }
+        assertEquals(ParkTapTexts.ALREADY, publisher.park(taskId))
+        assertEquals(edits, wire.bodies.count { it.second == "editMessageText" }, "the no-op edits nothing")
+    }
+
+    @Test
+    fun anUnknownOrExpiredCardIsRefusedNeverALie() = runTest {
+        val wire = Wire()
+        val publisher = publisher(wire, LiveHub()) // no card ever born
+        assertEquals(ParkTapTexts.REFUSAL, publisher.park("task-9"))
+        assertTrue(wire.bodies.none { it.second == "editMessageText" }, "a refused tap touches nothing")
+        // a card of ANOTHER task: the same refusal
+        val hub = LiveHub()
+        hub.apply(frame("task-9", "task_run_started", at = 1_000), nowMs = 1_000)
+        hub.apply(frame("task-9", "agent_thought_chunk", at = 1_050, "content" to JsonPrimitive("x")), nowMs = 1_050)
+        val wire2 = Wire()
+        val publisher2 = publisher(wire2, hub)
+        publisher2.tick()
+        assertEquals(ParkTapTexts.REFUSAL, publisher2.park("another-task"))
+    }
+
+    @Test
+    fun aThrottledWindowDefersTheParkedRenderAndTheTapStillAcks() = runTest {
+        val taskId = "task-9"
+        val hub = LiveHub()
+        hub.apply(frame(taskId, "task_run_started", at = 1_000), nowMs = 1_000)
+        hub.apply(frame(taskId, "agent_thought_chunk", at = 1_050, "content" to JsonPrimitive("arranco")), nowMs = 1_050)
+        val wire = Wire()
+        var nowSec = 2.0
+        val cooldown = Cooldown(now = { nowSec }, readFile = { null })
+        val publisher = publisher(wire, hub, cooldown = cooldown)
+        publisher.tick() // the birth
+        cooldown.extend(raSeconds = 60) // Telegram named the window
+        val edits = wire.bodies.count { it.second == "editMessageText" }
+        // the ack flies (the toast is not the edit), the render waits for the window
+        assertEquals(ParkTapTexts.ACK, publisher.park(taskId))
+        assertEquals(edits, wire.bodies.count { it.second == "editMessageText" }, "the parked render obeys the cooldown")
+        nowSec = 5_000.0
+        publisher.park(taskId) // the no-op ack — the retry is the tick's (the gate's law, unit 3)
+    }
+
     private companion object {
         const val TICK_MS = 2_000L
     }

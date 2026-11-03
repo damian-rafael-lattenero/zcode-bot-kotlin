@@ -2,6 +2,7 @@ package dev.lattenero.bot.daemon
 
 import dev.lattenero.bot.channel.Ack
 import dev.lattenero.bot.channel.BotCommands
+import dev.lattenero.bot.channel.ParkTapTexts
 import dev.lattenero.bot.channel.BrainCommands
 import dev.lattenero.bot.channel.ChannelClient
 import dev.lattenero.bot.channel.DeployCommand
@@ -568,7 +569,7 @@ private fun buildLiveView(
 }
 
 /** The single reader — knob-gated (retire-python.nu turns it on). */
-@Suppress("LongMethod") // wiring breadth: the reader's every piece, one home (buildChannelStack's own law)
+@Suppress("LongMethod", "CyclomaticComplexMethod") // wiring breadth: the reader's every piece, one home
 private fun buildPoller(
     cfg: DaemonConfig,
     api: TgApi?,
@@ -752,17 +753,33 @@ private fun buildPoller(
 
                 is InboundUpdate.Callback -> {
                     metrics.pollerCallback()
-                    answerCallback(liveApi, update.callbackId)
                     when {
-                        // B6 — the deploy taps: intercepted BEFORE the
-                        // callback fallback (the sst: law: a stray data must
-                        // never ride to the agent as the owner's own words —
-                        // «/deploy go» launching a build would be the graver bug)
-                        update.data.startsWith("dep:") ->
-                            deployFlow.onTap(update.data.removePrefix("dep:"), update.fromId)
+                        // ⏸️ THE PARK TAP (bg:<taskId>, the owner's 3/11):
+                        // answered ONCE, with its own honest toast — a
+                        // callback query answers once, so this branch never
+                        // reaches the bare ack below. The toast IS the ack
+                        // («▶️ A background — te aviso al terminar») or the
+                        // honest refusal (an unknown/expired card never
+                        // lies); the park's effect rides the live view.
+                        update.data.startsWith("bg:") -> {
+                            val ack = liveView?.park(update.data.removePrefix("bg:"))
+                            answerCallback(liveApi, update.callbackId, ack ?: ParkTapTexts.REFUSAL)
+                        }
 
-                        else -> commands.onCallback(update.data, update.updateId)
-                            ?.let { speak(it.text, false, it.markup) }
+                        else -> {
+                            answerCallback(liveApi, update.callbackId)
+                            when {
+                                // B6 — the deploy taps: intercepted BEFORE the
+                                // callback fallback (the sst: law: a stray data must
+                                // never ride to the agent as the owner's own words —
+                                // «/deploy go» launching a build would be the graver bug)
+                                update.data.startsWith("dep:") ->
+                                    deployFlow.onTap(update.data.removePrefix("dep:"), update.fromId)
+
+                                else -> commands.onCallback(update.data, update.updateId)
+                                    ?.let { speak(it.text, false, it.markup) }
+                            }
+                        }
                     }
                 }
             }
@@ -940,11 +957,18 @@ private const val DIFF_REPLY_CAP = 3500
 private const val BYTES_K = 1024L
 private const val SID_TAIL = 8
 
-/** The tap's toast — best-effort by design (Python's bare except; the action itself already ran). */
+/** The tap's toast — best-effort by design (Python's bare except; the action itself already ran).
+ *  [text] is the toast's honest words when the tap promises something (the ⏸️ park's ack). */
 @Suppress("TooGenericExceptionCaught") // Python's bare except: a failed toast never fails the tap
-private suspend fun answerCallback(api: TgApi, callbackId: String) {
+private suspend fun answerCallback(api: TgApi, callbackId: String, text: String? = null) {
     try {
-        api.call("answerCallbackQuery", buildJsonObject { put("callback_query_id", callbackId) })
+        api.call(
+            "answerCallbackQuery",
+            buildJsonObject {
+                put("callback_query_id", callbackId)
+                if (text != null) put("text", text)
+            },
+        )
     } catch (e: Exception) {
         logger.warn(e) { "answerCallbackQuery failed (the tap's action still ran): ${e.message}" }
     }
