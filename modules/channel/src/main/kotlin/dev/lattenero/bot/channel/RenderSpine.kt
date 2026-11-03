@@ -192,6 +192,21 @@ sealed interface RenderEvent {
     /** Back to the whole task's stream (a t: attach clears any lane scope). */
     data object WatchTask : RenderEvent
 
+    /**
+     * A COLLAPSED OUTPUT BOX was born (U5b): the feed spoke the collapsed
+     * header with its one 📜 button and the send FLEW — the born fact (the
+     * message id included) folds here. The event is the FACT, not the
+     * request: a send that never flew folds nothing (there is no message
+     * to edit, the tap on it is an honest miss).
+     */
+    data class BoxBorn(
+        val taskId: String,
+        val boxId: Int,
+        val header: String,
+        val pages: List<String>,
+        val messageId: Long,
+    ) : RenderEvent
+
     /** The turn is spent (the seal's cleanup, a ☢️ nuclear): the fold's reset. */
     data object Clear : RenderEvent
 }
