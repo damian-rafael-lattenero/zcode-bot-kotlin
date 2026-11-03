@@ -28,6 +28,15 @@ object Keyboards {
     }
 
     /**
+     * A URL button (Telegram's own shape): the tap OPENS the link in the
+     * user's browser — no callback, nothing for the bot to answer.
+     */
+    fun urlButton(text: String, url: String): JsonObject = buildJsonObject {
+        put("text", text)
+        put("url", url)
+    }
+
+    /**
      * /tasks's keyboard: one green row per conversation (Python's
      * button_of: stamp + n + title[:34], callback `t:<sid>`), then the
      * blue 🔵 subagent rows — ALWAYS visible (the owner's 2/11 law: the

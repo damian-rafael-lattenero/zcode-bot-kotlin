@@ -191,6 +191,18 @@ object GiftsMenu {
         }
     }
 
+    /**
+     * The browser DOOR (the claim's captcha gate, 3/11): ONE url button —
+     * a tap opens the owner's browser at the rewards surface. Telegram
+     * cannot make a callback open a URL by itself, so this row is the
+     * closest a bot can get to «confirm → abrí el link».
+     */
+    fun webDoorKeyboard(label: String, url: String): JsonObject = buildJsonObject {
+        putJsonArray("inline_keyboard") {
+            add(buildJsonArray { add(Keyboards.urlButton(label, url)) })
+        }
+    }
+
     /** The host's claim verdict — `success` is the server's, never re-derived. */
     @Suppress("ReturnCount") // one guard per verdict tier (unreadable, refused, applied)
     fun claimResult(json: String, name: String, zone: ZoneId = ZoneId.systemDefault()): String {

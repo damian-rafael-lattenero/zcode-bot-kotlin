@@ -271,9 +271,10 @@ class GiftsCommandTest {
     }
 
     @Test
-    fun theServersCaptchaGateNamesTheWorkingDoor() = runBlocking {
+    fun theServersCaptchaGateAnswersWithTheBrowserDoor() = runBlocking {
         // measured live 3/11: claimManualPlan throws «captcha verify failed»;
-        // the fork's security edition is a stub, so no proof can exist here
+        // the fork's security edition is a stub, so no proof can exist here —
+        // the answer is ONE line + a url button that opens the app's own page
         val o = ops().apply {
             claimAnswer = QueryAnswer.Failed("internal", "captcha verify failed")
         }
@@ -282,7 +283,15 @@ class GiftsCommandTest {
         bc.onCallback("cl:global-build", 2L)
         val done = bc.onCallback("cly:", 3L)!!
         assertEquals(BotCommands.GIFT_CAPTCHA, done.text)
-        assertTrue("CAPTCHA" in done.text && "stub" in done.text)
+        val row = done.markup!!.jsonObject["inline_keyboard"]!!.jsonArray[0].jsonArray[0].jsonObject
+        assertEquals("🌐 Abrir la web (planes)", row["text"]!!.jsonPrimitive.content)
+        assertEquals(BotCommands.GIFT_CLAIM_URL, row["url"]!!.jsonPrimitive.content)
+        assertEquals(
+            "https://zcode.z.ai/en/rewards?embedded=app&theme=zai-dark",
+            BotCommands.GIFT_CLAIM_URL,
+            "the app's trusted-URL contract requires both params",
+        )
+        assertNull(row["callback_data"], "a url button opens the browser — no callback to answer")
     }
 
     @Test
