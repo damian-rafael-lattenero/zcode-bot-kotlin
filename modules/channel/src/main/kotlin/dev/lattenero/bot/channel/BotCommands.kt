@@ -199,7 +199,7 @@ class BotCommands(
             "status" -> BotReply(status())
             "stop" -> stop(rest)
             "nuclear", "nuke" -> nuclear(rest)
-            "quota" -> BotReply(quota())
+            "quota" -> quota()
             "usage" -> BotReply(usage())
             "ctx" -> ctxList()
             "help", "start" -> BotReply(help())
@@ -292,6 +292,19 @@ class BotCommands(
         // /mode's picker tap (mo:<mode>): the SAME write the typed command
         // runs — one path, one vocabulary, one honest answer
         data.startsWith("mo:") -> mode(data.removePrefix("mo:"))
+
+        // A5's gifts: the first tap ARMS (a confirmation card), the second
+        // (cly:/gfy:) fires, gxn: cancels. The planId/type/key live in the
+        // pending slot, never in the callback (Telegram's 64-byte law).
+        data == "cly:" -> giftClaimGo()
+
+        data == "gfy:" -> giftResetGo()
+
+        data == "gxn:" -> giftCancel()
+
+        data.startsWith("cl:") -> giftClaimConfirm(data.removePrefix("cl:"))
+
+        data.startsWith("gf:") -> giftResetConfirm(data.removePrefix("gf:"))
 
         // LA EXPANSIÓN EN EL LUGAR (2/11): the collapsed CoT block's tap —
         // the tap toggles the block WHOLE on its OWN message (expand, then
@@ -441,6 +454,103 @@ class BotCommands(
     private suspend fun currentMode(taskId: String, ws: String?): String? =
         (ops.query(ChannelQuery.TaskSnapshot(taskId, ws, messageLimit = 1)) as? QueryAnswer.Ok)
             ?.let { ModeMenu.currentFrom(it.resultJson) }
+
+    // ── A5: the coding plan's gifts (the 🎁 read and its two confirmed writes) ──
+
+    /**
+     * The gifts read: a dead plane is EMPTY (silence), an old host is
+     * silence too (no capability probe, no warning) — A5's degradation
+     * contract: no data → no line.
+     */
+    private suspend fun giftsFor(taskId: String?): GiftsMenu.Gifts =
+        when (val answer = ops.query(ChannelQuery.CodingPlanGifts(taskId))) {
+            is QueryAnswer.Ok -> GiftsMenu.parse(answer.resultJson, clock())
+            is QueryAnswer.Failed -> {
+                if (answer.code != UNKNOWN_QUERY_CODE) {
+                    logger.info { "gifts: ${answer.code} — no lines (${answer.message ?: "?"})" }
+                }
+                GiftsMenu.EMPTY
+            }
+            QueryAnswer.Unavailable -> GiftsMenu.EMPTY
+        }
+
+    /** The conversation in front (the gifts' provider hint; null is fine — the host resolves). */
+    private suspend fun activeTaskId(): String? =
+        (contextAnswer() as? ContextAnswer.Ctx)?.value?.activeTaskId
+
+    /** `cl:<planId>` — re-read the offer (the truth may have moved) and ask the ✅. */
+    private suspend fun giftClaimConfirm(planId: String): BotReply {
+        val offer = giftsFor(activeTaskId()).offers.firstOrNull { it.planId == planId }
+            ?: return BotReply("🤷 Esa oferta ya no está — corré /quota de nuevo.")
+        pendingGift = PendingGift("claim", planId, null, null, offer.displayName, clock())
+        logger.info { "gift: claim ARMED for ${offer.planId} — waiting the ✅" }
+        return BotReply(GiftsMenu.claimConfirmation(offer), markup = GiftsMenu.confirmKeyboard("cly:"))
+    }
+
+    /** `cly:` — the claim itself: the host's verdict IS the answer. */
+    private suspend fun giftClaimGo(): BotReply {
+        val p = livePendingGift("claim")
+            ?: return BotReply(GIFT_NOTHING_ARMED)
+        pendingGift = null
+        logger.info { "gift: CLAIM firing for ${p.planId}" }
+        return when (val answer = ops.query(ChannelQuery.ClaimCodingPlan(p.planId.orEmpty()))) {
+            is QueryAnswer.Ok -> BotReply(GiftsMenu.claimResult(answer.resultJson, p.name))
+            is QueryAnswer.Unavailable -> BotReply(DEGRADED)
+            is QueryAnswer.Failed -> giftFailure("reclamar", answer)
+        }
+    }
+
+    /** `gf:<type>` — how many are left and how soon the earliest dies; then the ✅. */
+    private suspend fun giftResetConfirm(type: String): BotReply {
+        val alive = giftsFor(activeTaskId()).resets.filter { it.type == type }
+        if (alive.isEmpty()) return BotReply("🤷 Ese reset ya no está — corré /quota de nuevo.")
+        pendingGift = PendingGift(
+            kind = "reset",
+            planId = null,
+            resetType = type,
+            idempotencyKey = java.util.UUID.randomUUID().toString(),
+            name = "reset",
+            atMs = clock(),
+        )
+        logger.info { "gift: reset ARMED ($type, ${alive.size} alive) — waiting the ✅" }
+        return BotReply(
+            GiftsMenu.resetConfirmation(type, alive.size, alive.first().expireAt, clock()),
+            markup = GiftsMenu.confirmKeyboard("gfy:"),
+        )
+    }
+
+    /** `gfy:` — spend the reset with the key generated at CONFIRM time (a double tap re-sends the same key). */
+    private suspend fun giftResetGo(): BotReply {
+        val p = livePendingGift("reset")
+            ?: return BotReply(GIFT_NOTHING_ARMED)
+        pendingGift = null
+        logger.info { "gift: RESET firing (${p.resetType})" }
+        return when (
+            val answer = ops.query(
+                ChannelQuery.UseCodingPlanReset(activeTaskId(), p.resetType.orEmpty(), p.idempotencyKey.orEmpty()),
+            )
+        ) {
+            is QueryAnswer.Ok -> BotReply(
+                "✅ Reset usado (${if (p.resetType == GiftsMenu.WEEK) "semanal" else "5h"}). " +
+                    "Corré /quota en un momento para ver el pool nuevo.",
+            )
+            is QueryAnswer.Unavailable -> BotReply(DEGRADED)
+            is QueryAnswer.Failed -> giftFailure("usar el reset", answer)
+        }
+    }
+
+    /** `gxn:` — nothing was touched; say exactly that. */
+    private fun giftCancel(): BotReply {
+        pendingGift = null
+        return BotReply("📬 Cancelado — no se tocó nada.")
+    }
+
+    private fun giftFailure(verb: String, answer: QueryAnswer.Failed): BotReply =
+        if (answer.code == UNKNOWN_QUERY_CODE) {
+            BotReply(GIFT_OLD_FORK)
+        } else {
+            BotReply("⚠️ No pude $verb (${answer.code}): ${PyText.esc(answer.message ?: "?")}")
+        }
 
     /**
      * ⚡ — the text is already in the F17 queue: stopping the turn IS the
@@ -1483,6 +1593,32 @@ class BotCommands(
     private var pendingDelivery: PendingDelivery? = null
 
     /**
+     * The 🎁 confirmation's one-shot state (A5): the owner tapped Reclamar
+     * or Usar reset — the NEXT tap is the ✅/❌. The planId/type/key live
+     * HERE, never in the callback (Telegram's 64-byte law), and the TTL
+     * keeps a stale confirmation from firing hours later.
+     */
+    private data class PendingGift(
+        val kind: String, // "claim" | "reset"
+        val planId: String?,
+        val resetType: String?,
+        val idempotencyKey: String?,
+        val name: String,
+        val atMs: Long,
+    )
+
+    @Volatile
+    private var pendingGift: PendingGift? = null
+
+    /** The pending gift inside its TTL, or null (and the slot cleared). */
+    private fun livePendingGift(kind: String): PendingGift? {
+        val p = pendingGift ?: return null
+        val usable = p.kind == kind && clock() - p.atMs <= PENDING_GIFT_TTL_MS
+        if (!usable) pendingGift = null
+        return p.takeIf { usable }
+    }
+
+    /**
      * A subagent's ORDER tap (`so:<tail>` — the ✍️ next to the 🔵 attach):
      * ATTACHES the subagent's stream (the full form when the fork names the
      * child, lane-scope otherwise — [laneAttach]'s semantics) AND arms the
@@ -1888,9 +2024,13 @@ class BotCommands(
      * plan), 3) the channel's own honest word last — and, for an OpenCode
      * provider whose meter could not be read, a line that names the real
      * suspect (key/red) instead of the fork's misleading not_configured.
+     * ON TOP of a usable card, the 🎁 gifts (A5): granted resets and
+     * claimable offers, each behind its own confirmation tap. Gifts never
+     * ride a degraded card (a gift line over 📡 would imply the channel
+     * answered).
      */
-    @Suppress("ReturnCount") // one return per rung — the ladder's own shape
-    private suspend fun quota(): String {
+    @Suppress("CyclomaticComplexMethod", "ReturnCount") // one rung per branch — the ladder's own shape
+    private suspend fun quota(): BotReply {
         val ctx = contextAnswer() as? ContextAnswer.Ctx
         val taskId = ctx?.value?.activeTaskId
         val providerId = planViews(ctx?.value?.workspacePath)?.let { it.plan ?: it.defaultPlan }
@@ -1899,15 +2039,22 @@ class BotCommands(
             is QueryAnswer.Unavailable -> DEGRADED
             is QueryAnswer.Failed -> "⚠️ Quota failed (${answer.code}): ${PyText.esc(answer.message ?: "?")}"
         }
-        if (channelUsable(channel)) return channel
-        quotaDirect?.let { run ->
-            runCatching { run(providerId) }.getOrNull()?.let { return it }
+        val usable = channelUsable(channel)
+        val direct = if (usable) null else quotaDirect?.let { run -> runCatching { run(providerId) }.getOrNull() }
+        val base = when {
+            usable -> channel
+            direct != null -> direct
+            providerId != null && providerId.contains("opencode", ignoreCase = true) -> QUOTA_OPENCODE_UNREADABLE
+            else -> channel
         }
-        return if (providerId != null && providerId.contains("opencode", ignoreCase = true)) {
-            QUOTA_OPENCODE_UNREADABLE
-        } else {
-            channel
-        }
+        if (direct == null && !usable) return BotReply(base) // degraded: the gifts stay silent
+        val gifts = giftsFor(taskId)
+        val lines = GiftsMenu.render(gifts, clock())
+        if (lines.isEmpty()) return BotReply(base)
+        return BotReply(
+            base + "\n" + lines.joinToString("\n"),
+            markup = GiftsMenu.keyboard(gifts),
+        )
     }
 
     /** The channel's word is final unless it is the honest not_configured / degraded / failed one. */
@@ -2802,6 +2949,18 @@ class BotCommands(
         /** /mode needs a conversation: the mode is PER conversation, not a global knob. */
         internal const val MODE_NO_CONTEXT =
             "📭 No hay conversación activa — /tasks n elige una: el modo es POR conversación."
+
+        /** No armed 🎁 (or its 5-minute window closed) — the honest nudge, not a silent no-op. */
+        internal const val GIFT_NOTHING_ARMED =
+            "🤔 No hay un 🎁 armado — corré /quota y tocá el botón de nuevo."
+
+        /** /quota's gift rung against a host that predates A5. */
+        internal const val GIFT_OLD_FORK =
+            "⚠️ La app conectada no conoce el frame de regalos — falta deployar el fork actualizado " +
+                "(ZCode damian, A5)."
+
+        /** The confirmation's one-shot window (the pending slot's TTL). */
+        internal const val PENDING_GIFT_TTL_MS = 5 * 60 * 1000L
         internal const val CTX_WINDOW_UNPARSEABLE =
             "⚠️ No pude leer la respuesta de la ventana de contexto"
 
@@ -3090,7 +3249,7 @@ class BotCommands(
          *  «4,000M»); ≥ 1K reads as K («850.5K»); below, the plain number.
          *  The v3 mistake: the input is NOT a K-count — dividing it by 1000
          *  again said a thousand times MORE. */
-        private fun tokenRaw(n: Double?): String = when {
+        internal fun tokenRaw(n: Double?): String = when {
             n == null -> "?"
             n >= RAW_PER_M -> group(scaled(n, RAW_PER_M)) + "M"
             n >= RAW_PER_K -> group(scaled(n, RAW_PER_K)) + "K"

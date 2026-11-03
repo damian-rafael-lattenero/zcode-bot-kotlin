@@ -54,6 +54,8 @@ instead.
 | 🗜 | compact · 🪟 context window · 📈 usage · 📊 quota/status |
 | 🧠 | thinking chars / the context meter header |
 | 🔴 🟡 🟢 | context meter ≥80% / ≥50% / below (Python's reporting law) |
+| 🎁 | a gift plane: a granted quota reset or a claimable offer (/quota's lines and its Reclamar/Usar buttons) |
+| 🔴 (leading) | an UNCLAIMED offer — act now (/quota's claimable line; same glyph as the hot meter, the slot disambiguates) |
 | 📣 | feed verbosity — 🔈 summary · 🔉 normal · 🔊 verbose |
 | 🗺 | plan mode · 🔓 full access · 🎛 mode |
 | 🛠 📝 🛡 | /mode's other three rows: build ("Ask before changes") · edit ("Edit automatically") · guarded ("Autonomous mode") — labels copied from the app's own i18n, never invented |
