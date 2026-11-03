@@ -201,6 +201,14 @@ class BotCommands(
     /** The question's free-text arm: the shortId whose question eats the NEXT line (the qf: tap). */
     private var pendingAnswerFor: String? = null
 
+    /**
+     * /plan_model_effort's DRAFT (owner, 3/11): the three choices live
+     * LOCALLY until ✅ Aceptar — a partial tap never writes, and a draft
+     * dies with [PLAN_DRAFT_TTL_MS] so a catalog change can never be
+     * applied blind.
+     */
+    private var planDraft: PlanMenu.Draft? = null
+
     /** One incoming line. Null = not a command (the router sends it as inbound). */
     @Suppress("CyclomaticComplexMethod") // one branch per command — the dispatcher's own shape
     suspend fun handle(text: String, updateId: Long): BotReply? {
@@ -216,7 +224,7 @@ class BotCommands(
             "ctx" -> ctxList()
             "help", "start" -> BotReply(help())
             "subagents", "agents" -> subagents(rest)
-            "plan" -> plan()
+            "plan", "plan_model_effort" -> plan() // the old name keeps muscle memory alive
             "mode" -> mode(rest)
             "last" -> BotReply(lastAnswer())
             "compact" -> compact()
@@ -300,8 +308,8 @@ class BotCommands(
 
         data == "saa:" -> subagents("activos")
 
-        data.startsWith("pl:") || data.startsWith("pm:") || data.startsWith("pe:") || data == "pd:" ->
-            planTap(data)
+        data.startsWith("pl:") || data.startsWith("pm:") || data.startsWith("pe:") || data == "pd:" ||
+            data == "pac:" || data == "pcl:" -> planTap(data)
 
         // /mode's picker tap (mo:<mode>): the SAME write the typed command
         // runs — one path, one vocabulary, one honest answer
@@ -366,41 +374,122 @@ class BotCommands(
     }
 
     /**
-     * A /plan tap: one field per tap (pl: plan, pm: model, pe: effort) or
-     * pd: copying the conversation's selection to the app's default. The
-     * set's OWN result re-renders the menu — the server's word is the truth.
+     * /plan_model_effort's taps — the DRAFT flow (owner, 3/11).
+     *
+     * pl:/pm:/pe: only move a LOCAL draft, one step at a time; each step
+     * re-resolves its siblings against the catalog (a cross-plan pair can
+     * never exist). Nothing is written until ✅ Aceptar (pac:) sends the
+     * WHOLE valid triple in one frame. pcl: discards; pd: writes the draft
+     * (or the selection in force) as the app's default.
+     *
+     * Why: the old flow wrote one field per tap and the fork merged it with
+     * the stale sibling — plan opencode-go-chat × GLM-5.3-Flash was refused
+     * («not selectable»), and every intermediate state was already a write.
      */
     private suspend fun planTap(data: String): BotReply {
-        val scope = "conversation"
-        val ws = (contextAnswer() as? ContextAnswer.Ctx)?.value?.workspacePath
-        val set = when {
-            data == "pd:" -> {
-                val cur = planViews(ws) ?: return BotReply(DEGRADED)
-                ops.query(
-                    ChannelQuery.SetModelSelection(
-                        scope = "default",
-                        plan = cur.plan,
-                        model = cur.model,
-                        effort = cur.effort,
-                        workspacePath = ws,
-                    ),
+        val ctx = (contextAnswer() as? ContextAnswer.Ctx)?.value
+        val ws = ctx?.workspacePath
+        val v = planViews(ws) ?: return BotReply(DEGRADED)
+        val title = ctx?.activeTaskId?.let { id ->
+            history.ctxTasks(SCOPE_FOR_PICK).firstOrNull { r -> r.sid == id }?.title
+        }
+        return when (data) {
+            "pcl:" -> {
+                planDraft = null
+                BotReply(
+                    "✖️ Borrador descartado — la selección vigente quedó intacta.",
+                    markup = PlanMenu.keyboard(v),
                 )
             }
 
-            data.startsWith("pl:") -> ops.query(
-                ChannelQuery.SetModelSelection(scope = scope, plan = data.removePrefix("pl:"), workspacePath = ws),
-            )
+            "pac:" -> acceptDraft(v, ws)
+            "pd:" -> defaultFromDraft(v, ws)
+            else -> draftTap(v, title, data)
+        }
+    }
 
-            data.startsWith("pm:") -> ops.query(
-                ChannelQuery.SetModelSelection(scope = scope, model = data.removePrefix("pm:"), workspacePath = ws),
-            )
-
-            else -> ops.query(
-                ChannelQuery.SetModelSelection(scope = scope, effort = data.removePrefix("pe:"), workspacePath = ws),
+    /** The three draft steps — each one re-resolves its siblings against the catalog. */
+    @Suppress("ReturnCount") // the base draft + each step's honest refusal
+    private fun draftTap(v: PlanMenu.Views, title: String?, data: String): BotReply {
+        val base = liveDraft() ?: v.startDraft(clock()) ?: return BotReply(PLAN_UNKNOWN)
+        return if (data.startsWith("pl:")) {
+            draftStep(v, title, v.draftWithPlan(base, data.removePrefix("pl:")), PLAN_UNKNOWN)
+        } else if (data.startsWith("pm:")) {
+            draftStep(v, title, v.draftWithModel(base, data.removePrefix("pm:")), MODEL_UNKNOWN)
+        } else {
+            draftStep(
+                v,
+                title,
+                v.draftWithEffort(base, data.removePrefix("pe:")),
+                planEffortUnknown(v.effortVocabulary(base.plan, base.model).joinToString(" · ").ifEmpty { "—" }),
             )
         }
+    }
+
+    /** The draft's current value, dropping one built longer than the TTL (a catalog may have changed). */
+    private fun liveDraft(): PlanMenu.Draft? =
+        planDraft?.takeIf { clock() - it.atMs <= PLAN_DRAFT_TTL_MS }
+
+    /** One draft step's render — the status line ALWAYS says what would be applied. */
+    private fun draftStep(
+        v: PlanMenu.Views,
+        title: String?,
+        next: PlanMenu.Draft?,
+        refusal: String,
+    ): BotReply {
+        if (next == null) return BotReply(refusal)
+        planDraft = next
+        return BotReply(PlanMenu.statusLine(v, title, next), markup = PlanMenu.keyboard(v, next))
+    }
+
+    /** ✅ Aceptar: the ONE write — the whole triple, only when the catalog still validates it. */
+    @Suppress("ReturnCount") // no draft / not-applicable / the channel's three answers
+    private suspend fun acceptDraft(v: PlanMenu.Views, ws: String?): BotReply {
+        val d = liveDraft() ?: return BotReply(PLAN_NOTHING_TO_ACCEPT, markup = PlanMenu.keyboard(v))
+        if (!v.draftValid(d)) {
+            planDraft = null
+            return BotReply(PLAN_DRAFT_STALE, markup = PlanMenu.keyboard(v))
+        }
+        val set = ops.query(
+            ChannelQuery.SetModelSelection(
+                scope = "conversation",
+                plan = d.plan,
+                model = d.model,
+                effort = d.effort,
+                workspacePath = ws,
+            ),
+        )
         return when (set) {
-            is QueryAnswer.Ok -> planReplyFrom(set.resultJson, "✅ aplicado")
+            is QueryAnswer.Ok -> {
+                planDraft = null
+                planReplyFrom(set.resultJson, "✅ aplicado")
+            }
+
+            is QueryAnswer.Unavailable -> BotReply(DEGRADED)
+            is QueryAnswer.Failed -> BotReply(
+                "⚠️ No pude aplicar (${set.code}): ${PyText.esc(set.message ?: "?")}",
+                markup = PlanMenu.keyboard(v, d), // the draft survives — the tap can be retried
+            )
+        }
+    }
+
+    /** 📌 the app's default: the draft when there is one, else the selection in force. */
+    @Suppress("ReturnCount") // the missing identity + the channel's three answers
+    private suspend fun defaultFromDraft(v: PlanMenu.Views, ws: String?): BotReply {
+        val draft = liveDraft()?.takeIf { v.draftValid(it) }
+        val plan = draft?.plan ?: v.plan ?: return BotReply(PLAN_UNKNOWN)
+        val model = draft?.model ?: v.model ?: return BotReply(MODEL_UNKNOWN)
+        val set = ops.query(
+            ChannelQuery.SetModelSelection(
+                scope = "default",
+                plan = plan,
+                model = model,
+                effort = draft?.effort ?: v.effort,
+                workspacePath = ws,
+            ),
+        )
+        return when (set) {
+            is QueryAnswer.Ok -> planReplyFrom(set.resultJson, "📌 default de la app actualizado")
             is QueryAnswer.Unavailable -> BotReply(DEGRADED)
             is QueryAnswer.Failed -> BotReply(
                 "⚠️ No pude aplicar (${set.code}): ${PyText.esc(set.message ?: "?")}",
@@ -414,7 +503,7 @@ class BotCommands(
         return (answer as? QueryAnswer.Ok)?.let { PlanMenu.parse(it.resultJson) }
     }
 
-    /** /plan — «elegir el plan, el modelo, y la velocidad de effort». */
+    /** /plan_model_effort — «elegir el plan, el modelo y el effort, y recién ahí aplicar». */
     @Suppress("ReturnCount") // one guard per honest state (no context, degraded, unreadable, menu)
     private suspend fun plan(): BotReply {
         val ctx = contextAnswer()
@@ -424,7 +513,7 @@ class BotCommands(
         if (ctx is ContextAnswer.None) {
             return BotReply(
                 "📭 No hay conversación activa — abrí una en ZCode o usá /tasks n. " +
-                    "/plan lee el plan, el modelo y el effort de la conversación activa.",
+                    "/plan_model_effort lee el plan, el modelo y el effort de la conversación activa.",
             )
         }
         val value = (ctx as? ContextAnswer.Ctx)?.value ?: return BotReply(DEGRADED)
@@ -435,7 +524,8 @@ class BotCommands(
             "📡 No pude leer la selección — ¿el fork está deployado con los frames de /plan? " +
                 "(commits 3d07cace+, falta el deploy del fork).",
         )
-        return BotReply(PlanMenu.statusLine(v, title), markup = PlanMenu.keyboard(v))
+        val draft = liveDraft()?.takeIf { v.draftValid(it) }
+        return BotReply(PlanMenu.statusLine(v, title, draft), markup = PlanMenu.keyboard(v, draft))
     }
 
     private fun planReplyFrom(resultJson: String, note: String): BotReply {
@@ -2893,7 +2983,7 @@ class BotCommands(
             "tasks" to "conversations by project · /tasks n picks the active one",
             "all_tasks" to "all conversations, loose ones included",
             "status" to "what is running + the active conversation",
-            "plan" to "plan, model and effort — tap to change",
+            "plan_model_effort" to "plan, model and effort — choose the three, then ✅ Aceptar",
             "mode" to "the conversation's mode — plan · build · edit · yolo · guarded",
             "last" to "re-sends the active conversation's last answer",
             "compact" to "shrinks the active conversation's context",
@@ -3020,6 +3110,32 @@ class BotCommands(
         /** /mode needs a conversation: the mode is PER conversation, not a global knob. */
         internal const val MODE_NO_CONTEXT =
             "📭 No hay conversación activa — /tasks n elige una: el modo es POR conversación."
+
+        /**
+         * A /plan tap whose plan (or model) the CURRENT catalog no longer
+         * exposes — a keyboard from before the app changed providers. The
+         * draft is NOT moved: an invented pair is exactly the bug being
+         * fixed.
+         */
+        internal const val PLAN_UNKNOWN =
+            "⚠️ Ese plan ya no está en el catálogo de la app — abrí /plan_model_effort de nuevo."
+        internal const val MODEL_UNKNOWN =
+            "⚠️ Ese modelo ya no está en el catálogo de la app — abrí /plan_model_effort de nuevo."
+
+        /** An effort outside the shown model's vocabulary — the real list rides along. */
+        internal fun planEffortUnknown(levels: String): String =
+            "⚠️ Ese effort no existe para el modelo mostrado — válidos: $levels"
+
+        /** ✅ with no draft open: nothing to apply, said plainly. */
+        internal const val PLAN_NOTHING_TO_ACCEPT =
+            "🤔 No hay ningún borrador abierto — tocá un plan, un modelo y un effort, y después ✅ Aceptar."
+
+        /** The draft outlived its TTL (the catalog may have moved) — dropped, never applied blind. */
+        internal const val PLAN_DRAFT_STALE =
+            "⚠️ El borrador quedó viejo (el catálogo pudo cambiar) — lo descarté; armá la combinación de nuevo."
+
+        /** A draft older than this is not trustworthy: the catalog can change under it. */
+        internal const val PLAN_DRAFT_TTL_MS = 30L * 60L * 1000L
 
         /** No armed 🎁 (or its 5-minute window closed) — the honest nudge, not a silent no-op. */
         internal const val GIFT_NOTHING_ARMED =

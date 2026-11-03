@@ -247,7 +247,7 @@ class ModeCommandTest {
     @Test
     fun modeSitsRightAfterPlanOnTheMenu() {
         val names = BotCommands.MENU.map { it.first }
-        assertEquals(names.indexOf("plan") + 1, names.indexOf("mode"))
+        assertEquals(names.indexOf("plan_model_effort") + 1, names.indexOf("mode"))
         assertTrue("/mode — the conversation's mode" in BotCommands.HELP)
     }
 
