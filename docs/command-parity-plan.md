@@ -45,6 +45,16 @@ post-U2.5 hot-fix queue, NOT a re-order of the compass) and
   guarantee achieved CHANNEL-SIDE (awaited `/new` → botStatus confirms
   the draft → fire with the create intent); no createTask cap needed —
   the A4 fork package stays additive-only.
+- **B6's live refutation + fix** (81e6c59, the owner's own /deploy at
+  22:02): the announce landed, the build+install ran, and then the
+  script's `launchctl bootout` tore down the daemon's WHOLE process tree —
+  the nohup'd script included — so the bootstrap never ran and the bot
+  stayed silent until a manual bootstrap (22:02:37→22:06:03). A nohup
+  child is NOT detached from launchd's job. The script now runs as its
+  OWN one-shot job (`com.zcode.bot-deploy`): a sibling that survives its
+  target's bootout, with HOME/JAVA_HOME/PATH and both stdio streams
+  pinned in a pure, tested plist. A failed bootstrap throws with
+  launchctl's words — the phone hears it and the daemon stays up.
 - **The ORDER pulse gate + the sn: detail card** (66d6a7e, the owner's
   live proof 20:34): two orders into the ⏹️ agent's dead session bounced
   nothing — now the ✍️ arm and the fire both ask the tri-state pulse
