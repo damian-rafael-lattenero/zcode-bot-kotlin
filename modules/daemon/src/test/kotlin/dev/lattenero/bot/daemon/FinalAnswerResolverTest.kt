@@ -46,6 +46,7 @@ class FinalAnswerResolverTest {
         val snap = queries.single() as ChannelQuery.TaskSnapshot
         assertEquals("session_x", snap.taskId)
         assertEquals("/ws/project", snap.workspacePath)
+        assertEquals(1, snap.messageLimit, "one message keeps the fork's projection light — a limit-less snapshot times out on a giant session")
         assertTrue(warnings.isEmpty(), "a first-try answer logs nothing")
     }
 
