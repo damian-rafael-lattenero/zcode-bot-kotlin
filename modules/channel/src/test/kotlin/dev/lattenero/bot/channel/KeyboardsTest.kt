@@ -62,7 +62,8 @@ class KeyboardsTest {
         assertEquals("t:ses_b", second["callback_data"]!!.jsonPrimitive.content)
         val lane1 = keyboard[2].jsonArray[0].jsonObject
         assertEquals("🔵 Task ▶️", lane1["text"]!!.jsonPrimitive.content)
-        assertTrue(lane1["callback_data"]!!.jsonPrimitive.content.startsWith("sa:"))
+        // the name tap opens the DETAIL CARD (the full uncapped name + actions)
+        assertTrue(lane1["callback_data"]!!.jsonPrimitive.content.startsWith("sn:"))
         // the ✍️ manito stays OUT of /tasks (the owner's 2/11: the unknown
         // manito is noise) — but the ⏹️ is an HONEST action: an open lane
         // carries its stop beside it (the same button /subagents has)
@@ -92,7 +93,7 @@ class KeyboardsTest {
         assertEquals(2, keyboard.size)
         val fresh = keyboard[0].jsonArray[0].jsonObject
         assertEquals("🔵 root-cause hunter ▶️", fresh["text"]!!.jsonPrimitive.content)
-        assertEquals("sa:sess_fresh", fresh["callback_data"]!!.jsonPrimitive.content)
+        assertEquals("sn:sess_fresh", fresh["callback_data"]!!.jsonPrimitive.content)
         // the FRESH row carries its ⏹️ (sst: + a 16-char tail ≈ 20 bytes —
         // the 64-byte law never even breathes)
         assertEquals("⏹️", keyboard[0].jsonArray[1].jsonObject["text"]!!.jsonPrimitive.content)

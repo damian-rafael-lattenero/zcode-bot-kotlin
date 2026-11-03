@@ -390,7 +390,7 @@ class TaskAttachTest {
     }
 
     @Test
-    fun subagentRowsSpeakTheRealNameAndCarryTheAttachTap() {
+    fun subagentRowsSpeakTheRealNameAndCarryTheDetailTap() {
         val kb = Keyboards.subagentsKeyboard(
             lanes = listOf(
                 laneWith("Agent", "toolu_dispatchaaaa1111", "fix the /plan menu"),
@@ -401,9 +401,10 @@ class TaskAttachTest {
         // the NAME the owner gave it — never the bare tool name (the «bash, bash» bug)
         assertTrue("fix the /plan menu" in kb)
         assertTrue("Task" in kb) // no description → the honest fallback
-        // the rows ARE the attach taps (same vocabulary the dispatcher owns)
-        assertTrue("sa:${"toolu_dispatchaaaa1111".takeLast(16)}" in kb)
-        assertTrue("sa:${"toolu_dispatchbbbb2222".takeLast(16)}" in kb)
+        // the name tap opens the DETAIL CARD (the full name + the actions —
+        // the row label caps, the missions are longísimos)
+        assertTrue("sn:${"toolu_dispatchaaaa1111".takeLast(16)}" in kb)
+        assertTrue("sn:${"toolu_dispatchbbbb2222".takeLast(16)}" in kb)
         assertTrue("sao:" in kb) // the view switch rides along
     }
 
@@ -412,7 +413,11 @@ class TaskAttachTest {
     @Test
     fun orderTapAttachesAndArmsTheNextFreeText() = runBlocking {
         val ops = FakeOps(boundStatus).apply { answers["activeTaskIds"] = """[]""" }
-        val history = FakeHistory(rows).apply { runningSubs = listOf("sess_subagent_agent_x") }
+        val history = FakeHistory(rows).apply {
+            runningSubs = listOf("sess_subagent_agent_x")
+            // the pulse gate's fresh row — only the store speaks life
+            runningTitled = listOf(RunningSubagent("sess_subagent_agent_x", "helper", lastMs = 1_000_000L))
+        }
         val hub = LiveHub()
         val bc = BotCommands(
             ops = ops,
@@ -465,9 +470,11 @@ class TaskAttachTest {
         val reply = bc.handle("/subagents", 3L)!!
         val data = reply.markup.toString()
         assertTrue("cazar la causa raíz" in data, "the store's row must render: $data")
-        assertTrue("sa:${sess.takeLast(16)}" in data) // the attach tap carries the session tail
-        // the tap: subscribed to the CHILD session + pinned, no lane needed
-        val attach = bc.onCallback("sa:${sess.takeLast(16)}", 4L)!!
+        assertTrue("sn:${sess.takeLast(16)}" in data) // the name tap carries the session tail
+        // the name tap: the DETAIL CARD — then the card's attach subscribes
+        val card = bc.onCallback("sn:${sess.takeLast(16)}", 4L)!!
+        assertTrue("cazar la causa raíz del bus" in card.text, "the full title: ${card.text}")
+        val attach = bc.onCallback("sa:${sess.takeLast(16)}", 5L)!!
         assertEquals(listOf(sess to app), ops.subscribed)
         assertEquals(sess, hub.peekPin())
         assertTrue("attachado" in attach.text)
@@ -504,5 +511,181 @@ class TaskAttachTest {
         assertEquals(listOf(dispatch), rows)
         assertTrue("research plugins" in Keyboards.subagentLabel(dispatch))
         assertTrue("Bash" !in Keyboards.subagentLabel(dispatch))
+    }
+
+    // ---- the ✍️ pulse gate + the detail card (the 2/11 swallow, proven live:
+    // two orders into the ⏹️ agent's dead session, zero bounce) -------------------
+
+    @Test
+    fun theArmRefusesAGhostTargetAndNeverSwallowsTheText() = runBlocking {
+        // the 20:34 exact shape: the pin points at a FINISHED child — no
+        // lane, no fresh row. The arm refuses BEFORE the attach; the next
+        // free text rides the normal route, never a dead inbox.
+        val ops = FakeOps(boundStatus).apply { answers["activeTaskIds"] = """[]""" }
+        val hub = LiveHub()
+        hub.pin("sess_subagent_agent_dead")
+        val bc = BotCommands(
+            ops = ops,
+            hub = hub,
+            daemonReset = { "fake ladder" },
+            clock = { 1_000_000L },
+            history = FakeHistory(rows),
+            defaultWorkspacePath = "/Users/damian/.zcode/workspace/default",
+        )
+        val arm = bc.onCallback("so:zzzzzzzzzzzzzzzz", 9L)!!
+        assertTrue("no da señal viva" in arm.text, "got: ${arm.text}")
+        assertTrue(ops.subscribed.isEmpty(), "a refused arm attaches no pipe")
+        assertEquals(0, ops.orders.size)
+        // the next text is the OWNER's own words, routed normally
+        bc.handle("esto va a la conversación abierta", 10L)
+        assertEquals(0, ops.orders.size)
+        assertTrue(ops.inbound.isNotEmpty(), "the text rode the router, not a ghost inbox")
+    }
+
+    @Test
+    fun theFireGateHoldsWhenTheChildVanishesWhilePinned() = runBlocking {
+        val ops = FakeOps(boundStatus).apply { answers["activeTaskIds"] = """[]""" }
+        val hub = LiveHub()
+        // the store NAMES the child (the session attach's verification set)
+        val history = FakeHistory(rows).apply { runningSubs = listOf("sess_subagent_agent_x") }
+        val bc = BotCommands(
+            ops = ops,
+            hub = hub,
+            daemonReset = { "fake ladder" },
+            clock = { 1_000_000L },
+            history = history,
+            defaultWorkspacePath = "/Users/damian/.zcode/workspace/default",
+        )
+        hub.apply(
+            streamEvent(
+                "task-02",
+                """{"type":"tool_call","toolId":"$laneId","toolName":"Task","subagentAgentId":"agent_x"}""",
+                1,
+            ),
+            1_000_000L,
+        )
+        val arm = bc.onCallback("so:$laneTail", 9L)!!
+        assertTrue("Armado" in arm.text, "got: ${arm.text}")
+        // the child ENDS while the arm sits armed: the card is pinned to
+        // the child's stream (the sa: full form — the hub drops the
+        // parent's close frame whole), so the STORE is the signal that
+        // remains, and it goes quiet
+        history.runningTitled = emptyList()
+        history.runningSubs = emptyList()
+        val ack = bc.handle("tarde — ya murió", 10L)!!
+        assertTrue("no da señal viva" in ack.text, "got: $ack")
+        assertEquals(0, ops.orders.size, "the order NEVER flies into a dead inbox")
+        // the shot is spent: the next text rides the router
+        bc.handle("y esto ya es texto normal", 11L)
+        assertEquals(0, ops.orders.size)
+    }
+
+    @Test
+    fun theFireGateHoldsWhenTheOnlySignalWentStale() = runBlocking {
+        // a row fresh at arm time, stale at fire time: no death certificate,
+        // no guess — the honest hold (the child may be grinding a long mission)
+        val ops = FakeOps(boundStatus).apply { answers["activeTaskIds"] = """[]""" }
+        val sess = "sess_subagent_agent_late"
+        val history = FakeHistory(rows)
+        val hub = LiveHub()
+        hub.pin(sess)
+        val bc = BotCommands(
+            ops = ops,
+            hub = hub,
+            daemonReset = { "fake ladder" },
+            clock = { 1_000_000L },
+            history = history,
+            defaultWorkspacePath = "/Users/damian/.zcode/workspace/default",
+        )
+        history.runningTitled = listOf(RunningSubagent(sess, "mission larga", lastMs = 1_000_000L - 60_000))
+        val arm = bc.onCallback("so:zzzzzzzzzzzzzzzz", 9L)!!
+        assertTrue("Armado" in arm.text, "a fresh row arms: ${arm.text}")
+        history.runningTitled = listOf(RunningSubagent(sess, "mission larga", lastMs = 1_000_000L - 16 * 60_000))
+        val ack = bc.handle("se te congeló?", 10L)!!
+        assertTrue("no da señal viva" in ack.text, "got: $ack")
+        assertEquals(0, ops.orders.size)
+    }
+
+    @Test
+    fun theDetailCardShowsTheFullNameAndTheFreshActionRow() = runBlocking {
+        // the 2/11 complaint: the spawn descriptions are longísimos and the
+        // row label caps — the sn: tap answers the FULL name + the actions
+        val ops = FakeOps(boundStatus).apply { answers["activeTaskIds"] = """[]""" }
+        val hub = LiveHub()
+        val bc = BotCommands(
+            ops = ops,
+            hub = hub,
+            daemonReset = { "fake ladder" },
+            clock = { 1_000_000L },
+            history = FakeHistory(rows),
+            defaultWorkspacePath = "/Users/damian/.zcode/workspace/default",
+        )
+        val longMission = "investigar la causa raíz del bus caído y proponer el ratchet del outbox"
+        hub.apply(
+            streamEvent(
+                "task-02",
+                """{"type":"tool_call","toolId":"$laneId","toolName":"Task","subagentAgentId":"agent_x",""" +
+                    """"input":{"description":"$longMission"}}""",
+                1,
+            ),
+            1_000_000L,
+        )
+        // the ROW still caps its label; the CARD must not
+        val rowLabel = Keyboards.subagentsKeyboard(
+            lanes = hub.peek()?.tools?.filter { it.parentToolUseId == null } ?: emptyList(),
+            inactiveView = false,
+        ).toString()
+        assertTrue(longMission !in rowLabel, "the row label stays capped")
+        val card = bc.onCallback("sn:$laneTail", 9L)!!
+        assertTrue(longMission in card.text, "the FULL mission in the card: ${card.text}")
+        assertTrue("⏳ vivo hace" in card.text)
+        val datas = card.markup.toString()
+        assertTrue("sa:${laneId.takeLast(16)}" in datas, "attach lives on the card: $datas")
+        assertTrue("so:${laneId.takeLast(16)}" in datas)
+        assertTrue("sst:${laneId.takeLast(16)}" in datas)
+    }
+
+    @Test
+    fun aDeadAgentSCardIsAPureMemory() = runBlocking {
+        // the card still reads — the full name survives the agent — but it
+        // earns NO buttons: ordering into a dead inbox never happens again
+        val ops = FakeOps(boundStatus).apply { answers["activeTaskIds"] = """[]""" }
+        val hub = LiveHub()
+        val bc = BotCommands(
+            ops = ops,
+            hub = hub,
+            daemonReset = { "fake ladder" },
+            clock = { 1_000_000L },
+            history = FakeHistory(rows),
+            defaultWorkspacePath = "/Users/damian/.zcode/workspace/default",
+        )
+        hub.apply(
+            streamEvent(
+                "task-02",
+                """{"type":"tool_call","toolId":"$laneId","toolName":"Task","subagentAgentId":"agent_x"}""",
+                1,
+            ),
+            1_000_000L,
+        )
+        hub.apply(
+            streamEvent(
+                "task-02",
+                """{"type":"tool_call_update","toolId":"$laneId","toolName":"Task","status":"completed"}""",
+                2,
+            ),
+            1_000_000L,
+        )
+        val card = bc.onCallback("sn:$laneTail", 9L)!!
+        assertTrue("💀 terminó" in card.text, "got: ${card.text}")
+        assertEquals(null, card.markup, "a dead card earns no buttons")
+    }
+
+    @Test
+    fun theDetailTextKeepsTheFullDescriptionUncapped() {
+        val longMission = "revisar el teclado completo del bot y unificar el vocabulario de filas"
+        val lane = laneWith("Agent", laneId, longMission)
+        val text = Keyboards.subagentDetailText(lane, nowMs = 1_060_000L)
+        assertTrue(longMission in text, text)
+        assertTrue("⏳ vivo hace 1m" in text, text)
     }
 }

@@ -236,6 +236,11 @@ class BotCommands(
 
         data.startsWith("so:") -> orderArm(data.removePrefix("so:"))
 
+        // the DETAIL CARD (sn:): the full uncapped name the row label
+        // caps, one honest status line, the fresh action row — a dead
+        // agent's card stays a pure memory (no buttons, no orders)
+        data.startsWith("sn:") -> subagentDetail(data.removePrefix("sn:"))
+
         // the ⏹️ tap (sst:<tail>) — intercepted HERE, never left to the
         // callbackText fallback: a stray tail falling through would ride
         // to the agent as the owner's own words (the graver bug)
@@ -396,12 +401,8 @@ class BotCommands(
      * the child's session yet, «ya no está vivo» when nothing answers.
      */
     private suspend fun subagentStop(tail: String): BotReply {
-        val turn = hub.peek()
-        val lanes = dispatchLanes(turn)
-        val parentSid = turn?.taskId
-            ?: (contextAnswer() as? ContextAnswer.Ctx)?.value?.activeTaskId
-        val dbRunning = if (parentSid != null) history.subagentsRunning(parentSid) else emptyList()
-        return when (val target = SubagentStop.resolve(lanes, dbRunning, tail, clock())) {
+        val lanes = dispatchLanes(hub.peek())
+        return when (val target = SubagentStop.resolve(lanes, runningRows(), tail, clock())) {
             is SubagentStopTarget.Gone -> {
                 logger.info { "callback ⏹️ sst: tail=$tail resolves to nothing alive — honest gone" }
                 BotReply("⏹️ Ese subagente ya no está vivo.")
@@ -424,6 +425,17 @@ class BotCommands(
                 }
             }
         }
+    }
+
+    /**
+     * The store's running rows for the open context — the SAME facts the
+     * ⏹️ reads; the ORDER gates (arm + fire) and the detail card share
+     * them so ONE freshness law answers for every subagent affordance.
+     */
+    private suspend fun runningRows(): List<RunningSubagent> {
+        val parentSid = hub.peek()?.taskId
+            ?: (contextAnswer() as? ContextAnswer.Ctx)?.value?.activeTaskId
+        return if (parentSid != null) history.subagentsRunning(parentSid) else emptyList()
     }
 
     /**
@@ -507,10 +519,30 @@ class BotCommands(
      * entera. ONE SHOT: the arm is consumed HERE, before the wire — a
      * second text rides the normal route (the 2/11 law the test pins; an
      * arm that survives its shot would silently redirect the owner's next
-     * line to a subagent).
+     * line to a subagent). The flight ALSO re-asks the target's pulse
+     * (the 2/11 swallow: an order into a finished child's inbox is read
+     * by NOBODY, and silence is the worst lie) — the shot is spent either
+     * way, the bounce says so.
      */
     private suspend fun fireArmedOrder(order: ArmedOrder, text: String, updateId: Long): BotReply {
         armedOrder = null // ONE shot: se consume al volar — el siguiente texto vuelve al router
+        val gate: BotReply? = when (
+            SubagentStop.orderTarget(hub.peek()?.tools.orEmpty(), runningRows(), order.sessionId, clock())
+        ) {
+            OrderPulse.Alive -> null
+            OrderPulse.Ended -> BotReply(
+                "💀 «${PyText.esc(order.title)}» ya terminó — la orden NO voló a nadie (el ✍️ queda libre).",
+            )
+
+            OrderPulse.Unknown -> BotReply(
+                "🤔 «${PyText.esc(order.title)}» no da señal viva ahora — la orden NO voló. " +
+                    "Reabrí su carta y volvé a armar si sigue ahí.",
+            )
+        }
+        if (gate != null) {
+            logger.info { "route: ORDER to ${order.sessionId} HELD by the pulse gate" }
+            return gate
+        }
         logger.info {
             "route: ORDER to ${order.sessionId} («${order.title}»): ${text.take(ORDER_LOG_PREVIEW)}"
         }
@@ -1197,11 +1229,42 @@ class BotCommands(
      * next free text as an order direct to that session. One tap, one shot:
      * the order flies, the arm disarms, the card keeps streaming.
      */
+    /**
+     * The ✍️'s PULSE GATE (the 2/11 swallow): the arm flies only to a
+     * target answering RIGHT NOW — the detail card's own law (fresh
+     * buttons or none) applied to the arming itself. Null flies; the
+     * reply refuses, BEFORE any attach: a refused arm leaves no pipe.
+     */
+    private suspend fun orderGateRefusal(tail: String): BotReply? {
+        val pin = hub.peekPin() ?: return null
+        // the RAW tools list: a CLOSED lane is the death certificate the
+        // pulse reads (dispatchLanes filters it out — open-only by design)
+        val pulse = SubagentStop.orderTarget(hub.peek()?.tools.orEmpty(), runningRows(), pin, clock())
+        val name = hub.peek()?.tools?.lastOrNull { it.toolId.endsWith(tail) }
+            ?.let { Keyboards.subagentName(it) }
+            ?: pin.takeLast(SID_TAIL)
+        return when (pulse) {
+            OrderPulse.Alive -> null
+            OrderPulse.Ended -> BotReply(
+                "💀 «${PyText.esc(name)}» ya terminó — el ✍️ no arma órdenes a subagentes muertos.",
+            )
+
+            OrderPulse.Unknown -> BotReply(
+                "🤔 «${PyText.esc(name)}» no da señal viva — el ✍️ no arma a ciegas. " +
+                    "Reabrí su carta y probá de nuevo.",
+            )
+        }
+    }
+
     @Suppress("ReturnCount") // two attach paths, one guard each
     private suspend fun orderArm(tail: String): BotReply {
+        orderGateRefusal(tail)?.let {
+            logger.info { "callback ✍️ so: REFUSED by the pulse gate" }
+            return it
+        }
         val attachReply = laneAttach(tail)
         val lane = hub.peek()?.tools?.lastOrNull { it.toolId.endsWith(tail) }
-        val pin = hub.peekPin()
+        val pin = hub.peekPin() // the gate passed: this target answers
         // an order flies ONLY to a REAL session id (the fork's inbound
         // taskId) — the lane-scope fallback has none and is honestly refused
         val (sessionId, title) = when {
@@ -1243,6 +1306,39 @@ class BotCommands(
             "👁 ${attachReply.text}\n" +
                 "✍️ Armado: tu PRÓXIMO texto va como orden a «${PyText.esc(title)}».",
         )
+    }
+
+    /**
+     * The DETAIL CARD (the sn: tap — the row label caps at TITLE_CAP and
+     * the spawn descriptions are longísimos, the 2/11 complaint): the
+     * FULL name, one honest status line, and — only while it lives — the
+     * action row (👁 attach · ✍️ orden · ⏹️ stop) built FRESH at tap
+     * time. A finished agent still shows its full name: reading what the
+     * mission was survives the agent; ordering into its dead inbox never
+     * happens again (the fire gate holds regardless).
+     */
+    private suspend fun subagentDetail(tail: String): BotReply {
+        // the RAW tools list — a closed lane's card survives as the memory
+        // it is (the full name + 💀), unlike the open-only dispatchLanes
+        val lane = hub.peek()?.tools?.lastOrNull { it.toolId.endsWith(tail) }
+        if (lane != null) {
+            return BotReply(
+                PyText.esc(Keyboards.subagentDetailText(lane, clock())),
+                markup = Keyboards.subagentDetailKeyboard(lane.status == null, tail),
+            )
+        }
+        val row = runningRows().firstOrNull { it.sid.endsWith(tail) }
+        return when (row) {
+            null -> BotReply(
+                "🔍 Ese subagente no está — ni lane viva ni fila en el store. " +
+                    "Refrescá la lista con /subagents.",
+            )
+
+            else -> BotReply(
+                PyText.esc(Keyboards.dbRowDetailText(row, clock())),
+                markup = Keyboards.subagentDetailKeyboard(Keyboards.dbRunningFresh(row, clock()), tail),
+            )
+        }
     }
 
     /**
