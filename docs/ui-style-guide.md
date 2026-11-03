@@ -56,6 +56,7 @@ instead.
 | 🔴 🟡 🟢 | context meter ≥80% / ≥50% / below (Python's reporting law) |
 | 📣 | feed verbosity — 🔈 summary · 🔉 normal · 🔊 verbose |
 | 🗺 | plan mode · 🔓 full access · 🎛 mode |
+| 🛠 📝 🛡 | /mode's other three rows: build ("Ask before changes") · edit ("Edit automatically") · guarded ("Autonomous mode") — labels copied from the app's own i18n, never invented |
 | 🔄 | running stamp on a list row / the restart leg of the nuclear ladder |
 | ⚔️ | order delivered · 🌀 steer · 🚧 project boundary · 🪦 bound and gone |
 | 📄 | /last pointer · ✂️ an honest cut («the tail was cut») |

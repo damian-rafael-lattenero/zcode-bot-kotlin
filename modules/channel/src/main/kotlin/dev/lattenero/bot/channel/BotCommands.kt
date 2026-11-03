@@ -205,6 +205,7 @@ class BotCommands(
             "help", "start" -> BotReply(help())
             "subagents", "agents" -> subagents(rest)
             "plan" -> plan()
+            "mode" -> mode(rest)
             "last" -> BotReply(lastAnswer())
             "compact" -> compact()
             "context_window" -> contextWindow()
@@ -287,6 +288,10 @@ class BotCommands(
 
         data.startsWith("pl:") || data.startsWith("pm:") || data.startsWith("pe:") || data == "pd:" ->
             planTap(data)
+
+        // /mode's picker tap (mo:<mode>): the SAME write the typed command
+        // runs — one path, one vocabulary, one honest answer
+        data.startsWith("mo:") -> mode(data.removePrefix("mo:"))
 
         // LA EXPANSIÓN EN EL LUGAR (2/11): the collapsed CoT block's tap —
         // the tap toggles the block WHOLE on its OWN message (expand, then
@@ -386,6 +391,56 @@ class BotCommands(
         val v = PlanMenu.parse(resultJson) ?: return BotReply("⚠️ Respuesta de selección ilegible")
         return BotReply("$note\n${PlanMenu.statusLine(v, null)}", markup = PlanMenu.keyboard(v))
     }
+
+    /**
+     * /mode — la conversación y su modo de colaboración (Python's
+     * `_cmd_mode`): bare shows the mode IN FORCE (read from the session's
+     * own `meta.mode`, never remembered) with the five tap rows; typed
+     * applies through the fork's `setMode` cap — the SAME switch the
+     * desktop toolbar uses. An unknown word is refused with the real
+     * vocabulary and NOTHING is sent (a typo must never downgrade a
+     * conversation); a host without the frame says the fork deploy is the
+     * fix; the channel down is the 📡.
+     */
+    @Suppress("ReturnCount") // one guard per honest tier (down, no context, bare, typed, unknown)
+    private suspend fun mode(rest: String): BotReply {
+        val ctx = when (val answer = contextAnswer()) {
+            is ContextAnswer.Ctx -> answer.value
+            ContextAnswer.None -> return BotReply(MODE_NO_CONTEXT)
+            ContextAnswer.Degraded -> return BotReply(DEGRADED)
+        }
+        val taskId = ctx.activeTaskId ?: return BotReply(MODE_NO_CONTEXT)
+        val title = history.ctxTasks(SCOPE_FOR_PICK).firstOrNull { it.sid == taskId }
+            ?.title?.takeIf { it.isNotEmpty() } ?: taskId.takeLast(SID_TAIL)
+        val requested = rest.trim().lowercase()
+        if (requested.isEmpty()) {
+            val current = currentMode(taskId, ctx.workspacePath)
+            return BotReply(ModeMenu.statusLine(title, current), markup = ModeMenu.keyboard(current))
+        }
+        val mode = ModeMenu.byId(requested)
+            ?: return BotReply(
+                ModeMenu.usage(),
+                markup = ModeMenu.keyboard(currentMode(taskId, ctx.workspacePath)),
+            )
+        return applyMode(taskId, title, mode)
+    }
+
+    /** The write: awaited, every outcome the fork's own word (Python's applied copy). */
+    private suspend fun applyMode(taskId: String, title: String, mode: ModeMenu.Mode): BotReply =
+        when (val answer = ops.query(ChannelQuery.SetMode(taskId, mode.id))) {
+            is QueryAnswer.Ok -> BotReply(ModeMenu.applied(title, mode), markup = ModeMenu.keyboard(mode.id))
+            is QueryAnswer.Unavailable -> BotReply(DEGRADED)
+            is QueryAnswer.Failed -> if (answer.code == UNKNOWN_QUERY_CODE) {
+                BotReply(MODE_OLD_FORK)
+            } else {
+                BotReply("⚠️ No pude aplicar el modo (${answer.code}): ${PyText.esc(answer.message ?: "?")}")
+            }
+        }
+
+    /** The mode in force — the snapshot's `meta.mode`, one message requested (the read is cheap). */
+    private suspend fun currentMode(taskId: String, ws: String?): String? =
+        (ops.query(ChannelQuery.TaskSnapshot(taskId, ws, messageLimit = 1)) as? QueryAnswer.Ok)
+            ?.let { ModeMenu.currentFrom(it.resultJson) }
 
     /**
      * ⚡ — the text is already in the F17 queue: stopping the turn IS the
@@ -2623,6 +2678,7 @@ class BotCommands(
             "all_tasks" to "all conversations, loose ones included",
             "status" to "what is running + the active conversation",
             "plan" to "plan, model and effort — tap to change",
+            "mode" to "the conversation's mode — plan · build · edit · yolo · guarded",
             "last" to "re-sends the active conversation's last answer",
             "compact" to "shrinks the active conversation's context",
             "context_window" to "context window used — tokens, model window and percent",
@@ -2737,6 +2793,15 @@ class BotCommands(
         internal const val STEER_OLD_FORK =
             "⚠️ La app conectada no conoce el frame «steer» — falta deployar el fork actualizado " +
                 "(ZCode damian, commit 7ae1a972+); el bot ya lo habla."
+
+        /** /mode's by-name refusal from a host that predates the A4 cap. */
+        internal const val MODE_OLD_FORK =
+            "⚠️ La app conectada no conoce el frame «setMode» — falta deployar el fork actualizado " +
+                "(ZCode damian, A4); el bot ya lo habla."
+
+        /** /mode needs a conversation: the mode is PER conversation, not a global knob. */
+        internal const val MODE_NO_CONTEXT =
+            "📭 No hay conversación activa — /tasks n elige una: el modo es POR conversación."
         internal const val CTX_WINDOW_UNPARSEABLE =
             "⚠️ No pude leer la respuesta de la ventana de contexto"
 
