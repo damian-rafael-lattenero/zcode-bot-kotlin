@@ -1,9 +1,13 @@
 package dev.lattenero.bot.channel
 
+import dev.lattenero.bot.contracts.PyText
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
@@ -152,5 +156,137 @@ class KeyboardsTest {
         // the datas are tiny — the 64-byte law never breathes
         assertTrue(Keyboards.callbackDataValid("vb:summary"))
         assertTrue(Keyboards.callbackDataValid("vb:verbose"))
+    }
+
+    // ---- the guide's laws (docs/ui-style-guide.md) — pinned on the builders --
+
+    /** (text, callback_data) of every button, row-flattened. */
+    private fun buttons(kb: JsonObject): List<Pair<String, String>> =
+        kb.jsonObject["inline_keyboard"]!!.jsonArray
+            .flatMap { it.jsonArray }
+            .map { b ->
+                b.jsonObject["text"]!!.jsonPrimitive.content to
+                    b.jsonObject["callback_data"]!!.jsonPrimitive.content
+            }
+
+    /** The keyboard's ROWS — the order law reads row by row, never flattened. */
+    private fun rowsOf(kb: JsonObject): List<List<Pair<String, String>>> =
+        kb.jsonObject["inline_keyboard"]!!.jsonArray
+            .map { row -> row.jsonArray.map { b -> b.jsonObject["text"]!!.jsonPrimitive.content to b.jsonObject["callback_data"]!!.jsonPrimitive.content } }
+
+    /** Every builder with LIVE rows, dead lanes and a ghost — the sweep's fixture. */
+    private fun allKeyboards(): List<JsonObject> {
+        val lanes = listOf(
+            ToolLive(toolId = "toolu_open", name = "Task", parentToolUseId = null, openedAtMs = 1),
+            ToolLive(toolId = "toolu_done", name = "Grep", parentToolUseId = null, openedAtMs = 1, status = "completed"),
+        )
+        val dbs = listOf(
+            RunningSubagent(sid = "sess_fresh1", title = "hunter", lastMs = 1_880_000L),
+            RunningSubagent(sid = "sess_ghost1", title = "ghost", lastMs = 2_000_000L - 20 * 60_000),
+        )
+        val rows = listOf(TaskRow(sid = "ses_a", title = "t", ws = "/w"))
+        val queue = listOf(QueuedText(text = "hola", messageId = "tg-42", receivedAt = 1L))
+        return listOfNotNull(
+            Keyboards.tasksKeyboard(rows, setOf("ses_a"), "ses_a", lanes, dbs, 2_000_000L),
+            Keyboards.subagentsKeyboard(lanes, dbs, inactiveView = false, nowMs = 2_000_000L),
+            Keyboards.subagentsKeyboard(lanes, dbs, inactiveView = true, nowMs = 2_000_000L),
+            Keyboards.subagentDetailKeyboard(alive = true, tail = "sess_fresh1"),
+            Keyboards.queueKeyboard(queue),
+            Keyboards.verbosityPicker(FeedVerbosity.NORMAL),
+            Keyboards.cotToggle(7, expanded = false),
+            Keyboards.cotToggle(7, expanded = true),
+            Keyboards.interruptQuestion("ses_0f84de0cf002474fe596446e627129dc"),
+            Keyboards.nuclearConfirm(),
+            Keyboards.stopConfirm(),
+            Keyboards.subagentsViewButtons(inactiveView = false),
+            Keyboards.subagentsViewButtons(inactiveView = true),
+        )
+    }
+
+    @Test
+    fun actionRowsNeverLeadWithTheDestructiveEnd() {
+        // the guide's order law: read → arm → run → stop; 🗑/💀/☢️ (and the
+        // ⏹️ stop tap) LAST in their row — never first. The pinned exceptions
+        // are the confirmation rows, which this sweep deliberately excludes.
+        val actionKeyboards = allKeyboards().filter { kb ->
+            val texts = buttons(kb).map { it.first }
+            texts.any { it == "⏹️" || it == "🗑" || "✍️" in it }
+        }
+        assertTrue(actionKeyboards.size >= 4, "the action keyboards must be in the sweep")
+        actionKeyboards.flatMap(::rowsOf).forEach { row ->
+            val firstData = row.first().second
+            assertTrue(
+                !firstData.startsWith("sst:") && !firstData.startsWith("qd:"),
+                "the destructive end led a row: $row",
+            )
+        }
+    }
+
+    @Test
+    fun theDetailCardActionRowIsTheGuideSReferenceOrder() {
+        // 👁 attach · ✍️ orden · ⏹️ stop — the reference row every other row aligns to
+        val row = rowsOf(Keyboards.subagentDetailKeyboard(alive = true, tail = "abc")!!).single()
+        assertEquals(
+            listOf("👁 attach" to "sa:abc", "✍️ orden" to "so:abc", "⏹️" to "sst:abc"),
+            row,
+        )
+    }
+
+    @Test
+    fun rowLabelsRespectTheCaps() {
+        // the guide's cap law: the ROW caps the name at 34 — a longíssimo
+        // name only ever fills the DETAIL CARD, never a button label
+        val long = "título larguísimo que se pasa de cualquier fila ".repeat(4)
+        val lanes = listOf(
+            ToolLive(
+                toolId = "toolu_open",
+                name = "Task",
+                parentToolUseId = null,
+                openedAtMs = 1,
+                input = buildJsonObject { put("description", JsonPrimitive(long)) },
+            ),
+        )
+        val kb = Keyboards.tasksKeyboard(
+            rows = listOf(TaskRow(sid = "ses_a", title = long, ws = "/w")),
+            running = setOf("ses_a"),
+            activeSid = "ses_a",
+            subagents = lanes,
+            dbRunning = listOf(RunningSubagent(sid = "sess_b", title = long, lastMs = 2_000_000L - 20 * 60_000)),
+            nowMs = 2_000_000L,
+        )!!
+        val labels = buttons(kb).map { it.first }
+        val task = labels.first { it.startsWith("🟢") }
+        assertTrue(PyText.cpLength(task) <= 46, "task row over cap: ${PyText.cpLength(task)}")
+        val lane = labels.first { it.startsWith("🔵") && it.endsWith("▶️") }
+        assertTrue(PyText.cpLength(lane) <= 40, "lane row over cap: ${PyText.cpLength(lane)}")
+        val ghost = labels.first { "⏸️" in it }
+        assertTrue(PyText.cpLength(ghost) <= 48, "ghost row over cap: ${PyText.cpLength(ghost)}")
+        val queue = buttons(Keyboards.queueKeyboard(listOf(QueuedText(long, "tg-1", 1L)))).first().first
+        assertEquals(28, PyText.cpLength(queue), "queue preview over cap: $queue")
+    }
+
+    @Test
+    fun theDestructiveEndsAndTheMarksKeepOneButtonShapeEach() {
+        // the guide's one-meaning law, on the buttons: a bare glyph is THE
+        // action it owns, and the destructive ends appear in exactly one shape
+        allKeyboards().flatMap(::buttons).forEach { (text, data) ->
+            if (text == "⏹️") assertTrue(data.startsWith("sst:"), "bare ⏹️ must be a stop tap: $data")
+            if (text == "🗑") assertTrue(data.startsWith("qd:"), "bare 🗑 must be a discard tap: $data")
+            if ("💀" in text) assertEquals("stop:go", data, "💀 owns /stop go's row: $data")
+            if ("☢️" in text) assertTrue(data.startsWith("nuc:"), "☢️ owns the nuclear row: $data")
+            if ("✍️" in text) assertTrue(data.startsWith("so:"), "✍️ arms an order, nothing else: $data")
+            if ("👁" in text) assertTrue(data.startsWith("sa:"), "👁 attaches, nothing else: $data")
+            if ("🚀" in text) assertTrue(data.startsWith("ql:"), "🚀 launches a parked text: $data")
+            if (text.startsWith("⚡")) assertTrue(data.startsWith("intr:"), "⚡ interrupts: $data")
+            if (text.startsWith("🟢")) assertTrue(data.startsWith("t:"), "🟢 rows attach tasks: $data")
+            if (text.startsWith("🔵")) assertTrue(data.startsWith("sn:"), "🔵 rows open the detail card: $data")
+        }
+    }
+
+    @Test
+    fun everyBuilderDataRidesThe64ByteLaw() {
+        allKeyboards().flatMap(::buttons).forEach { (_, data) ->
+            assertTrue(Keyboards.callbackDataValid(data), "illegal callback_data: \"$data\"")
+        }
     }
 }
