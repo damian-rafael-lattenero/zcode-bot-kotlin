@@ -150,11 +150,17 @@ class LiveHub {
 
     suspend fun peek(): TurnLive? = mutex.withLock { current }
 
-    /** After the seal is published the turn is spent; /nuclear also lands here.
-     *  A pin dies with the card: the parent's next event re-lights its own. */
-    suspend fun clear(): Unit = mutex.withLock {
+    /**
+     * After the seal is published the turn is spent; /nuclear also lands
+     * here. A pin dies with ITS OWN card — [sealedTaskId] names the turn
+     * that sealed. Measured live 2/11 22:48: the owner attached a child,
+     * the PARENT's turn sealed six seconds later, and the blanket reset
+     * stole the pin — /steer then flew to the parent he was not reading.
+     * null keeps the nuclear semantics (everything dies).
+     */
+    suspend fun clear(sealedTaskId: String? = null): Unit = mutex.withLock {
         current = null
-        pinnedTaskId = null
+        if (sealedTaskId == null || pinnedTaskId == sealedTaskId) pinnedTaskId = null
     }
 }
 
@@ -504,8 +510,9 @@ class LivePublisher(
         }
         // THE REGISTRY SURVIVES THE SEAL (the collapsed buttons keep
         // working after the turn ends — the owner reads the CoT calmly);
-        // only the entry cap prunes it.
-        hub.clear()
+        // only the entry cap prunes it. The PIN dies only if THIS turn is
+        // its card: the parent sealing must not steal a child's pin.
+        hub.clear(state.taskId)
         orphanStore?.clear()
         statusMessageId = null
         statusTaskId = null
