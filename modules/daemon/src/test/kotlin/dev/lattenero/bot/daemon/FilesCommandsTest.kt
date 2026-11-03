@@ -53,7 +53,7 @@ class FilesCommandsTest {
         // the honesty here is the cap math, pinned by the constant itself
         assertEquals(20L * 1024 * 1024, FilesCommands.MAX_FILE_BYTES)
         val plan = FilesCommands.planFileSend(f.absolutePath)
-        assertNotNull(plan.file) // 1 byte passes
+        assertEquals(f.absolutePath, plan.file?.path) // 1 byte passes — and the test STAYS void
     }
 
     @Test
