@@ -120,6 +120,19 @@ class SteerTest {
     }
 
     @Test
+    fun whenASubagentIsPinnedTheSteerGoesToTheChild() = runBlocking {
+        // the owner attached a child (👁) — the turn in front is the CHILD's
+        val fake = ops() as FakeOps
+        val hub = LiveHub()
+        hub.pin("sess_subagent_agent_9")
+        val bc = BotCommands(ops = fake, hub = hub, daemonReset = { "noop" })
+        val reply = bc.handle("/steer cambiá el rumbo", 9L)!!
+        assertEquals("sess_subagent_agent_9" to "cambiá el rumbo", fake.steered.single())
+        assertTrue("subagente" in reply.text, reply.text)
+        assertTrue("agent_9" in reply.text, "the child must be NAMED: ${reply.text}")
+    }
+
+    @Test
     fun steerOnAnOldForkRefusesByTheHostsName() = runBlocking {
         val (bc, _) = commands(ops().apply { steerAnswer = SteerAnswer.Failed("unknown_request", "unknown request type") })
         val reply = bc.handle("/steer probando", 3L)!!
