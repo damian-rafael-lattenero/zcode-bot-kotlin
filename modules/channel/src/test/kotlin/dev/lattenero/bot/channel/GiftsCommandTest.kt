@@ -161,6 +161,13 @@ class GiftsCommandTest {
         )
         assertEquals("flash-promo", gifts.offers.single().displayName)
         assertNull(gifts.offers.single().tokens)
+        // no billing-preview name → the line says WHAT it is + the real id,
+        // never a title invented from the id (the 3/11 live shape: the
+        // GLOBAL BUILD banner carries no text in the API answer)
+        assertTrue(
+            "🔴 <b>Oferta reclamable (flash-promo)</b>" in GiftsMenu.render(gifts, 1L).single(),
+            GiftsMenu.render(gifts, 1L).single(),
+        )
     }
 
     @Test
