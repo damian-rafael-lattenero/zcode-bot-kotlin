@@ -12,7 +12,7 @@
    "x",
    "c"
   ],
-  "expected": "● 🟢 +1  🔴 −1\n·  a\n🔴 -b\n🟢 +x\n·  c"
+  "expected": "● 🟢 +1  🔴 −1\n· 1  a\n🔴 2 -b\n🟢 2 +x\n· 3  c"
  },
  {
   "kind": "colored_diff",
@@ -41,7 +41,7 @@
    "l9",
    "l10"
   ],
-  "expected": "● 🟢 +2  🔴 −2\n·  l1\n🔴 -l2\n🟢 +L2\n·  l3\n·  l4\n·  l5\n·  l6\n·  l7\n🔴 -l8\n🟢 +L8\n·  l9\n·  l10"
+  "expected": "● 🟢 +2  🔴 −2\n· 1  l1\n🔴 2 -l2\n🟢 2 +L2\n· 3  l3\n· 4  l4\n· 5  l5\n· 6  l6\n· 7  l7\n🔴 8 -l8\n🟢 8 +L8\n· 9  l9\n· 10  l10"
  },
  {
   "kind": "colored_diff",
@@ -72,7 +72,7 @@
    "y",
    "z"
   ],
-  "expected": "● 🟢 +3  🔴 −0\n🟢 +x\n🟢 +y\n🟢 +z"
+  "expected": "● 🟢 +3  🔴 −0\n🟢 1 +x\n🟢 2 +y\n🟢 3 +z"
  },
  {
   "kind": "colored_diff",
@@ -83,7 +83,7 @@
    "z"
   ],
   "new": [],
-  "expected": "● 🟢 +0  🔴 −3\n🔴 -x\n🔴 -y\n🔴 -z"
+  "expected": "● 🟢 +0  🔴 −3\n🔴 1 -x\n🔴 2 -y\n🔴 3 -z"
  },
  {
   "kind": "colored_diff",
@@ -612,7 +612,7 @@
    "ctx 198",
    "CHANGED"
   ],
-  "expected": "● 🟢 +1  🔴 −1\n·  ctx 196\n·  ctx 197\n·  ctx 198\n🔴 -ctx 199\n🟢 +CHANGED"
+  "expected": "● 🟢 +1  🔴 −1\n· 257  ctx 196\n· 258  ctx 197\n· 259  ctx 198\n🔴 260 -ctx 199\n🟢 260 +CHANGED"
  },
  {
   "kind": "colored_diff",
@@ -625,7 +625,7 @@
    "hola ✨ otra",
    "dos"
   ],
-  "expected": "● 🟢 +1  🔴 −1\n🔴 -hola ✨ línea\n🟢 +hola ✨ otra\n·  dos"
+  "expected": "● 🟢 +1  🔴 −1\n🔴 1 -hola ✨ línea\n🟢 1 +hola ✨ otra\n· 2  dos"
  },
  {
   "kind": "colored_diff",
@@ -726,7 +726,7 @@
    "line 47",
    "line 48"
   ],
-  "expected": "● 🟢 +0  🔴 −8\n🔴 -line 0\n·  line 1\n·  line 2\n·  line 3\n·  line 4\n·  line 5\n·  line 6\n🔴 -line 7\n·  line 8\n·  line 9\n·  line 10\n·  line 11\n·  line 12\n·  line 13\n🔴 -line 14\n·  line 15\n·  line 16\n·  line 17\n·  line 18\n·  line 19\n·  line 20\n🔴 -line 21\n·  line 22\n·  line 23\n·  line 24\n·  line 25\n·  line 26\n·  line 27\n🔴 -line 28\n·  line 29\n·  line 30\n·  line 31\n·  line 32\n·  line 33\n·  line 34\n🔴 -line 35\n·  line 36\n·  line 37\n·  line 38\n·  line 39\n·  line 40\n·  line 41\n🔴 -line 42\n·  line 43\n·  line 44\n·  line 45\n·  line 46\n·  line 47\n·  line 48\n🔴 -line 49"
+  "expected": "● 🟢 +0  🔴 −8\n🔴 1 -line 0\n· 1  line 1\n· 2  line 2\n· 3  line 3\n· 4  line 4\n· 5  line 5\n· 6  line 6\n🔴 8 -line 7\n· 7  line 8\n· 8  line 9\n· 9  line 10\n· 10  line 11\n· 11  line 12\n· 12  line 13\n🔴 15 -line 14\n· 13  line 15\n· 14  line 16\n· 15  line 17\n· 16  line 18\n· 17  line 19\n· 18  line 20\n🔴 22 -line 21\n· 19  line 22\n· 20  line 23\n· 21  line 24\n· 22  line 25\n· 23  line 26\n· 24  line 27\n🔴 29 -line 28\n· 25  line 29\n· 26  line 30\n· 27  line 31\n· 28  line 32\n· 29  line 33\n· 30  line 34\n🔴 36 -line 35\n· 31  line 36\n· 32  line 37\n· 33  line 38\n· 34  line 39\n· 35  line 40\n· 36  line 41\n🔴 43 -line 42\n· 37  line 43\n· 38  line 44\n· 39  line 45\n· 40  line 46\n· 41  line 47\n· 42  line 48\n🔴 50 -line 49"
  },
  {
   "kind": "tool_box",
@@ -778,7 +778,7 @@
    "old_string": "x=1",
    "new_string": "x=2"
   },
-  "expected": "🔧 <b>Edit</b> — <code>a.txt</code>\n<pre>● 🟢 +1  🔴 −1\n🔴 -x=1\n🟢 +x=2</pre>"
+  "expected": "🔧 <b>Edit</b> — <code>a.txt</code>\n<pre>● 🟢 +1  🔴 −1\n🔴 1 -x=1\n🟢 1 +x=2</pre>"
  },
  {
   "kind": "tool_box",
@@ -815,7 +815,7 @@
     }
    ]
   },
-  "expected": "🔧 <b>MultiEdit</b>\n<pre>· edit 1\n● 🟢 +1  🔴 −1\n🔴 -a\n🟢 +b\n· edit 2\n● 🟢 +1  🔴 −1\n🔴 -c\n🟢 +d</pre>"
+  "expected": "🔧 <b>MultiEdit</b>\n<pre>· edit 1\n● 🟢 +1  🔴 −1\n🔴 1 -a\n🟢 1 +b\n· edit 2\n● 🟢 +1  🔴 −1\n🔴 1 -c\n🟢 1 +d</pre>"
  },
  {
   "kind": "tool_box",

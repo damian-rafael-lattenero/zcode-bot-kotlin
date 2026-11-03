@@ -1,6 +1,9 @@
 package dev.lattenero.bot.channel
 
 import dev.lattenero.bot.contracts.PyText
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 
 /**
  * One TRANSCRIPT FEED message: the words, the optional inline keyboard,
@@ -13,6 +16,12 @@ import dev.lattenero.bot.contracts.PyText
 data class FeedMessage(
     val text: String,
     val block: Int? = null,
+    /**
+     * A COLLAPSED tool output (the owner, 3/11): the header above rides
+     * the chat with ONE button; the numbered pages live here until the
+     * tap. Null = a plain data message.
+     */
+    val pages: ToolOutputPages.Pages? = null,
 ) {
     companion object {
         /** A plain data message (a tool close, an open one-liner). */
@@ -52,8 +61,9 @@ object TranscriptFeed {
      * input-less lane) falls back to the honest one-liner, never to
      * silence.
      */
-    // one guard per early exit (the silent level, the turn switch) — the diff's own shape
-    @Suppress("ReturnCount")
+    // one guard per early exit (the silent level, the turn switch) — the diff's
+    // own shape; the collapse branch is one more verdict, not a second flow
+    @Suppress("ReturnCount", "CyclomaticComplexMethod")
     fun messages(
         prev: TurnLive?,
         curr: TurnLive,
@@ -79,6 +89,11 @@ object TranscriptFeed {
         curr.tools.forEach { lane ->
             val before = prevTools[lane.toolId]
             if (lane.status != null && (before == null || before.status == null)) {
+                val collapsed = collapseOf(lane)
+                if (collapsed != null) {
+                    out += FeedMessage(text = collapsed.header, pages = collapsed)
+                    return@forEach
+                }
                 val box = if (lane.input == null) "" else toolBox(lane)
                 out += FeedMessage.of(box.ifBlank { closeFallback(lane, verbs) })
             }
@@ -148,6 +163,51 @@ object TranscriptFeed {
         val detail = if (clipped.isNotEmpty()) " <code>${PyText.esc(clipped)}</code>" else ""
         return "▶️ ${verb.head()}$detail"
     }
+
+    /**
+     * THE COLLAPSED OUTPUT (the owner, 3/11): a shell's output ALWAYS
+     * travels behind the pager's button — that IS the verbosity cure; a
+     * file read only when it is long enough to bury the chat. Null = the
+     * box speaks. Every page's lines carry their REAL numbers (the read's
+     * offset included), so a snippet is never anonymous.
+     */
+    private fun collapseOf(lane: ToolLive): ToolOutputPages.Pages? {
+        val out = lane.output?.takeIf { it.isNotBlank() }
+        val shell = lane.name in SHELL_TOOLS
+        val read = lane.name in READ_TOOLS
+        val tiny = out != null && !shell && (!read || PyText.cpLength(out) <= ToolOutputPages.INLINE_READ_CP)
+        return if (out == null || tiny) {
+            null
+        } else {
+            val detail = (if (shell) commandOf(lane.input) else fileOf(lane.input)).orEmpty()
+            val start = if (read) offsetOf(lane.input) + 1 else 1
+            val kind = if (shell) "⚡ <b>${PyText.esc(lane.name)}</b>" else "📖 <b>${PyText.esc(lane.name)}</b>"
+            ToolOutputPages.Pages(
+                header = ToolOutputPages.headerOf(kind, detail, PyText.splitLines(out).size),
+                pages = ToolOutputPages.pages(out, start),
+            )
+        }
+    }
+
+    /** The command as the shell would see it (a list joins with spaces). */
+    private fun commandOf(input: JsonObject?): String? = when (val cmd = input?.get("command")) {
+        is JsonArray -> cmd.joinToString(" ") { PyText.pyStr(it) }
+        is JsonPrimitive -> if (cmd.isString) cmd.content else null
+        else -> null
+    }
+
+    private fun fileOf(input: JsonObject?): String? =
+        listOf("file_path", "path").firstNotNullOfOrNull { k ->
+            (input?.get(k) as? JsonPrimitive)?.takeIf { it.isString }?.content?.takeIf { it.isNotEmpty() }
+        }
+
+    /** The read's offset (a slice starts deeper in the file) — 0 when absent. */
+    private fun offsetOf(input: JsonObject?): Int =
+        (input?.get("offset") as? JsonPrimitive)?.content?.toIntOrNull() ?: 0
+
+    /** The tools whose output is collapsed behind the pager. */
+    private val SHELL_TOOLS = setOf("Bash", "Shell")
+    private val READ_TOOLS = setOf("Read", "View")
 
     /** The open one-liner's detail cap (the card's lane line uses the same window). */
     private const val OPEN_DETAIL_CP = 60

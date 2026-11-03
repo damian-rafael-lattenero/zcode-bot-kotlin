@@ -96,15 +96,60 @@ class TranscriptFeedTest {
 
     @Test
     fun aToolCloseSpeaksTheInjectedBoxOnce() {
-        val prev = turn(tools = listOf(closed("t1", status = null, input = buildJsonObject { put("command", "ls") })))
+        val cmd = buildJsonObject { put("command", "grep -r x .") }
+        val prev = turn(tools = listOf(closed("t1", name = "Grep", status = null, input = cmd)))
         val curr = turn(
-            tools = listOf(
-                closed("t1", input = buildJsonObject { put("command", "ls") }, output = "out", outputLines = 1),
-            ),
+            tools = listOf(closed("t1", name = "Grep", input = cmd, output = "out", outputLines = 1)),
         )
         val msgs = TranscriptFeed.messages(prev, curr, FeedVerbosity.NORMAL, { "BOX(${it.name})" }, verbs)
-        assertEquals(listOf("BOX(Bash)"), msgs.map { it.text })
+        assertEquals(listOf("BOX(Grep)"), msgs.map { it.text })
         assertNull(msgs[0].block, "a close is plain data — no CoT registration")
+    }
+
+    @Test
+    fun aShellCloseCollapsesIntoOneButtonWithNumberedPages() {
+        val cmd = buildJsonObject { put("command", "ls -la") }
+        val prev = turn(tools = listOf(closed("t1", status = null, input = cmd)))
+        val curr = turn(tools = listOf(closed("t1", input = cmd, output = "uno\ndos", outputLines = 2)))
+        val msgs = TranscriptFeed.messages(prev, curr, FeedVerbosity.NORMAL, { "BOX" }, verbs)
+        assertEquals(1, msgs.size)
+        val pages = msgs[0].pages!!
+        assertEquals("   1│ uno\n   2│ dos", pages.pages.single())
+        assertTrue("2 líneas" in msgs[0].text)
+        assertTrue("tocar para ver" in msgs[0].text)
+        assertTrue("BOX" !in msgs[0].text, "the box never rides: the output is behind the button")
+    }
+
+    @Test
+    fun aLongReadCollapsesAndNumbersFromItsOffset() {
+        val content = (1..100).joinToString("\n") { "línea $it" }
+        val inp = buildJsonObject { put("file_path", "/x/y.txt"); put("offset", 40) }
+        val prev = turn(tools = listOf(closed("t1", name = "Read", status = null, input = inp)))
+        val curr = turn(tools = listOf(closed("t1", name = "Read", input = inp, output = content)))
+        val msgs = TranscriptFeed.messages(prev, curr, FeedVerbosity.NORMAL, { "BOX" }, verbs)
+        val pages = msgs[0].pages!!
+        assertTrue(pages.pages.first().startsWith("  41│ línea 1"), "the read's REAL position")
+        assertTrue("/x/y.txt" in msgs[0].text)
+    }
+
+    @Test
+    fun aShortReadStaysInline() {
+        val inp = buildJsonObject { put("file_path", "/x/y.txt") }
+        val prev = turn(tools = listOf(closed("t1", name = "Read", status = null, input = inp)))
+        val curr = turn(tools = listOf(closed("t1", name = "Read", input = inp, output = "corto")))
+        val msgs = TranscriptFeed.messages(prev, curr, FeedVerbosity.NORMAL, { "BOX" }, verbs)
+        assertNull(msgs[0].pages, "a short file body is not worth a tap")
+        assertEquals("BOX", msgs[0].text)
+    }
+
+    @Test
+    fun aShellCloseWithoutOutputKeepsTheBox() {
+        val cmd = buildJsonObject { put("command", "true") }
+        val prev = turn(tools = listOf(closed("t1", status = null, input = cmd)))
+        val curr = turn(tools = listOf(closed("t1", input = cmd)))
+        val msgs = TranscriptFeed.messages(prev, curr, FeedVerbosity.NORMAL, { "BOX" }, verbs)
+        assertNull(msgs[0].pages)
+        assertEquals("BOX", msgs[0].text)
     }
 
     @Test
@@ -139,8 +184,9 @@ class TranscriptFeedTest {
 
     @Test
     fun aLaneOpenedAndClosedBetweenTicksSpeaksOnlyItsClose() {
+        val inp = buildJsonObject { put("pattern", "x") }
         val curr = turn(
-            tools = listOf(closed("t1", input = buildJsonObject { put("command", "ls") }, output = "f", outputLines = 1)),
+            tools = listOf(closed("t1", name = "Grep", input = inp, output = "f", outputLines = 1)),
         )
         val msgs = TranscriptFeed.messages(turn(), curr, FeedVerbosity.VERBOSE, { "BOX" }, verbs)
         assertEquals(listOf("BOX"), msgs.map { it.text }, "the close is the content carrier; the open would be noise")

@@ -239,7 +239,7 @@ class LivePublisher(
      * the snapshot is younger than [GIFTS_STALE_MS]. Null/empty = silence.
      */
     private val gifts: suspend () -> GiftsMenu.Gifts? = { null },
-) : CoTTaps {
+) : CoTTaps, BoxTaps {
 
     /** the message being edited — the publisher's only mutable cell (§7 escape hatch). */
     @Volatile
@@ -264,6 +264,15 @@ class LivePublisher(
      * (the taps land here too): the registry itself stays a plain holder.
      */
     private val cotBlocks = CotBlocks { messageId, text, markup ->
+        telegram.edit(config(), messageId, text, markup)
+    }
+
+    /**
+     * THE OUTPUT PAGER's registry (the owner, 3/11): each collapsed shell
+     * output's message, header and numbered pages; the tap opens/flips a
+     * page IN PLACE. Same mutex contract as [cotBlocks].
+     */
+    private val boxPages = BoxPages { messageId, text, markup ->
         telegram.edit(config(), messageId, text, markup)
     }
 
@@ -478,6 +487,12 @@ class LivePublisher(
      */
     private suspend fun speakFeed(feed: List<FeedMessage>, state: TurnLive) {
         feed.forEach { msg ->
+            // a COLLAPSED tool output: the header speaks with its one
+            // button; the registry keeps the numbered pages for the taps
+            msg.pages?.let { pages ->
+                boxPages.speakCollapsed(pages) { markup -> speak(msg.text, markup) }
+                return@forEach
+            }
             val block = msg.block ?: run {
                 speak(msg.text, null)
                 return@forEach
@@ -509,6 +524,26 @@ class LivePublisher(
             "📡 Sin Telegram configurado — no hay mensaje que abrir."
         } else {
             cotBlocks.toggle(registryId)
+        }
+    }
+
+    /** The pager's tap: open/flip a page of the numbered output, in place. */
+    override suspend fun open(registryId: Int, page: Int): String? = tickMutex.withLock {
+        val cfg = config()
+        if (!cfg.configured) {
+            "📡 Sin Telegram configurado — no hay mensaje que abrir."
+        } else {
+            boxPages.open(registryId, page)
+        }
+    }
+
+    /** The pager's way back: the message folds to its one-line header. */
+    override suspend fun fold(registryId: Int): String? = tickMutex.withLock {
+        val cfg = config()
+        if (!cfg.configured) {
+            "📡 Sin Telegram configurado — no hay mensaje que abrir."
+        } else {
+            boxPages.fold(registryId)
         }
     }
 

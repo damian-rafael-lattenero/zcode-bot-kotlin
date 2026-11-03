@@ -107,7 +107,9 @@ class FilesCommandsTest {
         assertTrue("Archivos cambiados" in text, text)
         assertTrue("(nuevo)" in text, text) // /b/new.txt was born this turn
         assertTrue("+1/−1" in text, text) // old.txt: DOS replaced dos
-        assertTrue("+ DOS" in text, text) // the hunk shows the change inline
+        // the line-number law (the owner, 3/11): the changed line says WHERE
+        assertTrue(Regex("""\+ 2│ DOS""").containsMatchIn(text), text)
+        assertTrue(Regex("""− 2│ dos""").containsMatchIn(text), text)
         assertTrue("/file /a/old.txt" !in text, text) // small diffs stay inline
     }
 

@@ -156,13 +156,21 @@ internal class SequenceMatcher(private val a: List<String>, private val b: List<
     }
 }
 
-/** unified_diff's line emission (headers and @@ markers never generated — the caller strips them anyway). */
+/**
+ * unified_diff's line emission. The `@@` hunk headers ARE generated (the
+ * owner's line-number law, 3/11: a diff without positions is unreadable
+ * on a phone) — [colorizeDiff] consumes them to number every line and
+ * emits none of them.
+ */
 // The emission is the algorithm: groups → lines, exactly difflib's order
 // (replace emits its '-' half AND its '+' half, like CPython's two ifs).
 @Suppress("NestedBlockDepth")
 internal fun unifiedDiffLines(a: List<String>, b: List<String>): List<String> {
     val out = mutableListOf<String>()
     for (g in SequenceMatcher(a, b).groupedOpcodes()) {
+        val first = g.firstOrNull() ?: continue
+        // the hunk's REAL 1-based starts — the numbers every body line inherits
+        out.add("@@ -${first.i1 + 1} +${first.j1 + 1} @@")
         for (c in g) {
             if (c.tag == SequenceMatcher.Tag.EQUAL) {
                 a.subList(c.i1, c.i2).forEach { out.add(" $it") }
@@ -224,9 +232,16 @@ internal fun colorizeDiff(lines: List<String>): List<String> {
 private val FIRST_MINUS = Regex("-(\\d+)")
 private val FIRST_PLUS = Regex("\\+(\\d+)")
 
-/** _colored_diff: difflib over old/new, @@ headers stripped (bare circles), capped, never empty. */
+/**
+ * _colored_diff: difflib over old/new, capped, never empty. The `@@`
+ * hunk headers stay IN: [colorizeDiff] reads them to stamp every added,
+ * removed and context line with its real number (the owner, 3/11: «no sé
+ * bien lo que estoy leyendo a qué línea corresponde») and renders none of
+ * them. Python's bare circles were the parity ceiling; the line numbers
+ * are the improvement.
+ */
 internal fun coloredDiff(old: List<String>, new: List<String>, maxChars: Int): String {
-    val d = unifiedDiffLines(old, new).filterNot { it.startsWith("@@") }
+    val d = unifiedDiffLines(old, new)
     val joined = colorizeDiff(d).joinToString("\n")
     return PyText.take(joined, maxChars).ifEmpty { "(no changes)" }
 }

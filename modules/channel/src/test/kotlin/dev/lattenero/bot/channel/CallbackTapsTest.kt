@@ -196,4 +196,34 @@ class CallbackTapsTest {
         val third = bc.handle("/nuclear go", 9L)!!
         assertTrue(third.text.contains("slow ladder"), third.text)
     }
+
+    @Test
+    fun thePagerTapsReachTheRegistryAndAnUnwiredOneAnswersTheMiss() = runBlocking {
+        val calls = mutableListOf<String>()
+        val taps = object : BoxTaps {
+            override suspend fun open(registryId: Int, page: Int): String? {
+                calls += "open:$registryId:$page"
+                return null
+            }
+
+            override suspend fun fold(registryId: Int): String? {
+                calls += "fold:$registryId"
+                return null
+            }
+        }
+        val wired = BotCommands(
+            ops = FakeOps(),
+            hub = LiveHub(),
+            daemonReset = { "" },
+            clock = { 1L },
+            boxTaps = taps,
+        )
+        kotlin.test.assertNull(wired.onCallback("bp:7:2", 1L))
+        kotlin.test.assertNull(wired.onCallback("bf:7", 2L))
+        assertEquals(listOf("open:7:2", "fold:7"), calls)
+
+        val bare = BotCommands(ops = FakeOps(), hub = LiveHub(), daemonReset = { "" }, clock = { 1L })
+        assertEquals(BoxPages.MISS, bare.onCallback("bp:7:0", 3L)!!.text)
+        assertEquals(BoxPages.MISS, bare.onCallback("bf:7", 4L)!!.text)
+    }
 }
