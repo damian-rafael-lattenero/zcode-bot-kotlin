@@ -153,6 +153,29 @@ class RenderFoldTest {
         assertEquals(BOX_CAP + 1, state.boxes.maxOf { it.boxId }, "the max id survives — the next id never regresses")
     }
 
+    @Test
+    fun thePagerTapMirrorsThePageTheMessageShows() {
+        var state = reduce(reduce(null, thought("pensando")), boxBorn(boxId = 7, pages = 3))
+        state = reduce(state, RenderEvent.Page(7, 1))!!
+        assertEquals(1, state!!.boxes.single().page, "the fold mirrors the landed edit")
+        // the clamp is the reducer's own defense: an out-of-range page lands at the last
+        assertEquals(2, reduce(state, RenderEvent.Page(7, 99))!!.boxes.single().page)
+        // the fold-back returns the header
+        assertEquals(
+            BoxLive.FOLDED,
+            reduce(state, RenderEvent.Page(7, BoxLive.FOLDED))!!.boxes.single().page,
+        )
+        // an unknown box moves nothing; a page on one box leaves its siblings
+        val seeded = reduce(null, thought("pensando"))
+        val two = reduce(reduce(seeded, boxBorn(boxId = 7)), boxBorn(boxId = 8))!!
+        val flipped = reduce(two, RenderEvent.Page(8, 0))!!
+        assertEquals(BoxLive.FOLDED, flipped.boxes.first { it.boxId == 7 }.page)
+        assertEquals(0, flipped.boxes.first { it.boxId == 8 }.page)
+        assertEquals(two, reduce(two, RenderEvent.Page(99, 0)), "an unknown box's tap is a no-op")
+        // a page event with no state stays nothing
+        assertNull(reduce(null, RenderEvent.Page(7, 0)))
+    }
+
     // ---- the staleness tick ------------------------------------------------------
 
     @Test
