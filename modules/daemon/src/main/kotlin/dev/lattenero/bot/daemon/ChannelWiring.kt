@@ -3,6 +3,7 @@ package dev.lattenero.bot.daemon
 import dev.lattenero.bot.channel.Ack
 import dev.lattenero.bot.channel.BotCommands
 import dev.lattenero.bot.channel.ChannelClient
+import dev.lattenero.bot.channel.DeployCommand
 import dev.lattenero.bot.channel.ChannelOps
 import dev.lattenero.bot.channel.ChannelQuery
 import dev.lattenero.bot.channel.ChannelSpec
@@ -35,6 +36,7 @@ import dev.lattenero.bot.daemon.nuclear.NuclearLadder
 import dev.lattenero.bot.daemon.queue.InboundQueue
 import dev.lattenero.bot.daemon.send.DaemonSend
 import dev.lattenero.bot.daemon.send.LaneFiles
+import dev.lattenero.bot.daemon.send.SendKnob
 import dev.lattenero.bot.daemon.send.SendLanes
 import dev.lattenero.bot.daemon.shadow.TimeIso
 import dev.lattenero.bot.daemon.spectator.ToolBox
@@ -296,6 +298,40 @@ internal fun wireChannel(
     // share it — the poller's commands AND the live view's title resolution
     val history: TasksHistory = TasksHistoryIo(cfg.baseDir)
 
+    // B6 — /deploy: the pure machine + THE DOOR's flow, built ONCE (the
+    // arm outlives the updates that touch it). The announce rides the
+    // commands lane's leg and its message id is the door's receipt: no
+    // announce, no spawn. The spawn is the REAL edge — nohup over
+    // ProcessBuilder, detached stdio, fire-and-forget (the script boots
+    // out this very daemon; the log lands where /file can fetch it).
+    val deployLog = File(File(cfg.homeDir, "logs"), DeploySpawn.LOG_FILE_NAME)
+    val deployEdge = DeploySpawn(
+        script = DeployScriptKnob.load(File(cfg.homeDir, SendKnob.FILE_NAME)),
+        logFile = deployLog,
+    )
+    val deployFlow = DeployFlow(
+        machine = DeployCommand(),
+        say = { text, loud, markup ->
+            val now = System.currentTimeMillis() / 1000.0
+            send.leg.deliverMarkup(
+                ShadowDecision(
+                    ts = now,
+                    tsIso = TimeIso.format(now),
+                    watcher = "channel",
+                    decision = "say",
+                    text = text,
+                ),
+                loud,
+                markup,
+            )
+        },
+        spawn = {
+            val pid = deployEdge.spawn().pid()
+            logger.warn { "deploy: script detached, pid=$pid (log: $deployLog)" }
+        },
+        ownerUserId = { TgConfig.load(remote).ownerUserId },
+    )
+
     // the /verbosity level's store, built ONCE, SHARED: the commands WRITE
     // it, the publisher READS it per tick — one instance, one truth (the
     // file-backed store: the owner's choice survives the restarts)
@@ -329,6 +365,7 @@ internal fun wireChannel(
         queue,
         history,
         verbosity,
+        deployFlow = deployFlow,
         lastPrompt = lastPrompt,
         liveView = liveView,
     )
@@ -434,6 +471,9 @@ private fun buildPoller(
     verbosity: VerbositySetting,
     // /retry's ammo (Python's F22) — the last FIRED prompt's store
     lastPrompt: LastPrompt,
+    // B6 — /deploy's flow (the door): the intercepts below hand it the
+    // /deploy texts and the dep: taps BEFORE the dispatcher ever sees them
+    deployFlow: DeployFlow,
     board: QuestionBoard = QuestionBoard(),
     // the collapsed CoT blocks' taps (the cb: buttons) — the live view IS
     // the registry (it spoke the messages and holds the ids + texts)
@@ -551,8 +591,10 @@ private fun buildPoller(
                     // FILES OUT + /diff (30/10): the two commands that need
                     // the wiring's own throats (the multipart upload; the
                     // snapshot query + the mini-diff render) — intercepted
-                    // BEFORE the text dispatcher, which never sees them
-                    dispatchMessage(liveApi, cfg, client, history, commands, speak, update)
+                    // BEFORE the text dispatcher, which never sees them.
+                    // B6: /deploy joins the pattern — the anti-suicide door
+                    // lives HERE, never in the free-text router.
+                    dispatchMessage(liveApi, cfg, client, history, commands, speak, deployFlow, update)
                     Ack.react(liveApi, cfg, update.messageId, Ack.HANDLED)
                 }
 
@@ -561,8 +603,17 @@ private fun buildPoller(
 
                 is InboundUpdate.Callback -> {
                     answerCallback(liveApi, update.callbackId)
-                    commands.onCallback(update.data, update.updateId)
-                        ?.let { speak(it.text, false, it.markup) }
+                    when {
+                        // B6 — the deploy taps: intercepted BEFORE the
+                        // callback fallback (the sst: law: a stray data must
+                        // never ride to the agent as the owner's own words —
+                        // «/deploy go» launching a build would be the graver bug)
+                        update.data.startsWith("dep:") ->
+                            deployFlow.onTap(update.data.removePrefix("dep:"), update.fromId)
+
+                        else -> commands.onCallback(update.data, update.updateId)
+                            ?.let { speak(it.text, false, it.markup) }
+                    }
                 }
             }
         },
@@ -637,10 +688,14 @@ private const val NUCLEAR_GATE = "nuclear-last"
 private const val NUCLEAR_DEBOUNCE_MS = 180_000L
 
 /**
- * The free-text dispatch: /file and /diff take the wiring's own throats
- * (the multipart upload; the snapshot query + the mini-diff render) —
- * everything else is the dispatcher's (the commands, then the route).
+ * The free-text dispatch: /deploy, /file and /diff take the wiring's own
+ * throats (B6's anti-suicide door; the multipart upload; the snapshot
+ * query + the mini-diff render) — everything else is the dispatcher's
+ * (the commands, then the route). The deploy flow speaks through its OWN
+ * say (the door's receipt is the announce's message id), so it returns
+ * nothing here.
  */
+@Suppress("LongParameterList") // the wiring's breadth: every throat the dispatch may need
 private suspend fun dispatchMessage(
     api: TgApi,
     cfg: TgConfig,
@@ -648,9 +703,13 @@ private suspend fun dispatchMessage(
     history: TasksHistory,
     commands: BotCommands,
     speak: suspend (String, Boolean, JsonObject?) -> Unit,
+    deployFlow: DeployFlow,
     update: InboundUpdate.Message,
 ) {
     when {
+        update.text == "/deploy" || update.text.startsWith("/deploy ") ->
+            deployFlow.onText(update.text.removePrefix("/deploy"), update.fromId)
+
         update.text.startsWith("/file") ->
             speak(filesOut(api, cfg, update.text.removePrefix("/file")), false, null)
 
