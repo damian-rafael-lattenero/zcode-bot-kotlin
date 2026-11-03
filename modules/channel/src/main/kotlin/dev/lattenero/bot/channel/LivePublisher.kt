@@ -180,6 +180,22 @@ class LiveHub {
     suspend fun peek(): TurnLive? = mutex.withLock { states.value }
 
     /**
+     * THE SEALED BOXES' ARCHIVE: a box's MESSAGE outlives the turn that
+     * spoke it — its buttons must keep opening pages after the seal (the
+     * old registry survived it; the fold's Clear is the LIVE world's
+     * reset, not the chat's). A box id is turn-unique by construction
+     * (task hash + birth order), so merging seals never collides. /nuclear
+     * (clear with no sealedTaskId) wipes it: nothing survives a ☢️.
+     */
+    private var sealedBoxes: List<BoxLive> = emptyList()
+
+    /** A box by wire id — the LIVE turn's first, then the sealed archive. */
+    suspend fun box(boxId: Int): BoxLive? = mutex.withLock {
+        states.value?.boxes?.firstOrNull { it.boxId == boxId }
+            ?: sealedBoxes.firstOrNull { it.boxId == boxId }
+    }
+
+    /**
      * After the seal is published the turn is spent; /nuclear also lands
      * here. A pin dies with ITS OWN card — [sealedTaskId] names the turn
      * that sealed. Measured live 2/11 22:48: the owner attached a child,
@@ -188,8 +204,19 @@ class LiveHub {
      * null keeps the nuclear semantics (everything dies).
      */
     suspend fun clear(sealedTaskId: String? = null): Unit = mutex.withLock {
+        sealedBoxes = if (sealedTaskId == null) {
+            emptyList()
+        } else {
+            // newest seal first; the archive is bounded like the live list
+            (states.value?.boxes.orEmpty() + sealedBoxes).distinctBy { it.boxId }.take(SEALED_BOX_CAP)
+        }
         fold(RenderEvent.Clear, SimpleLineDiffer)
         if (sealedTaskId == null || pinnedTaskId == sealedTaskId) pinnedTaskId = null
+    }
+
+    private companion object {
+        /** The sealed archive's ceiling — the chat's own scrollback is the real limit. */
+        const val SEALED_BOX_CAP = 120
     }
 }
 
@@ -626,8 +653,7 @@ class LivePublisher(
         if (!cfg.configured) {
             "📡 Sin Telegram configurado — no hay mensaje que abrir."
         } else {
-            val box = hub.peek()?.boxes?.firstOrNull { it.boxId == registryId }
-                ?: return@withLock BoxTaps.MISS
+            val box = hub.box(registryId) ?: return@withLock BoxTaps.MISS
             val index = page.coerceIn(0, box.pages.size - 1)
             val ok = telegram.edit(
                 cfg,
@@ -653,8 +679,7 @@ class LivePublisher(
         if (!cfg.configured) {
             "📡 Sin Telegram configurado — no hay mensaje que abrir."
         } else {
-            val box = hub.peek()?.boxes?.firstOrNull { it.boxId == registryId }
-                ?: return@withLock BoxTaps.MISS
+            val box = hub.box(registryId) ?: return@withLock BoxTaps.MISS
             val ok = telegram.edit(cfg, box.messageId, box.header, Keyboards.boxOpen(registryId))
             if (ok) hub.page(registryId, BoxLive.FOLDED)
             logger.info { "box tap: id=$registryId -> ${if (ok) "folded" else "fold BLOCKED (throttle)"}" }
