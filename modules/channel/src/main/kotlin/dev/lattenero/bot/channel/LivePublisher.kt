@@ -169,6 +169,14 @@ class LiveHub {
         mutex.withLock { fold(RenderEvent.BoxBorn(taskId, boxId, header, pages, messageId), SimpleLineDiffer) }
     }
 
+    /**
+     * THE PAGER'S TAP (U5b): the box's message shows [pageIndex] now — the
+     * edit landed; the fold mirrors it (the fact, not the request).
+     */
+    suspend fun page(boxId: Int, pageIndex: Int) {
+        mutex.withLock { fold(RenderEvent.Page(boxId, pageIndex), SimpleLineDiffer) }
+    }
+
     suspend fun peek(): TurnLive? = mutex.withLock { states.value }
 
     /**
@@ -607,9 +615,11 @@ class LivePublisher(
 
     /**
      * The pager's tap (U5b): render FROM the fold — the box's own header,
-     * numbered pages and message id — and edit the message in place. A box
-     * the fold does not know (an old turn, a restart) answers the honest
-     * miss; null = the toast is silence (the edit speaks for itself).
+     * numbered pages and message id — edit the message in place, and fold
+     * the [RenderEvent.Page] fact on success (a throttled edit flips
+     * NOTHING: the message keeps its page, the fold keeps its truth). A
+     * box the fold does not know (an old turn, a restart) answers the
+     * honest miss; null = the toast is silence (the edit speaks).
      */
     override suspend fun open(registryId: Int, page: Int): String? = tickMutex.withLock {
         val cfg = config()
@@ -625,6 +635,7 @@ class LivePublisher(
                 ToolOutputPages.renderPage(box.header, box.pages, index),
                 Keyboards.boxPages(registryId, index, box.pages.size),
             )
+            if (ok) hub.page(registryId, index) // the mirror: the message shows page `index` now
             logger.info {
                 val verdict = if (ok) "open" else "edit BLOCKED (throttle)"
                 "box tap: id=$registryId page=${index + 1}/${box.pages.size} -> $verdict"
@@ -633,7 +644,10 @@ class LivePublisher(
         }
     }
 
-    /** The pager's way back: the message folds to its one-line header. */
+    /**
+     * The pager's way back: the message folds to its one-line header and
+     * the fold mirrors it ([BoxLive.FOLDED]) — same fact law as [open].
+     */
     override suspend fun fold(registryId: Int): String? = tickMutex.withLock {
         val cfg = config()
         if (!cfg.configured) {
@@ -642,6 +656,7 @@ class LivePublisher(
             val box = hub.peek()?.boxes?.firstOrNull { it.boxId == registryId }
                 ?: return@withLock BoxTaps.MISS
             val ok = telegram.edit(cfg, box.messageId, box.header, Keyboards.boxOpen(registryId))
+            if (ok) hub.page(registryId, BoxLive.FOLDED)
             logger.info { "box tap: id=$registryId -> ${if (ok) "folded" else "fold BLOCKED (throttle)"}" }
             null
         }

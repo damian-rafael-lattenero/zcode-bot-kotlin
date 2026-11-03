@@ -207,6 +207,16 @@ sealed interface RenderEvent {
         val messageId: Long,
     ) : RenderEvent
 
+    /**
+     * THE PAGER'S TAP (U5b): a `bp:`/`bf:` button's edit LANDED — the box's
+     * message shows page [page] now (the fold-back is [BoxLive.FOLDED]) —
+     * and the fold mirrors it. The event is the fact, not the request: a
+     * throttled edit folds nothing (the message keeps its page, the state
+     * keeps its truth). The tap rides the existing callback dispatch (the
+     * 64-byte wire law untouched: `bp:<id>:<page>`).
+     */
+    data class Page(val boxId: Int, val page: Int) : RenderEvent
+
     /** The turn is spent (the seal's cleanup, a ☢️ nuclear): the fold's reset. */
     data object Clear : RenderEvent
 }

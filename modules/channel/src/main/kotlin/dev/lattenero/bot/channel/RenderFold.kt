@@ -93,6 +93,22 @@ fun reduce(
         else -> state
     }
 
+    is RenderEvent.Page -> state?.let { s ->
+        // THE PAGER'S MIRROR (U5b): the page the message actually shows.
+        // The clamp is the reducer's own defense too (an out-of-range page
+        // can only arrive as the tap edge's already-clamped index — the
+        // fold re-clamps rather than trusting the wire).
+        s.copy(
+            boxes = s.boxes.map { box ->
+                if (box.boxId == event.boxId) {
+                    box.copy(page = event.page.coerceIn(BoxLive.FOLDED, box.pages.size - 1))
+                } else {
+                    box
+                }
+            },
+        )
+    }
+
     RenderEvent.Clear -> null // the turn is spent: the fold's own reset
 }
 
