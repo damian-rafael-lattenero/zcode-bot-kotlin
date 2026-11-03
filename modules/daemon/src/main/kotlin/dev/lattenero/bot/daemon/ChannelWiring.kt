@@ -301,13 +301,14 @@ internal fun wireChannel(
     // B6 — /deploy: the pure machine + THE DOOR's flow, built ONCE (the
     // arm outlives the updates that touch it). The announce rides the
     // commands lane's leg and its message id is the door's receipt: no
-    // announce, no spawn. The spawn is the REAL edge — nohup over
-    // ProcessBuilder, detached stdio, fire-and-forget (the script boots
-    // out this very daemon; the log lands where /file can fetch it).
+    // announce, no spawn. The spawn is the REAL edge — its OWN one-shot
+    // launchd job (measured 2/11 22:02: nohup+ProcessBuilder DIED at the
+    // script's own bootout of this daemon; a sibling job survives it).
     val deployLog = File(File(cfg.homeDir, "logs"), DeploySpawn.LOG_FILE_NAME)
     val deployEdge = DeploySpawn(
         script = DeployScriptKnob.load(File(cfg.homeDir, SendKnob.FILE_NAME)),
         logFile = deployLog,
+        plistFile = File(File(cfg.homeDir, "state"), DeploySpawn.JOB_PLIST_NAME),
     )
     val deployFlow = DeployFlow(
         machine = DeployCommand(),
@@ -326,8 +327,11 @@ internal fun wireChannel(
             )
         },
         spawn = {
-            val pid = deployEdge.spawn().pid()
-            logger.warn { "deploy: script detached, pid=$pid (log: $deployLog)" }
+            deployEdge.spawn()
+            logger.warn {
+                "deploy: ${DeploySpawn.JOB_LABEL} bootstrapped as its OWN job " +
+                    "(survives this daemon's bootout) — log: $deployLog"
+            }
         },
         ownerUserId = { TgConfig.load(remote).ownerUserId },
     )

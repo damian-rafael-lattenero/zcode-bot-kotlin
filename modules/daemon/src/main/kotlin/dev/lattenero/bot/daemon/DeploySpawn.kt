@@ -8,49 +8,151 @@ import java.io.File
 
 private val logger = KotlinLogging.logger {}
 
+/** One launchctl call's outcome — stdout+stderr merged (the loud relay's text). */
+data class LaunchctlResult(val exit: Int, val text: String)
+
+/** The launchctl edge; injected so the suite never touches launchd. */
+fun interface Launchctl {
+    fun run(args: List<String>): LaunchctlResult
+}
+
 /**
  * B6's deploy edge — the REAL spawn of scripts/deploy-daemon.nu, detached
- * by construction. The script it launches builds, installs and BOOTOUTS
- * THIS VERY DAEMON's LaunchAgent (then bootstraps the new one), so the
- * spawn must survive its own parent's death:
+ * by CONSTRUCTION: the script runs as ITS OWN one-shot launchd job
+ * ([JOB_LABEL]), never as a child of this daemon.
  *
- * - `/usr/bin/nohup` — when launchd tears the daemon down (the script's
- *   own bootout of it), the child's inherited SIGHUP is IGNORED; the
- *   interpreter is the script's shebang's business, never ours.
- * - detached stdio — stdin is /dev/null, stdout+stderr are APPENDED to
- *   the deploy log: no pipe to a dying parent to SIGPIPE the script, and
- *   the build's output lands where /file can fetch it from.
- * - fire and FORGET — no waitFor anywhere: the build takes minutes and
- *   this daemon must keep answering the phone until the bootout lands.
+ * The first version used /usr/bin/nohup + ProcessBuilder and trusted
+ * "launchd SIGTERMs the job's pid; the orphan reparents". The owner's live
+ * /deploy on 2026-11-02 22:02 REFUTED it: launchd tears down the job's
+ * whole process tree, so the script died AT ITS OWN `launchctl bootout` —
+ * the daemon went down and the bootstrap never ran (the bot stayed silent
+ * until a manual bootstrap). A separate job is the only thing that
+ * survives its sibling's bootout.
  *
- * The residual truth, said plainly: the child keeps the daemon's process
- * GROUP (POSIX has no setsid from Java). Measured launchd behavior on
- * bootout is SIGTERM to the job's own pid — nohup + the orphan's
- * reparenting covers the child — but a launchd that ever killed whole
- * groups would kill the script mid-deploy. The announce-before-spawn door
- * (DeployFlow) is the reason that window is survivable: the phone already
- * heard the deploy left.
+ * The plist carries what the build needs and launchd would NOT inherit:
+ * HOME (nu's home dir), JAVA_HOME (gradlew's JVM — the daemon's own) and a
+ * PATH wide enough for launchctl/stat/cp. Stdout and stderr both land
+ * APPENDED in the deploy log — /file's contract.
  */
-class DeploySpawn(private val script: File, private val logFile: File) {
+class DeploySpawn(
+    private val script: File,
+    private val logFile: File,
+    private val plistFile: File,
+    private val uid: String = currentUid(),
+    private val javaHome: String = System.getProperty("java.home"),
+    private val home: String = System.getProperty("user.home"),
+    private val launchctl: Launchctl = Launchctl { args -> runLaunchctl(args) },
+) {
 
     /**
-     * The builder, exposed so the suite pins the DETACHED flags without
-     * ever exec'ing a deploy.
+     * The one-shot job's plist — pure, so the suite pins the contract:
+     * RunAtLoad, NO KeepAlive (a deploy runs once, never in a loop), the
+     * script's own directory as cwd (its FILE_PWD belt), the three env
+     * vars and the log redirect.
      */
-    internal fun builder(): ProcessBuilder =
-        ProcessBuilder("/usr/bin/nohup", script.absolutePath)
-            .directory(script.parentFile) // the script resolves its repo from $FILE_PWD; cwd is the belt
-            .redirectInput(ProcessBuilder.Redirect.from(File("/dev/null")))
-            .redirectOutput(ProcessBuilder.Redirect.appendTo(logFile))
-            .redirectErrorStream(true)
+    fun plist(): String = buildString {
+        appendLine("""<?xml version="1.0" encoding="UTF-8"?>""")
+        appendLine(
+            """<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" """ +
+                """"http://www.apple.com/DTDs/PropertyList-1.0.dtd">""",
+        )
+        appendLine("""<plist version="1.0">""")
+        appendLine("<dict>")
+        appendLine("    <key>Label</key>")
+        appendLine("    <string>$JOB_LABEL</string>")
+        appendLine("    <key>ProgramArguments</key>")
+        appendLine("    <array>")
+        appendLine("        <string>${xml(script.absolutePath)}</string>")
+        appendLine("    </array>")
+        appendLine("    <key>WorkingDirectory</key>")
+        appendLine("    <string>${xml(script.parentFile.path)}</string>")
+        appendLine("    <key>EnvironmentVariables</key>")
+        appendLine("    <dict>")
+        appendLine("        <key>HOME</key>")
+        appendLine("        <string>${xml(home)}</string>")
+        appendLine("        <key>JAVA_HOME</key>")
+        appendLine("        <string>${xml(javaHome)}</string>")
+        appendLine("        <key>PATH</key>")
+        appendLine("        <string>${xml(path())}</string>")
+        appendLine("    </dict>")
+        appendLine("    <key>RunAtLoad</key>")
+        appendLine("    <true/>")
+        appendLine("    <key>ProcessType</key>")
+        appendLine("    <string>Background</string>")
+        appendLine("    <key>StandardOutPath</key>")
+        appendLine("    <string>${xml(logFile.absolutePath)}</string>")
+        appendLine("    <key>StandardErrorPath</key>")
+        appendLine("    <string>${xml(logFile.absolutePath)}</string>")
+        appendLine("</dict>")
+        appendLine("</plist>")
+    }
 
-    /** Fork and move on — answers the child's process (the pid is the log's evidence). */
-    fun spawn(): Process = builder().start()
+    /**
+     * Write the job's plist and hand it to launchd. A previous run of the
+     * same label (one-shot, normally already exited) is cleared first —
+     * bootstrap refuses an already-loaded label. Any failure to write or
+     * to bootstrap throws: [DeployFlow]'s catch turns it into the phone's
+     * LOUD failure and THIS daemon stays up.
+     */
+    fun spawn(): LaunchctlResult {
+        plistFile.parentFile?.mkdirs()
+        plistFile.writeText(plist())
+        logFile.parentFile?.mkdirs()
+        logFile.appendText("\n==> deploy job bootstrapped at ${java.time.Instant.now()}\n")
+        launchctl.run(listOf("bootout", domain(), JOB_LABEL))
+        val out = launchctl.run(listOf("bootstrap", domain(), plistFile.absolutePath))
+        if (out.exit != 0) {
+            throw IllegalStateException("launchctl bootstrap $JOB_LABEL failed: ${out.text.trim()}")
+        }
+        return out
+    }
+
+    /** `gui/<uid>` — the daemon's own domain; the deploy job is its sibling, not its child. */
+    fun domain(): String = "gui/$uid"
+
+    private fun path(): String = listOf(
+        "/usr/bin",
+        "/bin",
+        "/usr/sbin",
+        "/sbin",
+        File(javaHome, "bin").path,
+        File(home, ".local/bin").path,
+    ).joinToString(":")
 
     companion object {
         /** Where the deploy's own words land (the daemon's logs dir; the wiring mkdirs it). */
         const val LOG_FILE_NAME = "deploy-daemon.log"
+
+        /** The one-shot job's label — INDEPENDENT of the daemon's (the survival is the point). */
+        const val JOB_LABEL = "com.zcode.bot-deploy"
+
+        /** The rendered plist's file name inside the daemon's state dir. */
+        const val JOB_PLIST_NAME = "deploy-job.plist"
+
+        private fun xml(text: String): String =
+            text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+        /** The numeric uid — launchctl's domain target needs it, never the username. */
+        @Suppress("TooGenericExceptionCaught") // an unreadable uid degrades to the default, never crashes a boot
+        fun currentUid(): String = try {
+            val p = ProcessBuilder("/usr/bin/id", "-u").redirectErrorStream(true).start()
+            val uid = p.inputStream.bufferedReader().readText().trim()
+            if (p.waitFor() == 0 && uid.isNotEmpty()) uid else "0"
+        } catch (e: Exception) {
+            logger.warn { "id -u unreadable (${e.message}) — the deploy job targets the wrong domain" }
+            "0"
+        }
     }
+}
+
+/** The real launchctl: merged output, never throws (the exit code carries the verdict). */
+@Suppress("TooGenericExceptionCaught") // a missing launchctl is an exit -1 with its reason, not a crash
+private fun runLaunchctl(args: List<String>): LaunchctlResult = try {
+    val p = ProcessBuilder(listOf("/bin/launchctl") + args).redirectErrorStream(true).start()
+    val text = p.inputStream.bufferedReader().readText()
+    LaunchctlResult(p.waitFor(), text)
+} catch (e: Exception) {
+    LaunchctlResult(-1, e.message ?: e::class.simpleName.orEmpty())
 }
 
 /**
