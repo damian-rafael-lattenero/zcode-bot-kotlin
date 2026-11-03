@@ -9,6 +9,7 @@ import kap.RestartPolicy
 import kap.Schedule
 import kap.process
 import kap.repeat
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.JsonObject
@@ -193,7 +194,7 @@ class LiveHub {
  */
 // The publisher's ladder: one function per duty (birth, feed, seal, watchdog,
 // prize cache) — the split is the state machine's shape, not duplication.
-@Suppress("TooManyFunctions")
+@Suppress("TooManyFunctions", "LongParameterList")
 class LivePublisher(
     private val hub: LiveHub,
     private val telegram: LiveTelegram,
@@ -239,6 +240,14 @@ class LivePublisher(
      * the snapshot is younger than [GIFTS_STALE_MS]. Null/empty = silence.
      */
     private val gifts: suspend () -> GiftsMenu.Gifts? = { null },
+    /**
+     * THE SEAL TAP (the owner's 🔔 moments): the daemon's notifications
+     * ride the SAME seal this card speaks — the facts are the seal's own
+     * ([SealFacts]), nothing is re-queried, the turn is never re-read.
+     * The tap NEVER breaks the seal: its failure is one log line and the
+     * card's cleanup runs untouched.
+     */
+    private val onSeal: suspend (SealFacts) -> Unit = {},
 ) : CoTTaps, BoxTaps {
 
     /** the message being edited — the publisher's only mutable cell (§7 escape hatch). */
@@ -582,6 +591,7 @@ class LivePublisher(
                 "thought=${state.thoughtChars} tools=${state.doneTools} answer=${answer?.length ?: 0} chars " +
                 "feed=${feed.size}"
         }
+        sealTap(state, answer, now)
         // THE REGISTRY SURVIVES THE SEAL (the collapsed buttons keep
         // working after the turn ends — the owner reads the CoT calmly);
         // only the entry cap prunes it. The PIN dies only if THIS turn is
@@ -591,6 +601,34 @@ class LivePublisher(
         statusMessageId = null
         statusTaskId = null
         feedSeen = null
+    }
+
+    /**
+     * THE SEAL TAP's edge: one value ([SealFacts]) carrying the seal's
+     * own truth, handed to the injected callback. The notification never
+     * breaks the seal — the callback's failure is one log line and the
+     * seal's cleanup (below) always runs (cancellation still passes).
+     */
+    @Suppress("TooGenericExceptionCaught") // the bus's tap invariant: no failure reaches the seal
+    private suspend fun sealTap(state: TurnLive, answer: String?, now: Long) {
+        try {
+            onSeal(
+                SealFacts(
+                    taskId = state.taskId,
+                    title = state.title,
+                    stopReason = (state.phase as TurnPhase.Done).stopReason,
+                    startedAtMs = state.startedAtMs,
+                    sealedAtMs = now,
+                    doneTools = state.doneTools,
+                    failedTools = state.failedTools,
+                    answer = answer,
+                ),
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            logger.warn(e) { "seal notifications tap failed (${e::class.simpleName}) — the seal is unaffected" }
+        }
     }
 
     /**
