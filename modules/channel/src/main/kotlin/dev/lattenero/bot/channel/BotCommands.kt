@@ -2973,7 +2973,7 @@ class BotCommands(
         internal const val GIFT_CAPTCHA =
             "🛡 El server pide un <b>CAPTCHA</b> para reclamar, y este build del fork no trae esa " +
                 "verificación (la edición de seguridad es un stub). Reclamá desde la app oficial o la " +
-                "web; después /quota ya muestra el plan y /plan lo puede usar."
+                "web: https://zcode.z.ai/en/rewards — después /quota ya muestra el plan y /plan lo puede usar."
 
         /** The confirmation's one-shot window (the pending slot's TTL). */
         internal const val PENDING_GIFT_TTL_MS = 5 * 60 * 1000L
