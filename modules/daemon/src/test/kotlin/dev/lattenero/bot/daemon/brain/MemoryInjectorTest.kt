@@ -2,6 +2,9 @@ package dev.lattenero.bot.daemon.brain
 
 import dev.lattenero.bot.channel.BrainReply
 import dev.lattenero.bot.daemon.bus.PromptTap
+import dev.lattenero.bot.daemon.metrics.MicrometerMetrics
+import io.micrometer.prometheusmetrics.PrometheusConfig
+import io.micrometer.prometheusmetrics.PrometheusMeterRegistry
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import java.io.File
@@ -153,4 +156,29 @@ class MemoryInjectorTest {
         assertFalse(typo.on)
         assertTrue(typo.warning!!.contains("ture"))
     }
+
+    /** E2's taps: the same events the log lines speak, counted for real. */
+    @Test
+    fun theMetricsTapCountsTheRealOutcomes() = runBlocking {
+        val reg = PrometheusMeterRegistry(PrometheusConfig.DEFAULT)
+        val m = MicrometerMetrics(reg)
+        val injected = MemoryInjector(search = { _, _ -> BrainReply.Response(200, searchJson) }, metrics = m)
+        val timingOut = MemoryInjector(search = { _, _ -> BrainReply.Timeout }, metrics = m)
+        val httpError = MemoryInjector(search = { _, _ -> BrainReply.Response(500, "boom") }, metrics = m)
+        val empty = MemoryInjector(search = { _, _ -> BrainReply.Response(200, """{"memories":[]}""") }, metrics = m)
+        injected.prepend("uno")
+        timingOut.prepend("dos")
+        httpError.prepend("tres")
+        empty.prepend("cuatro") // "sin recuerdos" is neither an injection nor a failure
+        val scrape = reg.scrape()
+        assertEquals(1.0, valueOf(scrape, "bot_memory_injected_total"))
+        assertEquals(2.0, valueOf(scrape, "bot_memory_inject_failures_total"))
+        assertEquals(4.0, valueOf(scrape, "bot_memory_fetch_seconds_count"), "every fetch rode the timer")
+    }
+
+    private fun valueOf(scrape: String, metric: String): Double? =
+        scrape.lineSequence()
+            .firstOrNull { it.startsWith(metric) }
+            ?.substringAfterLast(' ')
+            ?.toDoubleOrNull()
 }

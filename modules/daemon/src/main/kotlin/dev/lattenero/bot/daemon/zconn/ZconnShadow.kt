@@ -181,6 +181,14 @@ class ZconnShadow(
     }
 
     /**
+     * The scrape-time state read (E2's gauge): the persisted episode
+     * machine's own `down`. Unreadable is not down — the same degrade
+     * [loadState] already speaks, and the machine's next pass re-persists
+     * the truth.
+     */
+    fun downNow(): Boolean = loadState()?.down ?: false
+
+    /**
      * State first: a decision may repeat once if the shadow write then
      * fails — Python's order, Python's worst case.
      */

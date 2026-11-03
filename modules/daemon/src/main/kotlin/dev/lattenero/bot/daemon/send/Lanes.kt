@@ -50,6 +50,15 @@ internal class SendLanes(
     val live: LiveLane?,
     /** Drains BOTH outboxes — the paced flush (1 msg/s, stops at a window). */
     val flush: suspend () -> Unit,
+    /**
+     * E2's gauge subjects: the REAL outboxes and cooldowns behind each
+     * throat, read at scrape time. Null when the mode has none (SHADOW,
+     * DRY-RUN) or when there is no second throat (no `firehose_token`).
+     */
+    val mainOutbox: Outbox? = null,
+    val fireOutbox: Outbox? = null,
+    val mainCooldown: Cooldown? = null,
+    val fireCooldown: Cooldown? = null,
 )
 
 /** The lanes' file names — the contract the coordinator's split named. */
@@ -95,10 +104,11 @@ internal fun buildLanes(
 private fun liveLanes(remote: () -> File, pythonState: File): SendLanes {
     val mainApi = TgApi({ TgConfig.load(remote()) })
     val mainCooldown = cooldownOf(pythonState, LaneFiles.COOLDOWN)
+    val mainOutbox = Outbox(File(pythonState, LaneFiles.OUTBOX))
     val mainSender = Sender(
         mainApi,
         mainCooldown,
-        Outbox(File(pythonState, LaneFiles.OUTBOX)),
+        mainOutbox,
         LastPh({ File(pythonState, LaneFiles.LAST_PH) }),
     )
     val mainLeg = SendLegs.live(
@@ -124,9 +134,12 @@ private fun liveLanes(remote: () -> File, pythonState: File): SendLanes {
             lastPh = LastPh({ File(pythonState, LaneFiles.LAST_PH) }),
             leg = mainLeg,
         )
-        return SendLanes(mainLeg, mainLeg, mainApi, mainLive, flushMain)
+        return SendLanes(
+            mainLeg, mainLeg, mainApi, mainLive, flushMain,
+            mainOutbox = mainOutbox, mainCooldown = mainCooldown,
+        )
     }
-    return splitLanes(remote, pythonState, mainApi, mainLeg, flushMain)
+    return splitLanes(remote, pythonState, mainApi, mainLeg, flushMain, mainOutbox, mainCooldown)
 }
 
 /** The split: the firehose throat — own api, own files, own leg; the live view rides it. */
@@ -136,13 +149,16 @@ private fun splitLanes(
     mainApi: TgApi,
     mainLeg: SendLeg,
     flushMain: suspend () -> Unit,
+    mainOutbox: Outbox,
+    mainCooldown: Cooldown,
 ): SendLanes {
     val fireApi = TgApi({ TgConfig.load(remote()).firehose })
     val fireCooldown = cooldownOf(pythonState, LaneFiles.FIRE_COOLDOWN)
+    val fireOutbox = Outbox(File(pythonState, LaneFiles.FIRE_OUTBOX))
     val fireSender = Sender(
         fireApi,
         fireCooldown,
-        Outbox(File(pythonState, LaneFiles.FIRE_OUTBOX)),
+        fireOutbox,
         LastPh({ File(pythonState, LaneFiles.FIRE_LAST_PH) }),
     )
     val firehoseLeg = SendLegs.live(
@@ -165,6 +181,10 @@ private fun splitLanes(
             flushMain()
             fireSender.outboxFlush(TgConfig.load(remote()).firehose)
         },
+        mainOutbox = mainOutbox,
+        fireOutbox = fireOutbox,
+        mainCooldown = mainCooldown,
+        fireCooldown = fireCooldown,
     )
 }
 
