@@ -10,6 +10,7 @@ import dev.lattenero.bot.daemon.send.SendLanes
 import dev.lattenero.bot.daemon.send.buildLanes
 import dev.lattenero.bot.daemon.send.SendLeg
 import dev.lattenero.bot.daemon.send.SendLegs
+import dev.lattenero.bot.daemon.notifications.NotificationsKnob
 import dev.lattenero.bot.daemon.send.SendMode
 import dev.lattenero.bot.daemon.shadow.ShadowLog
 import dev.lattenero.bot.daemon.spectator.SpectatorOrchestrator
@@ -89,6 +90,14 @@ fun main(args: Array<String>) {
     if (memoryKnob.warning != null) logger.warn { "memory_inject knob $knobFile: ${memoryKnob.warning}" }
     logger.info { "memory_inject knob: on=${memoryKnob.on} (file=$knobFile)" }
 
+    // The owner's key-moment notifications (🔔): read ONCE at boot. The
+    // house knobs' INVERSE: garbage stays ON (the owner's explicit order
+    // makes ON the safe default) and only an explicit false silences.
+    // OFF = the wiring builds nothing — zero I/O.
+    val notifKnob = NotificationsKnob.load(knobFile)
+    if (notifKnob.warning != null) logger.warn { "notifications knob $knobFile: ${notifKnob.warning}" }
+    logger.info { "notifications knob: on=${notifKnob.on} (file=$knobFile)" }
+
     val stateDir = File(cfg.homeDir, "state")
     val shadowLog = ShadowLog(File(cfg.homeDir, "shadow"))
     val pythonState = File(File(cfg.baseDir, "hooks"), "state")
@@ -116,6 +125,7 @@ fun main(args: Array<String>) {
         pollKnob.on,
         eventBusOn = busKnob.on,
         memoryInjectOn = memoryKnob.on,
+        notificationsOn = notifKnob.on,
     )
 
     val clock = { System.currentTimeMillis() / MILLIS_PER_SECOND }
@@ -169,6 +179,11 @@ fun main(args: Array<String>) {
                 onHeartbeat = { touch(File(stateDir, HB_POLLER)) },
             )
             ?.startIn(this)
+        // 🔔 the notifications' watcher: the store's transitions, one pass
+        // per daemon tick, its own heartbeat (null with the knob off)
+        val notifHandle = stack.notifs
+            ?.asProcess(cfg.interval, onHeartbeat = { touch(File(stateDir, HB_NOTIFS)) })
+            ?.startIn(this)
         logger.info {
             val view = if (liveHandle != null) "on" else "off"
             val poll = if (pollerHandle != null) "ON" else "off"
@@ -209,6 +224,7 @@ fun main(args: Array<String>) {
                 spectatorHandle.stop()
                 outboxDrain.stop()
                 pollerHandle?.stop()
+                notifHandle?.stop()
                 liveHandle?.stop()
                 pingHandle.stop()
                 channelHandle.stop()
@@ -354,6 +370,7 @@ private const val HB_SPECTATOR = "hb-spectator"
 private const val HB_CHANNEL = "hb-channel"
 private const val HB_LIVE_VIEW = "hb-live-view"
 private const val HB_POLLER = "hb-poller"
+private const val HB_NOTIFS = "hb-subagent-notifs"
 private const val COMPONENT_KEY = "component"
 private val DEFAULT_HEARTBEAT_EVERY = 30.seconds
 private val SPECTATOR_SCAN = 2.seconds
