@@ -1,6 +1,7 @@
 package dev.lattenero.bot.daemon
 
 import dev.lattenero.bot.channel.BotCommands
+import dev.lattenero.bot.daemon.bus.EventBusKnob
 import dev.lattenero.bot.daemon.send.DaemonSend
 import dev.lattenero.bot.daemon.send.LiveLane
 import dev.lattenero.bot.daemon.send.SendKnob
@@ -74,6 +75,13 @@ fun main(args: Array<String>) {
         "poll knob: on=${pollKnob.on} ($who)"
     }
 
+    // U1b's bus knob (ADR-019): read ONCE at boot, SHIPPED OFF. With the
+    // knob off the producer is never built — the tap points are no-ops and
+    // the daemon does exactly what it did before U1b.
+    val busKnob = EventBusKnob.load(knobFile)
+    if (busKnob.warning != null) logger.warn { "event_bus knob $knobFile: ${busKnob.warning}" }
+    logger.info { "event_bus knob: on=${busKnob.on} (file=$knobFile)" }
+
     val stateDir = File(cfg.homeDir, "state")
     val shadowLog = ShadowLog(File(cfg.homeDir, "shadow"))
     val pythonState = File(File(cfg.baseDir, "hooks"), "state")
@@ -93,7 +101,7 @@ fun main(args: Array<String>) {
 
     // B3b: the channel stack (client always; live view when the daemon owns
     // the send; poller only at the retirement knob)
-    val stack = wireChannel(cfg, send, lanes, pythonState, pollKnob.on)
+    val stack = wireChannel(cfg, send, lanes, pythonState, pollKnob.on, eventBusOn = busKnob.on)
 
     val clock = { System.currentTimeMillis() / MILLIS_PER_SECOND }
     val zconnWatch = ZconnShadow(cfg.baseDir, stateDir, shadowLog, clock, pythonState, send.leg)
@@ -189,6 +197,7 @@ fun main(args: Array<String>) {
                 liveHandle?.stop()
                 pingHandle.stop()
                 channelHandle.stop()
+                stack.bus?.close() // in-flight bus reply reads die with the daemon
                 stack.client.close() // unblocks the session's read so the process can end
                 api?.close() // the live leg's client — no sends outlive the daemon
                 root?.cancel() // the per-turn spectators must not hang the exit

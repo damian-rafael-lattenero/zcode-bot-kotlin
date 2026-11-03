@@ -10,6 +10,7 @@ import dev.lattenero.bot.channel.ChannelSpec
 import dev.lattenero.bot.channel.ClientFrame
 import dev.lattenero.bot.channel.GiftsMenu
 import dev.lattenero.bot.channel.InboundAttachment
+import dev.lattenero.bot.channel.InboundAnswer
 import dev.lattenero.bot.channel.InboundReceipt
 import dev.lattenero.bot.channel.InboundUpdate
 import dev.lattenero.bot.channel.LastPrompt
@@ -30,6 +31,10 @@ import dev.lattenero.bot.channel.QuestionBoard
 import dev.lattenero.bot.channel.VerbositySetting
 import dev.lattenero.bot.contracts.PyText
 import dev.lattenero.bot.contracts.ShadowDecision
+import dev.lattenero.bot.daemon.bus.BusProducer
+import dev.lattenero.bot.daemon.bus.BusSink
+import dev.lattenero.bot.daemon.bus.PromptTap
+import dev.lattenero.bot.daemon.bus.activePromptContext
 import dev.lattenero.bot.daemon.history.LIVE_VERBS
 import dev.lattenero.bot.daemon.history.SEQUENCE_LINE_DIFFER
 import dev.lattenero.bot.daemon.history.TasksHistoryIo
@@ -65,6 +70,8 @@ internal class ChannelStack(
     val liveView: LivePublisher?,
     val poller: Poller?,
     val hub: LiveHub,
+    /** U1b's producer — null with the `event_bus` knob off (zero I/O). */
+    val bus: BusProducer? = null,
 )
 
 /**
@@ -158,13 +165,15 @@ private val OPENCODE_HEADERS = mapOf(
  * the only thing that flips it). The final render rides the spectator's
  * own renderer, INJECTED so the channel module never depends on daemon.
  */
-@Suppress("LongMethod") // wiring breadth: the stack's every piece, one home
+@Suppress("LongMethod", "CyclomaticComplexMethod") // wiring breadth: the stack's every piece, one home
 internal fun wireChannel(
     cfg: DaemonConfig,
     send: DaemonSend,
     lanes: SendLanes,
     pythonState: File,
     pollOn: Boolean,
+    /** U1b: the `event_bus` knob, read once at boot — OFF means the producer is never built. */
+    eventBusOn: Boolean = false,
 ): ChannelStack {
     val hub = LiveHub()
     val tokenFile = File(cfg.baseDir, ChannelSpec.TOKEN_FILENAME)
@@ -228,11 +237,17 @@ internal fun wireChannel(
     // the texts that arrived mid-turn fire as inbounds now
     val queue = InboundQueue(File(File(cfg.homeDir, "state"), QUEUE_FILE))
     var drainQueue: suspend () -> Unit = {}
+    // U1b: the producer is assigned right after the client exists (its
+    // final-answer read is a channel query) — the callback reads the holder.
+    var busTaps: BusProducer? = null
     val client = ChannelClient(
         transportFactory = { UnixSocketTransport { socketFile } },
         tokenReader = { tokenFile.takeIf { it.exists() }?.readText() },
         onStreamEvent = { frame ->
             feedAndResync(hub, frame, System.currentTimeMillis())
+            // ADR-019: the turn's lifecycle rides the same frames the live
+            // view folds — the tap never changes what the bot says or does
+            busTaps?.onFrame(frame)
             // THE ANSWER ROUND-TRIP: the stream carries the questions AND
             // their resolutions — the board messages the owner on the
             // former (dedupe inside), seals honestly on the latter (the
@@ -274,12 +289,38 @@ internal fun wireChannel(
         // future watchdog keys HERE: a missing heartbeat is a dead bus.
         onKeepalive = { frame -> hub.keepalive(frame.taskId, frame.seq) },
     )
+
+    // U1b — the bus producer (ADR-019): OFF by default (the knob is read at
+    // boot in Main; OFF means this block does not run, not even a file stat).
+    // The final answer is the SAME snapshot read the live view speaks at the
+    // seal: the daemon DOES see the assistant's text — nothing is invented.
+    if (eventBusOn) {
+        val sink = BusSink(
+            File(File(cfg.baseDir, "agent-brain"), BUS_FILE),
+            log = { message -> logger.warn { message } },
+        )
+        busTaps = BusProducer(
+            sink = sink,
+            finalAnswer = { taskId ->
+                when (val answer = client.query(ChannelQuery.TaskSnapshot(taskId))) {
+                    is QueryAnswer.Ok -> snapshotAnswerOf(answer.resultJson)
+                    else -> null
+                }
+            },
+            log = { message -> logger.warn { message } },
+        )
+        logger.info { "event_bus ON — appending to ${File(File(cfg.baseDir, "agent-brain"), BUS_FILE)}" }
+    }
+    val promptTap = PromptTap(busTaps) { activePromptContext(client) }
+
     drainQueue = {
         val pending = queue.drain()
         if (pending.isNotEmpty()) {
             delay(QUEUE_DRAIN_DELAY) // let the session's phase settle before the next prompt
             pending.forEachIndexed { i, p ->
+                val token = promptTap.begin(p.text)
                 val fired = client.sendInbound(p.text, "${p.messageId}-q$i", System.currentTimeMillis())
+                if (fired == InboundReceipt.FIRED) promptTap.fired(token) else promptTap.dropped(token)
                 logger.info {
                     "queue drained: ${p.messageId} (…) ${if (fired == InboundReceipt.FIRED) "fired" else "FAILED"}"
                 }
@@ -365,13 +406,17 @@ internal fun wireChannel(
         deployFlow = deployFlow,
         lastPrompt = lastPrompt,
         liveView = liveView,
+        promptTap = promptTap,
     )
-    return ChannelStack(client, liveView, poller, hub)
+    return ChannelStack(client, liveView, poller, hub, busTaps)
 }
 
 private const val QUEUE_FILE = "inbound-queue.json"
 private const val ATTACHMENTS_DIR = "attachments"
 private const val LIVE_ORPHAN_FILE = "live-view-active.json"
+
+/** ADR-019's append-only file (agent-brain's FileTailer owns the read side). */
+private const val BUS_FILE = "bus-events.jsonl"
 
 /** The /verbosity level's persisted line (FileVerbositySetting's file). */
 private const val VERBOSITY_FILE = "verbosity.txt"
@@ -484,6 +529,8 @@ private fun buildPoller(
     // the collapsed CoT blocks' taps (the cb: buttons) — the live view IS
     // the registry (it spoke the messages and holds the ids + texts)
     liveView: LivePublisher? = null,
+    // U1b: the free-text prompt seam (ADR-019) — a no-op with the bus off
+    promptTap: PromptTap = PromptTap(null),
 ): Poller? {
     if (!pollOn) return null
     val liveApi = api ?: TgApi({ TgConfig.load(remote) })
@@ -509,7 +556,12 @@ private fun buildPoller(
                     messageId: String,
                     receivedAt: Long,
                     attachments: List<InboundAttachment>,
-                ) = client.sendInbound(text, messageId, receivedAt, attachments = attachments)
+                ): InboundReceipt {
+                    val token = promptTap.begin(text)
+                    val receipt = client.sendInbound(text, messageId, receivedAt, attachments = attachments)
+                    if (receipt == InboundReceipt.FIRED) promptTap.fired(token) else promptTap.dropped(token)
+                    return receipt
+                }
 
                 // the ✍️ armed order: direct to the named session (the fork's
                 // inbound taskId), AWAITED — the fork's rejection is the reply
@@ -519,7 +571,12 @@ private fun buildPoller(
                     messageId: String,
                     receivedAt: Long,
                     taskId: String,
-                ) = client.sendOrderAwait(text, messageId, receivedAt, taskId)
+                ): InboundAnswer {
+                    val token = promptTap.begin(text, knownSid = taskId)
+                    val answer = client.sendOrderAwait(text, messageId, receivedAt, taskId)
+                    if (answer is InboundAnswer.Answered) promptTap.fired(token) else promptTap.dropped(token)
+                    return answer
+                }
 
                 // STEER: the running turn's redirection (the fork's `steer` frame, awaited)
                 override suspend fun steer(taskId: String, text: String) = client.steer(taskId, text)
@@ -533,7 +590,12 @@ private fun buildPoller(
                     messageId: String,
                     receivedAt: Long,
                     bindTaskId: String?,
-                ) = client.sendInboundAwait(text, messageId, receivedAt, bindTaskId)
+                ): InboundAnswer {
+                    val token = promptTap.begin(text, knownSid = bindTaskId)
+                    val answer = client.sendInboundAwait(text, messageId, receivedAt, bindTaskId)
+                    if (answer is InboundAnswer.Answered) promptTap.fired(token) else promptTap.dropped(token)
+                    return answer
+                }
 
                 // EL BIND ATÓMICO (the fork's cap «bind», d8510c23): solo con
                 // el cap anunciado — un servidor viejo ignoraría el campo y el
@@ -608,7 +670,7 @@ private fun buildPoller(
                 }
 
                 is InboundUpdate.Attachment ->
-                    dispatchAttachment(liveApi, cfg, pythonState, client, speak, update)
+                    dispatchAttachment(liveApi, cfg, pythonState, client, speak, prompts = promptTap, update = update)
 
                 is InboundUpdate.Callback -> {
                     answerCallback(liveApi, update.callbackId)
@@ -644,6 +706,7 @@ private suspend fun dispatchAttachment(
     pythonState: File,
     client: ChannelClient,
     speak: suspend (String, Boolean, JsonObject?) -> Unit,
+    prompts: PromptTap,
     update: InboundUpdate.Attachment,
 ) {
     Ack.react(api, cfg, update.messageId, Ack.RECEIVED)
@@ -666,12 +729,14 @@ private suspend fun dispatchAttachment(
             sizeBytes = bytes,
             localPath = target.absolutePath,
         )
+        val token = prompts.begin(update.caption)
         val fired = client.sendInbound(
             update.caption,
             "tg-${update.updateId}-att",
             System.currentTimeMillis(),
             attachments = listOf(att),
         )
+        if (fired == InboundReceipt.FIRED) prompts.fired(token) else prompts.dropped(token)
         logger.info {
             "attachment ${update.updateId}: ${update.filename} ($bytes bytes) " +
                 "${if (fired == InboundReceipt.FIRED) "delivered" else "NOT delivered (channel down)"}"
