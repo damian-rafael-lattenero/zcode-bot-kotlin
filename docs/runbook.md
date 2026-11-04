@@ -57,7 +57,7 @@ one JVM runs every bot watcher:
 | `live-view` | every 3 s edit cadence | `state/hb-live-view` | the never-radio-silence card: one message edited in place (`LivePublisher`) |
 | `poller` | 1 s spacing + 3 s long-poll | `state/hb-poller` | getUpdates, the single reader since the Python retirement (`Poller`) |
 | `subagent-notifs` | every daemon tick (5 s) | `state/hb-subagent-notifs` | the 🔔 owner notifications from the store's transitions |
-| `outbox-drain` | every 15 s | none | paces both lanes' parked messages out of `outbox*.json`, 1 msg/s |
+| `outbox-drain` | every 15 s | none | paces the lane(s)' parked messages out of `outbox*.json`, 1 msg/s (both files only when the firehose split exists) |
 
 Sources: `modules/daemon/.../Main.kt` (the wiring), `modules/channel/.../ChannelClient.kt`,
 `Poller.kt`, `LivePublisher.kt`; the heartbeat constants at the bottom of `Main.kt`.
@@ -76,7 +76,7 @@ That is the honest reading:
 
 So `hb-channel` fresh + `channel DEGRADED: no socket` in the log is the
 normal, correct picture of "the app is closed, sends keep flowing". The
-healer (§2.3) exists to catch the other case: the loop itself died.
+healer (§2.4) exists to catch the other case: the loop itself died.
 
 ### 1.3 What survives what
 
@@ -138,7 +138,7 @@ What the script does, in order (`scripts/deploy-daemon.nu`):
    *supposed* to leave the daemon down. The marker ages out on its own
    after 15 min (`DEPLOY_GRACE_S` in `bot-healer.nu`).
 2. builds with `./gradlew -q :modules:daemon:installDist detekt test`
-   (the Gradle daemon on 25; detekt needs < 24 — see the README) and
+   (the build is one JVM, toolchain 25) and
    installs into `~/.zcode/bot-daemon`.
 3. **re-bootstraps `com.zcode.bot-healer` first**, so that if anything
    below fails, the job that resurrects the daemon is already armed.
@@ -174,12 +174,14 @@ tail -20 ~/.zcode/bot-kotlin/logs/deploy-daemon.log
 ```
 
 **Known failure — `bootstrap com.zcode.bot-deploy failed: Bootstrap
-failed: 5: Input/output error`.** Measured 2026-11-03 at 19:37 and 22:45:
-the label was still loaded from an earlier run (loaded-and-stopped is its
-normal resting state), the pre-bootstrap `bootout` failed, and both
-bootstrap attempts — the retry included — answered `error 5`. The daemon
-stays up and the phone hears the failure; the deploy never runs. The
-recovery is in §8.1.
+failed: 5: Input/output error`.** Measured 2026-11-03 at 19:37 (twice)
+and 22:45. At that moment the label was still loaded from the 14:14 run
+(loaded-and-stopped is its normal resting state) and **both** bootstrap
+attempts — the 2 s retry included — answered `error 5`. `DeploySpawn`
+discards the pre-bootstrap `bootout`'s exit code, so the bootout not
+having taken effect is the likeliest cause, not a proven one. What is
+certain: the daemon stays up, the phone hears the failure, and the
+deploy never runs. The recovery is in §8.1.
 
 ### 2.4 The healer — the daemon's own dead-man's switch
 
@@ -229,7 +231,7 @@ by design (it quits the app, swaps `/Applications/ZCode.app`, reopens it):
 
 Its phases are sanity → quit → build/install (`~/Projects/ZCode/scripts/build-install.nu --yes`)
 → reopen → verify (`verify-deploy.nu` + a hello/hello_ok smoke) → retire
-Pythons' leftovers → final announce. `--real` quits the app, so the
+Python's leftovers → final announce. `--real` quits the app, so the
 session that launched it must not be inside the app's process tree: the
 repository's own documented door is the launchd job
 `com.zcode.deploy-fork` (`RunAtLoad` is **false** on purpose — on 30/10 a
@@ -257,7 +259,7 @@ tail -f /tmp/deploy-fork.log
 ## 3. Diagnosing a silent bot — the ladder
 
 Run the steps in order and stop at the first one that answers "no". Each
-step names what it *proves*, not just what it prints. All five are
+step names what it *proves*, not just what it prints. Every step below is
 read-only.
 
 ### Step 0 — is Telegram reachable at all?
@@ -388,7 +390,7 @@ lsof -nP -U | grep daemon-local
 - `channel error id=… code=…` — the protocol said no to one request; it
   does not kill the session.
 
-The token file is 0600 and belongs to the plugin; never print it.
+The token file is 0600 and written by the fork's host; never print it.
 
 ### Step 5 — did the send leave?
 
@@ -409,8 +411,10 @@ cat ~/.zcode/hooks/state/tg-last-ph      # the newest message id the Mac sent
   drain runs every 15 s, 1 msg/s, and stops at a 429 window. A parked
   message is a delay.
 - `tg-cooldown`'s **mtime is the expiry epoch** (that is the Python
-  contract the transport still shares): `active=yes` means Telegram
-  asked the bot to wait, and every lane honors it.
+  contract the transport still shares): `active=yes` means Telegram asked
+  the main lane to wait. A firehose split keeps its own
+  `tg-cooldown-firehose`; with no split — today's config — there is one
+  file and one window.
 - `sendMessage failed (attempt N/3)` in the log with a `429` is the
   flood window; with `403` it is a bot the owner never `/start`ed.
 
@@ -471,13 +475,15 @@ curl -sS http://127.0.0.1:8765/rag/stats
 curl -sS http://127.0.0.1:8765/memory/status
 ```
 
-Live on 2026-11-03 22:55 (abridged):
+Live on 2026-11-03 23:10 (abridged; `applied` and the bus counters move
+— `applied` read 3 at 22:55 and 4 fifteen minutes later, a migrate
+landed in between):
 
 ```json
 /health  {"status":"ok","version":"0.1.0","config":{"http":"127.0.0.1:8765",
           "pg_url":"jdbc:postgresql://127.0.0.1:5433/agent_brain","pg_password_set":true,
           "embed_provider":"ollama","embed_dim":768,"bus_transport":"file"}}
-/ready   {"status":"ok","checks":{"db":{"ok":true,"applied":3,"pending":[],"embedDim":768},
+/ready   {"status":"ok","checks":{"db":{"ok":true,"applied":4,"pending":[],"embedDim":768},
           "embed":{"provider":"ollama","model":"nomic-embed-text","dim":768,"ok":true}}}
 /rag/stats    {"documents":17460,"chunks":60441}
 /memory/status{"pendingTurns":0,"processedTurns":33,"memories":49,"quarantined":2,"breaker":"Closed"}
@@ -530,9 +536,9 @@ From `/bus/status`:
 
 | Field | Healthy | What a bad value means |
 |---|---|---|
-| `lagBytes` | small and not growing (`fileBytes − offset`, ~1–2 KB at rest) | growing monotonically = the tailer stopped consuming (the loop is stuck, not slow) — `brain_bus_lag_bytes` in Prometheus |
-| `heartbeatAgeMs` | under a couple of seconds (the loop polls every `bus_poll_ms`, default 500 ms) | seconds-to-minutes = the tailer loop is wedged while Ktor still answers: `/health` will look fine. `brain_bus_heartbeat_age_seconds` is the honest probe |
-| `duplicates` / `inserted` vs `seen` | `duplicates: 0`, `inserted == seen` (149/149 live) | `duplicates > 0` is a **replay**: the tailer re-read events (offset lost). Not a data-loss bug, but the "cero replay" property is broken and the dashboard's `brain_bus_events_duplicates_total` shows it |
+| `lagBytes` | small and not growing (`fileBytes − offset`; 1338 B at 22:55 and 0 at 23:10, both normal) | growing monotonically = the tailer stopped consuming (the loop is stuck, not slow) — `brain_bus_lag_bytes` in Prometheus |
+| `heartbeatAgeMs` | under a couple of seconds (the loop polls every `bus_poll_ms`, default 500 ms; 4720 ms and 3559 ms were read in two live samples) | seconds-to-minutes = the tailer loop is wedged while Ktor still answers: `/health` will look fine. `brain_bus_heartbeat_age_seconds` is the honest probe |
+| `duplicates` / `inserted` vs `seen` | `duplicates: 0`, `inserted == seen` (149/149 at 22:55, 941/941 at 23:10 — it advances with the live turn) | `duplicates > 0` is a **replay**: the tailer re-read events (offset lost). Not a data-loss bug, but the "cero replay" property is broken and the dashboard's `brain_bus_events_duplicates_total` shows it |
 
 Also read `malformed` (lines the tailer refused) and `shrinks` (the file
 got smaller than the offset — a rotation the tailer survived by
@@ -776,7 +782,7 @@ must never be copied into a repo.
 and has started zero turns since 2026-10-30: the only markers present
 are three from 29–30/10, and **nothing writes markers any more** — the
 Python hooks that did are gone (§5.2), and no ZCode package writes
-`state/turn-*.marker`. Its only log line today is
+`state/turn-*.marker`. Its only line in the whole `daemon.jsonl` is
 `spectator-orchestrator stopped — shutting down`. It still beats
 `hb-spectator`.
 
@@ -785,14 +791,21 @@ orchestrator (a wiring change, one commit, `Main.kt`), or keep it and
 document it as dormant. Deleting the markers alone is the
 no-code-change half.
 
-**Risk.** Low for the deletion (they are inert inputs), but note the
-hazard that makes it worth doing: the scan is **live** — a stale marker
-whose sid is the current task and is not in `bot-workers.json` *would*
-spawn a spectator turn. Today the gate holds only because
-`bot-session.json` does not name those sids. Retiring the orchestrator
-removes the hazard and one heartbeat; it also removes the only path that
-would narrate a Mac-side turn if markers ever came back. Decide which
-future you want.
+**Risk.** Low for the deletion (they are inert inputs), but the hazard
+that makes it worth doing is not hypothetical — read how thin the gate
+is. The scan's inputs today: one of the three markers
+(`session_dccc764c…`) **is** the sid in `bot-session.json`, and in LIVE
+mode `send.ownsSpectator` is true, so `mac_spectator: false` no longer
+blocks. What stops a spawn is (a) `sidIndex` finds no
+`model-io-<sid>.jsonl` rollout for it, and (b) `bot-workers.json` —
+Python's frozen registry from 30/10 — still lists that sid, so the F15
+"its own worker streams it" gate skips it. Two accidents, one of them a
+file nobody maintains: if a rollout ever reappears and the registry is
+pruned or removed, the spectator would start narrating a six-day-old
+turn. Retiring the orchestrator (or just deleting the markers) removes
+the hazard and one heartbeat; it also removes the only path that would
+narrate a Mac-side turn if markers ever came back. Decide which future
+you want.
 
 ### 6.5 `com.zcode.reopen-zcode`
 
@@ -855,3 +868,573 @@ is Python's busy flag; the Kotlin daemon uses `live-view-active.json` and
 documenting that it is *not* the current busy flag is worth more.
 
 **Risk.** None.
+
+## 7. Codes — the F-tags, honestly
+
+The F-code namespace belongs to the **retired Python repo**
+(`/Users/lattenero/Projects/bot/docs/F-CODES.md`, F0–F86 plus R/D codes).
+It is a provenance convention: `# F42: <explanation>` greps and dates a
+change. **No behaviour depends on a tag here.** The Kotlin repo cites 27
+tags in `modules/`, as history; this table says what the Kotlin code
+means by each one and whether the meaning was **carried** unchanged,
+**drifted** (reused for a related-but-different law), or **retired**.
+
+Read a tag with its repository — the same label can mean something else
+in a sibling repo (`docs/plan-brujula.md` calls agent-brain's anti-while
+gate "F1", while Python's F1 was "one single source per concept").
+
+| Tag | What THIS repo means by it | Owner file | Status |
+|---|---|---|---|
+| F2d | the offset is confirmed **after** dispatch (at-least-once, never at-most-once) | `Poller.kt`, `ChannelFrames.kt` | carried as a law |
+| F4d | the live view is OPTIONAL — a failure never breaks anything | `LiveTelegram.kt` | carried as a law |
+| F8 / F83 | the **shared cooldown window**: Telegram's 429 names it, its mtime is the expiry, `send()` pre-checks it before spending an attempt, and parking beats burning attempts | `Cooldown.kt`, `Sender.kt` | merged (Python's F8 was the warm worker — retired) |
+| F15 | ONE getUpdates reader **and** only the focused task gets a spectator | `SpectatorWatch.kt`, `SpectatorIo.kt` | carried |
+| F17 | the explicit park queue — a busy Mac parks, never drops; `/stop`/`/queue` own it | `Routing.kt`, `BotCommands.kt`, `InboundQueue.kt` | carried |
+| F20 | turnId correlation rebuilt on the CLI-log path | `SpectatorCore.kt` | carried |
+| F22 | `/run`'s store contract: every fired prompt is `/retry`'s ammo; model/mode survive a switch | `BotCommands.kt`, `LastPrompt.kt` | carried |
+| F23 | 👀 on receipt, ✅ on handled — reactions answer THE message, zero new messages | `Ack.kt`, `Poller.kt` | carried |
+| F30 | queue items written before the tag carry no `ts` — tolerate them | `contracts/StateFormats.kt` | carried as tolerance (the auditor itself is retired) |
+| F32 | the turn's FINAL answer is the one that lands; the marker is consumed by it | `SpectatorWatch.kt`, `SpectatorCore.kt` | carried |
+| F33 | the rollout-tail spectator and its record reduction | `SpectatorCore.kt` | carried as history (no markers are written — §6.4) |
+| F35b | first-cycle fail-fast: a poison update must not crash-loop the cycle | `Poller.kt` | carried |
+| F43 | a box has a SIZE; it seals before it overflows | `LiveTurn.kt` | carried |
+| F46 | «R.C» labels (round, box); `pre-F46` is the older box/ph vocabulary | `contracts/StateFormats.kt` | carried |
+| F48 | `from_owner`'s fail-closed gate: without an owner, NOBODY gets through | `TgConfig.kt` | **drifted** — Python's F48 family was the gateway's reply discipline |
+| F50b | the line-count stamp on every file shown (🟢 +N · 🔴 −M · K lines) | `spectator/ToolBox.kt` | carried |
+| F55b | numbering on what is SHOWN (patches from `@@`, Write boxes from 1, Edit bare) | `spectator/ToolBox.kt` | carried |
+| F57 | one box = one live message (`perbox`), not one message per round | `contracts/StateFormats.kt` | carried |
+| F63 | subagents: the task's thread quiet, one line per agent | `SpectatorCore.kt` | carried |
+| F67 | a live agent view mutes its parent session's stream (freshness, not existence) | `SpectatorIo.kt` | **drifted** — Python's F67 was the cot-live task-switch gap |
+| F75 | the Python reader/writer duality | `contracts/StateFormats.kt` (the comment that retires it) | **retired by owner order** |
+| F76 | only the stream focus (or the active sid) may push | `SpectatorIo.kt` | carried |
+| F79e | the sync breaker: 5 consecutive failures open it, 2 successes close it | `TgBreaker.kt` | carried |
+| F84b | `tg-last-ph`: every `sendMessage` records the chat's newest message id | `LastPh.kt`, `Sender.kt` | carried |
+| F85 | the chat hears the wire: one ⚠️/✅ per model-wire episode, a re-fail near a recovery is the same episode | `zconn/ConnTrack.kt` | carried |
+| F85c | the retry clock that went deaf because it sat ahead of the clock; the countdown is honest | `zconn/ZconnShadow.kt` (+ `ZconnRetryTest`) | carried (the 1308 lesson) |
+
+**Superseded, with no F-tag carrying the successor:** the actor workers
+and their registry (F16 — the fork owns turns now), the nuclear
+`killall ZCode` cycle (F4e — `NuclearLadder`), the live-view sidecar
+(F4d's original) and the bash-output storm (F86) — the fork's stream
+pushes both (`docs/parity-and-engineering.md`'s capability table), the
+F79 healer-of-the-healer (the beacon + `bot-healer.nu`), the F81
+code-stamp spawns (there are no per-turn processes to spawn).
+
+**Retired with no successor:** the invariant auditor's heals (F30's
+actor), the stuck-watch, the CoT-tap deploy dance (F59), the F77
+reader/writer modes.
+
+Their rows stay in the Python glossary; there is no equivalence table to
+invent here. When a Kotlin comment cites one of them it is dating an
+idea, not naming a running mechanism.
+
+## 8. Emergency recipes
+
+Every recipe below is an **ACTION** unless it says otherwise. The
+read-only checks that tell you which one to run are in §3 and §4.
+
+### 8.1 The bot is dead (nothing answers, and `/status` never arrives)
+
+**Case A — the daemon job is not loaded at all** (`launchctl print` answers
+`Could not find service "com.zcode.bot-daemon"`). A deploy boots the job
+out and only then bootstraps it, so a failed deploy leaves exactly this.
+
+```bash
+# [read-only] why: the deploy's last words say whether its bootstrap failed
+grep -nE "^✗|done\. Live daemon armed" ~/.zcode/bot-kotlin/logs/deploy-daemon.log | tail -5
+```
+
+```bash
+# [ACTION] re-arm it from the rendered plist (no rebuild)
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.zcode.bot-daemon.plist
+launchctl print gui/$(id -u)/com.zcode.bot-daemon | head -8
+```
+
+If the bootstrap itself refuses (an unreadable plist, a bad `JAVA_HOME`),
+the rebuild path is §2.3.
+
+**Case B — the daemon runs but `/deploy` fails with `Bootstrap failed: 5:
+Input/output error`.** The deploy never runs; the bot keeps working and
+the phone hears the failure. The deploy job is still loaded from a
+previous run (loaded-and-stopped is its normal resting state) and it
+blocks a fresh bootstrap.
+
+```bash
+# [read-only] is the deploy job still loaded?
+launchctl print gui/$(id -u)/com.zcode.bot-deploy | head -6
+#   state = not running        <- normal resting state, but it still blocks a bootstrap
+```
+
+```bash
+# [ACTION] clear the residue, then /deploy again from the phone
+launchctl bootout gui/$(id -u)/com.zcode.bot-deploy
+launchctl print gui/$(id -u)/com.zcode.bot-deploy
+#   Bad request. Could not find service "com.zcode.bot-deploy" in domain for user gui: 501
+#   ^ that message is the proof it is gone
+```
+
+This recovery was **not exercised** for this document (it changes live
+launchd state); the "gone" message above was produced with a
+non-existent label, which is the same answer launchd gives.
+
+**Case C — the job is loaded and running but stale.** The healer's own
+door is the sanctioned restart:
+
+```bash
+# [ACTION] restarts a live daemon (bypasses the three doors)
+~/.local/bin/nu-nightly ~/Projects/zcode-bot-kotlin/scripts/bot-healer.nu --force
+```
+
+**Case D — the JVM dies on boot.** `launchd.err.log` carries the VM
+error; the installed tree is broken — rebuild and reinstall with §2.3.
+
+### 8.2 The channel is down (sends work, turns don't)
+
+`channel DEGRADED: no socket` and/or `/status` answering 📡.
+
+1. Is the app running and is its host up?
+
+```bash
+# [read-only] the app's launchd label and the socket's owner
+launchctl list | grep application.dev.zcode
+lsof -nP -U | grep daemon-local
+```
+
+2. **Do not** start/kill the app from an agent session (§2.5). The
+   owner's door is `open -a ZCode` **at the Mac**, or `/nuclear` from the
+   phone if the app is wedged. `reopen-zcode` only fires at login.
+
+3. If the socket exists and the token exists but `hello` never answers,
+   the fork's host is older than the channel protocol
+   (`caps=` in the last `channel UP` tells you what it speaks) — §8.4.
+
+4. Sends keep flowing and the poller keeps reading throughout: the
+   correct expectation is "the bot answers commands that need no app,
+   and says 📡 for the rest".
+
+### 8.3 The outbox is stuck (messages parked, nothing lands)
+
+```bash
+# [read-only] how many are parked, and is a 429 window open?
+jq 'length' ~/.zcode/hooks/state/outbox.json
+now=$(date +%s); m=$(stat -f %m ~/.zcode/hooks/state/tg-cooldown)
+echo "active=$([ "$m" -gt "$now" ] && echo yes || echo no)"
+```
+
+- `active=yes` — Telegram asked the bot to wait. **Do nothing**: the
+  window expires on its own and the drain resumes at 1 msg/s. Touching
+  the file to "clear" it burns the flood penalty.
+- `active=no` and the depth not moving — the drain Process is dead
+  (`outbox-drain` has **no heartbeat file**, by design). Restart the
+  daemon (§2.2). The queue is a file: nothing is lost.
+- A single 403 in the log means the owner never `/start`ed the bot that
+  the lane uses; the message will park forever until they do.
+
+### 8.4 The fork is deployed with an old build
+
+Symptom: `📡 No pude leer la selección — ¿el fork está deployado con los
+frames de /plan?`, or a command naming a "fix" the app does not have.
+
+```bash
+# [read-only] what the RUNNING host says it is
+jq -r 'select(.message|startswith("channel UP")) | .message' \
+  ~/.zcode/bot-kotlin/logs/daemon.jsonl | tail -1
+# channel UP: hello_ok v1 bot=daemon-local enabled=true server pid=12875 app=3.17.2 caps=22
+
+# [read-only] what the installed app bundle is
+defaults read /Applications/ZCode.app/Contents/Info.plist CFBundleShortVersionString
+
+# [read-only] what the checkout is (the deploy builds from here)
+git -C ~/Projects/ZCode log -1 --format='%h %s'
+```
+
+`app=` is the authority for what is RUNNING; the bundle version and the
+checkout tell you what a deploy *would* install. When they disagree, the
+fork deploy is the owner's call (§2.5), and the bot keeps saying 📡 in
+the meantime — by design, not as a bug.
+
+### 8.5 The brain is up but has no database (colima off)
+
+`/health` may still answer (the HTTP server does not need Postgres), and
+`/ready` is the honest one.
+
+```bash
+# [read-only] readiness first — a 503 with db.ok=false is the answer
+curl -sS -o /tmp/ready.json -w '%{http_code}\n' http://127.0.0.1:8765/ready; cat /tmp/ready.json
+
+# [read-only] the containers and the VM
+colima status; docker ps --format '{{.Names}}\t{{.Status}}'
+```
+
+- If colima is stopped: **start it from Ghostty, never from a ZCode
+  session** (`~/.zcode/AGENTS.md`: the VM is a child of whatever started
+  it, and a ZCode restart takes it down). Then, in `~/Projects/agent-brain`:
+  `make up` (compose + migrations).
+- `serve-brain.nu` already handles the racing case: with Postgres down it
+  exits **75** (`EX_TEMPFAIL`) and launchd retries after the
+  `ThrottleInterval` of 30 s instead of crash-looping.
+- While the brain is down, the bot degrades loudly, not silently:
+  `bot_brain_failures_total` / `bot_memory_inject_failures_total` appear,
+  and `memory_inject` simply prepends nothing. `/brain` answers its own
+  error.
+
+### 8.6 Disk and memory
+
+```bash
+# [read-only] the three numbers that matter
+df -h /
+memory_pressure | tail -2
+ps -o pid,rss,etime,comm -p $(launchctl list | awk '$3=="com.zcode.bot-daemon"{print $1}')
+```
+
+Measured 2026-11-03: `/` at 1% used, `System-wide memory free
+percentage: 32%`, daemon RSS 82 MB after 29 min. The daemon rotates its
+log by day (`daemon-YYYY-MM-DD.0.jsonl`); the live dir was 30 MB total.
+
+If the disk is the problem, these are the growth points, in order:
+`~/.zcode/bot-kotlin/logs/daemon.jsonl*`, `~/.zcode/bot-recordings/`
+(daily traces, content inlined up to 512 KB per file — real prompts:
+never put them in a repo), `~/.zcode/hooks/logs/`, and the docker
+volumes (`make down` keeps them; `make nuke` drops them — owner's call,
+it deletes the brain's data).
+
+### 8.7 Knob rollback (`~/.zcode/bot-kotlin/daemon.json`)
+
+Every knob is read **once at boot**; the file is the deploy, a kickstart
+is the apply. Live at 2026-11-03:
+
+```json
+{"send":"live","poll":true,"event_bus":true,"memory_inject":true,
+ "brain_url":"http://127.0.0.1:8765","metrics":true,"notifications":true}
+```
+
+| Knob | Default when absent | OFF means | How to roll back |
+|---|---|---|---|
+| `send` | `shadow` | `shadow`: nobody sends; `dry-run`: compose+log, no post | see the **warning** below — shadow alone silences the phone |
+| `poll` | `false` | the daemon stops reading getUpdates → the phone is **deaf** unless another poller runs | set `true` + kickstart |
+| `event_bus` | `false` | no bus appends → the brain's ingest stops hearing the bot | set `true` + kickstart |
+| `memory_inject` | `false` | prompts go out without the memory block (no brain call) | set `true` + kickstart |
+| `metrics` | `false` | no `/metrics` listener; Grafana's bot panels go `up=0` | set `true` + kickstart |
+| `metrics_port` | `9102` | — (read even when OFF, loudly) | — |
+| `otel` | `false` | no spans exported | set `true` + `otel_endpoint` + kickstart |
+| `notifications` | **`true`** (the inverse house rule: garbage stays ON) | only an explicit `false` silences the 🔔 | remove the key or set `true` |
+| `deploy_script` | the repo checkout's `scripts/deploy-daemon.nu` | — | — |
+| `brain_url` | `http://127.0.0.1:8765` | — | — |
+
+The apply is always the same, and its proof is in the boot lines:
+
+```bash
+# [ACTION] apply a knob change
+launchctl kickstart -k gui/$(id -u)/com.zcode.bot-daemon
+
+# [read-only] the boot's own record of what it read
+jq -r 'select(.message|test("knob|channel wired|metrics endpoint ON"))
+       | ."@timestamp" + " " + .message' ~/.zcode/bot-kotlin/logs/daemon.jsonl | tail -8
+```
+
+> **Warning — the README's one-line send rollback is a trap now.**
+> The README's rollback (`send: shadow` + `mac_spectator: true` +
+> restoring `zconn.json.pre-cutover`) was written for the strangler,
+> when Python still spoke. **Python is retired and its agents are
+> `Disabled=true`** (§5.1): flipping `send` to `shadow` today means
+> *nobody* sends and the phone goes silent. The only safe full rollback
+> is the inverse of `retire-python.nu`: relaunch Python's three agents,
+> *then* flip `send` to `shadow`. The daemon-only rollbacks (`poll`,
+> `event_bus`, `memory_inject`, `metrics`, `otel`, `notifications`) are
+> safe on their own — each removes exactly one surface and leaves the
+> send path alive.
+
+## 9. What the Python runbook said that no longer holds
+
+The old `docs/runbook.md` is the parity reference and the rollback door;
+it is not this system's manual. Every section of it, and its fate:
+
+| Python runbook claim | Here |
+|---|---|
+| **Update transport: polling or webhook** (ADR-011), `cert.pem` in `~/.zcode/hooks`, `/set_webhook`, `/webhook_info`, `GET :8443/health` | **retired.** The daemon polls only: `getUpdates` with a 3 s long-poll and a bounded retry (`Poller.kt`). There is no webhook path, no certificate and no 8443 listener in this repo. |
+| **Runtime: Python 3.13 + its own venv**, `./bootstrap.nu`, pinned `requirements.txt`, rollback to `/usr/bin/python3` | **retired.** One JVM (Corretto 25) under `~/.zcode/bot-daemon`, built by Gradle `installDist`. No venv is installed or read (the old one is inert, §5.2). |
+| **The ACTOR model (F16)**: the poller as supervisor, one detached `--run-turn` process per turn, `bot-workers.json` registry, `bot-stop/<sid>`, `bot-q/`, `bot-queue.json`, `bot-nuclear` | **retired.** The fork owns turns; the daemon subscribes to a task over the channel and renders it. The files still exist in `state/` and some are read (`bot-workers.json` as the spectator's skip-list), but nothing spawns or supervises a turn process. |
+| **Deploy: `./deploy.nu`, `--rollback` to `~/.zcode/hooks/backups/`, `touch state/reload-now`** | **retired.** The deploy is `scripts/deploy-daemon.nu` (§2.3): build+install+re-arm. There is **no `--rollback` flag**; the rollback is a knob or git + redeploy. `reload-now` no longer exists. |
+| **Suite: `pytest -n auto` / `-n 16`, `check_no_duplicates.py`, `selfcheck.py`** | **retired.** The gate is `./gradlew test detekt` (CI: `ci.yml`, Corretto 25, plus the "no manual concurrency" sweep and the installDist smokes). The 2-worker-count protocol died with xdist. |
+| **Processes**: `watch-commands`, `watch-app`, `hook`, `--stuck-watch`, `--run-turn` | **retired.** The live process table is §1.1. What survives is the warning: `zcode-host-local-*`, `ZCode` and its `zcode-cli` children are the app's — never kill them from the session (§2.5). |
+| **Compact "absorbed" by the app** (ADR-003) | **not ported.** `/compact` here asks the fork through the channel (`BotCommands.kt`); the host's answer frame is the truth. There is no "authoritative pre → truePost" report in this repo, so the old recipe has no equivalent. |
+| **`/stop` doesn't halt a phone-only run** (ADR-002) | **replaced.** `/stop` sends `session/stop` over the channel; if the host is down it says so (`📡 … Nothing was stopped.`). There is no phone-only run to explain: a run is the app's. |
+| **`/nuclear` = `/stop` markers → SIGTERM the registry pids → `killall -TERM ZCode` → `open -a ZCode` → bot kickstart** | **replaced.** `NuclearLadder` (§2.5): stopAll through the channel, SIGTERM→SIGKILL the CLI runners (external `ps`, comm exact), `launchctl bootout gui/<uid>/application.dev.zcode.*` (the only real kill — `killall` alone gets resurrected by launchd), `open -a ZCode`, wait for `hello_ok`, then `launchctl kickstart -k` the daemon. Two-step confirm and single-flight (`/nuclear` → the ☢️ tap / `/nuclear go`). |
+| **Network down → messages fall into the outbox and resend on their own** | **carried.** Same files (`outbox.json`, `tg-cooldown`, `tg-last-ph`), same behaviour, now drained by the daemon every 15 s (§3 Step 5). |
+| **Config: `~/.zcode/telegram-remote.json`, `~/.zcode/hooks/bot-provider.json`, hooks in `~/.zcode/cli/config.json` (7 events), `/etc/hosts`** | **partial.** The first two are carried (paths only — never print either). The CLI hooks are **gone on purpose** (§5.2). `/etc/hosts`/IPv6 is a host-level workaround, not part of this bot's config; the beacon's `getMe` (Step 0) is the honest test of Telegram reachability. |
+
+One doc-level discrepancy worth knowing while reading other files: the
+README's build section still says the local gate needs a Java 21
+override ("detekt 1.23 cannot run on a daemon >= 24") and that "CI runs
+plain (Corretto 21)". Neither is true at `fe434b1`: `ci.yml` uses
+Corretto **25**, the detekt 2.0 upgrade removed the daemon-version
+constraint, and `~/.gradle/gradle.properties` pins
+`org.gradle.java.home` to Corretto 25. `./gradlew test detekt` is the
+whole gate, and the deploy script (§2.3) is the authority on what runs
+locally.
+
+## 10. Evidence — the read-only commands, with their real output
+
+Executed 2026-11-03 between 22:50 and 23:25 (local). Abridged where the
+output is long; nothing sensitive is reproduced.
+
+**The census (§5.1).**
+
+```
+$ launchctl list | grep -i zcode
+-	0	com.zcode.reopen-zcode
+63495	0	com.zcode.bot-daemon
+-	0	com.zcode.bot-recorder
+-	0	com.zcode.deploy-fork
+-	0	com.zcode.beacon
+-	0	com.zcode.bot-comparator
+-	0	com.zcode.bot-healer
+12822	0	application.dev.zcode.app.34889990.34893168
+-	0	com.zcode.bot-deploy
+-	1	com.zcode.agent-brain-index
+70721	143	com.zcode.agent-brain
+```
+
+**The daemon and the deploy job (§2.1, §2.3).**
+
+```
+$ launchctl print gui/501/com.zcode.bot-daemon | head -8
+gui/501/com.zcode.bot-daemon = {
+	active count = 1
+	path = /Users/lattenero/Library/LaunchAgents/com.zcode.bot-daemon.plist
+	type = LaunchAgent
+	state = running
+	program = /Users/lattenero/.zcode/bot-daemon/bin/daemon
+	arguments = {
+
+$ launchctl print gui/501/com.zcode.bot-deploy | head -10
+gui/501/com.zcode.bot-deploy = {
+	active count = 0
+	path = /Users/lattenero/.zcode/bot-kotlin/state/deploy-job.plist
+	type = LaunchAgent
+	state = not running
+	program = /Users/lattenero/Projects/zcode-bot-kotlin/scripts/deploy-daemon.nu
+```
+
+**The heartbeats (§1.2, §3 Step 1).**
+
+```
+$ now=$(date +%s); for f in ~/.zcode/bot-kotlin/state/hb-*; do echo "$(basename "$f") age=$((now - $(stat -f %m "$f")))s"; done
+hb-channel age=2s
+hb-live-view age=2s
+hb-poller age=2s
+hb-spectator age=2s
+hb-subagent-notifs age=2s
+hb-zconn-shadow age=2s
+```
+
+**The healer's own view (§2.4).**
+
+```
+$ nu-nightly scripts/bot-healer.nu --status
+{"hb":"/Users/lattenero/.zcode/bot-kotlin/state/hb-channel","hb_age_s":2,
+ "deploy_in_flight":false,"loaded":true,"since_last_heal_s":50816,
+ "plan":{"act":false,"why":"heartbeat fresca: 2s","action":"none","quiet":true}}
+
+$ nu-nightly scripts/bot-healer.nu --dry-run
+heartbeat fresca: 2s
+```
+
+**The deploy's own words (§2.3, §8.1).**
+
+```
+$ tail -6 ~/.zcode/bot-kotlin/logs/deploy-daemon.log
+==> verification: first heartbeat + armed state (deadline 15s)
+[deploy] heartbeat: Nov  3 14:14:48 2026
+[deploy] state: {"down":false,"first_down":1.79371439541E9,"last_up":1.793726016106E9,
+  "reason":"Provider rejected the model request.","since":1.793726016606E9,"announced_retry":null}
+[deploy] log tail: {… "message":"channel UP: hello_ok v1 bot=daemon-local … app=3.17.2 caps=22" …}
+done. Live daemon armed: channel + getUpdates poller + send (daemon.json is the knob).
+Health: ~/.zcode/bot-kotlin/state/hb-channel · hb-poller · hb-zconn-shadow; log: logs/daemon.jsonl.
+
+$ jq -r 'select(.message|test("deploy")) | ."@timestamp"+" "+.["message"][0:110]' daemon.jsonl | tail -4
+2026-11-03T14:14:34 deploy: com.zcode.bot-deploy bootstrapped as its OWN job (survives this daemon's bootout)
+2026-11-03T19:37:27 deploy: the spawn FAILED — this daemon stays up
+2026-11-03T19:37:58 deploy: the spawn FAILED — this daemon stays up
+2026-11-03T22:45:53 deploy: the spawn FAILED — this daemon stays up
+```
+
+**The silent-bot ladder (§3).**
+
+```
+$ tail -1 ~/.zcode/bot-kotlin/logs/beacon.log
+2026-11-03T22:59:47-03:00 ok epoch=1793757583 daemon_age_s=4 poll_fail_recent=false telegram_probe=ok
+
+$ jq -r 'select(.message|test("^channel (UP|bye|DEGRADED)")) | ."@timestamp"+" "+.message' daemon.jsonl | tail -2
+2026-11-03T21:46:31 channel UP: hello_ok v1 bot=daemon-local enabled=true server pid=12875 app=3.17.2 caps=22
+2026-11-03T22:34:43 channel UP: hello_ok v1 bot=daemon-local enabled=true server pid=12875 app=3.17.2 caps=22
+
+$ jq -r 'select(.message|startswith("route:")) | ."@timestamp"+" "+.message' daemon.jsonl | tail -2
+2026-11-03T22:59:35 route: update=770337517 ctxWs=zcode-bot-kotlin active=session_2d5c… alive=true running=0 open=session_2d5c… (zcode…)
+2026-11-03T22:59:35 route: text FIRED at session_2d5c… (already aimed at the open conversation)
+
+$ cat ~/.zcode/hooks/state/tg-offset && stat -f '%Sm %N' ~/.zcode/hooks/state/tg-offset
+770337518
+Nov  3 23:01:08 2026 /Users/lattenero/.zcode/hooks/state/tg-offset
+
+$ jq 'length' ~/.zcode/hooks/state/outbox.json
+0
+$ now=$(date +%s); m=$(stat -f %m ~/.zcode/hooks/state/tg-cooldown); echo "active=$([ "$m" -gt "$now" ] && echo yes || echo no)"
+active=no
+
+$ ls -l ~/.zcode/daemon-local.sock ~/.zcode/daemon-local.token
+srw-------@ 1 lattenero  staff   0 Nov  3 13:14 /Users/lattenero/.zcode/daemon-local.sock
+-rw-------@ 1 lattenero  staff  65 Nov  3 13:14 /Users/lattenero/.zcode/daemon-local.token
+
+$ lsof -nP -U | grep daemon-local
+ZCode\x20 12875 lattenero   29u  unix 0xa2672734442946df      0t0 /Users/lattenero/.zcode/daemon-local.sock
+ZCode\x20 12875 lattenero   41u  unix 0xf6c8507244de3382      0t0 /Users/lattenero/.zcode/daemon-local.sock
+```
+
+**The daemon's boot record (§1.1, §8.7).**
+
+```
+$ jq -r 'select(.message|test("knob|channel wired|telegram menu")) | .message' daemon.jsonl | tail -8
+send knob: mode=LIVE (file=/Users/lattenero/.zcode/bot-kotlin/daemon.json)
+poll knob: on=true (this daemon OWNS getUpdates)
+event_bus knob: on=true (file=/Users/lattenero/.zcode/bot-kotlin/daemon.json)
+memory_inject knob: on=true (file=/Users/lattenero/.zcode/bot-kotlin/daemon.json)
+metrics knob: on=true port=9102 (file=/Users/lattenero/.zcode/bot-kotlin/daemon.json)
+otel knob: on=false endpoint=http://127.0.0.1:4318/v1/traces (file=/Users/lattenero/.zcode/bot-kotlin/daemon.json)
+channel wired: client=on socket=/Users/lattenero/.zcode/daemon-local.sock liveView=on poller=ON
+telegram menu registered: /tasks /all_tasks /status /plan_model_effort /mode /last /compact /context_window /queue /run /steer /stop /nuclear /quota /usage /ctx /subagents /verbosity /brain /memory /help — 21 commands
+```
+
+**The brain (§4).**
+
+```
+$ curl -sS http://127.0.0.1:8765/health | jq -c '{status,version,http:.config.http,pg:.config.pg_url,pw_set:.config.pg_password_set}'
+{"status":"ok","version":"0.1.0","http":"127.0.0.1:8765","pg":"jdbc:postgresql://127.0.0.1:5433/agent_brain","pw_set":true}
+
+$ curl -sS http://127.0.0.1:8765/ready | jq -c '{status,db:.checks.db.ok,applied:.checks.db.applied,embed:.checks.embed.ok,dim:.checks.embed.dim}'
+{"status":"ok","db":true,"applied":4,"embed":true,"dim":768}
+# (the same command read applied:3 at 22:55 — a migrate landed in between)
+
+$ curl -sS http://127.0.0.1:8765/bus/status | jq -c '{lagBytes,heartbeatAgeMs,seen,inserted,duplicates,malformed,restarts}'
+{"lagBytes":0,"heartbeatAgeMs":3559,"seen":941,"inserted":941,"duplicates":0,"malformed":0,"restarts":0}
+# (at 22:55 the same command read lagBytes:1338, seen/inserted 149/149 — the
+#  counters advance with the live turn; what must not move is duplicates)
+
+$ curl -sS http://127.0.0.1:8765/rag/stats | jq -c '{documents,chunks}'
+{"documents":17460,"chunks":60441}
+
+$ curl -sS http://127.0.0.1:8765/memory/status | jq -c '{pendingTurns,processedTurns,memories,quarantined,breaker}'
+{"pendingTurns":0,"processedTurns":33,"memories":49,"quarantined":2,"breaker":"Closed"}
+
+$ curl -sS http://127.0.0.1:8765/metrics | grep -c '^# TYPE'
+20
+
+$ curl -sS http://127.0.0.1:9102/metrics | grep -c '^# TYPE'
+17
+
+$ lsof -nP -iTCP:8765 -sTCP:LISTEN | tail -1
+java    70721 lattenero   82u  IPv6 … TCP 127.0.0.1:8765 (LISTEN)
+
+$ lsof -nP -iTCP:9102 -sTCP:LISTEN | tail -1
+java    63495 lattenero   68u  IPv6 … TCP 127.0.0.1:9102 (LISTEN)
+```
+
+**Prometheus and Grafana (§4.6).**
+
+```
+$ colima status
+colima is running using macOS Virtualization.Framework (arch: aarch64, runtime: docker)
+
+$ docker ps --format '{{.Names}}\t{{.Status}}\t{{.Ports}}'
+agent-brain-grafana	Up 59 minutes (healthy)	127.0.0.1:3000->3000/tcp
+agent-brain-prometheus	Up 59 minutes (healthy)	127.0.0.1:9090->9090/tcp
+agent-brain-pg	Up About an hour (healthy)	127.0.0.1:5433->5432/tcp
+agent-brain-redpanda	Up About an hour (healthy)	8081-8082/tcp, 9092/tcp, 9644/tcp, 127.0.0.1:19092->19092/tcp
+
+$ curl -sS http://127.0.0.1:9090/api/v1/targets | jq -r '.data.activeTargets[] | "\(.labels.job) \(.scrapeUrl) \(.health)"'
+agent-brain http://host.docker.internal:8765/metrics up
+bot http://host.docker.internal:9102/metrics up
+
+$ curl -sS 'http://127.0.0.1:9090/api/v1/query?query=up' | jq -c '.data.result[] | {job:.metric.job,v:.value[1]}'
+{"job":"agent-brain","v":"1"}
+{"job":"bot","v":"1"}
+
+$ curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:3000/api/health
+200
+```
+
+**The parse gates (§4.5).**
+
+```
+$ nu-nightly -c "nu-check --debug scripts/bot-healer.nu"                      -> true
+$ nu-nightly -c "nu-check --debug scripts/deploy-daemon.nu"                   -> true
+$ nu-nightly -c "nu-check --debug ~/Projects/agent-brain/ops/drills/channel-cut.nu" -> true
+```
+
+**The hooks are gone (§5.2).**
+
+```
+$ jq 'has("hooks")' ~/.zcode/cli/config.json
+false
+$ jq -r 'keys[]' ~/.zcode/cli/config.json
+mcp
+plugins
+
+$ stat -f '%Sm %N' ~/.zcode/hooks/logs/prompt-worker.log ~/.zcode/hooks/logs/watch-cmds.log
+Oct 30 14:50:26 2026 /Users/lattenero/.zcode/hooks/logs/prompt-worker.log
+Oct 12 13:12:27 2026 /Users/lattenero/.zcode/hooks/logs/watch-cmds.log
+```
+
+**The dormant spectator (§6.4).**
+
+```
+$ ls -lat ~/.zcode/hooks/state/*.marker | head -3
+Oct 30 13:03 turn-session_dccc764c…marker
+Oct 30 12:36 turn-session_b291a524…marker
+Oct 29 18:36 turn-session_0f84de0c…marker
+
+$ jq -r 'select(.message|test("spectator")) | .message' daemon.jsonl | tail -1
+spectator-orchestrator stopped — shutting down
+```
+
+**The comparator's frozen baseline (§6.6).**
+
+```
+$ for f in report-2026-11-0*.json; do echo "$f -> $(jq -r .verdict $f) (pythonEvents=$(jq -r .zconn.pythonEvents $f), pythonTurns=$(jq -r .spectator.pythonTurns $f))"; done
+report-2026-11-01.json -> DIVERGENT (pythonEvents=2, pythonTurns=4)
+report-2026-11-02.json -> DIVERGENT (pythonEvents=2, pythonTurns=4)
+report-2026-11-03.json -> DIVERGENT (pythonEvents=2, pythonTurns=4)
+```
+
+**The inert firehose outbox (§6.7).**
+
+```
+$ jq -r 'select(.message|test("firehose lane")) | .message' daemon.jsonl | tail -1
+firehose lane: OFF (no firehose_token) — one throat, the shared files, exactly as before
+
+$ python3 -I -c "import json,os;print(len(json.load(open(os.path.expanduser('~/.zcode/hooks/state/outbox-firehose.json')))))"
+20
+```
+
+**Disk and memory (§8.6).**
+
+```
+$ df -h / | tail -1
+/dev/disk3s1s1   1.8Ti    13Gi   1.6Ti     1%    484k   4.3G    0%   /
+
+$ memory_pressure | tail -1
+System-wide memory free percentage: 32%
+
+$ ps -o pid,rss,etime,comm -p 63495 | tail -1
+63495  82576  28:53 /Library/Java/JavaVirtualMachines/amazon-corretto-25.jdk/Contents/Home/bin/java
+
+$ du -sh ~/.zcode/bot-kotlin/logs ~/.zcode/bot-recordings ~/.zcode/hooks/logs
+ 30M	/Users/lattenero/.zcode/bot-kotlin/logs
+ 13M	/Users/lattenero/.zcode/bot-recordings
+7.0M	/Users/lattenero/.zcode/hooks/logs
+```
+
+**Not executed, by rule:** the T7 drills (§4.5), `bot-healer.nu --force`
+(§2.4), every `launchctl kickstart|bootout|bootstrap` (§2.2, §8.1), the
+deploy scripts (§2.3, §2.5), `make up|down|nuke` (§4.6, §8.5), and the
+app's own restart (§8.2). Each is marked **ACTION** where it appears.
