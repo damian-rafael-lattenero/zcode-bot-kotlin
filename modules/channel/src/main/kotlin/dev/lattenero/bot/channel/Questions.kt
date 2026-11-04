@@ -359,24 +359,39 @@ class QuestionBoard(
      * Returns the question when a NEW one went out (null = not a question
      * or already pending).
      */
+    /** One insertion's under-lock outcome: the new short id + the cards the cap retired. */
+    private class Registration(val shortId: String, val evicted: List<PendingQuestion>)
+
     @Suppress("ReturnCount") // the dedupe's guards ARE the law
     suspend fun onStreamEvent(frame: ServerFrame.StreamEvent): PendingQuestion? {
         val parsed = parseQuestionEvent(frame.event) ?: return null
-        val shortId = synchronized(lock) {
+        val registered = synchronized(lock) {
             shortIdByRequestId[parsed.requestId]?.let { return null }
             val sid = "q${counter.incrementAndGet()}"
             shortIdByRequestId[parsed.requestId] = sid
             byShortId[sid] = parsed
+            val evicted = mutableListOf<PendingQuestion>()
             while (byShortId.size > REGISTRY_CAP) {
                 val eldest = byShortId.keys.first()
-                val dropped = byShortId.remove(eldest)
-                dropped?.let { shortIdByRequestId.remove(it.requestId) }
+                byShortId.remove(eldest)?.let { dropped ->
+                    shortIdByRequestId.remove(dropped.requestId)
+                    evicted.add(dropped)
+                }
             }
-            sid
+            Registration(sid, evicted)
         }
-        val mid = sendQuestion(questionText(parsed), questionKeyboard(shortId, parsed))
+        // THE EVICTION'S HONESTY (measured 4/11): a retired card keeps armed
+        // buttons whose taps now answer «ya no está pendiente» — a dead
+        // button pretending to be live. The seal edit flies OUTSIDE the lock
+        // (the AnswerStep law: decisions under the monitor, effects after).
+        registered.evicted.forEach { q ->
+            if (q.mid > 0) editQuestion(q.mid, EVICTION_TEXT, null)
+        }
+        val mid = sendQuestion(questionText(parsed), questionKeyboard(registered.shortId, parsed))
         if (mid != null && mid > 0) {
-            synchronized(lock) { byShortId[shortId]?.let { byShortId[shortId] = it.copy(mid = mid) } }
+            synchronized(lock) {
+                byShortId[registered.shortId]?.let { byShortId[registered.shortId] = it.copy(mid = mid) }
+            }
         }
         return parsed
     }
@@ -458,6 +473,10 @@ class QuestionBoard(
     companion object {
         /** The registry's cap — the oldest question evicts (the stream's replay cannot grow it unbounded). */
         const val REGISTRY_CAP = 32
+
+        /** The evicted card's honest seal (4/11: an armed dead button lies — its tap answers «ya no está pendiente»). */
+        const val EVICTION_TEXT =
+            "🗑 Pregunta retirada — llegaron $REGISTRY_CAP pendientes; mandá la respuesta por texto si sigue vigente"
 
         /** The buttons' cap per question (Telegram's keyboard sanity; ✍️ always remains). */
         const val QUESTION_OPTIONS_CAP = 8
