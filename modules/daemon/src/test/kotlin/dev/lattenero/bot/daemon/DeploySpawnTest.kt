@@ -270,8 +270,10 @@ class DeploySpawnTest {
             beat = { beats += it },
         ).spawn()
         assertEquals(0, out.exit)
-        // the order IS the recipe: bootout → bootstrap ×2 → enable → bootstrap
-        assertEquals(listOf("enable", "gui/501", DeploySpawn.JOB_LABEL), calls[3])
+        // the order IS the recipe: bootout → bootstrap ×2 → enable → bootstrap;
+        // enable takes ONE service-target arg (gui/<uid>/<label>) — the two-arg
+        // form was a silent no-op and the self-heal never healed
+        assertEquals(listOf("enable", "gui/501/${DeploySpawn.JOB_LABEL}"), calls[3])
         assertEquals(3, calls.count { it.first() == "bootstrap" })
         // the second beat never ran: the enable-retry is immediate
         assertEquals(listOf(DeploySpawn.BOOTOUT_BEAT_MS), beats)
