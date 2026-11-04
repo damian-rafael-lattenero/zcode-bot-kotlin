@@ -95,6 +95,73 @@ class PollerTest {
         assertEquals(11L, TgOffset.current(File(dir, "tg-offset"))) // advanced past it: no crash-loop
     }
 
+    /**
+     * THE REPLAY FIX (4/11): an update that can kill this daemon
+     * MID-dispatch commits its offset THROUGH ITSELF FIRST — the offset
+     * file already carries update_id+1 the moment the dispatch runs, so a
+     * process death inside it can never be followed by a re-delivery (the
+     * in-process single-flight gates die with the process). The dispatch
+     * lambda here dies the way the ladder's self-kickstart / the deploy's
+     * bootout die and reads the cursor at its last breath.
+     */
+    @Test
+    fun aSuicidalCommandPreCommitsItsOffsetBeforeDispatch() = runTest {
+        val dir = tempDir()
+        TgOffset.save(File(dir, "tg-offset"), 10) // the previous confirmation
+        var offsetWhenDying = 0L
+        val poller = poller(dir, """{"result":[${update(10, "/nuclear go")}]}""") { _, _ ->
+            offsetWhenDying = TgOffset.current(File(dir, "tg-offset"))
+            throw IllegalStateException("the ladder's self-kickstart killed this daemon")
+        }
+        poller.cycle(cfg)
+        assertEquals(11L, offsetWhenDying, "the offset is ALREADY committed when the suicide runs")
+    }
+
+    @Test
+    fun aSuicidalTapPreCommitsItsOffsetBeforeDispatch() = runTest {
+        val dir = tempDir()
+        TgOffset.save(File(dir, "tg-offset"), 10)
+        var offsetWhenDying = 0L
+        val api = TgApi({ cfg }, engineFactory = factory("""{"result":[${tapJson(10, "dep:bot")}]}"""))
+        val cursor = File(dir, "tg-offset")
+        if (!cursor.exists()) TgOffset.save(cursor, 0)
+        val poller = Poller(api = api, offsetFile = cursor, dispatch = { _, _ ->
+            offsetWhenDying = TgOffset.current(cursor)
+            throw IllegalStateException("the deploy's bootout killed this daemon")
+        })
+        poller.cycle(cfg)
+        assertEquals(11L, offsetWhenDying, "the dep: tap's offset is ALREADY committed when it runs")
+    }
+
+    /** An ORDINARY command that crashes keeps the old law: the cursor commits only POST-dispatch. */
+    @Test
+    fun anOrdinaryCommandThatDiesKeepsTheAtLeastOnceLaw() = runTest {
+        val dir = tempDir()
+        TgOffset.save(File(dir, "tg-offset"), 10)
+        var offsetDuringDispatch = 0L
+        val poller = poller(dir, """{"result":[${update(10, "/status")}]}""") { _, _ ->
+            offsetDuringDispatch = TgOffset.current(File(dir, "tg-offset"))
+            throw IllegalStateException("an ordinary crash, not a suicide")
+        }
+        val outcome = poller.cycle(cfg)
+        assertEquals(10L, offsetDuringDispatch, "NOT pre-committed: at-least-once replays it")
+        assertEquals(11L, TgOffset.current(File(dir, "tg-offset"))) // the post-loop commit still runs
+        assertEquals(1, outcome.messages)
+    }
+
+    /** One owner button tap update, the shape the suicidal-tap tests poll for. */
+    private fun tapJson(id: Long, data: String): String = buildJsonObject {
+        put("update_id", id)
+        put(
+            "callback_query",
+            buildJsonObject {
+                put("id", "cb$id")
+                put("data", data)
+                put("from", buildJsonObject { put("id", 7) })
+            },
+        )
+    }.toString()
+
     @Test
     fun theOwnerGateIsFailClosed() = runTest {
         val dir = tempDir()
