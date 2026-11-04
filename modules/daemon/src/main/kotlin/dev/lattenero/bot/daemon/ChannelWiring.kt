@@ -331,7 +331,9 @@ internal fun wireChannel(
                 ConfigOptionsUpdate.TYPE -> {
                     val options = ConfigOptionsUpdate.parse(frame.event)
                     if (options == null) {
-                        logger.info { "config_option_update ${frame.taskId.takeLast(8)}: foreign shape — ignored" }
+                        logger.info {
+                            "config_option_update ${frame.taskId.takeLast(SID_TAIL)}: foreign shape — ignored"
+                        }
                     } else {
                         mirrorRefresh?.onConfigUpdate(frame.taskId, options)
                     }
