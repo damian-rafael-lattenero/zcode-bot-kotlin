@@ -22,15 +22,17 @@ class PlanCommandTest {
     private class FakeOps : ChannelOps {
         var available = true
 
-        /** When set, every query fails with THIS code (the timeout drill's hook). */
-        var failCode: String? = null
+        /** When set, ONLY the setModelSelection write fails with THIS code (the timeout drill's hook). */
+        var failSetModelWith: String? = null
         val queries = mutableListOf<ChannelQuery>()
         val answers = mutableMapOf<String, String>()
 
         override suspend fun query(query: ChannelQuery): QueryAnswer {
             queries.add(query)
             if (!available) return QueryAnswer.Unavailable
-            failCode?.let { return QueryAnswer.Failed(it, "simulated") }
+            if (query is ChannelQuery.SetModelSelection) {
+                failSetModelWith?.let { return QueryAnswer.Failed(it, "simulated") }
+            }
             return answers[queryKind(query)]?.let { QueryAnswer.Ok(it) }
                 ?: QueryAnswer.Failed("unknown_query", "no canned answer")
         }
@@ -345,13 +347,13 @@ class PlanCommandTest {
         }
         val bc = commands(o)
         bc.onCallback("pe:low", 6L, OWNER) // a draft first
-        o.failCode = "timeout" // the host hiccuped mid-write (the 4/11 drill)
+        o.failSetModelWith = "timeout" // the host hiccuped mid-write (the 4/11 drill)
         val failed = bc.onCallback("pac:", 7L, OWNER)!!
         assertTrue("El canal no respondió a tiempo" in failed.text, failed.text)
         assertTrue("El draft sigue ARMADO" in failed.text, failed.text)
         assertTrue(failed.markup?.toString()?.contains("pac:") == true, "the retry keyboard survives: $failed")
         // THE PROMISE IS REAL: the same tap, channel back, applies the SAME draft
-        o.failCode = null
+        o.failSetModelWith = null
         val ok = bc.onCallback("pac:", 8L, OWNER)!!.text
         assertTrue("✅ aplicado" in ok, ok)
         assertEquals("low", o.queries.filterIsInstance<ChannelQuery.SetModelSelection>().last().effort)
