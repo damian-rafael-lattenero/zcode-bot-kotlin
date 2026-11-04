@@ -556,8 +556,8 @@ runs, so `Closed` is the honest absence, not a proof of health.
 ### 4.5 The drills (T7)
 
 Three Nushell drills in `~/Projects/agent-brain/ops/drills/`, each of
-which **kills a real job** and asserts against `/metrics`, `/ready` and
-`/bus/status` only (no Grafana):
+which **cuts a real component** (a launchd label, or ollama) and asserts
+against `/metrics`, `/ready` and `/bus/status` only (no Grafana):
 
 ```bash
 # [ACTION] cuts com.zcode.bot-daemon and asserts the scrape is REFUSED,
