@@ -121,13 +121,13 @@ class TaskAttachTest {
         {"bot":{"id":"daemon-local","enabled":true},"context":null}
     """.trimIndent()
 
-    private fun commands(ops: FakeOps): BotCommands = BotCommands(
+    private fun commands(ops: FakeOps, history: TasksHistory = FakeHistory(rows)): BotCommands = BotCommands(
         ops = ops,
         hub = LiveHub(),
         daemonReset = { "fake ladder" },
         ownerUserId = { OWNER },
         clock = { 1_000_000L },
-        history = FakeHistory(rows),
+        history = history,
         defaultWorkspacePath = "/Users/damian/.zcode/workspace/default",
     )
 
@@ -356,6 +356,65 @@ class TaskAttachTest {
         assertEquals(listOf("sess_subagent_$agentId" to app), ops.subscribed)
         assertEquals("sess_subagent_$agentId", hub.peekPin())
         assertTrue("su turno COMPLETO" in reply.text)
+    }
+
+    @Test
+    fun anAttachToAGhostRowIsRefusedInsteadOfPinningSilence() = runBlocking {
+        // measured 4/11: a KILLED agent's store row never closes — the attach
+        // pinned it, the card was born BLANK («queda en blanco»), and no event
+        // would ever fill it. THE GHOST LAW: a row frozen past the ghost mark
+        // is a dead agent, not a stream — the honest refusal.
+        val ops = FakeOps(boundStatus)
+        val history = FakeHistory(rows).apply {
+            runningSubs = listOf("sess_subagent_ghost")
+            runningTitled = listOf(RunningSubagent(sid = "sess_subagent_ghost", title = "mision", lastMs = 0))
+        }
+        val hub = LiveHub()
+        val bc = BotCommands(
+            ops = ops,
+            hub = hub,
+            daemonReset = { "fake ladder" },
+            ownerUserId = { OWNER },
+            clock = { 1_000_000L },
+            history = history,
+            defaultWorkspacePath = "/Users/damian/.zcode/workspace/default",
+        )
+        val reply = bc.onCallback("sa:ghost", 5L, OWNER)!!
+        assertTrue("💀" in reply.text && "murió sin cerrar" in reply.text)
+        assertEquals(emptyList(), ops.subscribed, "nothing subscribes to a dead agent")
+        assertNull(hub.peekPin(), "the silence is never pinned")
+    }
+
+    @Test
+    fun aFreshStoredChildAttachSwitchesTheCardToItInstantly() = runBlocking {
+        // THE INSTANT SWITCH (4/11): a quiet child never streams first —
+        // without the fold's switch the card stayed the PARENT's until the
+        // child's next event (the owner's attach felt dead). The tap must
+        // point the card at the child NOW.
+        val ops = FakeOps(boundStatus)
+        val history = FakeHistory(rows).apply {
+            runningSubs = listOf("sess_subagent_fresh")
+            runningTitled = listOf(RunningSubagent(sid = "sess_subagent_fresh", title = "vivo", lastMs = 999_000))
+        }
+        val hub = LiveHub()
+        val bc = BotCommands(
+            ops = ops,
+            hub = hub,
+            daemonReset = { "fake ladder" },
+            ownerUserId = { OWNER },
+            clock = { 1_000_000L },
+            history = history,
+            defaultWorkspacePath = "/Users/damian/.zcode/workspace/default",
+        )
+        val reply = bc.onCallback("sa:fresh", 5L, OWNER)!!
+        assertTrue("👁" in reply.text)
+        assertEquals(listOf("sess_subagent_fresh" to app), ops.subscribed)
+        assertEquals("sess_subagent_fresh", hub.peekPin())
+        assertEquals(
+            "sess_subagent_fresh",
+            hub.peek()?.taskId,
+            "the fold IS the child — no waiting for its first event",
+        )
     }
 
     @Test
@@ -591,7 +650,9 @@ class TaskAttachTest {
         val sess = "sess_subagent_agent_2e587e61"
         val history = FakeHistory(rows).apply {
             runningSubs = listOf(sess)
-            runningTitled = listOf(RunningSubagent(sess, "cazar la causa raíz del bus"))
+            // a REAL running row: the store touches lastMs continuously — a
+            // frozen one is the GHOST the ghost law refuses (its own test)
+            runningTitled = listOf(RunningSubagent(sess, "cazar la causa raíz del bus", lastMs = 999_000))
         }
         val hub = LiveHub() // an EMPTY hub — the stream never saw the lane
         val bc = BotCommands(
