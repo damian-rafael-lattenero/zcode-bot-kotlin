@@ -47,6 +47,41 @@ internal fun dispatchLanes(turn: TurnLive?): List<ToolLive> =
         it.parentToolUseId == null && it.status == null && it.name in BotCommands.SUBAGENT_DISPATCH_NAMES
     }
 
+/**
+ * THE DESTRUCTIVE TAPS — the owner gate's vocabulary (a PURE predicate,
+ * pinned by the suite). The poller's fail-closed owner filter is the
+ * WORKING boundary of the wire; this is the second lock, the one that
+ * still refuses when a future path bypasses dispatch (the /deploy
+ * precedent, applied to every tap that spends something un-spendable):
+ *
+ * - `intr:` — ⚡ kills the busy turn mid-flight;
+ * - `odp:` — ⚡ pushes by INTERRUPTING the busy child;
+ * - `sst:` — ⏹️ stops a subagent's generation;
+ * - `nuc:` — ☢️ stops every run, kills every CLI, restarts app and bot;
+ * - `stop:` — 💀 hard-stops every active task's turn;
+ * - `gfy:` — spends a coding-plan reset: finite and one-way.
+ *
+ * Everything else the router accepts (attach, view, pickers, local drafts,
+ * arming an order) is reversible or inert: those taps keep their old law.
+ *
+ * THE FALLBACK'S OWN SPELLINGS count too: the router's `else` runs the
+ * data as typed words ([Keyboards.callbackText]), so a payload that
+ * spells `/nuclear` or `/stop` IS the same tap — the prefix list alone
+ * would have let it through.
+ */
+private val DESTRUCTIVE_TAP_PREFIXES = listOf("intr:", "odp:", "sst:", "nuc:", "stop:", "gfy:")
+
+/** The slash vocabulary the callback fallback can spell (the taps' typed names). */
+private val DESTRUCTIVE_COMMANDS = setOf("nuclear", "nuke", "stop")
+
+internal fun isDestructiveTap(data: String): Boolean = when {
+    DESTRUCTIVE_TAP_PREFIXES.any(data::startsWith) -> true
+    else -> {
+        val typed = BotCommands.parseCommand(Keyboards.callbackText(data))?.first
+        typed != null && typed in DESTRUCTIVE_COMMANDS
+    }
+}
+
 /** The dispatcher's data source — the client's queries behind one interface (tests fake it). */
 interface ChannelOps {
     suspend fun query(query: ChannelQuery): QueryAnswer
@@ -190,6 +225,14 @@ class BotCommands(
      * they are not wired — never a crash and never invented results.
      */
     private val brain: BrainCommands? = null,
+    /**
+     * THE OWNER'S ID — the SAME source /deploy reads (`owner_user_id` in
+     * the bot's config), as a provider because the config is the edge's
+     * file (DeployFlow's own shape: no duplicated parsing, one truth).
+     * Null = fail closed: with no owner in the config NOBODY fires a
+     * destructive tap — never «the first tap that arrives».
+     */
+    private val ownerUserId: () -> Long? = { null },
 ) {
 
     /** /nuclear's single-flight companion: the in-process half (the wiring adds the cross-restart mtime gate). */
@@ -256,9 +299,30 @@ class BotCommands(
      * encolar»): ⚡ stops the busy turn (the queued text then fires on its
      * own), ⏳ confirms the natural wait. The tap's toast
      * (answerCallbackQuery) is the wiring's effect, not ours.
+     *
+     * THE SECOND LOCK ([fromId], U9's defense-in-depth): every
+     * DESTRUCTIVE tap re-checks its sender against the config's owner
+     * before routing — the same refusal `/deploy` speaks, and nothing
+     * runs behind it. Non-destructive taps keep their old law (a watch
+     * still needs no ownership); the poller's filter stays the working
+     * boundary.
      */
+    suspend fun onCallback(data: String, updateId: Long, fromId: Long?): BotReply? {
+        if (isDestructiveTap(data) && !isOwner(fromId)) {
+            logger.warn { "callback \"$data\" REFUSED — sender $fromId is not the owner; nothing executed" }
+            return BotReply(NOT_OWNER)
+        }
+        return routeCallback(data, updateId)
+    }
+
+    /** The owner's second lock: a null sender or an unwired/blank owner never passes (fail closed). */
+    private fun isOwner(fromId: Long?): Boolean {
+        val owner = ownerUserId() ?: return false
+        return fromId == owner
+    }
+
     @Suppress("CyclomaticComplexMethod") // one branch per tap vocabulary — the dispatcher's own shape
-    suspend fun onCallback(data: String, updateId: Long): BotReply? = when {
+    private suspend fun routeCallback(data: String, updateId: Long): BotReply? = when {
         data.startsWith("intr:") -> interruptNow(data.removePrefix("intr:"), updateId)
 
         data.startsWith("t:") -> taskAttach(data.removePrefix("t:"), updateId)
@@ -2904,6 +2968,13 @@ class BotCommands(
         internal const val DEGRADED =
             "📡 The channel to the app is down — the fork's host is not running? " +
                 "Commands that need it wait for the app."
+
+        /**
+         * The destructive tap's refusal — /deploy's NotOwner vocabulary
+         * (🚫, «solo el dueño», nothing touched), said in the taps' own
+         * voice. The tap answered it and ran NOTHING behind it.
+         */
+        internal const val NOT_OWNER = "🚫 Solo el dueño toca ese botón — no se ejecutó nada."
 
         /** /retry's honest refusal — nothing fired yet, so nothing to relaunch (F22). */
         internal const val RETRY_NOTHING =

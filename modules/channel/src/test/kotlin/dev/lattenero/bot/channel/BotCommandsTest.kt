@@ -8,6 +8,9 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
+/** The bot's configured owner — the taps the suite sends come from him. */
+private const val OWNER = 7L
+
 /**
  * The eight commands against a FAKE channel (the queries recorded, the
  * replies pinned) — the dispatcher is pure decision on query answers.
@@ -141,6 +144,7 @@ class BotCommandsTest {
             ops = o,
             hub = LiveHub(),
             daemonReset = { resets += 1; "fake ladder: 2 stopped" },
+            ownerUserId = { OWNER },
             clock = { 1_000_000L },
             history = history,
             defaultWorkspacePath = defaultWs,
@@ -483,7 +487,7 @@ class BotCommandsTest {
             onInbound = { text -> if (text.startsWith("/task ")) answers["botStatus"] = boundTo02 }
         }
         val (bc, _) = commands(o)
-        val reply = bc.onCallback("t:task-02", 99L)!!
+        val reply = bc.onCallback("t:task-02", 99L, OWNER)!!
         assertTrue("🎯 Tu texto va a «second»" in reply.text) // bindAttempt's copy — the host's verdict confirmed
         assertEquals(listOf("/task task-02" to "tg-99-bind"), o.awaited)
     }
@@ -494,6 +498,7 @@ class BotCommandsTest {
         val o = ops()
         val bc = BotCommands(
             ops = o, hub = LiveHub(), daemonReset = { resets += 1; "fake ladder: 2 stopped" },
+            ownerUserId = { OWNER },
             clock = { 1_000_000L }, history = FakeHistory(rows), defaultWorkspacePath = defaultWs,
         )
         val card = bc.reply("/nuclear", 1L)!!
@@ -649,6 +654,7 @@ class BotCommandsTest {
         }
         val bc = BotCommands(
             ops = o, hub = hub, daemonReset = { "" }, clock = { 2_000L },
+            ownerUserId = { OWNER },
             history = FakeHistory(rows), defaultWorkspacePath = defaultWs,
         )
         val reply = bc.reply("/subagents", 1L)!!

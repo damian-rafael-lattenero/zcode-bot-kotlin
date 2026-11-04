@@ -9,6 +9,9 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
+/** The bot's configured owner — the taps the suite sends come from him. */
+private const val OWNER = 7L
+
 /**
  * /verbosity — the transcript feed's knob: bare → the picker (the current
  * marked), an arg → the Spanish aliases, unknown → the picker with the
@@ -44,6 +47,7 @@ class VerbosityCommandTest {
         ops = FakeOps(),
         hub = LiveHub(),
         daemonReset = { "ladder ok" },
+        ownerUserId = { OWNER },
         clock = { 1_000_000L },
         verbosity = verbosity,
     )
@@ -88,10 +92,10 @@ class VerbosityCommandTest {
     @Test
     fun thePickerTapSetsTheLevelAndTheRefusalSetsNothing() = runBlocking {
         val setting = VolatileVerbosity()
-        val reply = commands(setting).onCallback("vb:summary", 1L)!!
+        val reply = commands(setting).onCallback("vb:summary", 1L, OWNER)!!
         assertEquals(FeedVerbosity.SUMMARY, setting.current())
         assertTrue("Aplicado" in reply.text)
-        val refusal = commands(setting).onCallback("vb:gratis", 2L)!!
+        val refusal = commands(setting).onCallback("vb:gratis", 2L, OWNER)!!
         assertTrue("no existe" in refusal.text, "the honest refusal")
         assertEquals(FeedVerbosity.SUMMARY, setting.current(), "an unknown tap data set nothing")
     }

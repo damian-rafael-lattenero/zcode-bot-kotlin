@@ -6,6 +6,9 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
+/** The bot's configured owner — the taps the suite sends come from him. */
+private const val OWNER = 7L
+
 /**
  * /plan — the NINTH command's reply contract (the pure half is
  * PlanMenuTest's): the menu renders from the fork's modelSelection answer,
@@ -115,6 +118,7 @@ class PlanCommandTest {
         ops = o,
         hub = LiveHub(),
         daemonReset = { "fake ladder" },
+        ownerUserId = { OWNER },
         clock = { 1_000_000L },
         history = FakeHistory(rows),
         defaultWorkspacePath = "",
@@ -169,7 +173,7 @@ class PlanCommandTest {
     @Test
     fun planTapOnlyMovesTheDraftAndWritesNothing() = runBlocking {
         val o = ops()
-        val reply = commands(o).onCallback("pl:account:zai-start-plan", 2L)!!
+        val reply = commands(o).onCallback("pl:account:zai-start-plan", 2L, OWNER)!!
         // nothing was written: the draft is local until ✅ Aceptar
         assertTrue(o.queries.filterIsInstance<ChannelQuery.SetModelSelection>().isEmpty())
         assertTrue("🟡" in reply.text, reply.text) // «A aplicar:»
@@ -189,13 +193,13 @@ class PlanCommandTest {
     fun theThreeStepsAssembleOneValidTripleAndAcceptWritesItOnce() = runBlocking {
         val o = ops()
         val bc = commands(o)
-        bc.onCallback("pl:account:zai-start-plan", 3L) // plan → its own first model
-        bc.onCallback("pe:low", 4L) // effort inside that model's vocabulary
+        bc.onCallback("pl:account:zai-start-plan", 3L, OWNER) // plan → its own first model
+        bc.onCallback("pe:low", 4L, OWNER) // effort inside that model's vocabulary
         assertTrue(
             o.queries.filterIsInstance<ChannelQuery.SetModelSelection>().isEmpty(),
             "still a draft — no write until accept",
         )
-        val accepted = bc.onCallback("pac:", 5L)!!
+        val accepted = bc.onCallback("pac:", 5L, OWNER)!!
         assertTrue(accepted.text.startsWith("✅ aplicado"), accepted.text)
         val set = o.queries.filterIsInstance<ChannelQuery.SetModelSelection>().single()
         assertEquals("conversation", set.scope)
@@ -213,8 +217,8 @@ class PlanCommandTest {
         val current = crossProviderJson("account:zai-start-plan", "GLM-5.3-Flash")
         val o = crossOps(current)
         val bc = commands(o)
-        bc.onCallback("pl:opencode-go-chat", 8L)
-        bc.onCallback("pac:", 9L)
+        bc.onCallback("pl:opencode-go-chat", 8L, OWNER)
+        bc.onCallback("pac:", 9L, OWNER)
         val set = o.queries.filterIsInstance<ChannelQuery.SetModelSelection>().single()
         assertEquals("opencode-go-chat", set.plan)
         assertEquals("deepseek-v4.1-flash", set.model, "the new plan's OWN first model")
@@ -226,8 +230,8 @@ class PlanCommandTest {
         val current = crossProviderJson("opencode-go-chat", "deepseek-v4.1-flash")
         val o = crossOps(current)
         val bc = commands(o)
-        bc.onCallback("pl:account:zai-start-plan", 10L)
-        bc.onCallback("pac:", 11L)
+        bc.onCallback("pl:account:zai-start-plan", 10L, OWNER)
+        bc.onCallback("pac:", 11L, OWNER)
         val set = o.queries.filterIsInstance<ChannelQuery.SetModelSelection>().single()
         assertEquals("account:zai-start-plan", set.plan)
         assertEquals("GLM-5.3-Flash", set.model)
@@ -238,7 +242,7 @@ class PlanCommandTest {
         val current = crossProviderJson("account:zai-start-plan", "GLM-5.3-Flash")
         val o = crossOps(current)
         val bc = commands(o)
-        val reply = bc.onCallback("pm:kimi-k2", 12L)!!
+        val reply = bc.onCallback("pm:kimi-k2", 12L, OWNER)!!
         assertTrue("OpenCode Go" in draftLine(reply.text), "the model's OWNER, never the current plan: ${reply.text}")
         assertTrue("kimi-k2" in draftLine(reply.text), reply.text)
         assertTrue(o.queries.filterIsInstance<ChannelQuery.SetModelSelection>().isEmpty())
@@ -250,7 +254,7 @@ class PlanCommandTest {
         val current = crossProviderJson("opencode-go-chat", "deepseek-v4.1-flash")
         val o = crossOps(current)
         val bc = commands(o)
-        val reply = bc.onCallback("pe:max", 13L)!!
+        val reply = bc.onCallback("pe:max", 13L, OWNER)!!
         assertTrue("no existe para el modelo mostrado" in reply.text, reply.text)
         assertTrue("low · high" in reply.text, reply.text)
         assertTrue(o.queries.filterIsInstance<ChannelQuery.SetModelSelection>().isEmpty())
@@ -259,7 +263,7 @@ class PlanCommandTest {
     @Test
     fun acceptWithoutADraftSaysThereIsNothingToApply() = runBlocking {
         val o = ops()
-        val reply = commands(o).onCallback("pac:", 14L)!!
+        val reply = commands(o).onCallback("pac:", 14L, OWNER)!!
         assertTrue("No hay ningún borrador abierto" in reply.text, reply.text)
         assertTrue(o.queries.filterIsInstance<ChannelQuery.SetModelSelection>().isEmpty())
     }
@@ -268,8 +272,8 @@ class PlanCommandTest {
     fun discardDropsTheDraftAndKeepsTheSelection() = runBlocking {
         val o = ops()
         val bc = commands(o)
-        bc.onCallback("pl:account:zai-start-plan", 15L)
-        val reply = bc.onCallback("pcl:", 16L)!!
+        bc.onCallback("pl:account:zai-start-plan", 15L, OWNER)
+        val reply = bc.onCallback("pcl:", 16L, OWNER)!!
         assertTrue("Borrador descartado" in reply.text, reply.text)
         assertTrue(
             o.queries.filterIsInstance<ChannelQuery.SetModelSelection>().isEmpty(),
@@ -277,14 +281,14 @@ class PlanCommandTest {
         )
         // the next ✅ has nothing to apply
         assertTrue(
-            "No hay ningún borrador" in bc.onCallback("pac:", 17L)!!.text,
+            "No hay ningún borrador" in bc.onCallback("pac:", 17L, OWNER)!!.text,
         )
     }
 
     @Test
     fun aStalePlanTapIsSaidHonestlyAndNothingIsSent() = runBlocking {
         val o = ops()
-        val reply = commands(o).onCallback("pl:gone-provider", 18L)!!
+        val reply = commands(o).onCallback("pl:gone-provider", 18L, OWNER)!!
         assertTrue("ya no está en el catálogo" in reply.text, reply.text)
         assertTrue(
             o.queries.filterIsInstance<ChannelQuery.SetModelSelection>().isEmpty(),
@@ -305,7 +309,7 @@ class PlanCommandTest {
     @Test
     fun theDefaultTapCopiesTheWholeConversationSelection() = runBlocking {
         val o = ops()
-        val reply = commands(o).onCallback("pd:", 5L)!!
+        val reply = commands(o).onCallback("pd:", 5L, OWNER)!!
         assertTrue("default de la app actualizado" in reply.text, reply.text)
         val set = o.queries.filterIsInstance<ChannelQuery.SetModelSelection>().single()
         assertEquals("default", set.scope, "pd: writes the APP's default, not the conversation's")
@@ -323,15 +327,15 @@ class PlanCommandTest {
             // setModelSelection deliberately MISSING -> unknown_query
         }
         val bc = commands(o)
-        bc.onCallback("pe:low", 6L) // a draft first
-        val reply = bc.onCallback("pac:", 7L)!!.text
+        bc.onCallback("pe:low", 6L, OWNER) // a draft first
+        val reply = bc.onCallback("pac:", 7L, OWNER)!!.text
         assertTrue("⚠️ No pude aplicar (unknown_query)" in reply, reply)
     }
 
     @Test
     fun aDownChannelDegradesTheTaps() = runBlocking {
         val o = ops().apply { available = false }
-        val reply = commands(o).onCallback("pe:low", 7L)!!.text
+        val reply = commands(o).onCallback("pe:low", 7L, OWNER)!!.text
         assertTrue("channel to the app is down" in reply, reply)
     }
 }
