@@ -110,24 +110,6 @@ fun reduce(
     }
 
     RenderEvent.Clear -> null // the turn is spent: the fold's own reset
-
-    // THE PARK'S TASK LAW (U5c): a foreign or expired park parks NOTHING
-    // (the honest miss — the tap's own toast names it) and a parked card
-    // folds nothing (the one-shot). The state carries the park from here:
-    // its Clear, a task switch and a ☢️ nuclear take it with the world.
-    is RenderEvent.Park -> when {
-        state == null || state.taskId != event.taskId || state.parked != null -> state
-        else -> state.copy(parked = ParkLive(atMs = event.atMs))
-    }
-
-    // THE PARK'S ONE EDIT (U5c): the fact that «▶️ sigue en background» is
-    // on the message. Idempotent — the second landing folds nothing (the
-    // tap edits ONCE); an unlanded edit (throttled) folds nothing either.
-    is RenderEvent.ParkLanded -> when {
-        state == null || state.taskId != event.taskId -> state
-        state.parked == null || state.parked.landed -> state
-        else -> state.copy(parked = state.parked.copy(landed = true))
-    }
 }
 
 /**
