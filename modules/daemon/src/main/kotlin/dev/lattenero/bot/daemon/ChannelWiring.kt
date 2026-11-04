@@ -2,6 +2,7 @@ package dev.lattenero.bot.daemon
 
 import dev.lattenero.bot.channel.Ack
 import dev.lattenero.bot.channel.BotCommands
+import dev.lattenero.bot.channel.BotReply
 import dev.lattenero.bot.channel.BrainCommands
 import dev.lattenero.bot.channel.ChannelClient
 import dev.lattenero.bot.channel.DeployCommand
@@ -9,6 +10,7 @@ import dev.lattenero.bot.channel.ChannelOps
 import dev.lattenero.bot.channel.ChannelQuery
 import dev.lattenero.bot.channel.ChannelSpec
 import dev.lattenero.bot.channel.ClientFrame
+import dev.lattenero.bot.channel.ConfigOptionsUpdate
 import dev.lattenero.bot.channel.GiftsMenu
 import dev.lattenero.bot.channel.InboundAttachment
 import dev.lattenero.bot.channel.InboundAnswer
@@ -19,6 +21,9 @@ import dev.lattenero.bot.channel.LiveHub
 import dev.lattenero.bot.channel.LiveOrphanStore
 import dev.lattenero.bot.channel.LivePublisher
 import dev.lattenero.bot.channel.LiveTelegram
+import dev.lattenero.bot.channel.MenuMirrorRefresher
+import dev.lattenero.bot.channel.ModeMenu
+import dev.lattenero.bot.channel.PlanMenu
 import dev.lattenero.bot.channel.Poller
 import dev.lattenero.bot.channel.OpencodeQuota
 import dev.lattenero.bot.channel.QuotaDirect
@@ -66,6 +71,7 @@ import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.delay
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -219,12 +225,21 @@ internal fun wireChannel(
         )
     } ?: QuestionBoard()
 
+    // THE OPEN MENU MIRROR — declared before the client (its stream
+    // callback captures the holder, the busTaps pattern): assigned right
+    // after the history exists. Null (no live api) = the honest nothing —
+    // the commands' own live re-read keeps working, nothing edits.
+    var mirrorRefresh: MenuMirrorRefresher? = null
+
     // one send path for everything the channel says: the knob's leg (shadow
     // logs, dry-run composes+logs, LIVE posts with cooldown/outbox/last-ph);
     // the markup (the buttons) rides deliverMarkup — live posts it, the
     // shadow contract stays text. This is the COMMANDS lane (the main
-    // throat): replies, buttons, announces — never render volume.
-    val speak: suspend (String, Boolean, JsonObject?) -> Unit = { text, loud, markup ->
+    // throat): replies, buttons, announces — never render volume. The BORN
+    // message's id comes back (null = nothing flew) — the OPEN MENU MIRROR
+    // registers the /mode and /plan_model_effort menus so they can
+    // self-refresh on the fork's config_option_update.
+    val speak: suspend (String, Boolean, JsonObject?) -> Long? = { text, loud, markup ->
         val now = System.currentTimeMillis() / 1000.0
         send.leg.deliverMarkup(
             ShadowDecision(ts = now, tsIso = TimeIso.format(now), watcher = "channel", decision = "say", text = text),
@@ -289,7 +304,12 @@ internal fun wireChannel(
                 // por la app DESPUÉS del cancel), y el elicitation_response que
                 // llega al resolverse sella solo. task_error SÍ: el broker murió
                 // con el turno.
-                "task_complete" -> drainQueue()
+                "task_complete" -> {
+                    drainQueue()
+                    // the turn's seal is the mirror's second expiry: the open
+                    // menu of THIS task dies with it (the TTL is the first)
+                    mirrorRefresh?.seal(frame.taskId)
+                }
 
                 "task_error" ->
                     board.resolveTask(frame.taskId, "⌛ El turno terminó — la pregunta quedó sin responder.")
@@ -298,6 +318,22 @@ internal fun wireChannel(
                     (frame.event["requestId"] as? JsonPrimitive)?.content?.let {
                         board.resolveByRequestId(it, "✅ Respondido desde la app.")
                     }
+
+                // EL ESPEJO DE LOS MENUS (the fork's config_option_update,
+                // additive — it does not exist on the wire until the fork
+                // deploy ships it): a config write ANYWHERE (the Mac, another
+                // tap) is the open /mode or /plan_model_effort menu's refresh
+                // trigger. The payload is only the trigger — the fresh state
+                // is re-READ live; a foreign shape is IGNORED (one log line,
+                // the additive rule).
+                ConfigOptionsUpdate.TYPE -> {
+                    val options = ConfigOptionsUpdate.parse(frame.event)
+                    if (options == null) {
+                        logger.info { "config_option_update ${frame.taskId.takeLast(8)}: foreign shape — ignored" }
+                    } else {
+                        mirrorRefresh?.onConfigUpdate(frame.taskId, options)
+                    }
+                }
             }
         },
         onInboundResult = { result ->
@@ -392,6 +428,40 @@ internal fun wireChannel(
     // share it — the poller's commands AND the live view's title resolution
     val history: TasksHistory = TasksHistoryIo(cfg.baseDir)
 
+    // THE MIRROR'S THROAT (the board's exact pattern): the commands lane's
+    // api + the SHARED cooldown file — a throttled edit skips itself, never
+    // retry-spams. The reads ride the channel client (the SAME queries the
+    // commands use: the one-message taskSnapshot for the mode, the
+    // modelSelection for the plan). The edit answers false when nothing
+    // flew; the refresher folds that honestly (the baseline does not move).
+    // The draft's source binds AFTER the commands exist (buildPoller below).
+    if (lanes.api != null) {
+        val mirrorTelegram = LiveTelegram(
+            api = lanes.api,
+            cooldown = Cooldown(readFile = { File(pythonState, LaneFiles.COOLDOWN).takeIf { it.exists() } }),
+        )
+        mirrorRefresh = MenuMirrorRefresher(
+            readMode = { taskId, ws ->
+                (client.query(ChannelQuery.TaskSnapshot(taskId, ws, messageLimit = 1)) as? QueryAnswer.Ok)
+                    ?.let { ModeMenu.currentFrom(it.resultJson) }
+            },
+            readPlan = { ws ->
+                (client.query(ChannelQuery.ModelSelection(ws)) as? QueryAnswer.Ok)
+                    ?.let { PlanMenu.parse(it.resultJson) }
+            },
+            titleOf = { taskId ->
+                runCatching {
+                    history.ctxTasks(BotCommands.SCOPE_FOR_PICK).firstOrNull { r -> r.sid == taskId }?.title
+                }.getOrNull()?.takeIf { it.isNotEmpty() }
+            },
+            edit = { _, messageId, text, markup ->
+                // the mirror's chat IS the bot's own chat (cfg.chatId — the
+                // recorded chatId is the registry's data; this throat has one)
+                mirrorTelegram.edit(TgConfig.load(remote), messageId, text, markup)
+            },
+        )
+    }
+
     // B6 — /deploy: the pure machine + THE DOOR's flow, built ONCE (the
     // arm outlives the updates that touch it). The announce rides the
     // commands lane's leg and its message id is the door's receipt: no
@@ -471,6 +541,7 @@ internal fun wireChannel(
         promptTap = promptTap,
         brain = brain,
         metrics = metrics,
+        mirror = mirrorRefresh,
     )
     return ChannelStack(client, liveView, poller, hub, busTaps, notifs?.watcher)
 }
@@ -582,7 +653,7 @@ private fun buildPoller(
     pollOn: Boolean,
     hub: LiveHub,
     client: ChannelClient,
-    speak: suspend (String, Boolean, JsonObject?) -> Unit,
+    speak: suspend (String, Boolean, JsonObject?) -> Long?,
     remote: File,
     queue: InboundQueue,
     history: TasksHistory,
@@ -606,6 +677,9 @@ private fun buildPoller(
     // E2: the metrics facade (the no-op when off) — the poller's cycles and
     // the owner's accepted updates, counted at the wiring
     metrics: Metrics = NoopMetrics,
+    // THE OPEN MENU MIRROR (null when the live api is missing): the dispatch
+    // registers the born /mode and /plan_model_effort menus into it
+    mirror: MenuMirrorRefresher? = null,
 ): Poller? {
     if (!pollOn) return null
     val liveApi = api ?: TgApi({ TgConfig.load(remote) })
@@ -728,6 +802,9 @@ private fun buildPoller(
         // second lock reads the config at the tap, one truth, no copy.
         ownerUserId = { TgConfig.load(remote).ownerUserId },
     )
+    // THE MIRROR'S DRAFT SOURCE (the late bind — the refresher was born
+    // before the commands): the commands own the draft and its TTL law
+    mirror?.bindDraft { commands.openDraft() }
     return Poller(
         api = liveApi,
         offsetFile = File(pythonState, "tg-offset"), // Python's own cursor — the torch passes at retirement
@@ -755,7 +832,7 @@ private fun buildPoller(
                     // BEFORE the text dispatcher, which never sees them.
                     // B6: /deploy joins the pattern — the anti-suicide door
                     // lives HERE, never in the free-text router.
-                    dispatchMessage(liveApi, cfg, client, history, commands, speak, deployFlow, update)
+                    dispatchMessage(liveApi, cfg, client, history, commands, speak, deployFlow, mirror, update)
                     Ack.react(liveApi, cfg, update.messageId, Ack.HANDLED)
                 }
 
@@ -776,7 +853,7 @@ private fun buildPoller(
                             deployFlow.onTap(update.data.removePrefix("dep:"), update.fromId)
 
                         else -> commands.onCallback(update.data, update.updateId, update.fromId)
-                            ?.let { speak(it.text, false, it.markup) }
+                            ?.let { reply -> speakReply(mirror, cfg.chatId, reply, speak) }
                     }
                 }
             }
@@ -798,7 +875,7 @@ private suspend fun dispatchAttachment(
     cfg: TgConfig,
     pythonState: File,
     client: ChannelClient,
-    speak: suspend (String, Boolean, JsonObject?) -> Unit,
+    speak: suspend (String, Boolean, JsonObject?) -> Long?,
     prompts: PromptTap,
     update: InboundUpdate.Attachment,
 ) {
@@ -856,6 +933,26 @@ private const val NUCLEAR_GATE = "nuclear-last"
 private const val NUCLEAR_DEBOUNCE_MS = 180_000L
 
 /**
+ * THE MIRROR'S REGISTRATION LEG: speak the reply and, when it carries the
+ * open-menu mark AND the send flew with an id, register THAT message —
+ * the fork's config_option_update will edit it in place from now on. A
+ * parked/failed send (null id, the shadow/dry-run legs) registers nothing:
+ * there is no message to mirror, the honest nothing.
+ */
+private suspend fun speakReply(
+    mirror: MenuMirrorRefresher?,
+    chatId: JsonElement,
+    reply: BotReply,
+    speak: suspend (String, Boolean, JsonObject?) -> Long?,
+) {
+    val messageId = speak(reply.text, false, reply.markup)
+    val mark = reply.mirror
+    if (mark != null && messageId != null) {
+        mirror?.noteMenu(mark.taskId, mark, messageId, chatId, reply.text)
+    }
+}
+
+/**
  * The free-text dispatch: /deploy, /file and /diff take the wiring's own
  * throats (B6's anti-suicide door; the multipart upload; the snapshot
  * query + the mini-diff render) — everything else is the dispatcher's
@@ -870,8 +967,9 @@ private suspend fun dispatchMessage(
     client: ChannelClient,
     history: TasksHistory,
     commands: BotCommands,
-    speak: suspend (String, Boolean, JsonObject?) -> Unit,
+    speak: suspend (String, Boolean, JsonObject?) -> Long?,
     deployFlow: DeployFlow,
+    mirror: MenuMirrorRefresher?,
     update: InboundUpdate.Message,
 ) {
     when {
@@ -884,7 +982,8 @@ private suspend fun dispatchMessage(
         update.text == "/diff" || update.text.startsWith("/diff ") ->
             speak(diffNow(client, history, update.text.removePrefix("/diff")), false, null)
 
-        else -> commands.handle(update.text, update.updateId)?.let { speak(it.text, false, it.markup) }
+        else -> commands.handle(update.text, update.updateId)
+            ?.let { reply -> speakReply(mirror, cfg.chatId, reply, speak) }
     }
 }
 

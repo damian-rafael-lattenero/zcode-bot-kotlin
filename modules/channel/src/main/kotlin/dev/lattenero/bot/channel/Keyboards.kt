@@ -522,4 +522,11 @@ object Keyboards {
 data class BotReply(
     val text: String,
     val markup: JsonObject? = null,
+    /**
+     * THE OPEN MENU MARK (the mirror): present when THIS reply is a
+     * /mode or /plan_model_effort menu that should self-refresh on the
+     * fork's config_option_update (the wiring registers the born message
+     * id). Null = an ordinary reply — never mirrored, never edited.
+     */
+    val mirror: MenuMirror.Mark? = null,
 )
