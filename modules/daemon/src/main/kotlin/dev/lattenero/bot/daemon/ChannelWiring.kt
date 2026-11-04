@@ -521,12 +521,13 @@ internal fun wireChannel(
         plistFile = File(File(cfg.homeDir, "state"), DeploySpawn.FORK_JOB_PLIST_NAME),
         // THE MIRROR (4/11), now under the ONE-TAP law: the fork button runs
         // the SAME script+args as the shell's `zcode-deploy` — build-install
-        // --when-quit (build-install is REAL by design; the old script's
+        // --quit (build-install is REAL by design; the old script's
         // --real/dryrun concern died with it). The build speaks its phases to
-        // Telegram; the swap waits for the owner's ⌘Q (the app is never
-        // killed behind his back — the MORE important without the confirm
-        // step the one-tap law retired).
-        args = listOf("--when-quit"),
+        // Telegram and the arc is FULLY automatic: build with the app alive,
+        // then the script closes ZCode itself (the owner: «un Ghostty aparte
+        // debería poder cerrar zcode sin necesidad de command q»), swaps and
+        // reopens — seconds of channel down at the very end.
+        args = listOf("--quit"),
         label = DeploySpawn.FORK_JOB_LABEL,
     )
     // THE ROW-DIE EDIT (4/11, the one-tap law): when a target fires, the

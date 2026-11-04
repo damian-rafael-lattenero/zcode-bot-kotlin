@@ -93,9 +93,9 @@ class DeployFlowTest {
         val f = flow(rig)
         f.onTap("fork", OWNER) // the tap IS the confirmation — no second step exists
         // THE MIRROR'S HONEST ARC survives the one-tap law: the card's fork
-        // row still says build → armed swap → the owner's ⌘Q
-        assertTrue(DeployFlow.TARGETS_CARD.contains("⌘Q"), "the fork's honest arc is on the card")
-        assertTrue(DeployFlow.THE_ANNOUNCE_FORK.contains("⌘Q"), "the announce says the swap waits for the owner")
+        // row says build → the script closes ZCode ITSELF → swap → reopen
+        assertTrue(DeployFlow.TARGETS_CARD.contains("cierra ZCode solo"), "the fork's honest arc is on the card")
+        assertTrue(DeployFlow.THE_ANNOUNCE_FORK.contains("CIERRA ZCode"), "the announce says the close is automatic")
         assertEquals(listOf(Target.FORK), rig.spawnedTargets)
         assertEquals(2, rig.spoken.size) // announce, spawned-note — no confirm card anywhere
         assertEquals(DeployFlow.THE_ANNOUNCE_FORK, rig.spoken[0].first)
