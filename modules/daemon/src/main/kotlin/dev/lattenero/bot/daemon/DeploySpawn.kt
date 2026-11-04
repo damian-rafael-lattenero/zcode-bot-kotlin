@@ -40,6 +40,12 @@ class DeploySpawn(
     private val logFile: File,
     private val plistFile: File,
     /**
+     * The script's own arguments (e.g. the fork automaton's `--real` — its
+     * DEFAULT mode is dryrun, so a fork deploy without the flag is a
+     * rehearsal, measured 4/11 13:56). The daemon script takes none.
+     */
+    private val args: List<String> = emptyList(),
+    /**
      * The one-shot job's OWN label — the survival law's whole point. The
      * daemon deploy keeps [Companion.JOB_LABEL]; the fork deploy runs as
      * [FORK_JOB_LABEL], a sibling of BOTH the daemon and the daemon's
@@ -79,6 +85,7 @@ class DeploySpawn(
         appendLine("    <key>ProgramArguments</key>")
         appendLine("    <array>")
         appendLine("        <string>${xml(script.absolutePath)}</string>")
+        for (arg in args) appendLine("        <string>${xml(arg)}</string>")
         appendLine("    </array>")
         appendLine("    <key>WorkingDirectory</key>")
         appendLine("    <string>${xml(script.parentFile.path)}</string>")
@@ -122,10 +129,23 @@ class DeploySpawn(
         plistFile.parentFile?.mkdirs()
         plistFile.writeText(plist())
         logFile.parentFile?.mkdirs()
-        launchctl.run(listOf("bootout", domain(), label))
+        // the bootout's own verdict is LOGGED, never discarded again: a
+        // stale "not bootable" label was invisible here (the 4/11 13:56
+        // error-5 wedge had no breadcrumb)
+        val bootout = launchctl.run(listOf("bootout", domain(), label))
+        logger.info { "deploy job $label bootout: exit=${bootout.exit} ${bootout.text.trim()}" }
         var out = launchctl.run(listOf("bootstrap", domain(), plistFile.absolutePath))
         if (out.exit != 0) {
             beat(BOOTOUT_BEAT_MS)
+            out = launchctl.run(listOf("bootstrap", domain(), plistFile.absolutePath))
+        }
+        // error 5 = disabled / stale label (measured 2/11 22:20 + 4/11 13:56):
+        // the launchd recovery recipe runs HERE now — enable the label and
+        // try the last bootstrap, so a wedged label self-heals instead of
+        // failing the phone's tap forever
+        if (out.exit != 0 && out.text.contains(ERROR_5_MARK)) {
+            launchctl.run(listOf("enable", domain(), label))
+            logger.warn { "deploy job $label bootstrap hit error 5 — enabled and retrying once" }
             out = launchctl.run(listOf("bootstrap", domain(), plistFile.absolutePath))
         }
         if (out.exit != 0) {
@@ -169,6 +189,9 @@ class DeploySpawn(
 
         /** The beat between a failed bootstrap and its one retry (lib/deploy.nu's measured fix). */
         const val BOOTOUT_BEAT_MS = 2_000L
+
+        /** launchd's own error-5 signature (disabled/stale label — the enable+retry trigger). */
+        const val ERROR_5_MARK = "Bootstrap failed: 5"
 
         private fun xml(text: String): String =
             text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")

@@ -131,13 +131,18 @@ class DeploySpawnTest {
     }
 
     @Test
-    fun aRaceLostTwiceStillFailsLoudly() = runTest {
+    fun aRaceLostEvenAfterTheSelfHealStillFailsLoudly() = runTest {
+        // 2026-11-04 hardening: an error-5 race now gets launchd's own
+        // recovery (enable + ONE last bootstrap) — a label that refuses even
+        // that still throws, LOUD, and the phone hears it
         var bootstraps = 0
+        var enables = 0
         val fake = Launchctl { args ->
             if (args.first() == "bootstrap") {
                 bootstraps++
                 LaunchctlResult(5, "Bootstrap failed: 5: Input/output error")
             } else {
+                if (args.first() == "enable") enables++
                 LaunchctlResult(0, "")
             }
         }
@@ -152,7 +157,8 @@ class DeploySpawnTest {
             beat = {},
         )
         assertFailsWith<IllegalStateException> { spawn.spawn() }
-        assertEquals(2, bootstraps)
+        assertEquals(3, bootstraps) // beat-retry + the enable-retry
+        assertEquals(1, enables)
     }
 
     @Test
@@ -214,6 +220,89 @@ class DeploySpawnTest {
     fun theDefaultLabelIsStillTheDaemonsDeployJob() {
         // the no-arg ctor keeps B6's label — the daemon deploy's contract is untouched
         assertContains(edge().plist(), "<string>${DeploySpawn.JOB_LABEL}</string>")
+    }
+
+    // 2026-11-04 hardening — args, bootout logging, and the error-5 self-heal.
+
+    @Test
+    fun thePlistCarriesTheScriptsArgs() {
+        val p = DeploySpawn(
+            script,
+            log,
+            plist,
+            args = listOf("--real"),
+            uid = "501",
+            javaHome = "/jdk-25",
+            home = "/Users/fake",
+        ).plist()
+        // the args ride INSIDE ProgramArguments, after the script
+        assertContains(p, "<string>${script.absolutePath}</string>\n        <string>--real</string>")
+        // the daemon default carries NO extra args
+        assertFalse(edge().plist().contains("--real"))
+    }
+
+    @Test
+    fun anError5BootstrapEnablesTheLabelAndTriesOnceMore() = runTest {
+        // measured 4/11 13:56: the phone's tap failed twice with error 5 — the
+        // edge now runs launchd's own recovery recipe (enable + last bootstrap)
+        val calls = mutableListOf<List<String>>()
+        var bootstraps = 0
+        val fake = Launchctl { args ->
+            calls += args
+            when (args.first()) {
+                "bootstrap" -> {
+                    bootstraps++
+                    if (bootstraps <= 2) LaunchctlResult(5, "Bootstrap failed: 5: Input/output error")
+                    else LaunchctlResult(0, "")
+                }
+                else -> LaunchctlResult(0, "")
+            }
+        }
+        val beats = mutableListOf<Long>()
+        val out = DeploySpawn(
+            script,
+            log,
+            plist,
+            uid = "501",
+            javaHome = "/jdk-25",
+            home = "/Users/fake",
+            launchctl = fake,
+            beat = { beats += it },
+        ).spawn()
+        assertEquals(0, out.exit)
+        // the order IS the recipe: bootout → bootstrap ×2 → enable → bootstrap
+        assertEquals(listOf("enable", "gui/501", DeploySpawn.JOB_LABEL), calls[3])
+        assertEquals(3, calls.count { it.first() == "bootstrap" })
+        // the second beat never ran: the enable-retry is immediate
+        assertEquals(listOf(DeploySpawn.BOOTOUT_BEAT_MS), beats)
+    }
+
+    @Test
+    fun aPlainFailureNeverEnablesAndStillThrows() = runTest {
+        // a NON-error-5 failure is not launchd's disabled-label disease —
+        // enabling would be cargo-cult; the edge fails LOUD as before
+        val calls = mutableListOf<List<String>>()
+        val fake = Launchctl { args ->
+            calls += args
+            if (args.first() == "bootstrap") {
+                LaunchctlResult(93, "Bootstrap failed: 93: Operation not permitted")
+            } else {
+                LaunchctlResult(0, "")
+            }
+        }
+        val spawn = DeploySpawn(
+            script,
+            log,
+            plist,
+            uid = "501",
+            javaHome = "/jdk-25",
+            home = "/Users/fake",
+            launchctl = fake,
+            beat = {},
+        )
+        val e = assertFailsWith<IllegalStateException> { spawn.spawn() }
+        assertContains(e.message.orEmpty(), "93")
+        assertEquals(0, calls.count { it.first() == "enable" })
     }
 
     @Test
