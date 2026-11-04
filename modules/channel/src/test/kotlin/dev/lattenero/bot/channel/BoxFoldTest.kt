@@ -199,9 +199,10 @@ class BoxFoldTest {
         val opened = lastEdit(wire)
         assertEquals(boxMessageId, opened.messageId, "the edit targets the born message")
         assertEquals(
-            "⚡ <b>Bash</b> — <code>ls</code> · 27 líneas\n<i>📜 tocar para ver</i>\n<pre>" +
+            "⚡ <b>Bash</b> — <code>ls</code> · 27 líneas\n<i>📜 tocar para ver</i>\n" +
+                "<pre><code class=\"language-bash\">" +
                 (1..26).joinToString("\n") { n -> "${n.toString().padStart(4)}│ ${lines[n - 1]}" } +
-                "</pre>",
+                "</code></pre>",
             opened.text, "page 1: the header + the numbered body, byte-exact",
         )
         assertEquals(pagesMarkup(box.boxId, 0, 2), opened.markup, "▸1 marks the shown page")
@@ -212,7 +213,7 @@ class BoxFoldTest {
         val flipped = lastEdit(wire)
         assertEquals(
             "⚡ <b>Bash</b> — <code>ls</code> · 27 líneas\n<i>📜 tocar para ver</i>\n" +
-                "<pre>  27│ ${lines[26]}</pre>",
+                "<pre><code class=\"language-bash\">  27│ ${lines[26]}</code></pre>",
             flipped.text, "page 2: line 27 with its REAL number, byte-exact",
         )
         assertEquals(pagesMarkup(box.boxId, 1, 2), flipped.markup, "▸2 marks the shown page")

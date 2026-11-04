@@ -86,6 +86,7 @@ fun reduce(
                         header = event.header,
                         pages = event.pages,
                         messageId = event.messageId,
+                        language = event.language,
                     )
                 ).takeLast(BOX_CAP), // the registry's own ceiling — the newest survive
         )
