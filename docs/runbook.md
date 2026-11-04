@@ -253,3 +253,360 @@ tail -f /tmp/deploy-fork.log
 - the sanctioned app restart is `/nuclear` **from the phone**, executed by
   the daemon (`modules/daemon/.../nuclear/NuclearLadder.kt`), not by a
   shell in the session.
+
+## 3. Diagnosing a silent bot — the ladder
+
+Run the steps in order and stop at the first one that answers "no". Each
+step names what it *proves*, not just what it prints. All five are
+read-only.
+
+### Step 0 — is Telegram reachable at all?
+
+The beacon already answers it every 60 s: it calls `getMe` directly and
+records the verdict.
+
+```bash
+# [read-only] the newest beacon line, with the live Telegram probe
+tail -1 ~/.zcode/bot-kotlin/logs/beacon.log
+# 2026-11-03T22:59:47-03:00 ok epoch=... daemon_age_s=4 poll_fail_recent=false telegram_probe=ok
+```
+
+`telegram_probe=ok` + a silent bot means the problem is on the Mac (keep
+going). `telegram_probe=fail` means Telegram or the network is the
+problem: the bot's own apology will arrive when it recovers
+(`poller RECOVERED` in `daemon.jsonl`), and there is nothing to fix
+locally.
+
+### Step 1 — is the daemon alive?
+
+```bash
+# [read-only] loaded? running? since when?
+launchctl print gui/$(id -u)/com.zcode.bot-daemon | head -8
+
+# [read-only] all six heartbeats, with ages in seconds
+now=$(date +%s); for f in ~/.zcode/bot-kotlin/state/hb-*; do
+  echo "$(basename "$f") age=$((now - $(stat -f %m "$f")))s"
+done
+```
+
+Every `hb-*` must be under ~30–40 s (the beat is 30 s). A single stale
+file is a single dead loop, not a dead daemon:
+
+| Stale file | The loop that died | What the owner loses |
+|---|---|---|
+| `hb-poller` | getUpdates (`poller`) | nothing arrives from the phone at all |
+| `hb-channel` | the channel client | `/status` and `/plan` answer 📡; no turn can start |
+| `hb-live-view` | the in-place card | the turn runs, but the phone shows no live progress |
+| `hb-zconn-shadow` | the model-wire watcher | no ⚠️/✅ notices (the wire may be down unnoticed) |
+| `hb-spectator` | the marker scanner | nothing today — nothing writes markers (§6.4) |
+| `hb-subagent-notifs` | the 🔔 notifications | no key-moment pings |
+
+If they are **all** stale, the JVM is not beating: check the crash noise
+and let launchd do its job (it will, `KeepAlive` is true).
+
+```bash
+# [read-only] the JVM's own stderr (a boot failure lands here)
+# Today it is dominated by JDK native-access WARNINGs — those are noise; a
+# stack trace or "Error occurred during initialization of VM" is not.
+tail -40 ~/.zcode/bot-kotlin/logs/launchd.err.log
+
+# [read-only] the daemon's last words
+tail -3 ~/.zcode/bot-kotlin/logs/daemon.jsonl
+```
+
+### Step 2 — is the poller reading the phone?
+
+```bash
+# [read-only] the reader's failures/conflicts, newest last
+jq -r 'select(.message|test("getUpdates|poller RECOVERED"))
+       | ."@timestamp" + " " + .message' ~/.zcode/bot-kotlin/logs/daemon.jsonl | tail -3
+
+# [read-only] the cursor Telegram was confirmed at, and when
+cat ~/.zcode/hooks/state/tg-offset
+stat -f '%Sm %N' ~/.zcode/hooks/state/tg-offset
+```
+
+A `getUpdates failed: ... Conflict: terminated by other getUpdates
+request` (HTTP 409) means **a second reader holds the token**. That was
+the 30/10 incident (a resurrected Python poller); the fix then was
+deleting the CLI hooks (§5.2) and the legacy app bot. The job census in
+§5 is how you check for a relapse.
+
+A frozen `tg-offset` while the owner keeps writing means nothing is being
+confirmed: either the poller is dead (Step 1) or every cycle fails
+(Step 2's log line).
+
+### Step 3 — did the owner's message arrive?
+
+```bash
+# [read-only] every accepted update, with the routing decision
+jq -r 'select(.message|startswith("route:"))
+       | ."@timestamp" + " " + .message' ~/.zcode/bot-kotlin/logs/daemon.jsonl | tail -5
+```
+
+The shapes that matter:
+
+- `route: update=<id> ctxWs=<workspace> active=<sid> alive=… running=… open=…`
+  — the update arrived and the router looked at the live state;
+- `route: text FIRED at <sid> (<reason>)` — the text entered a real
+  conversation (this is the healthy line);
+- `route: <reason> — text parked (F17)` / `route: … HELD — asking
+  empujar/encolar` — the Mac was busy; the text is in the F17 queue
+  (`/queue` lists it with 🚀/🗑 taps);
+- `route: atomic bind to <sid> REFUSED|TIMED OUT|REJECTED` — the fork
+  answered "no"; the reason is the fork's own word;
+- `route: text NOT fired — the channel is down` — Step 4.
+
+No `route:` line at all after the owner's message means the update never
+reached this process: go back to Step 2.
+
+### Step 4 — is the channel to the app alive?
+
+The channel exists only while the fork's host is deployed. Two lines
+resolve it — **the newest one wins**:
+
+```bash
+# [read-only] the last UP / bye / DEGRADED
+jq -r 'select(.message|test("^channel (UP|bye|DEGRADED)"))
+       | ."@timestamp" + " " + .message' ~/.zcode/bot-kotlin/logs/daemon.jsonl | tail -3
+
+# [read-only] the socket file and its owner (the ZCode host)
+ls -l ~/.zcode/daemon-local.sock ~/.zcode/daemon-local.token
+lsof -nP -U | grep daemon-local
+```
+
+- `channel UP: hello_ok v… server pid=… app=… caps=…` — connected. The
+  `app=` field is the fork's version: that is how you date a stale fork
+  deploy (§8.4).
+- `channel DEGRADED: no socket — the fork's host is not deployed —
+  reconnect attempt N in …` — the app is closed, still booting, or the
+  fork build is not deployed. **Sends keep flowing**, so the bot does not
+  go silent; commands that need the app answer honestly (`📡`).
+- `channel bye: …` — the session ended; the client reconnects on its own
+  exponential policy (1 s → 30 s), and the reconnect is logged as
+  `channel DEGRADED` until it succeeds.
+- `channel error id=… code=…` — the protocol said no to one request; it
+  does not kill the session.
+
+The token file is 0600 and belongs to the plugin; never print it.
+
+### Step 5 — did the send leave?
+
+```bash
+# [read-only] the last sends that landed (the transport's receipt)
+jq -r 'select(.message|startswith("send LIVE"))
+       | ."@timestamp" + " " + .message' ~/.zcode/bot-kotlin/logs/daemon.jsonl | tail -3
+
+# [read-only] the queue that touches Telegram, and the 429 window
+jq 'length' ~/.zcode/hooks/state/outbox.json
+now=$(date +%s); m=$(stat -f %m ~/.zcode/hooks/state/tg-cooldown)
+echo "cooldown_mtime=$m now=$now active=$([ "$m" -gt "$now" ] && echo yes || echo no)"
+cat ~/.zcode/hooks/state/tg-last-ph      # the newest message id the Mac sent
+```
+
+- `send LIVE …: message_id=<id>` — it landed.
+- `outbox.json` growing means sends are **parked**, not lost: the
+  drain runs every 15 s, 1 msg/s, and stops at a 429 window. A parked
+  message is a delay.
+- `tg-cooldown`'s **mtime is the expiry epoch** (that is the Python
+  contract the transport still shares): `active=yes` means Telegram
+  asked the bot to wait, and every lane honors it.
+- `sendMessage failed (attempt N/3)` in the log with a `429` is the
+  flood window; with `403` it is a bot the owner never `/start`ed.
+
+### Step 6 — ask the bot itself
+
+The chat is a diagnostic surface, and it never lies about a degrade:
+
+| Command | What a degrade looks like |
+|---|---|
+| `/status` | `📡 The channel to the app is down — the fork's host is not running?` |
+| `/plan_model_effort` | `📡 No pude leer la selección — ¿el fork está deployado con los frames de /plan?` |
+| `/tasks` | `📡 The channel is down (…unavailable) — the fork's host is not running?` |
+| `/queue` | the parked texts, with 🚀/🗑 per row |
+| `/ctx`, `/usage` | `⚠️ No pude leer…` when the host answers a shape the bot cannot parse |
+| `/help` | lists the menu this binary registered (21 commands at `fe434b1`) |
+
+The menu is registered with Telegram **once, at boot**
+(`telegram menu registered: … — N commands`). A command the owner cannot
+see in Telegram's «/» list after a deploy is a boot-time registration
+failure, not a missing command.
+
+### Step 7 — cross-check the two watchers
+
+```bash
+# [read-only] the healer's view: is the beat fresh, is a deploy in flight, is the job loaded?
+~/.local/bin/nu-nightly ~/Projects/zcode-bot-kotlin/scripts/bot-healer.nu --status
+
+# [read-only] has it ever acted?
+cat ~/.zcode/bot-kotlin/state/healer.json
+cat ~/.zcode/bot-kotlin/logs/healer.log
+```
+
+`healer.json` carries `ts, action, hb_age_s, ok, detail` — the last heal
+and whether it took. A `detail` with text means the heal itself failed
+(usually launchd's refusal, quoted verbatim) and needs hands (§8.1).
+
+## 4. Diagnosing the brain (`agent-brain`)
+
+The brain is a separate launchd job (`com.zcode.agent-brain`) serving
+`http://127.0.0.1:8765` from `~/Projects/agent-brain`, with Postgres (and
+Redpanda, Prometheus, Grafana) in colima. The bot talks to it for RAG
+(`/brain`), memory injection (`memory_inject`) and the bus.
+
+### 4.1 The endpoints, and what each answer means
+
+```bash
+# [read-only] liveness + the whole config it is serving (no secret values: password is only "set: true")
+curl -sS http://127.0.0.1:8765/health
+
+# [read-only] readiness: migrations applied, embedding dimension, a live embed probe
+curl -sS http://127.0.0.1:8765/ready
+
+# [read-only] the bus tailer's whole state
+curl -sS http://127.0.0.1:8765/bus/status
+
+# [read-only] corpus and memory inventory
+curl -sS http://127.0.0.1:8765/rag/stats
+curl -sS http://127.0.0.1:8765/memory/status
+```
+
+Live on 2026-11-03 22:55 (abridged):
+
+```json
+/health  {"status":"ok","version":"0.1.0","config":{"http":"127.0.0.1:8765",
+          "pg_url":"jdbc:postgresql://127.0.0.1:5433/agent_brain","pg_password_set":true,
+          "embed_provider":"ollama","embed_dim":768,"bus_transport":"file"}}
+/ready   {"status":"ok","checks":{"db":{"ok":true,"applied":3,"pending":[],"embedDim":768},
+          "embed":{"provider":"ollama","model":"nomic-embed-text","dim":768,"ok":true}}}
+/rag/stats    {"documents":17460,"chunks":60441}
+/memory/status{"pendingTurns":0,"processedTurns":33,"memories":49,"quarantined":2,"breaker":"Closed"}
+```
+
+`/ready` answers **503 with `"ok": false`** when a check fails — the body
+is the answer, not the status code alone. `db.applied` / `db.pending` is
+the migration truth; `embed.embedDim` vs `embed.expectedEmbedDim` is the
+mismatch that makes every insert fail (a new embedding model needs
+`make nuke`, and that drops the data — owner's call).
+
+### 4.2 The exposition: 20 families
+
+```bash
+# [read-only] how many metric families, and which
+curl -sS http://127.0.0.1:8765/metrics | grep -c '^# TYPE'
+curl -sS http://127.0.0.1:8765/metrics | grep '^# TYPE'
+```
+
+**20 families on 2026-11-03** (the E5 brief said 21; the exposition is
+the authority — count it, never assume). `brain_bus_*` (13) covers the
+tailer, `brain_rag_*` (2) the corpus, `brain_memory_*` (5) the memories
+and the breaker. The full table with the honest-indicator law:
+`~/Projects/agent-brain/docs/observability.md`.
+
+An **absent** family is a fact, not a scrape error: it means that surface
+never ran in this process's life (e.g. `brain_memory_*` needs the memory
+worker, `bot_turns_*` needs a witnessed turn).
+
+The daemon's own exposition is the other half:
+
+```bash
+# [read-only] the bot's exposition as it renders today
+curl -sS http://127.0.0.1:9102/metrics | grep -c '^# TYPE'
+curl -sS http://127.0.0.1:9102/metrics | grep '^# TYPE'
+```
+
+Live that is **17 `# TYPE` blocks** covering 14 of the **17 families**
+inventoried in `docs/observability.md` (a Micrometer summary renders as
+its own `summary` plus a `_max` gauge, so blocks and families are not the
+same number). The three absent-on-purpose families seen live are
+`bot_brain_failures_total`, `bot_memory_inject_failures_total` and
+`bot_zconn_transitions_total`: each exists only once its event happens.
+Counting is how you tell "the surface never ran" from "the scrape broke"
+— the count is the evidence, not the presence of one line.
+
+### 4.3 The three numbers that diagnose the bus
+
+From `/bus/status`:
+
+| Field | Healthy | What a bad value means |
+|---|---|---|
+| `lagBytes` | small and not growing (`fileBytes − offset`, ~1–2 KB at rest) | growing monotonically = the tailer stopped consuming (the loop is stuck, not slow) — `brain_bus_lag_bytes` in Prometheus |
+| `heartbeatAgeMs` | under a couple of seconds (the loop polls every `bus_poll_ms`, default 500 ms) | seconds-to-minutes = the tailer loop is wedged while Ktor still answers: `/health` will look fine. `brain_bus_heartbeat_age_seconds` is the honest probe |
+| `duplicates` / `inserted` vs `seen` | `duplicates: 0`, `inserted == seen` (149/149 live) | `duplicates > 0` is a **replay**: the tailer re-read events (offset lost). Not a data-loss bug, but the "cero replay" property is broken and the dashboard's `brain_bus_events_duplicates_total` shows it |
+
+Also read `malformed` (lines the tailer refused) and `shrinks` (the file
+got smaller than the offset — a rotation the tailer survived by
+re-reading). Both are real events, counted, never swallowed.
+
+### 4.4 The memory breaker
+
+`/memory/status`'s `breaker` is `Closed | Open | HalfOpen`. `Open` means
+the embedding provider failed hard enough to trip it; `quarantined` is
+the count of attempts kept instead of dropped (nothing is invented away).
+
+The breaker is the **extractor's**: with `pendingTurns == 0` it never
+runs, so `Closed` is the honest absence, not a proof of health.
+
+### 4.5 The drills (T7)
+
+Three Nushell drills in `~/Projects/agent-brain/ops/drills/`, each of
+which **kills a real job** and asserts against `/metrics`, `/ready` and
+`/bus/status` only (no Grafana):
+
+```bash
+# [ACTION] cuts com.zcode.bot-daemon and asserts the scrape is REFUSED,
+#          the recovery is a NEW process (counters reset) and bot_zconn_down
+#          equals state/zconn.json's own "down"
+~/.local/bin/nu-nightly ~/Projects/agent-brain/ops/drills/channel-cut.nu --label com.zcode.bot-daemon
+
+# [ACTION] cuts the brain; /ready and /metrics must be refused, and the tailer
+#          must resume from its persisted offset (lag 0, no re-ingest)
+~/.local/bin/nu-nightly ~/Projects/agent-brain/ops/drills/bus-cut.nu --label com.zcode.agent-brain
+
+# [ACTION] stops ollama: /ready must say DEGRADED (embed.ok=false) with the
+#          real reason, /metrics must keep answering, the breaker opens only
+#          if the extractor had work
+~/.local/bin/nu-nightly ~/Projects/agent-brain/ops/drills/memory-embedding-cut.nu --base-url http://127.0.0.1:8765
+```
+
+They were **not run** for this document (each one cuts a live job; the
+brief's rule is that destructive commands are marked, not executed). The
+parse gate is read-only and was run for one of them:
+
+```bash
+# [read-only] the static gate every .nu script in this ecosystem has
+~/.local/bin/nu-nightly -c "nu-check --debug /Users/lattenero/Projects/agent-brain/ops/drills/channel-cut.nu"
+# true
+```
+
+### 4.6 Prometheus and Grafana
+
+```bash
+# [read-only] colima and the four containers
+colima status
+docker ps --format '{{.Names}}\t{{.Status}}\t{{.Ports}}'
+
+# [read-only] the two scrape targets and their health
+curl -sS http://127.0.0.1:9090/api/v1/targets | jq -r '.data.activeTargets[] | "\(.labels.job) \(.scrapeUrl) \(.health)"'
+
+# [read-only] both directions of "up"
+curl -sS 'http://127.0.0.1:9090/api/v1/query?query=up' | jq -c '.data.result[] | {job: .metric.job, v: .value[1]}'
+```
+
+Live: `agent-brain … 8765/metrics up`, `bot … 9102/metrics up`, and both
+`up` values `"1"`. Grafana answers `200` on
+`http://127.0.0.1:3000/api/health` (anonymous Viewer; the dashboard is
+provisioned from `ops/grafana/`).
+
+The stack is **started from a terminal outside ZCode**, never from an
+agent session:
+
+```bash
+# [ACTION] in ~/Projects/agent-brain, from Ghostty (survives ZCode restarts)
+make up      # docker compose up -d --wait + installDist + migrations
+make down    # stops the containers, keeps every volume
+```
+
+The reason is in `~/.zcode/AGENTS.md`: a `colima start` run from inside a
+ZCode session dies with the app's process tree, taking Postgres and
+Redpanda with it.
