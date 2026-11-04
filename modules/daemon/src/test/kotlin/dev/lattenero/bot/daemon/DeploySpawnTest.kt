@@ -90,13 +90,48 @@ class DeploySpawnTest {
         val out = edge(fake).spawn()
 
         assertEquals(0, out.exit)
-        assertEquals(2, calls.size)
-        // bootout first (bootstrap refuses a loaded label), then bootstrap THIS plist
-        assertEquals(listOf("bootout", "gui/501", DeploySpawn.JOB_LABEL), calls[0])
-        assertEquals(listOf("bootstrap", "gui/501", plist.absolutePath), calls[1])
+        assertEquals(3, calls.size)
+        // the busy pre-check (`print`) first, then bootout (bootstrap refuses a
+        // loaded label), then bootstrap THIS plist
+        assertEquals("print", calls[0].first())
+        assertEquals(listOf("bootout", "gui/501", DeploySpawn.JOB_LABEL), calls[1])
+        assertEquals(listOf("bootstrap", "gui/501", plist.absolutePath), calls[2])
         // the rendered plist is on disk — launchctl reads the FILE, not a string
         assertTrue(plist.exists())
         assertContains(plist.readText(), DeploySpawn.JOB_LABEL)
+    }
+
+    // 2026-11-04 hardening v4 — the BUSY GUARD: a RUNNING deploy job gets an
+    // honest «ya está corriendo» BEFORE launchd is asked anything — the
+    // owner's double-tap at 16:28/16:36 hit launchd's error 5 while the
+    // 16:28 fork deploy was mid-build, and the raw error read like a bug.
+
+    @Test
+    fun aRunningJobIsRefusedByNameBeforeAnythingFires() = runTest {
+        val calls = mutableListOf<List<String>>()
+        val fake = Launchctl { args ->
+            calls += args
+            when (args.first()) {
+                "print" -> LaunchctlResult(0, "gui/501/com.zcode.bot-fork-deploy = {\n\tstate = running\n\tpid = 30584\n}")
+                else -> LaunchctlResult(0, "")
+            }
+        }
+        val spawn = DeploySpawn(
+            script,
+            log,
+            plist,
+            uid = "501",
+            javaHome = "/jdk-25",
+            home = "/Users/fake",
+            launchctl = fake,
+            beat = {},
+        )
+        val e = assertFailsWith<IllegalStateException> { spawn.spawn() }
+        assertContains(e.message.orEmpty(), "ya está CORRIENDO")
+        assertContains(e.message.orEmpty(), DeploySpawn.JOB_LABEL)
+        // NOTHING touched launchd beyond the pre-check: no bootout, no bootstrap
+        assertEquals(0, calls.count { it.first() == "bootout" })
+        assertEquals(0, calls.count { it.first() == "bootstrap" })
     }
 
     // 2026-11-04 hardening v3 — the BOOTOUT has its own ladder: a wedged
@@ -375,10 +410,10 @@ class DeploySpawnTest {
             beat = { beats += it },
         ).spawn()
         assertEquals(0, out.exit)
-        // the order IS the recipe: bootout → bootstrap ×2 → enable → bootstrap;
+        // the order IS the recipe: print → bootout → bootstrap ×2 → enable → bootstrap;
         // enable takes ONE service-target arg (gui/<uid>/<label>) — the two-arg
         // form was a silent no-op and the self-heal never healed
-        assertEquals(listOf("enable", "gui/501/${DeploySpawn.JOB_LABEL}"), calls[3])
+        assertEquals(listOf("enable", "gui/501/${DeploySpawn.JOB_LABEL}"), calls[4])
         assertEquals(3, calls.count { it.first() == "bootstrap" })
         // the second beat never ran: the enable-retry is immediate
         assertEquals(listOf(DeploySpawn.BOOTOUT_BEAT_MS), beats)
