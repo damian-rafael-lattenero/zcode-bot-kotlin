@@ -7,7 +7,7 @@ read-only, executed against the live machine. Python-era recipes that no
 longer exist are listed in §9 with what replaced them — or with
 "nothing".
 
-**Verified against:** `master` `fe434b1`, 2026-11-03 22:50–23:20
+**Verified against:** `master` `fe434b1`, 2026-11-03 22:50–23:10
 (America/Argentina/Buenos_Aires). The evidence appendix (§10) carries the
 commands and their real, abbreviated output.
 
@@ -475,7 +475,7 @@ curl -sS http://127.0.0.1:8765/rag/stats
 curl -sS http://127.0.0.1:8765/memory/status
 ```
 
-Live on 2026-11-03 23:10 (abridged; `applied` and the bus counters move
+Live on 2026-11-03 23:05 (abridged; `applied` and the bus counters move
 — `applied` read 3 at 22:55 and 4 fifteen minutes later, a migrate
 landed in between):
 
@@ -536,9 +536,9 @@ From `/bus/status`:
 
 | Field | Healthy | What a bad value means |
 |---|---|---|
-| `lagBytes` | small and not growing (`fileBytes − offset`; 1338 B at 22:55 and 0 at 23:10, both normal) | growing monotonically = the tailer stopped consuming (the loop is stuck, not slow) — `brain_bus_lag_bytes` in Prometheus |
+| `lagBytes` | small and not growing (`fileBytes − offset`; 1338 B at 22:55 and 0 at 23:05, both normal) | growing monotonically = the tailer stopped consuming (the loop is stuck, not slow) — `brain_bus_lag_bytes` in Prometheus |
 | `heartbeatAgeMs` | under a couple of seconds (the loop polls every `bus_poll_ms`, default 500 ms; 4720 ms and 3559 ms were read in two live samples) | seconds-to-minutes = the tailer loop is wedged while Ktor still answers: `/health` will look fine. `brain_bus_heartbeat_age_seconds` is the honest probe |
-| `duplicates` / `inserted` vs `seen` | `duplicates: 0`, `inserted == seen` (149/149 at 22:55, 941/941 at 23:10 — it advances with the live turn) | `duplicates > 0` is a **replay**: the tailer re-read events (offset lost). Not a data-loss bug, but the "cero replay" property is broken and the dashboard's `brain_bus_events_duplicates_total` shows it |
+| `duplicates` / `inserted` vs `seen` | `duplicates: 0`, `inserted == seen` (149/149 at 22:55, 941/941 at 23:05 — it advances with the live turn) | `duplicates > 0` is a **replay**: the tailer re-read events (offset lost). Not a data-loss bug, but the "cero replay" property is broken and the dashboard's `brain_bus_events_duplicates_total` shows it |
 
 Also read `malformed` (lines the tailer refused) and `shrinks` (the file
 got smaller than the offset — a rotation the tailer survived by
@@ -1175,7 +1175,7 @@ locally.
 
 ## 10. Evidence — the read-only commands, with their real output
 
-Executed 2026-11-03 between 22:50 and 23:25 (local). Abridged where the
+Executed 2026-11-03 between 22:50 and 23:10 (local). Abridged where the
 output is long; nothing sensitive is reproduced.
 
 **The census (§5.1).**
