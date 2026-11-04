@@ -13,6 +13,27 @@ export def step [msg: string]: nothing -> nothing {
     print $"\n==> ($msg)"
 }
 
+# One-shot Telegram announce, independent of the app and of the bot's
+# transport: token/chat come from the config the poller itself reads. The
+# announcement NEVER breaks the caller (do -i + catch). THE PHASES' VOICE:
+# the phone must never sit blind through a build (measured 4/11 — the owner
+# read silence for minutes). NOT hooked into `step`: the recorder's and the
+# comparator's deploys use step too and must not speak.
+export def announce [text: string]: nothing -> nothing {
+    let cfg_path = ($nu.home-dir | path join ".zcode/telegram-remote.json")
+    if not ($cfg_path | path exists) { return }
+    try {
+        let cfg = (open $cfg_path)
+        let token = ($cfg.token? | default "")
+        let chat = ($cfg.chat_id? | default "")
+        if ($token | is-empty) or ($chat | is-empty) { return }
+        let body = ({chat_id: $chat, text: $text} | to json)
+        do -i {
+            http post -m 10sec -t application/json $"https://api.telegram.org/bot($token)/sendMessage" $body -r | ignore
+        }
+    } catch {|_e| }
+}
+
 export def die [msg: string]: nothing -> nothing {
     print -e $"✗ ($msg)"
     exit 1
