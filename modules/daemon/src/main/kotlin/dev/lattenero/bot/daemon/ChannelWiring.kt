@@ -472,11 +472,21 @@ internal fun wireChannel(
     // announce, no spawn. The spawn is the REAL edge — its OWN one-shot
     // launchd job (measured 2/11 22:02: nohup+ProcessBuilder DIED at the
     // script's own bootout of this daemon; a sibling job survives it).
+    // 2026-11-04: a SECOND edge for the fork deploy — its own label, its
+    // own log, its own plist; a BOTH deploy spawns fork FIRST because a
+    // sibling job survives the daemon deploy's own bootout.
     val deployLog = File(File(cfg.homeDir, "logs"), DeploySpawn.LOG_FILE_NAME)
     val deployEdge = DeploySpawn(
         script = DeployScriptKnob.load(File(cfg.homeDir, SendKnob.FILE_NAME)),
         logFile = deployLog,
         plistFile = File(File(cfg.homeDir, "state"), DeploySpawn.JOB_PLIST_NAME),
+    )
+    val forkDeployLog = File(File(cfg.homeDir, "logs"), DeploySpawn.FORK_LOG_FILE_NAME)
+    val forkDeployEdge = DeploySpawn(
+        script = DeployScriptKnob.loadFork(File(cfg.homeDir, SendKnob.FILE_NAME)),
+        logFile = forkDeployLog,
+        plistFile = File(File(cfg.homeDir, "state"), DeploySpawn.FORK_JOB_PLIST_NAME),
+        label = DeploySpawn.FORK_JOB_LABEL,
     )
     val deployFlow = DeployFlow(
         machine = DeployCommand(),
@@ -494,11 +504,28 @@ internal fun wireChannel(
                 markup,
             )
         },
-        spawn = {
-            deployEdge.spawn()
-            logger.warn {
-                "deploy: ${DeploySpawn.JOB_LABEL} bootstrapped as its OWN job " +
-                    "(survives this daemon's bootout) — log: $deployLog"
+        spawn = { target ->
+            // BOTH never arrives here: the FLOW splits it (fork first — the
+            // survival order is the flow's law, pinned by its test). This
+            // edge only maps ATOMIC targets to their own sibling job.
+            when (target) {
+                DeployCommand.Target.BOT -> {
+                    deployEdge.spawn()
+                    logger.warn {
+                        "deploy(bot): ${DeploySpawn.JOB_LABEL} bootstrapped as its OWN job " +
+                            "(survives this daemon's bootout) — log: $deployLog"
+                    }
+                }
+                DeployCommand.Target.FORK -> {
+                    forkDeployEdge.spawn()
+                    logger.warn {
+                        "deploy(fork): ${DeploySpawn.FORK_JOB_LABEL} bootstrapped as its OWN job " +
+                            "(sibling of the daemon; this daemon SURVIVES it) — log: $forkDeployLog"
+                    }
+                }
+                DeployCommand.Target.BOTH -> throw IllegalStateException(
+                    "deploy(BOTH) must be split by the flow (fork first) — the wiring only spawns atomic targets",
+                )
             }
         },
         ownerUserId = { TgConfig.load(remote).ownerUserId },

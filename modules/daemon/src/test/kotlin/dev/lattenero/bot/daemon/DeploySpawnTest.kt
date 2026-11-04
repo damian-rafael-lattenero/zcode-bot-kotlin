@@ -184,11 +184,56 @@ class DeploySpawnTest {
         assertEquals("gui/501", edge().domain())
     }
 
+    // 2026-11-04 — the FORK edge: its own label, its own log, its own plist —
+    // a sibling of the daemon AND of the daemon's deploy job.
+
+    @Test
+    fun theForkJobCarriesItsOwnLabelAndLogNeverTheDaemons() {
+        val forkScript = File("/Users/fake/Projects/zcode-bot-kotlin/scripts/deploy-fork-and-retire.nu")
+        val forkLog = File(tmp, "logs/deploy-fork.log")
+        val forkPlist = File(tmp, "state/deploy-fork-job.plist")
+        val p = DeploySpawn(
+            forkScript,
+            forkLog,
+            forkPlist,
+            label = DeploySpawn.FORK_JOB_LABEL,
+            uid = "501",
+            javaHome = "/jdk-25",
+            home = "/Users/fake",
+        ).plist()
+        assertContains(p, "<string>${DeploySpawn.FORK_JOB_LABEL}</string>")
+        assertContains(p, "<string>${forkScript.absolutePath}</string>")
+        // the labels never collide — each job bootouts/bootstraps ITSELF only
+        assertContains(p, DeploySpawn.FORK_JOB_LABEL)
+        assertEquals("com.zcode.bot-fork-deploy", DeploySpawn.FORK_JOB_LABEL)
+        assertEquals("deploy-fork.log", DeploySpawn.FORK_LOG_FILE_NAME)
+        assertEquals("deploy-fork-job.plist", DeploySpawn.FORK_JOB_PLIST_NAME)
+    }
+
+    @Test
+    fun theDefaultLabelIsStillTheDaemonsDeployJob() {
+        // the no-arg ctor keeps B6's label — the daemon deploy's contract is untouched
+        assertContains(edge().plist(), "<string>${DeploySpawn.JOB_LABEL}</string>")
+    }
+
     @Test
     fun theKnobDefaultsToTheRepoCheckoutWhenTheConfigIsSilent() {
         val missing = File("/nonexistent/daemon.json")
         assertEquals(DeployScriptKnob.DEFAULT, DeployScriptKnob.load(missing))
         assertEquals(DeployScriptKnob.DEFAULT, DeployScriptKnob.load(tempJson("{}")))
+    }
+
+    @Test
+    fun theForkKnobDefaultsToTheForkScriptAndHonorsItsOwnKey() {
+        val missing = File("/nonexistent/daemon.json")
+        assertEquals(DeployScriptKnob.FORK_DEFAULT, DeployScriptKnob.loadFork(missing))
+        assertEquals(DeployScriptKnob.FORK_DEFAULT, DeployScriptKnob.loadFork(tempJson("{}")))
+        // its OWN key — the daemon's deploy_script never leaks into the fork's edge
+        val custom = tempJson("""{"deploy_fork_script": "/opt/my-fork-deploy.nu"}""")
+        assertEquals(File("/opt/my-fork-deploy.nu"), DeployScriptKnob.loadFork(custom))
+        // the daemon's key is NOT the fork's key
+        val daemonOnly = tempJson("""{"deploy_script": "/opt/daemon-only.nu"}""")
+        assertEquals(DeployScriptKnob.FORK_DEFAULT, DeployScriptKnob.loadFork(daemonOnly))
     }
 
     @Test
@@ -202,6 +247,9 @@ class DeploySpawnTest {
         assertEquals(DeployScriptKnob.DEFAULT, DeployScriptKnob.load(tempJson("not json at all")))
         assertEquals(DeployScriptKnob.DEFAULT, DeployScriptKnob.load(tempJson("""{"deploy_script": 42}""")))
         assertEquals(DeployScriptKnob.DEFAULT, DeployScriptKnob.load(tempJson("""{"deploy_script": "  "}""")))
+        // the fork's knob obeys the same degrade law
+        assertEquals(DeployScriptKnob.FORK_DEFAULT, DeployScriptKnob.loadFork(tempJson("not json at all")))
+        assertEquals(DeployScriptKnob.FORK_DEFAULT, DeployScriptKnob.loadFork(tempJson("""{"deploy_fork_script": "  "}""")))
         // a WRONG shape never throws — the failure would be loud at spawn time, not here
     }
 

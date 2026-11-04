@@ -308,6 +308,23 @@ object Keyboards {
         }
     }
 
+    /**
+     * 2026-11-04 — /deploy's TARGET selection: bot / fork / both, one row.
+     * The tap arms THAT target (the go/no confirm row stays untouched —
+     * the target lives in the arm, not in the confirm's callback).
+     */
+    fun deployTargets(): JsonObject = buildJsonObject {
+        putJsonArray("inline_keyboard") {
+            add(
+                buildJsonArray {
+                    add(button("🤖 Bot Kotlin", "dep:bot"))
+                    add(button("🍴 ZCode Fork", "dep:fork"))
+                    add(button("🚀 Ambos", "dep:both"))
+                },
+            )
+        }
+    }
+
     /** Python's exact ☢️ confirmation row (handlers_system._cmd_nuclear) — ONE row, both buttons. */
     fun nuclearConfirm(): JsonObject = buildJsonObject {
         putJsonArray("inline_keyboard") {

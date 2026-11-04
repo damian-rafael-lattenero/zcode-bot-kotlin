@@ -23,14 +23,14 @@ class DeployCommandTest {
         val m = machine()
         m.arm()
         now = DeployCommand.WINDOW_MS - 1 // a hair before the ceiling
-        assertEquals(DeployCommand.Verdict.Confirmed, m.confirm("go", OWNER, OWNER))
+        assertEquals(DeployCommand.Verdict.Confirmed(DeployCommand.Target.BOT), m.confirm("go", OWNER, OWNER))
     }
 
     @Test
     fun theGoIsConsumedByItsShot() {
         val m = machine()
         m.arm()
-        assertEquals(DeployCommand.Verdict.Confirmed, m.confirm("go", OWNER, OWNER))
+        assertEquals(DeployCommand.Verdict.Confirmed(DeployCommand.Target.BOT), m.confirm("go", OWNER, OWNER))
         // the double-tap: impatience must never launch a SECOND deploy
         assertEquals(DeployCommand.Verdict.NotArmed, m.confirm("go", OWNER, OWNER))
     }
@@ -65,7 +65,7 @@ class DeployCommandTest {
         m.arm()
         assertEquals(DeployCommand.Verdict.NotOwner, m.confirm("go", INTRUDER, OWNER))
         // the owner's confirmation was NOT consumed by the stranger's tap
-        assertEquals(DeployCommand.Verdict.Confirmed, m.confirm("go", OWNER, OWNER))
+        assertEquals(DeployCommand.Verdict.Confirmed(DeployCommand.Target.BOT), m.confirm("go", OWNER, OWNER))
     }
 
     @Test
@@ -73,7 +73,7 @@ class DeployCommandTest {
         val m = machine()
         m.arm()
         assertEquals(DeployCommand.Verdict.NotOwner, m.confirm("no", INTRUDER, OWNER))
-        assertEquals(DeployCommand.Verdict.Confirmed, m.confirm("go", OWNER, OWNER))
+        assertEquals(DeployCommand.Verdict.Confirmed(DeployCommand.Target.BOT), m.confirm("go", OWNER, OWNER))
     }
 
     @Test
@@ -107,7 +107,7 @@ class DeployCommandTest {
         now = DeployCommand.WINDOW_MS - 100_000 // 500s in: the first window is nearly spent
         m.arm() // the bare /deploy again — a FRESH 600s from NOW
         now += DeployCommand.WINDOW_MS - 100_000 // 500s after the RE-arm (1000s after the first)
-        assertEquals(DeployCommand.Verdict.Confirmed, m.confirm("go", OWNER, OWNER))
+        assertEquals(DeployCommand.Verdict.Confirmed(DeployCommand.Target.BOT), m.confirm("go", OWNER, OWNER))
     }
 
     @Test
@@ -116,14 +116,14 @@ class DeployCommandTest {
         m.arm()
         assertEquals(DeployCommand.Verdict.NotArmed, m.confirm("please", OWNER, OWNER))
         // a wrong word never spends the window — only go/no ever fires
-        assertEquals(DeployCommand.Verdict.Confirmed, m.confirm("go", OWNER, OWNER))
+        assertEquals(DeployCommand.Verdict.Confirmed(DeployCommand.Target.BOT), m.confirm("go", OWNER, OWNER))
     }
 
     @Test
     fun theVerdictVocabularyIsExactlyFive() {
         // the wiring renders one text per verdict — a sixth would render as silence
         val verdicts = listOf(
-            DeployCommand.Verdict.Confirmed,
+            DeployCommand.Verdict.Confirmed(DeployCommand.Target.BOT),
             DeployCommand.Verdict.Cancelled,
             DeployCommand.Verdict.Expired,
             DeployCommand.Verdict.NotArmed,
@@ -131,6 +131,44 @@ class DeployCommandTest {
         )
         assertEquals(5, verdicts.map { it::class }.toSet().size)
         assertIs<DeployCommand.Verdict.Confirmed>(verdicts.first())
+    }
+
+    // 2026-11-04 — the arm carries a TARGET: the go fires exactly what was armed.
+
+    @Test
+    fun theGoFiresExactlyTheArmedTarget() {
+        val m = machine()
+        m.arm(DeployCommand.Target.FORK)
+        assertEquals(DeployCommand.Verdict.Confirmed(DeployCommand.Target.FORK), m.confirm("go", OWNER, OWNER))
+        val both = machine()
+        both.arm(DeployCommand.Target.BOTH)
+        assertEquals(DeployCommand.Verdict.Confirmed(DeployCommand.Target.BOTH), both.confirm("go", OWNER, OWNER))
+    }
+
+    @Test
+    fun theDefaultArmIsTheBot() {
+        // the no-arg arm (the wiring's /deploy rest ladder) means the bot — never a surprise target
+        val m = machine()
+        m.arm()
+        assertEquals(DeployCommand.Verdict.Confirmed(DeployCommand.Target.BOT), m.confirm("go", OWNER, OWNER))
+    }
+
+    @Test
+    fun aReSelectionReplacesTheWholeArm() {
+        val m = machine()
+        m.arm(DeployCommand.Target.BOTH)
+        m.arm(DeployCommand.Target.FORK) // the newest choice is the only trusted one
+        assertEquals(DeployCommand.Verdict.Confirmed(DeployCommand.Target.FORK), m.confirm("go", OWNER, OWNER))
+    }
+
+    @Test
+    fun aTargetArmExpiresWithTheSameWindow() {
+        val m = machine()
+        m.arm(DeployCommand.Target.FORK)
+        now = DeployCommand.WINDOW_MS
+        assertEquals(DeployCommand.Verdict.Expired, m.confirm("go", OWNER, OWNER))
+        now += 1000
+        assertEquals(DeployCommand.Verdict.NotArmed, m.confirm("go", OWNER, OWNER))
     }
 
     private companion object {
