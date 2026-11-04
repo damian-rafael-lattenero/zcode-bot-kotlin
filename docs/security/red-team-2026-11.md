@@ -235,6 +235,18 @@ redacts the token in logs (`ChannelClientTest.handshakeWritesTheTokenOnTheWireOn
 unparseable server lines are counted and ignored, not fatal
 (`ChannelClientTest.unparseableAndUnknownLinesAreIgnoredNotFatal`).
 
+Unauthorized queries and id replay (server source, `daemonChannel.ts`): an
+unknown query kind answers `{"type":"error","code":"unknown_query"}` and the
+connection survives (additive protocol), an unknown request type answers
+`bad_request`, an oversized line is `bad_request` + `fatal` + destroy, and an
+inbound whose `messageId` was seen inside the 2-minute window answers
+`inbound_result {duplicate:true}` **without** re-sending the prompt — the
+at-least-once retry after a lost answer is idempotent on the expensive part.
+On the client, a frame whose id matches no waiter is dropped by design
+(`live.pending[id]?.complete`), so a replayed or forged `inbound_result` is a
+no-op. `inbound` with neither text nor attachments is refused
+(`bad_request`), so an empty frame cannot start a turn.
+
 **What the socket's auth does and does not protect** (honest): it protects
 against *other users* and accidental clients (0700 dir + 0600 socket), and
 against a stale process holding a rotated token. It cannot protect against a
