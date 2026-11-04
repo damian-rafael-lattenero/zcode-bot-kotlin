@@ -344,6 +344,7 @@ class PlanCommandTest {
         val o = FakeOps().apply {
             answers["botStatus"] = boundStatus
             answers["modelSelection"] = msJson()
+            answers["setModelSelection"] = msJson() // the retry's write must have somewhere to land
         }
         val bc = commands(o)
         bc.onCallback("pe:low", 6L, OWNER) // a draft first
