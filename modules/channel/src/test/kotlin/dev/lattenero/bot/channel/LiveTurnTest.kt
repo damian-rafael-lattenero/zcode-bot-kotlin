@@ -148,11 +148,37 @@ class LiveTurnTest {
         val writing = s!!.phase as TurnPhase.Writing
         assertNull(writing.tool) // tool null = the ANSWER itself
         assertEquals(12, s.answerChars)
+        // THE WORDS, NOT ONLY THE COUNT (owner, 3/11): the tail keeps the
+        // streamed text so the card renders it (Python's text[-3200:]).
+        assertEquals("La respuesta", s.answerTail)
+        s = reduce(s, ev("agent_message_chunk", "content" to str(" sigue")))
+        assertEquals("La respuesta sigue", s!!.answerTail)
+        assertEquals(18, s.answerChars)
+
+        // the replay guard: a sentence-sized re-emission the tail already
+        // ends with folds NOTHING (the fork's recovery, measured 30/10)
+        val sentence = " y esta es una frase completa que ya viajó."
+        s = reduce(s, ev("agent_message_chunk", "content" to str(sentence)))
+        val chars = s!!.answerChars
+        s = reduce(s, ev("agent_message_chunk", "content" to str(sentence)))
+        assertEquals(chars, s!!.answerChars, "a replayed sentence never doubles")
+        assertEquals(1, s.answerTail.split(sentence.trim()).size - 1, "…and never doubles in the tail")
 
         s = reduce(s, ev("task_complete", "stopReason" to str("end_turn"), "usage" to buildJsonObject { put("totalTokens", 4242) }))
         val done = s.phase as TurnPhase.Done
         assertEquals("end_turn", done.stopReason)
         assertEquals(4242L, s.usageTokens)
+    }
+
+    @Test
+    fun theCardSpeaksTheAnswerAsItStreams() {
+        var s: TurnLive? = null
+        s = reduce(s, ev("task_run_started"))
+        s = reduce(s, ev("agent_message_chunk", "content" to str("Voy a revisar <el> stream & volver.")))
+        val text = LiveTurn.render(s!!, nowMs = s.lastEventAtMs!! + 2_000, channelAlive = true)
+        assertTrue("<pre>" in text, "the live box carries the words in a pre block: $text")
+        assertTrue("Voy a revisar &lt;el&gt; stream &amp; volver." in text, "escaped, verbatim: $text")
+        assertTrue("escribiendo la respuesta" in text, text)
     }
 
     @Test

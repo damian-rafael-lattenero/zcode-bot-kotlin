@@ -234,11 +234,22 @@ private fun reduceThought(state: RenderState, event: RenderEvent.Thought): Rende
     }
 }
 
-/** agent_message_chunk: the answer's chars grow; real progress clears the retry pill. */
+/**
+ * agent_message_chunk: the answer's chars grow AND its tail keeps the
+ * words — the card renders the tail (Python's `text[-3200:]`), so the
+ * owner reads the answer as it streams instead of a bare counter. Real
+ * progress clears the retry pill. The replay guard mirrors the CoT's:
+ * the fork's stream recovery can re-emit a sentence-sized chunk the tail
+ * already ends with (measured 30/10), and short legitimate repeats
+ * (separators, tokens) must pass.
+ */
 private fun reduceAnswer(state: RenderState, event: RenderEvent.Answering): RenderState {
-    val chars = state.answerChars + event.delta.length
+    val delta = event.delta
+    if (delta.length >= REPLAY_GUARD_MIN_CP && state.answerTail.endsWith(delta)) return state
+    val chars = state.answerChars + delta.length
     return state.copy(
         answerChars = chars,
+        answerTail = LiveTurn.takeLastCodePoints(state.answerTail + delta, LiveTurn.ANSWER_TAIL_CP),
         phase = when (val phase = state.phase) {
             is TurnPhase.Done -> phase
             else -> TurnPhase.Writing(
@@ -249,7 +260,7 @@ private fun reduceAnswer(state: RenderState, event: RenderEvent.Answering): Rend
                 sinceMs = phaseSince(phase, state, event.nowMs),
             )
         },
-        apiRetry = if (event.delta.isNotEmpty()) null else state.apiRetry,
+        apiRetry = if (delta.isNotEmpty()) null else state.apiRetry,
     )
 }
 
