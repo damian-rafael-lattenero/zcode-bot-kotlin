@@ -7,6 +7,9 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
+/** The bot's configured owner — the taps the suite sends come from him. */
+private const val OWNER = 7L
+
 /**
  * /retry — Python's F22 rescue, the command half: the honest «nada» when
  * nothing fired yet, the verbatim re-fire through the SAME router (the
@@ -127,6 +130,7 @@ class RetryCommandTest {
             ops = ops,
             hub = LiveHub(),
             daemonReset = { "fake ladder" },
+            ownerUserId = { OWNER },
             clock = { 1_000_000L },
             history = history,
             defaultWorkspacePath = "/Users/damian/.zcode/workspace/default",
@@ -243,7 +247,7 @@ class RetryCommandTest {
         assertNull(bc.reply("arreglá el login del bot", 1L))
         assertEquals(listOf("task-77" to app), o.subscribed)
         // 2) the owner arms the ✍️ order on task-77 (tap → read → write the order)
-        val arm = bc.onCallback("so:task-77", 8L)!!
+        val arm = bc.onCallback("so:task-77", 8L, OWNER)!!
         assertTrue("Armado" in arm.text, "got: $arm")
         assertEquals(2, o.subscribed.size, "the arm's attach rode along")
         // 3) /retry with the arm live: the ack is the RETRY's — the saved prompt
@@ -270,7 +274,7 @@ class RetryCommandTest {
     @Test
     fun aFailedRetryKeepsTheArmedOrderUntouched() = runBlocking {
         val (bc, o, dir) = commands(FakeOps(boundStatus))
-        val arm = bc.onCallback("so:task-77", 8L)!!
+        val arm = bc.onCallback("so:task-77", 8L, OWNER)!!
         assertTrue("Armado" in arm.text)
         // nothing saved: the honest «nada» must not even touch the arm
         assertEquals(BotCommands.RETRY_NOTHING, bc.reply("/retry", 9L))

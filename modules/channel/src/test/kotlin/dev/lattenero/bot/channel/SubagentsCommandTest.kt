@@ -14,6 +14,9 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
+/** The bot's configured owner — the taps the suite sends come from him. */
+private const val OWNER = 7L
+
 /**
  * /subagents's NEW contract (the owner's order, 30/10: «que muestre el
  * subagente activo — y que no mezcle los inactivos»):
@@ -82,6 +85,7 @@ class SubagentsCommandTest {
         ops = FakeOps(),
         hub = hub,
         daemonReset = { "" },
+        ownerUserId = { OWNER },
         clock = { now },
         history = history,
         defaultWorkspacePath = "",
@@ -245,9 +249,9 @@ class SubagentsCommandTest {
     fun saoTapSwitchesToInactivosAndSaaBack() {
         val history = FakeHistory(listOf(SubagentRow("one", "completed", now - 9_000, now - 1_000)))
         val commands = bc(LiveHub(), history)
-        val inactive = runBlocking { commands.onCallback("sao:", 1L)!! }
+        val inactive = runBlocking { commands.onCallback("sao:", 1L, OWNER)!! }
         assertTrue("ended today" in inactive.text, "${inactive.text}")
-        val active = runBlocking { commands.onCallback("saa:", 2L)!! }
+        val active = runBlocking { commands.onCallback("saa:", 2L, OWNER)!! }
         assertTrue("No turn is being watched" in active.text, "${active.text}")
     }
 

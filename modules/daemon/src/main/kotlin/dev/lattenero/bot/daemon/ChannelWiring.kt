@@ -723,6 +723,10 @@ private fun buildPoller(
         boxTaps = liveView,
         lastPrompt = lastPrompt,
         brain = brain,
+        // THE OWNER'S ID — the SAME config read /deploy's door makes
+        // (`TgConfig.load(remote).ownerUserId`): the destructive taps'
+        // second lock reads the config at the tap, one truth, no copy.
+        ownerUserId = { TgConfig.load(remote).ownerUserId },
     )
     return Poller(
         api = liveApi,
@@ -771,7 +775,7 @@ private fun buildPoller(
                         update.data.startsWith("dep:") ->
                             deployFlow.onTap(update.data.removePrefix("dep:"), update.fromId)
 
-                        else -> commands.onCallback(update.data, update.updateId)
+                        else -> commands.onCallback(update.data, update.updateId, update.fromId)
                             ?.let { speak(it.text, false, it.markup) }
                     }
                 }

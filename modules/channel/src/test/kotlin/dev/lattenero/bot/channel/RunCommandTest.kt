@@ -6,6 +6,9 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
+/** The bot's configured owner — the taps the suite sends come from him. */
+private const val OWNER = 7L
+
 /**
  * /run <prompt> — Python's _cmd_run (handlers_tasks.py:343), the B5
  * command: a FRESH conversation and the prompt in it, ONE shot. The
@@ -137,6 +140,7 @@ class RunCommandTest {
             ops = ops,
             hub = LiveHub(),
             daemonReset = { "fake ladder" },
+            ownerUserId = { OWNER },
             clock = { 1_000_000L },
             history = FakeHistory(rows),
             defaultWorkspacePath = "/Users/damian/.zcode/workspace/default",
@@ -281,7 +285,7 @@ class RunCommandTest {
     @Test
     fun runNeverSpendsTheArmedOrderTheTypedLineStillFlies() = runBlocking {
         val (bc, o, dir) = commands(FakeOps(boundStatus))
-        val arm = bc.onCallback("so:task-77", 8L)!!
+        val arm = bc.onCallback("so:task-77", 8L, OWNER)!!
         assertTrue("Armado" in arm.text, "got: $arm")
         val refused = bc.reply("/run preparate el desayuno", 9L)!!
         assertTrue("✍️" in refused, "got: $refused")
