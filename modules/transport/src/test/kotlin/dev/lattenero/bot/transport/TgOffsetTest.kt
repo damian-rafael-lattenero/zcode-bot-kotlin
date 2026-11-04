@@ -31,6 +31,22 @@ class TgOffsetTest {
         assertEquals(0L, TgOffset.current(path))
     }
 
+    /**
+     * U9/F1: 0 is the DANGEROUS answer — it asks Telegram for up to 24 h of
+     * updates. The provenance is what lets the poller tell "first run" from
+     * "poisoned file" and refuse to replay a backlog of old commands.
+     */
+    @Test
+    fun readCarriesTheProvenanceOfTheZero() {
+        assertEquals(TgOffset.CursorState.ABSENT, TgOffset.read(path).state)
+        path.writeText("8801")
+        assertEquals(TgOffset.CursorReading(8801L, TgOffset.CursorState.LIVE), TgOffset.read(path))
+        path.writeText("12x")
+        assertEquals(TgOffset.CursorReading(0L, TgOffset.CursorState.CORRUPT), TgOffset.read(path))
+        path.writeText("")
+        assertEquals(TgOffset.CursorState.CORRUPT, TgOffset.read(path).state, "an empty file never parsed")
+    }
+
     @Test
     fun saveWritesTheDecimalAndLeavesNoTmpBehind() {
         TgOffset.save(path, 12345)

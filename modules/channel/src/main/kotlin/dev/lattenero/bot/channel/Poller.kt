@@ -76,8 +76,18 @@ sealed interface InboundUpdate {
     ) : InboundUpdate
 }
 
-/** One poll cycle's outcome — the offset to confirm POST-dispatch (F2d's at-least-once). */
-data class PollOutcome(val offset: Long, val messages: Int, val conflict: Boolean = false)
+/**
+ * One poll cycle's outcome — the offset to confirm POST-dispatch (F2d's
+ * at-least-once). [messages] counts what was DISPATCHED; [cursorLost]
+ * (U9/F1) says this pass began with a cursor that was never live, so the
+ * batch it fetched was consumed WITHOUT dispatching (see [Poller]).
+ */
+data class PollOutcome(
+    val offset: Long,
+    val messages: Int,
+    val conflict: Boolean = false,
+    val cursorLost: Boolean = false,
+)
 
 /**
  * B3b's poller — getUpdates as a Kap Process, SHIPPED OFF (`poll` knob in
@@ -112,8 +122,24 @@ class Poller(
      * (a plain lambda — this module stays stdlib-pure).
      */
     private val onCycle: (PollOutcome) -> Unit = {},
+    /**
+     * U9/F1: the cursor was never live (absent = first run, corrupt = a
+     * poisoned file) and a fetched batch was consumed WITHOUT dispatching.
+     * The count is what was dropped; the OWNER hears it once (the honest
+     * law: a silent drop is a lie by omission).
+     */
+    private val onCursorLost: suspend (Int) -> Unit = {},
 ) {
     private val mute = MuteTracker(clock)
+
+    /**
+     * The in-memory cursor FLOOR: the highest update_id this process has
+     * already consumed. It outranks the file so a disk that could not take
+     * the last save can never make THIS process re-dispatch a batch it
+     * already ran (U9/F1's other half — a failing write is not a license
+     * to replay /nuclear).
+     */
+    private var floor: Long = 0L
 
     /** One cycle: fetch → filter → dispatch → confirm the offset. */
     suspend fun cycle(cfg: TgConfig): PollOutcome {
@@ -124,8 +150,15 @@ class Poller(
 
     @Suppress("TooGenericExceptionCaught", "SwallowedException", "ReturnCount") // poison must not crash-loop (F35b)
     private suspend fun runCycle(cfg: TgConfig): PollOutcome {
-        if (!cfg.configured) return PollOutcome(TgOffset.current(offsetFile), 0)
-        val offset = TgOffset.current(offsetFile)
+        if (!cfg.configured) return PollOutcome(maxOf(floor, TgOffset.current(offsetFile)), 0)
+        val cursor = TgOffset.read(offsetFile)
+        val offset = maxOf(cursor.value, floor)
+        // U9/F1: a cursor that was never LIVE reads as 0, and 0 makes
+        // Telegram replay up to 24 h of updates — including every old
+        // `/nuclear go` / `/deploy go`. The FIRST pass of a lost cursor
+        // therefore CONSUMES the backlog without dispatching it (the
+        // owner is told); later passes ride the in-memory floor and flow.
+        val cursorLost = cursor.state != TgOffset.CursorState.LIVE && floor == 0L
         val (next, messages) = try {
             fetch(cfg, offset)
         } catch (e: CircuitBreakerOpen) {
@@ -146,6 +179,16 @@ class Poller(
             logger.warn { "poller RECOVERED after a ${window.toMs - window.fromMs}ms mute window — telling the owner" }
             onReconnected(window)
         }
+        if (cursorLost) {
+            logger.warn {
+                "getUpdates cursor LOST (${cursor.state}) — ${messages.size} fetched update(s) consumed WITHOUT " +
+                    "dispatching: a replay would re-run old commands (U9/F1); the cursor moves to $next"
+            }
+            saveCursor(next) // POST-consumption: the backlog dies HERE, never in the dispatcher
+            runCatching { onCursorLost(messages.size) }
+                .onFailure { logger.warn(it) { "cursor-lost notice failed (the drop stands)" } }
+            return PollOutcome(next, 0, cursorLost = true)
+        }
         for (message in messages) {
             try {
                 dispatch(cfg, message)
@@ -155,8 +198,28 @@ class Poller(
                 logger.warn(e) { "dispatch crashed (moving on): update_id=${message.updateId}" }
             }
         }
-        TgOffset.save(offsetFile, next) // POST-dispatch: at-least-once, never at-most-once
+        saveCursor(next) // POST-dispatch: at-least-once, never at-most-once
         return PollOutcome(next, messages.size)
+    }
+
+    /**
+     * Confirms the cursor: the FLOOR first (in-process truth), then the
+     * file. A failing save is logged and swallowed — the floor already
+     * keeps this process from re-dispatching, so a read-only disk costs
+     * durability across restarts, never a replay today.
+     */
+    @Suppress("TooGenericExceptionCaught", "SwallowedException") // the floor is the guarantee; the disk is the nicety
+    private fun saveCursor(next: Long) {
+        floor = maxOf(floor, next)
+        try {
+            TgOffset.save(offsetFile, next)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            logger.error(e) {
+                "tg-offset SAVE FAILED at $next — the in-memory floor keeps this process from re-dispatching"
+            }
+        }
     }
 
     /** fetch_updates: breaker around the call, offset advance over every update, the owner gate. */

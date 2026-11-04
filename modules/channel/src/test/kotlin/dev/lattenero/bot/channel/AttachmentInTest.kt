@@ -2,6 +2,7 @@ package dev.lattenero.bot.channel
 
 import dev.lattenero.bot.transport.TgApi
 import dev.lattenero.bot.transport.TgConfig
+import dev.lattenero.bot.transport.TgOffset
 import io.ktor.client.engine.HttpClientEngine
 import io.ktor.client.engine.HttpClientEngineFactory
 import io.ktor.client.engine.mock.MockEngine
@@ -37,6 +38,9 @@ class AttachmentInTest {
         dispatch: suspend (TgConfig, InboundUpdate) -> Unit = { _, _ -> },
     ): Poller {
         val api = TgApi({ cfg }, engineFactory = factory(body))
+        // U9/F1: dispatch only rides a LIVE cursor — these tests pin the
+        // attachment ladder, not the first-boot policy (see PollerCursorTest).
+        TgOffset.save(File(dir, "tg-offset"), 0)
         return Poller(api = api, offsetFile = File(dir, "tg-offset"), dispatch = dispatch)
     }
 
