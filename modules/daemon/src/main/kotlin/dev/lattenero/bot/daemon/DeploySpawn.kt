@@ -126,6 +126,18 @@ class DeploySpawn(
      * turns it into the phone's LOUD failure and THIS daemon stays up.
      */
     suspend fun spawn(): LaunchctlResult {
+        // THE BUSY GUARD comes first: a RUNNING deploy job cannot be
+        // bootout'ed (launchd answers error 5 while it runs — measured 4/11
+        // 16:28-16:39, the owner tapped fork/both AGAIN while the 16:28 fork
+        // deploy was mid-build) and double-running a deploy is the real
+        // hazard. The honest answer names the state, not launchd noise.
+        val precheck = launchctl.run(listOf("print", "${domain()}/$label"))
+        if (precheck.text.contains(JOB_RUNNING_MARK)) {
+            throw IllegalStateException(
+                "el deploy job $label ya está CORRIENDO — hay un deploy en curso; " +
+                    "esperá a que termine (el fork tarda ~15 min) y volvé a tocar",
+            )
+        }
         plistFile.parentFile?.mkdirs()
         plistFile.writeText(plist())
         logFile.parentFile?.mkdirs()
@@ -136,7 +148,9 @@ class DeploySpawn(
         // bootout two minutes later succeeded on the first try). rc=3 (not
         // loaded) is a fine outcome — nothing to clear. The bootstrap never
         // runs against a bootout that was still failing error 5 without a
-        // fight.
+        // fight. 5 attempts: the wedge can outlive 3 (~4 s) when concurrent
+        // launchd work hits the same domain (measured at 16:28, the fork's
+        // bootstrap racing the bot's bootout) — the budget is now ~10 s.
         for (attempt in 1..BOOTOUT_ATTEMPTS) {
             val bootout = launchctl.run(listOf("bootout", domain(), label))
             logger.info { "deploy job $label bootout #$attempt: exit=${bootout.exit} ${bootout.text.trim()}" }
@@ -207,10 +221,13 @@ class DeploySpawn(
         const val BOOTOUT_BEAT_MS = 2_000L
 
         /** The bootout's own retry ladder — a wedged label clears itself on a later try. */
-        const val BOOTOUT_ATTEMPTS = 3
+        const val BOOTOUT_ATTEMPTS = 5
 
         /** `Boot-out failed: 3: No such process` — the label is not loaded; nothing to clear. */
         const val BOOTOUT_NOT_LOADED_EXIT = 3
+
+        /** `launchctl print`'s marker for an ACTIVE deploy job — the busy guard's trigger. */
+        const val JOB_RUNNING_MARK = "state = running"
 
         /** launchd's own error-5 signature (disabled/stale label — the enable+retry trigger). */
         const val ERROR_5_MARK = "Bootstrap failed: 5"
