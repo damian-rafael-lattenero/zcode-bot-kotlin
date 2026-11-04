@@ -228,7 +228,7 @@ class TranscriptFeedTest {
             verbs,
         )
         assertEquals(1, msgs.size, "one collapsed message — the text lives behind the tap, not in the chat")
-        assertTrue("8K" in msgs[0].text)
+        assertTrue("generado 8k" in msgs[0].text, "the sealed block's verdict speaks the number law: ${msgs[0].text}")
     }
 
     @Test

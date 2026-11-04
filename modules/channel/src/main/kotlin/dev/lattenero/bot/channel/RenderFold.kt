@@ -86,6 +86,7 @@ fun reduce(
                         header = event.header,
                         pages = event.pages,
                         messageId = event.messageId,
+                        language = event.language,
                     )
                 ).takeLast(BOX_CAP), // the registry's own ceiling — the newest survive
         )
@@ -150,13 +151,25 @@ private fun reduceFrame(state: RenderState?, event: RenderEvent.FromFrame, diffe
         lastEventAtMs = if (event.atMs > 0) event.atMs else event.nowMs,
     )
     return when (event) {
-        is RenderEvent.Started -> refreshed.copy(startedAtMs = event.atMs.takeIf { it > 0 } ?: event.nowMs)
+        is RenderEvent.Started -> {
+            // THE HEADER'S CLOCK IS ZCODE'S, MIRRORED (v2 §1): the payload's
+            // startedAt beats the delivery `at` (the bus's clock can be
+            // minutes late after a recovery burst). MIN-GUARD: a re-emitted
+            // task_run_started never restarts the clock — the time counts
+            // from when the TASK started, not from the re-delivery.
+            val anchored = event.startedAtMs.takeIf { it > 0 }
+                ?: event.atMs.takeIf { it > 0 }
+                ?: event.nowMs
+            refreshed.copy(startedAtMs = minOf(refreshed.startedAtMs ?: anchored, anchored))
+        }
 
         is RenderEvent.Thought -> reduceThought(refreshed, event)
 
         is RenderEvent.Answering -> reduceAnswer(refreshed, event)
 
         is RenderEvent.ToolOpen -> reduceToolArrival(refreshed, event, differ)
+
+        is RenderEvent.ToolRunning -> reduceToolRunning(refreshed, event, differ)
 
         is RenderEvent.ToolClose -> reduceToolClose(refreshed, event, differ)
 
@@ -219,6 +232,10 @@ private fun reduceThought(state: RenderState, event: RenderEvent.Thought): Rende
             cotBlocks = blocks,
             cotPending = pending,
             cotTail = LiveTurn.takeLastCodePoints(state.cotTail + delta, LiveTurn.COT_TAIL_CP),
+            // THE CoT'S FRESHNESS ANCHOR (v2 §2): only the main agent's real
+            // deltas mark the thinking fresh — the «generando CoT vs
+            // procesando…» split reads it, subagent lanes never touch it
+            lastThoughtAtMs = event.atMs.takeIf { it > 0 } ?: event.nowMs,
             phase = TurnPhase.Thinking(chars = chars, sinceMs = phaseSince(state.phase, state, event.nowMs)),
             // REAL progress clears the retry pill (the fork's own recovery rule)
             apiRetry = if (delta.isNotEmpty()) null else state.apiRetry,
@@ -310,6 +327,61 @@ private fun reduceToolArrival(state: RenderState, event: RenderEvent.ToolOpen, d
                 lines = lane.lines,
                 rawChars = lane.rawChars,
                 sinceMs = existing?.openedAtMs ?: event.nowMs,
+            )
+        },
+    )
+}
+
+/**
+ * `tool_call_update` `in_progress` (v2 §3): the action IS alive — touch its
+ * lane's clock and, if the phase drifted to Thinking (a sibling closed),
+ * return to Writing on the lane's OWN `openedAtMs` anchor (the elapsed the
+ * verbLine renders is the ACTION's, not the arrival's). A never-opened lane
+ * opens here, anchored on the fork's own stamp. A closed lane never reopens.
+ */
+// the lane merge, one guard per field — the arrival's own shape (the ?: fallbacks ARE the table)
+@Suppress("CyclomaticComplexMethod")
+private fun reduceToolRunning(state: RenderState, event: RenderEvent.ToolRunning, differ: LineDiffer): RenderState {
+    val toolId = event.tool.toolId ?: return state
+    val existing = state.tools.firstOrNull { it.toolId == toolId }
+    val name = event.tool.name ?: existing?.name ?: "tool"
+    val streamed = event.tool.streamedLines
+    // the partial projection only ever GROWS the count (sampling may stutter)
+    val lines = when {
+        streamed > 0 -> streamed
+        else -> existing?.lines ?: 0
+    }
+    val input = event.tool.input ?: existing?.input
+    val liveDiff = liveEditDiff(input, differ)
+    val anchor = existing?.openedAtMs ?: event.atMs.takeIf { it > 0 } ?: event.nowMs
+    val lane = ToolLive(
+        toolId = toolId,
+        name = name,
+        title = event.tool.title ?: existing?.title,
+        parentToolUseId = event.tool.parentToolUseId ?: existing?.parentToolUseId,
+        subagentAgentId = event.tool.subagentAgentId ?: existing?.subagentAgentId,
+        openedAtMs = anchor,
+        lines = lines,
+        rawChars = event.tool.rawChars ?: existing?.rawChars ?: 0,
+        input = input,
+        status = existing?.status, // a closed lane does not reopen
+        isMcp = existing?.isMcp ?: event.tool.isMcp,
+        added = liveDiff?.first ?: existing?.added,
+        removed = liveDiff?.second ?: existing?.removed,
+        lastUpdateAtMs = event.nowMs,
+    )
+    val tools = state.tools.filterNot { it.toolId == toolId } + lane
+    return state.copy(
+        tools = tools,
+        phase = when {
+            state.phase is TurnPhase.Done -> state.phase
+            existing?.status != null -> state.phase // a closed lane's stale ping moves no phase
+            else -> TurnPhase.Writing(
+                tool = name,
+                toolId = toolId,
+                lines = lane.lines,
+                rawChars = lane.rawChars,
+                sinceMs = anchor, // the action's own anchor — the elapsed runs on it
             )
         },
     )

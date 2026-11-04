@@ -56,4 +56,30 @@ class ToolOutputPagesTest {
         assertEquals(ToolOutputPages.MAX_PAGES + 1, pages.size)
         assertTrue("no entra en Telegram" in pages.last())
     }
+
+    // ---- live card v2 §5/§6: the bash fence and the filename law ----
+
+    @Test
+    fun shellPagesRideTheBashFenceNonShellKeepPlain() {
+        val pages = listOf("   1│ uno", "   2│ dos")
+        val bash = ToolOutputPages.renderPage("H", pages, 0, "bash")
+        assertTrue("<pre><code class=\"language-bash\">   1│ uno</code></pre>" in bash, bash)
+        assertEquals("H\n<pre>   1│ uno</pre>", ToolOutputPages.renderPage("H", pages, 0), "non-shell: the plain pre")
+        // the esc law holds inside the fence too
+        val evil = ToolOutputPages.renderPage("H", listOf("   1│ <b>&</b>"), 0, "bash")
+        assertTrue("&lt;b&gt;&amp;&lt;/b&gt;" in evil, evil)
+    }
+
+    @Test
+    fun theHeaderElidesAPathButKeepsThePreviewForACommand() {
+        // 162 cp of path against the 120 budget: dirs elide, basename whole
+        val deep = "/verylongpath".repeat(10) + "/file-name.kt"
+        val header = ToolOutputPages.headerOf("📖 <b>Read</b>", deep, 3)
+        assertTrue("…/" in header, header)
+        assertTrue("file-name.kt</code>" in header, "basename + extension byte-for-byte: $header")
+        assertTrue(deep !in header, "the dir chain actually elided")
+        // a COMMAND is not a path — it previews as always
+        val cmd = ToolOutputPages.headerOf("⚡ <b>Bash</b>", "npm run build --verbose", 5)
+        assertTrue("<code>npm run build --verbose</code>" in cmd)
+    }
 }

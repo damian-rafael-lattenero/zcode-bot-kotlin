@@ -1,5 +1,6 @@
 package dev.lattenero.bot.channel
 
+import dev.lattenero.bot.contracts.PyText
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
@@ -249,7 +250,7 @@ class LiveTurnTest {
         // THE WORKING HEADER (the owner's 2/11 law: the desktop pill's
         // mirror — hace cuánto empezó la tarea) + the NOW line beneath it
         assertTrue("⏳ <b>Working · 2s</b>" in text)
-        assertTrue("🧠 <b>pensando</b> · 40 caracteres" in text)
+        assertTrue("🧠 <b>generando CoT</b> · 40 caracteres" in text, "a fresh delta IS the CoT flowing: $text")
         assertTrue("40 caracteres" in text) // the counter, with the total
         assertTrue("💓" !in text) // THE HEART IS DEAD (the owner's 30/10 verdict)
         assertTrue("💭" !in text) // the blink died with the redraw law: only REAL change re-draws
@@ -267,7 +268,7 @@ class LiveTurnTest {
         val frozen = LiveTurn.render(s, nowMs = last + 42_000, channelAlive = true)
         assertTrue("(42s sin eventos)" in frozen)
         assertTrue("⏳ <b>Working · 0s</b>" in frozen, "the turn timer froze at the last event")
-        assertTrue("· 0s (42s sin eventos)" in frozen, "the thinking line's timer froze too")
+        assertTrue("🧠 <b>procesando…</b> (42s sin eventos)" in frozen, "a frozen card never claims «generando»: $frozen")
         // 42s of silence is still «en vivo» — the line carries the honest age,
         // «frozen» is reserved for the cut stream (the hard word lives at 90s)
         assertTrue("en vivo · último evento hace 42s" in frozen)
@@ -294,8 +295,8 @@ class LiveTurnTest {
             ),
         )
         val text = LiveTurn.render(s!!, nowMs = s.lastEventAtMs!! + 10_000, channelAlive = true)
-        assertTrue("🔧 <b>Write</b> · 4 líneas" in text) // the MINIMAL fallback verb (the real map is daemon-side)
-        assertTrue("4 líneas · " in text) // raw is gone — human copy only counts lines // the open lane keeps its counters
+        // the retry pill holds the frozen clock — the NOW timer runs on it
+        assertTrue("🔧 <b>Write</b> · 0s · 4 líneas" in text, text) // the write family's line: timer + streamed lines
         assertTrue("⚠️ Rate limited — retrying 2/5" in text)
     }
 
@@ -367,7 +368,7 @@ class LiveTurnTest {
         }
         var s: TurnLive? = null
         s = reduce(
-            s,
+            null,
             ev(
                 "tool_call", "toolId" to str("tr"), "toolName" to str("Read"),
                 "input" to buildJsonObject { put("file_path", str("/w/Main.kt")) },
@@ -384,7 +385,9 @@ class LiveTurnTest {
             ),
         )
         text = LiveTurn.render(s!!, nowMs = s.lastEventAtMs!!, channelAlive = true, verbs = verbs)
-        assertTrue("⚡ <b>shell</b> <code>npm test</code>" in text)
+        // v2 §3/§5: the bash NOW line IS the command — complete, in the bash block
+        assertTrue("⚡ <b>Bash</b> · 0s" in text, text)
+        assertTrue("<pre><code class=\"language-bash\">npm test</code></pre>" in text, text)
 
         // the minimal fallback knows MCP on its own (mcp__ or the plugin marker)
         s = reduce(
@@ -601,11 +604,11 @@ class LiveTurnTest {
     }
 
     @Test
-    fun bashLaneShowsItsCommandAndPromisesTheOutputAtClose() {
-        // the daemon's real map puts the command in the detail — the lane
-        // shows WHAT runs, not just the verb
-        val verbs = ToolVerbifier { name, input, _ ->
-            if (name == "Bash") ToolVerb("⚡", "shell", input?.str("command") ?: "") else ToolVerb("🔧", name)
+    fun bashLaneShowsItsCompleteCommandInTheBashBlock() {
+        // v2 §3/§5: the NOW line for a shell speaks the command WHOLE inside
+        // the bash block (Telegram's closest to «fondo negro, letras verdes»)
+        val verbs = ToolVerbifier { name, _, _ ->
+            if (name == "Bash") ToolVerb("⚡", "shell", "") else ToolVerb("🔧", name)
         }
         var s: TurnLive? = null
         s = reduce(
@@ -616,9 +619,22 @@ class LiveTurnTest {
             ),
         )
         val text = LiveTurn.render(s!!, nowMs = s.lastEventAtMs!!, channelAlive = true, verbs = verbs)
-        assertTrue("⚡ <b>shell</b> <code>npm test</code>" in text) // the command renders on the lane
-        assertTrue("salida al cerrar" in text) // honest: this fork streams no live tool output
+        assertTrue("⚡ <b>Bash</b> · 0s" in text, text)
+        assertTrue("<pre><code class=\"language-bash\">npm test</code></pre>" in text, text)
         assertTrue("0 líneas" !in text) // the invented zero is GONE
+        // a >1800 cp command: the card shows the head and promises the feed —
+        // the command itself is NEVER elided mid-way there (v2 §3)
+        s = reduce(
+            s,
+            ev(
+                "tool_call", "toolId" to str("tbig"), "toolName" to str("Bash"),
+                "input" to buildJsonObject { put("command", str("y".repeat(2000))) },
+            ),
+        )
+        val big = LiveTurn.render(s, nowMs = s.lastEventAtMs!!, channelAlive = true, verbs = verbs)
+        assertTrue("y".repeat(1800) in big, "the first 1800 cp ride the card")
+        assertTrue("y".repeat(1801) !in big, "…and not one more")
+        assertTrue("✂️ … el comando completo va en el feed" in big, big)
     }
 
     @Test
@@ -644,7 +660,7 @@ class LiveTurnTest {
         )
         assertEquals(3, s!!.tools.first().outputLines)
         val text = LiveTurn.render(s, nowMs = s.lastEventAtMs!!, channelAlive = true)
-        assertTrue("🔧 Bash: 3 líneas de salida" in text)
+        assertTrue("🔧 Bash · 0s · 3 líneas de salida" in text, "the stamp carries the runtime (v2 §5): $text")
         // a structured payload invents no count (the close boxes render it)
         s = reduce(
             s,
@@ -779,6 +795,210 @@ class LiveTurnTest {
         s = reduce(s, ev("task_complete", "stopReason" to str("end_turn")))
         val done = LiveTurn.render(s!!, nowMs = now, channelAlive = true, giftsLine = prize)
         assertTrue("Premios" !in done) // a Done card is a verdict, not a shelf
+    }
+
+    // ---- live card v2 §1: the header's clock is zcode's, mirrored ----
+
+    @Test
+    fun theHeaderClockAnchorsOnTheForksStartedAtAndNeverRestarts() {
+        var s = reduce(
+            null,
+            ServerFrame.StreamEvent(
+                "task-9", 1, 60_000L,
+                buildJsonObject { put("type", "task_run_started"); put("startedAt", 10_000) },
+            ),
+        )
+        assertEquals(10_000L, s!!.startedAtMs, "the payload's startedAt beats the delivery clock")
+        s = reduce(
+            s,
+            ServerFrame.StreamEvent(
+                "task-9", 2, 120_000L,
+                buildJsonObject { put("type", "task_run_started"); put("startedAt", 30_000) },
+            ),
+        )
+        assertEquals(10_000L, s!!.startedAtMs, "a re-emitted start (stream recovery) never restarts the clock")
+    }
+
+    @Test
+    fun theWorkingHeadCountsFromTheTasksRealStart() {
+        // delivery at 51s, the task REALLY started at 1s: the header says so
+        var s = reduce(
+            null,
+            ServerFrame.StreamEvent(
+                "task-9", 1, 51_000L,
+                buildJsonObject { put("type", "task_run_started"); put("startedAt", 1_000) },
+            ),
+        )
+        s = reduce(s, thought("pensando"))
+        val text = LiveTurn.render(s!!, nowMs = s.lastEventAtMs!! + 1_000, channelAlive = true)
+        assertTrue("⏳ <b>Working · 1m40s</b>" in text, "the header counts from zcode's start: $text")
+    }
+
+    @Test
+    fun inProgressKeepsTheActionAliveWithItsOwnAnchor() {
+        var s: TurnLive? = null
+        s = reduce(
+            s,
+            ev(
+                "tool_call", "toolId" to str("t1"), "toolName" to str("Bash"),
+                "input" to buildJsonObject { put("command", str("npm test")) },
+            ),
+        )
+        val openedAt = s!!.tools.first().openedAtMs
+        // a sibling opens and closes — the phase drifts to Thinking
+        s = reduce(
+            s,
+            ev(
+                "tool_call", "toolId" to str("t2"), "toolName" to str("Bash"),
+                "input" to buildJsonObject { put("command", str("ls")) },
+            ),
+        )
+        s = reduce(s, ev("tool_call_update", "toolId" to str("t2"), "status" to str("completed")))
+        assertTrue(s!!.phase is TurnPhase.Thinking)
+        // t1's in_progress: back to Writing on t1's OWN anchor
+        s = reduce(
+            s,
+            ev("tool_call_update", "toolId" to str("t1"), "toolName" to str("Bash"), "status" to str("in_progress")),
+        )
+        val writing = s.phase as TurnPhase.Writing
+        assertEquals("t1", writing.toolId)
+        assertEquals(openedAt, writing.sinceMs, "the action's elapsed keeps the openedAtMs anchor")
+        assertEquals("Bash", writing.tool)
+    }
+
+    // ---- live card v2 §2: «procesando…» vs «generando CoT» ----
+
+    @Test
+    fun theThinkingSplitsGeneratingCoTFromPureProcessing() {
+        var s: TurnLive? = null
+        s = reduce(s, thought("pensando el problema")) // the delta just landed — the CoT IS flowing
+        val last = s!!.lastEventAtMs!!
+        val fresh = LiveTurn.render(s, nowMs = last + 2_000, channelAlive = true)
+        assertTrue("🧠 <b>generando CoT</b> · 20 caracteres · 2s" in fresh, fresh)
+        // 6s since the last delta: under the staleness window, past the CoT
+        // one — the honest «procesando…» (the model may be computing pure)
+        val quiet = LiveTurn.render(s, nowMs = last + 6_000, channelAlive = true)
+        assertTrue("🧠 <b>procesando…</b>" in quiet, quiet)
+        assertTrue("sin eventos" !in quiet, "the staleness degrade has not fired under 20s")
+        // THE FROZEN CLOCK IS NEVER «GENERANDO»: the freshness reads the
+        // real clock, so 42s of silence says «procesando…» + the honest age
+        val frozen = LiveTurn.render(s, nowMs = last + 42_000, channelAlive = true)
+        assertTrue("🧠 <b>procesando…</b> (42s sin eventos)" in frozen, frozen)
+        // a subagent's narration does not keep the CoT fresh
+        var sub = reduce(null, thought("main", parent = null))
+        sub = reduce(sub, thought("sub narration", parent = "lane-A"))
+        val subFresh = LiveTurn.render(sub!!, nowMs = sub.lastEventAtMs!! + 6_000, channelAlive = true)
+        assertTrue("🧠 <b>procesando…</b>" in subFresh, "subagent lanes never refresh the card's CoT: $subFresh")
+    }
+
+    @Test
+    fun afterAToolClosesTheThinkingStartsProcesandoUntilNewDeltas() {
+        // v2 §2: lastThoughtAtMs is old right after a close — «procesando…»
+        // immediately; the first new delta flips it to «generando CoT»
+        var s: TurnLive? = null
+        s = reduce(s, thought("antes de la acción"))
+        val thoughtAt = s!!.lastEventAtMs!!
+        s = reduce(
+            s,
+            ev(
+                "tool_call", "toolId" to str("t1"), "toolName" to str("Bash"),
+                "input" to buildJsonObject { put("command", str("ls")) },
+            ),
+        )
+        // the tool runs 6s (past COT_QUIET_MS), then closes
+        val closed = reduce(
+            s,
+            ServerFrame.StreamEvent(
+                "task-9", seq + 1, thoughtAt + 6_000,
+                buildJsonObject { put("type", "tool_call_update"); put("toolId", "t1"); put("status", "completed") },
+            ),
+        )
+        val afterClose = LiveTurn.render(closed, nowMs = closed.lastEventAtMs!! + 1_000, channelAlive = true)
+        assertTrue("🧠 <b>procesando…</b>" in afterClose, afterClose)
+        val again = reduce(closed, thought("el CoT sigue"))
+        val freshAgain = LiveTurn.render(again, nowMs = again.lastEventAtMs!! + 1_000, channelAlive = true)
+        assertTrue("🧠 <b>generando CoT</b>" in freshAgain, freshAgain)
+    }
+
+    // ---- live card v2 §3/§6: the edit line and the filename law ----
+
+    @Test
+    fun theEditNowLineElidesThePathButNeverTheBasename() {
+        val deep = "/home/owner/Projects/zcode-bot-kotlin/modules/channel/src/main/kotlin/dev/lattenero/bot/channel/LiveTurn.kt"
+        val verbs = ToolVerbifier { name, _, _ ->
+            if (name == "Edit") ToolVerb("✏️", "editing", "") else ToolVerb("🔧", name)
+        }
+        var s: TurnLive? = null
+        s = reduce(
+            s,
+            ev(
+                "tool_call", "toolId" to str("te"), "toolName" to str("Edit"),
+                "input" to buildJsonObject {
+                    put("file_path", str(deep))
+                    put("old_string", str("a\nb"))
+                    put("new_string", str("a\nX\nb\nc"))
+                },
+            ),
+        )
+        val text = LiveTurn.render(s!!, nowMs = s.lastEventAtMs!!, channelAlive = true, verbs = verbs)
+        // the MINIMUM elision wins: the longest head that fits the budget
+        assertTrue(
+            "✏️ <b>Edit</b> · 0s — <code>…/src/main/kotlin/dev/lattenero/bot/channel/LiveTurn.kt</code>" in text,
+            "dir chain elided from the left, basename+extension whole: $text",
+        )
+        assertTrue("LiveTurn.kt</code>" in text)
+        assertTrue("🟢 +3 · 🔴 −1" in text, "the LIVE diff rides the NOW line: $text")
+    }
+
+    @Test
+    fun theStampCarriesTheRealRuntime() {
+        var s: TurnLive? = null
+        s = reduce(
+            s,
+            ev(
+                "tool_call", "toolId" to str("tb"), "toolName" to str("Bash"),
+                "input" to buildJsonObject { put("command", str("npm test")) },
+            ),
+        )
+        val openedAt = s!!.tools.first().openedAtMs
+        // the close lands 12s after the open — BOTH anchors are real events
+        val closed = reduce(
+            s,
+            ServerFrame.StreamEvent(
+                "task-9", seq + 1, openedAt + 12_000,
+                buildJsonObject {
+                    put("type", "tool_call_update"); put("toolId", "tb"); put("status", "completed")
+                    put("content", "out1\nout2")
+                },
+            ),
+        )
+        val text = LiveTurn.render(closed, nowMs = closed.lastEventAtMs!!, channelAlive = true)
+        assertTrue("🔧 Bash · 12s · 2 líneas de salida" in text, "the measured runtime, frozen-clock-safe: $text")
+    }
+
+    // ---- live card v2: the number law and the filename law, as tables ----
+
+    @Test
+    fun fmtKDecimalSpeaksTheNumberLaw() {
+        assertEquals("999", LiveTurn.fmtKDecimal(999))
+        assertEquals("1k", LiveTurn.fmtKDecimal(1_000))
+        assertEquals("1,25k", LiveTurn.fmtKDecimal(1_250))
+        assertEquals("2,75k", LiveTurn.fmtKDecimal(2_750))
+        assertEquals("3k", LiveTurn.fmtKDecimal(3_000))
+        assertEquals("999,99k", LiveTurn.fmtKDecimal(999_999), "the K rung floors — «1000k» cannot exist")
+        assertEquals("1M", LiveTurn.fmtKDecimal(1_000_000), "the M rung starts exactly AT the boundary")
+        assertEquals("1,5M", LiveTurn.fmtKDecimal(1_500_000))
+    }
+
+    @Test
+    fun elidePathNeverCutsInsideTheBasename() {
+        assertEquals("/a/b/c.txt", PyText.elidePath("/a/b/c.txt", 100), "fits → unchanged")
+        assertEquals("…/chain/file-name.kt", PyText.elidePath("/very/long/dir/chain/file-name.kt", 20))
+        assertEquals("…/file-name.kt", PyText.elidePath("/very/long/dir/chain/file-name.kt", 14))
+        // the basename alone over the budget is the CALLER's problem — the
+        // helper returns it whole under «…/», never cut inside
+        assertEquals("…/superlongname.txt", PyText.elidePath("/d/superlongname.txt", 5))
+        assertEquals("…/nombre.txt", PyText.elidePath("nombre.txt", 5), "a relative path elides the same way")
     }
 
 }

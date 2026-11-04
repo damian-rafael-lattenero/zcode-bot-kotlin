@@ -99,6 +99,20 @@ sealed interface TurnPhase {
 }
 
 /**
+ * The shell family, ONE source (the card's bash block, the feed's collapse,
+ * the pager's fence all read it) — the same names the spectator's ToolBox
+ * classifies SHELL.
+ */
+internal val SHELL_TOOLS = setOf("Bash", "Shell")
+
+/**
+ * The file-writing family (the card's edit NOW line, the edit pings): the
+ * spectator's EDIT + WRITE tables — the live +N/−M folds for the EDIT
+ * half; a bare Write (no old side) honestly shows no counts.
+ */
+internal val WRITE_EDIT_TOOLS = setOf("Edit", "MultiEdit", "Replace", "Write", "Create", "New")
+
+/**
  * The fork's TYPED terminal error (ZCodeTaskError: error, code?, detail?,
  * attribution?{source, reason, statusCode, providerErrorCode, retryable}) —
  * surfaced as its own pill, the honest end of a dead turn.
@@ -159,6 +173,12 @@ data class BoxLive(
     val messageId: Long,
     /** The page the message shows: [FOLDED] = the header + its one button. */
     val page: Int = FOLDED,
+    /**
+     * The pages' fence language (v2 §5): `bash` for a shell's output — the
+     * tap's render wraps the numbered body in the bash code block; null =
+     * the plain `<pre>`. Carried by the fold: the tap renders FROM here.
+     */
+    val language: String? = null,
 ) {
     companion object {
         /** The folded mark: the message shows its header, no page open. */
@@ -215,6 +235,13 @@ data class TurnLive(
     val doneTools: Int = 0,
     val failedTools: Int = 0,
     val interaction: InteractionPending? = null,
+    /**
+     * The last MAIN-AGENT thought's real moment (v2 §2): the «generando CoT
+     * vs procesando…» split's anchor. Subagent lanes never touch it (their
+     * narration is the 🤖 row, not the card's thinking state); a replayed
+     * chunk never refreshes it (the replay guard returns state whole).
+     */
+    val lastThoughtAtMs: Long? = null,
     /** The fork's own retry pill (session_info_update.apiRetry / task_network_debug_status). */
     val apiRetry: ApiRetryPill? = null,
     /** The fork's typed terminal error — the honest seal of a dead turn. */
@@ -325,6 +352,14 @@ internal object StreamEvents {
 
     fun status(event: JsonObject): String? = event.str("status")
 
+    /**
+     * task_run_started's payload clock — zcode's OWN start stamp, epoch ms
+     * (v2 §1). The frame's `at` is the DELIVERY clock (the daemon's
+     * `at: now()`); after a recovery burst it can be minutes late. 0/null =
+     * absent (the delivery clock keeps its fallback).
+     */
+    fun startedAt(event: JsonObject): Long = event.long("startedAt") ?: 0L
+
     fun input(event: JsonObject): JsonObject? = event.obj("input")
 
     /** pluginMetadata.component == "mcp" — the fork's own MCP marker. */
@@ -427,6 +462,13 @@ object LiveTurn {
     /** Thinking degrades honestly after this silence — «(30s sin eventos)». */
     const val STALE_SOFT_MS = 20_000L
 
+    /**
+     * The CoT's freshness window (v2 §2): a main-agent thought younger than
+     * this means the CoT is ACTUALLY flowing — «generando CoT»; past it the
+     * honest word is «procesando…» (the model may be computing pure).
+     */
+    const val COT_QUIET_MS = 5_000L
+
     /** After this the line says the stream is probably CUT — still honest, never fabricated. */
     const val STALE_HARD_MS = 90_000L
 
@@ -500,11 +542,17 @@ object LiveTurn {
 
             is TurnPhase.Thinking -> {
                 lines.add(workingHead(state.title, elapsed))
-                val stale = stalenessWord(silence, channelAlive)
-                // THE PENDING TAIL IS A ONE-LINER (the owner, 2/11: the CoT
-                // never spills — he opens the collapsed blocks when he wants)
+                // v2 §2: the pure-computing state vs the CoT actually
+                // flowing. The freshness reads the REAL clock — a frozen
+                // card (silence, dead channel, error) is never «generando»;
+                // its honest word is «procesando…» plus the staleness line.
+                val fresh = state.lastThoughtAtMs != null && nowMs - state.lastThoughtAtMs < COT_QUIET_MS
                 lines.add(
-                    "🧠 <b>pensando</b> · ${phase.chars} caracteres · ${fmtDur(clockNow - phase.sinceMs)}$stale",
+                    if (fresh) {
+                        "🧠 <b>generando CoT</b> · ${phase.chars} caracteres · ${fmtDur(clockNow - phase.sinceMs)}"
+                    } else {
+                        "🧠 <b>procesando…</b>${stalenessWord(silence, channelAlive)}"
+                    },
                 )
             }
 
@@ -524,7 +572,7 @@ object LiveTurn {
                 } else {
                     val lane = phase.toolId?.let { id -> state.tools.firstOrNull { it.toolId == id } }
                     val verb = verbs.of(lane?.name ?: phase.tool ?: "", lane?.input, lane?.isMcp ?: false)
-                    lines.add(verbLine(verb, lane, phase, clockNow, silence, channelAlive))
+                    lines.addAll(verbLines(verb, lane, phase, clockNow, silence, channelAlive))
                 }
             }
         }
@@ -597,8 +645,7 @@ object LiveTurn {
      */
     private fun laneLine(lane: ToolLive, verbs: ToolVerbifier, clockNow: Long, nowMs: Long): String {
         val verb = verbs.of(lane.name, lane.input, lane.isMcp)
-        val clipped = PyText.preview(verb.detail, DETAIL_CP)
-        val detail = if (clipped.isNotEmpty()) " <code>${PyText.esc(clipped)}</code>" else ""
+        val detail = detailOf(shapedDetail(verb.detail, DETAIL_CP))
         // a dispatch lane whose child was ACKed never freezes: the child runs
         // as its OWN session (the sa: attach's card is the honest view) and
         // the parent stream carries nothing until the dispatch result — a
@@ -624,47 +671,119 @@ object LiveTurn {
         else -> " · salida al cerrar"
     }
 
-    /** One closed lane's verdict line: the edit's diff, the output's lines. */
+    /** One closed lane's verdict line: the runtime (REAL, both anchors are
+     *  real events — frozen-clock-safe, v2 §5), the edit's diff, the
+     *  output's lines. */
     private fun stampLine(lane: ToolLive, verbs: ToolVerbifier): String {
         val mark = when (lane.status) {
             "failed" -> " ❌"
             "denied", "stopped" -> " ⏹️"
             else -> ""
         }
+        val runtime = lane.lastUpdateAtMs?.let { " · ${fmtDur(it - lane.openedAtMs)}" } ?: ""
         val verdict = when {
             lane.added != null || lane.removed != null -> "🟢 +${lane.added ?: 0} · 🔴 −${lane.removed ?: 0}"
             lane.outputLines != null -> "${lane.outputLines} líneas de salida"
             else -> PyText.esc(lane.status ?: "listo")
         }
-        return "${verbs.of(lane.name, lane.input, lane.isMcp).emoji} ${PyText.esc(lane.name)}: $verdict$mark"
+        return "${verbs.of(lane.name, lane.input, lane.isMcp).emoji} ${PyText.esc(lane.name)}$runtime · $verdict$mark"
     }
 
-    /** The NOW line for a tool: verb + target + the honest counters + the
-     *  tool's OWN elapsed (the timer runs on [clockNow] — the frozen
-     *  clock, never the present) + the staleness word. */
-    private fun verbLine(
+    /**
+     * The NOW line(s) for a tool (v2 §3): the tool's OWN elapsed (the fold
+     * anchored the phase on the lane's openedAtMs; the timer runs on
+     * [clockNow] — the frozen clock, never the present) + the staleness
+     * word — and, for the two families the owner reads RAW, the target
+     * itself: the shell's complete command in a bash code block (≤
+     * [COMMAND_CARD_CP] rides the card; longer shows the head and promises
+     * the feed — never elided mid-command there), the edit's elided path +
+     * its LIVE diff. Other tools keep the one-line verb + detail.
+     */
+    // one branch per family (shell / write-edit / the rest) — the NOW line IS the state machine
+    @Suppress("CyclomaticComplexMethod")
+    private fun verbLines(
         verb: ToolVerb,
         lane: ToolLive?,
         phase: TurnPhase.Writing,
         clockNow: Long,
         silence: Long,
         channelAlive: Boolean,
-    ): String {
-        val clipped = PyText.preview(verb.detail, DETAIL_CP)
-        val detail = if (clipped.isNotEmpty()) " <code>${PyText.esc(clipped)}</code>" else ""
+    ): List<String> {
         val stale = stalenessWord(silence, channelAlive)
         val timer = fmtDur(clockNow - phase.sinceMs)
+        val name = lane?.name ?: phase.tool ?: ""
+        return when {
+            lane != null && name in SHELL_TOOLS -> {
+                val head = "${verb.emoji} <b>${PyText.esc(name)}</b> · $timer$stale"
+                val cmd = TranscriptFeed.commandOf(lane.input)
+                    ?.takeIf { it.isNotBlank() }
+                listOf(head) + (cmd?.let(::commandBlock) ?: emptyList())
+            }
+
+            lane != null && name in WRITE_EDIT_TOOLS ->
+                listOf(editNowLine(verb, lane, timer, stale))
+
+            else -> {
+                val detail = detailOf(shapedDetail(verb.detail, DETAIL_CP))
+                val counts = when {
+                    lane != null && (lane.added != null || lane.removed != null) ->
+                        " · 🟢 +${lane.added ?: 0} · 🔴 −${lane.removed ?: 0}"
+
+                    phase.lines > 0 -> " · ${phase.lines} líneas"
+
+                    lane != null -> laneCounts(lane) // «salida al cerrar» — the fork streams no live output
+                    else -> ""
+                }
+                listOf("${verb.head()}$detail$counts · $timer$stale")
+            }
+        }
+    }
+
+    /**
+     * The shell's command block (v2 §5): Telegram's bash highlighting is
+     * the closest to «fondo negro, letras verdes» — a message cannot force
+     * colors, that is the honest ceiling. ≤ [COMMAND_CARD_CP] code points
+     * ride complete; longer shows the head and promises the feed (which
+     * speaks the command ONCE, complete).
+     */
+    private fun commandBlock(cmd: String): List<String> = when {
+        PyText.cpLength(cmd) <= COMMAND_CARD_CP ->
+            listOf("<pre><code class=\"language-bash\">${PyText.esc(cmd)}</code></pre>")
+
+        else -> listOf(
+            "<pre><code class=\"language-bash\">${PyText.esc(PyText.take(cmd, COMMAND_CARD_CP))}</code></pre>",
+            "✂️ … el comando completo va en el feed",
+        )
+    }
+
+    /** The edit's NOW line (v2 §3): path through the filename law, the
+     *  LIVE +N/−M from the folding differ (a bare Write has no old side —
+     *  its streamed lines are the honest feedback instead). */
+    private fun editNowLine(verb: ToolVerb, lane: ToolLive, timer: String, stale: String): String {
+        val path = lane.input?.str("file_path") ?: lane.input?.str("path") ?: ""
+        val target = if (path.isEmpty()) "" else " — <code>${PyText.esc(PyText.elidePath(path, DETAIL_CP))}</code>"
         val counts = when {
-            lane != null && (lane.added != null || lane.removed != null) ->
-                " · 🟢 +${lane.added ?: 0} · 🔴 −${lane.removed ?: 0}"
-
-            phase.lines > 0 -> " · ${phase.lines} líneas"
-
-            lane != null -> laneCounts(lane) // «salida al cerrar» — the fork streams no live output
+            lane.added != null || lane.removed != null -> " · 🟢 +${lane.added ?: 0} · 🔴 −${lane.removed ?: 0}"
+            lane.lines > 0 -> " · ${lane.lines} líneas"
             else -> ""
         }
-        return "${verb.head()}$detail$counts · $timer$stale"
+        return "${verb.emoji} <b>${PyText.esc(lane.name)}</b> · $timer$target$counts$stale"
     }
+
+    /**
+     * The one-line detail: a PATH-SHAPED detail (no whitespace, has
+     * slashes) elides from the left per the filename law (v2 §6 — the
+     * basename + extension never cut); everything else previews as today.
+     */
+    private fun shapedDetail(raw: String, maxCp: Int): String =
+        if (raw.isNotEmpty() && raw.none { it.isWhitespace() } && '/' in raw) {
+            PyText.elidePath(raw, maxCp)
+        } else {
+            PyText.preview(raw, maxCp)
+        }
+
+    private fun detailOf(shaped: String): String =
+        if (shaped.isNotEmpty()) " <code>${PyText.esc(shaped)}</code>" else ""
 
     /** The honest staleness word — silence is data, never a hidden spinner. */
     internal fun stalenessWord(silenceMs: Long, channelAlive: Boolean): String = when {
@@ -693,7 +812,7 @@ object LiveTurn {
             blocks == 1 -> "1 bloque plegado"
             else -> "$blocks bloques plegados"
         }
-        val pendingWord = if (pending == 0) null else "${fmtK(pending)} en camino"
+        val pendingWord = if (pending == 0) null else "${fmtKDecimal(pending.toLong())} en camino"
         return when {
             blocksWord == null && pendingWord == null -> null
             else -> "📖 CoT: " + listOfNotNull(blocksWord, pendingWord).joinToString(" · ")
@@ -708,6 +827,27 @@ object LiveTurn {
         }
 
         else -> n.toString()
+    }
+
+    /**
+     * v2's number law: K/M rungs with DECIMAL COMMA, trailing zeros
+     * trimmed, FLOORED — never rounds into the next rung («1000k» cannot
+     * exist), and the M rung starts exactly at 1_000_000 (1M, never
+     * «1000k»). Spoken by the pings, the CoT row's «en camino» and the
+     * sealed blocks' «generado Xk»; the card's phase lines keep raw counts.
+     */
+    internal fun fmtKDecimal(n: Long): String = when {
+        n < K_FROM -> n.toString()
+        n < M_FROM -> rung(n, K_FROM.toLong()) + "k"
+        else -> rung(n, M_FROM) + "M"
+    }
+
+    /** The rung's text: floor at two decimals, comma decimal, zeros trimmed. */
+    private fun rung(n: Long, divisor: Long): String {
+        val hundredths = n * 100 / divisor
+        val whole = hundredths / 100
+        val frac = (hundredths % 100).toString().padStart(2, '0').trimEnd('0')
+        return if (frac.isEmpty()) "$whole" else "$whole,$frac"
     }
 
     /**
@@ -767,6 +907,13 @@ object LiveTurn {
     private const val DETAIL_CP = 60
 
     /**
+     * The card's command budget (v2 §3): a bash command up to this many
+     * code points rides the card COMPLETE inside the bash block; longer
+     * shows the head and promises the feed (which speaks it once, whole).
+     */
+    const val COMMAND_CARD_CP = 1800
+
+    /**
      * A plain lane with no event for this long renders FROZEN — its clock
      * stops (the doctrine) and the line dims. 10 minutes: a pending
      * elicitation or a slow legit run stays live well under it; the
@@ -777,6 +924,7 @@ object LiveTurn {
     private const val TEN = 10L
     private const val SECONDS_PER_MINUTE = 60L
     private const val SECONDS_PER_HOUR = 3600L
+    private const val M_FROM = 1_000_000L
 
     /** The fallback title's length — the sid's tail («644150daf013»). */
     internal const val TITLE_TAIL = 12

@@ -53,6 +53,91 @@ class RenderFoldTest {
         assertEquals(1_000L, s.startedAtMs)
     }
 
+    // ---- v2 §1: the header's clock is zcode's, mirrored -------------------------
+
+    @Test
+    fun theStartedAnchorIsThePayloadsStampAndNeverRestarts() {
+        // the payload's startedAt (the task's real start) beats the delivery
+        // clock — the fresh seed anchors on it
+        var s = reduce(null, RenderEvent.Started("task-9", seq = 1, atMs = 60_000, nowMs = 60_000, startedAtMs = 10_000))
+        assertEquals(10_000L, s!!.startedAtMs, "the header counts from zcode's own start stamp")
+        // MIN-GUARD: a re-emitted task_run_started (stream recovery) never
+        // restarts the clock — min(existing, new)
+        s = reduce(s, RenderEvent.Started("task-9", seq = 2, atMs = 120_000, nowMs = 120_000, startedAtMs = 30_000))
+        assertEquals(10_000L, s!!.startedAtMs, "a re-delivery never restarts the task's clock")
+        // absent payload: the delivery clock keeps its fallback
+        s = reduce(null, RenderEvent.Started("task-9", seq = 3, atMs = 45_000, nowMs = 50_000, startedAtMs = 0))
+        assertEquals(45_000L, s!!.startedAtMs)
+        // both absent: the receive clock
+        s = reduce(null, RenderEvent.Started("task-9", seq = 4, atMs = 0, nowMs = 77_000, startedAtMs = 0))
+        assertEquals(77_000L, s!!.startedAtMs)
+    }
+
+    // ---- v2 §3: the in_progress fold ---------------------------------------------
+
+    private fun toolRunning(toolId: String, seq: Long, atMs: Long = seq, nowMs: Long = seq, name: String? = null) =
+        RenderEvent.ToolRunning(
+            taskId = "task-9",
+            seq = seq,
+            atMs = atMs,
+            nowMs = nowMs,
+            tool = ToolCall(toolId = toolId, name = name, streamedLines = 0, rawChars = null, isMcp = false),
+        )
+
+    @Test
+    fun inProgressRestoresWritingOnTheLanesOwnAnchor() {
+        // lane A opens (anchor = 1), a sibling B opens+closes (the phase
+        // drifts to Thinking), then A's in_progress arrives: the phase
+        // returns to Writing on A's OWN openedAtMs — the action's elapsed,
+        // never restarted by the ping's arrival
+        var s = reduce(null, toolOpenEvent(toolId = "tA", seq = 1))
+        s = reduce(s, toolOpenEvent(toolId = "tB", seq = 2))!!
+        s = reduce(s, toolCloseEvent(toolId = "tB", output = "out", seq = 3))!!
+        assertTrue(s!!.phase is TurnPhase.Thinking, "the close drifted the phase to Thinking")
+        s = reduce(s, toolRunning(toolId = "tA", seq = 4))!!
+        val writing = s.phase as TurnPhase.Writing
+        assertEquals("tA", writing.toolId)
+        assertEquals(1L, writing.sinceMs, "the action's elapsed keeps the lane's openedAtMs anchor")
+        assertEquals(4L, s.tools.first { it.toolId == "tA" }.lastUpdateAtMs, "the lane was touched")
+    }
+
+    @Test
+    fun inProgressOnANeverOpenedLaneOpensItAtTheForksOwnStamp() {
+        // no pending/final ever arrived: the lane opens here, anchored on
+        // the event's OWN clock (atMs), not the delivery/receive clock
+        val s = reduce(null, toolRunning(toolId = "tX", seq = 5, atMs = 5_000, nowMs = 6_000, name = "Bash"))!!
+        val lane = s.tools.single()
+        assertEquals("Bash", lane.name)
+        assertEquals(5_000L, lane.openedAtMs)
+        val writing = s.phase as TurnPhase.Writing
+        assertEquals("tX", writing.toolId)
+        assertEquals(5_000L, writing.sinceMs)
+    }
+
+    @Test
+    fun inProgressNeverReopensAClosedLane() {
+        var s = reduce(null, toolOpenEvent(toolId = "tC", seq = 1))
+        s = reduce(s, toolCloseEvent(toolId = "tC", output = "out", seq = 2))!!
+        val before = s
+        s = reduce(s, toolRunning(toolId = "tC", seq = 3))!!
+        assertEquals("completed", s!!.tools.single().status, "a closed lane does not reopen")
+        assertEquals(before!!.phase, s.phase, "a closed lane's stale ping moves no phase")
+        assertEquals(3L, s.tools.single().lastUpdateAtMs, "the touch itself still lands")
+    }
+
+    // ---- v2 §2: the CoT freshness anchor -----------------------------------------
+
+    @Test
+    fun onlyTheMainAgentsThoughtsMarkTheCoTFresh() {
+        var s = reduce(null, thought("pensando"))!!
+        val mainStamp = s.lastThoughtAtMs
+        assertNotNull(mainStamp, "the main lane's delta marks the thinking fresh")
+        assertEquals(s.lastEventAtMs, mainStamp)
+        s = reduce(s, thought("sub narration", parent = "lane-A"))!!
+        assertEquals(mainStamp, s!!.lastThoughtAtMs, "a subagent's narration never refreshes the card's CoT")
+        assertEquals(13, s.subagentThought["lane-A"], "the subagent's own lane still grows")
+    }
+
     // ---- the hub's verbs, as events -------------------------------------------
 
     @Test
