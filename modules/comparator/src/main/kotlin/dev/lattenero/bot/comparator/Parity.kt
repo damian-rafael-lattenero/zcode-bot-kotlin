@@ -13,8 +13,11 @@ data class ParityReport(
     val coverageStart: Double,
     val zconn: ZconnParity,
     val spectator: SpectatorParity,
-    /** PARITY (every overlapping event agrees) · DIVERGENT · INSUFFICIENT (nothing overlapping yet). */
+    /** PARITY (every overlapping event agrees) · DIVERGENT · INSUFFICIENT
+     *  (nothing overlapping yet, a stale baseline). */
     val verdict: String,
+    /** Why INSUFFICIENT, when the plain «nothing overlaps» is not the cause (null = no reason). */
+    val verdictReason: String? = null,
 )
 
 @Serializable
@@ -64,6 +67,9 @@ object Parity {
 
     const val ZCONN_TOLERANCE_S = 60.0
     const val TURN_TOLERANCE_S = 90.0
+
+    /** A reference older than two days is a frozen baseline, not a comparison (post-retirement law). */
+    const val BASELINE_STALE_S = 2 * 86_400.0
     private val STEP_SUFFIX = Regex(""" · <b>(\d+)</b>$""")
 
     fun zconn(python: List<ZconnTruth>, shadow: List<ShadowDecision>, coverageStart: Double): ZconnParity {
@@ -172,13 +178,33 @@ object Parity {
         )
     }
 
-    fun verdict(z: ZconnParity, s: SpectatorParity): String = when {
+    /**
+     * THE VERDICT — and its ONE honesty law since the Python retirement
+     * (2026-11-04): the Python side is the REFERENCE, and a frozen
+     * reference proves nothing. A baseline whose newest event is older
+     * than [BASELINE_STALE_S] is INSUFFICIENT even when the counts
+     * "diverge" — otherwise every post-retirement day would print
+     * DIVERGENT forever (measured: python=2/4 frozen since 30/10 while
+     * shadow grew to 235) and the daily audit would train its reader to
+     * ignore it. Only a LIVE baseline can earn PARITY or DIVERGENT.
+     */
+    fun verdict(
+        z: ZconnParity,
+        s: SpectatorParity,
+        baselineNewestTs: Double? = null,
+        nowS: Double? = null,
+    ): String = when {
+        baselineStale(baselineNewestTs, nowS) -> "INSUFFICIENT"
         z.pythonOnly > 0 || z.shadowOnly > 0 || s.stepMismatches > 0 || s.pythonOnly > 0 || s.shadowOnly > 0 ->
             "DIVERGENT"
 
         z.matched + s.matched == 0 -> "INSUFFICIENT"
         else -> "PARITY"
     }
+
+    /** True when the reference side has not moved for longer than the staleness window. */
+    fun baselineStale(newestTs: Double?, nowS: Double?): Boolean =
+        newestTs != null && nowS != null && nowS - newestTs > BASELINE_STALE_S
 
     private const val HEADER_SUFFIX = "— Mac turn live (spectator)"
 }

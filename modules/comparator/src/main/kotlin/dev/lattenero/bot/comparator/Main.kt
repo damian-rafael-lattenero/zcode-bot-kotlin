@@ -36,12 +36,27 @@ fun main(args: Array<String>) {
     )
     val z = Parity.zconn(zconnTruth, shadow, coverageStart)
     val s = Parity.spectator(spectatorTruth, Parity.shadowTurns(shadow), coverageStart)
+    // THE REFERENCE'S PULSE (2026-11-04): the newest Python event, both logs.
+    // A frozen reference (the retirement) makes the comparison INSUFFICIENT —
+    // never a forever-DIVERGENT.
+    val nowS = nowMs / MILLIS_PER_SECOND
+    val baselineNewest = listOfNotNull(
+        zconnTruth.maxOfOrNull { it.ts },
+        spectatorTruth.maxOfOrNull { it.startTs },
+    ).maxOrNull()
+    val stale = Parity.baselineStale(baselineNewest, nowS)
+    val reason = if (stale && baselineNewest != null) {
+        "python baseline stale since ${Instant.ofEpochSecond(baselineNewest.toLong())} — the reference is retired, nothing to compare"
+    } else {
+        null
+    }
     val report = ParityReport(
         generatedIso = Instant.ofEpochMilli(nowMs).toString(),
         coverageStart = coverageStart,
         zconn = z,
         spectator = s,
-        verdict = Parity.verdict(z, s),
+        verdict = Parity.verdict(z, s, baselineNewest, nowS),
+        verdictReason = reason,
     )
     val json = Json { prettyPrint = true }
     File(outDir, "report-${Instant.ofEpochMilli(nowMs).toString().take(DAY)}.json")
@@ -58,7 +73,7 @@ fun main(args: Array<String>) {
             "shadow=${s.shadowTurns} matched=${s.matched} stepMismatches=${s.stepMismatches} " +
             "pythonOnly=${s.pythonOnly} shadowOnly=${s.shadowOnly}",
     )
-    println("verdict: ${report.verdict}")
+    println("verdict: ${report.verdict}${report.verdictReason?.let { " ($it)" } ?: ""}")
 }
 
 private data class Config(
