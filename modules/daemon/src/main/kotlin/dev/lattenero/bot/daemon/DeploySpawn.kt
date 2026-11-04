@@ -39,6 +39,13 @@ class DeploySpawn(
     private val script: File,
     private val logFile: File,
     private val plistFile: File,
+    /**
+     * The one-shot job's OWN label — the survival law's whole point. The
+     * daemon deploy keeps [Companion.JOB_LABEL]; the fork deploy runs as
+     * [FORK_JOB_LABEL], a sibling of BOTH the daemon and the daemon's
+     * deploy job (in a BOTH deploy each script outlives the other's bootout).
+     */
+    private val label: String = JOB_LABEL,
     private val uid: String = currentUid(),
     private val javaHome: String = System.getProperty("java.home"),
     private val home: String = System.getProperty("user.home"),
@@ -68,7 +75,7 @@ class DeploySpawn(
         appendLine("""<plist version="1.0">""")
         appendLine("<dict>")
         appendLine("    <key>Label</key>")
-        appendLine("    <string>$JOB_LABEL</string>")
+        appendLine("    <string>$label</string>")
         appendLine("    <key>ProgramArguments</key>")
         appendLine("    <array>")
         appendLine("        <string>${xml(script.absolutePath)}</string>")
@@ -115,17 +122,17 @@ class DeploySpawn(
         plistFile.parentFile?.mkdirs()
         plistFile.writeText(plist())
         logFile.parentFile?.mkdirs()
-        launchctl.run(listOf("bootout", domain(), JOB_LABEL))
+        launchctl.run(listOf("bootout", domain(), label))
         var out = launchctl.run(listOf("bootstrap", domain(), plistFile.absolutePath))
         if (out.exit != 0) {
             beat(BOOTOUT_BEAT_MS)
             out = launchctl.run(listOf("bootstrap", domain(), plistFile.absolutePath))
         }
         if (out.exit != 0) {
-            throw IllegalStateException("launchctl bootstrap $JOB_LABEL failed: ${out.text.trim()}")
+            throw IllegalStateException("launchctl bootstrap $label failed: ${out.text.trim()}")
         }
         // the log's line is the RECEIPT: only a bootstrapped job earns it
-        logFile.appendText("\n==> deploy job $JOB_LABEL armed at ${java.time.Instant.now()}\n")
+        logFile.appendText("\n==> deploy job $label armed at ${java.time.Instant.now()}\n")
         return out
     }
 
@@ -148,8 +155,17 @@ class DeploySpawn(
         /** The one-shot job's label — INDEPENDENT of the daemon's (the survival is the point). */
         const val JOB_LABEL = "com.zcode.bot-deploy"
 
+        /** The fork deploy's own label — a sibling of the daemon AND of the daemon's deploy job. */
+        const val FORK_JOB_LABEL = "com.zcode.bot-fork-deploy"
+
+        /** The fork deploy's log — the fork's words never mix with the daemon's. */
+        const val FORK_LOG_FILE_NAME = "deploy-fork.log"
+
         /** The rendered plist's file name inside the daemon's state dir. */
         const val JOB_PLIST_NAME = "deploy-job.plist"
+
+        /** The fork job's rendered plist name — its own file, its own bootout. */
+        const val FORK_JOB_PLIST_NAME = "deploy-fork-job.plist"
 
         /** The beat between a failed bootstrap and its one retry (lib/deploy.nu's measured fix). */
         const val BOOTOUT_BEAT_MS = 2_000L
@@ -191,18 +207,31 @@ private fun runLaunchctl(args: List<String>): LaunchctlResult = try {
 object DeployScriptKnob {
 
     private const val KEY = "deploy_script"
+    private const val FORK_KEY = "deploy_fork_script"
 
     val DEFAULT: File =
         File(System.getProperty("user.home"), "Projects/zcode-bot-kotlin/scripts/deploy-daemon.nu")
 
+    /** The fork deploy's script — the same repo, its own one-shot automaton. */
+    val FORK_DEFAULT: File =
+        File(System.getProperty("user.home"), "Projects/zcode-bot-kotlin/scripts/deploy-fork-and-retire.nu")
+
     // any reading failure is the same answer: the default (SendKnob's degrade law)
     @Suppress("TooGenericExceptionCaught")
-    fun load(daemonJson: File): File = try {
+    fun load(daemonJson: File): File = load(daemonJson, KEY, DEFAULT, "deploy_script")
+
+    /** The fork's knob — its own key (`deploy_fork_script`), the same degrade law. */
+    @Suppress("TooGenericExceptionCaught")
+    fun loadFork(daemonJson: File): File = load(daemonJson, FORK_KEY, FORK_DEFAULT, FORK_KEY)
+
+    // any reading failure is the same answer: the default (SendKnob's degrade law)
+    @Suppress("TooGenericExceptionCaught")
+    private fun load(daemonJson: File, key: String, default: File, logName: String): File = try {
         val root = Json.parseToJsonElement(daemonJson.readText()) as? JsonObject
-        (root?.get(KEY) as? JsonPrimitive)?.takeIf { it.isString }?.content
-            ?.takeIf { it.isNotBlank() }?.let { File(it) } ?: DEFAULT
+        (root?.get(key) as? JsonPrimitive)?.takeIf { it.isString }?.content
+            ?.takeIf { it.isNotBlank() }?.let { File(it) } ?: default
     } catch (e: Exception) {
-        logger.warn { "deploy_script knob unreadable (${e.message}) — the default repo script stays" }
-        DEFAULT
+        logger.warn { "$logName knob unreadable (${e.message}) — the default repo script stays" }
+        default
     }
 }

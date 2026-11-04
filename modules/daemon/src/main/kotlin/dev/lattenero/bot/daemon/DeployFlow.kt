@@ -1,6 +1,7 @@
 package dev.lattenero.bot.daemon
 
 import dev.lattenero.bot.channel.DeployCommand
+import dev.lattenero.bot.channel.DeployCommand.Target
 import dev.lattenero.bot.channel.DeployCommand.Verdict
 import dev.lattenero.bot.channel.Keyboards
 import io.github.oshai.kotlinlogging.KotlinLogging
@@ -23,45 +24,59 @@ private val logger = KotlinLogging.logger {}
  *
  * [say]'s contract is the send leg's: never throws, answers the born
  * message's id (null = shadow/dry-run/parked/failed — nothing flew).
- * [spawn]'s contract is the edge's: fork-and-forget, throws only when the
- * child could not be born (missing script, unwritable log) — a throw
- * means THIS daemon stays up and the phone hears it LOUD.
+ * [spawn]'s contract is the edge's: fork-and-forget for the target's OWN
+ * sibling launchd job(s), throws only when a child could not be born
+ * (missing script, unwritable log) — a throw means THIS daemon stays up
+ * and the phone hears it LOUD.
+ *
+ * 2026-11-04 — three targets: bare /deploy offers 🤖 bot / 🍴 fork /
+ * 🚀 both; the tap arms THAT target and the go fires exactly it. The
+ * fork deploy does NOT touch this daemon (the canal 📡 dies with the
+ * app and comes back with it); the bot deploy boots out THIS daemon —
+ * and BOTH is fork FIRST, because a sibling job survives the bootout
+ * (the spawn order is the whole point, not a style choice).
  */
 class DeployFlow(
     private val machine: DeployCommand,
     private val say: suspend (String, Boolean, JsonObject?) -> Long?,
-    private val spawn: suspend () -> Unit,
+    private val spawn: suspend (Target) -> Unit,
     /** The config's owner, read PER USE (the config cadence); null = nobody confirms. */
     private val ownerUserId: () -> Long?,
 ) {
 
     /**
-     * The message path — Python's rest ladder: "go" runs, "no" cancels,
-     * ANYTHING ELSE (bare included) arms a fresh window and shows the card.
+     * The message path — Python's rest ladder, widened: "go" runs the
+     * armed target, "no" cancels, a TARGET WORD arms that target, and
+     * ANYTHING ELSE (bare included) shows the target card.
      */
     suspend fun onText(rest: String, fromId: Long?) {
-        val word = rest.trim().lowercase()
-        handle(
-            when (word) {
-                DeployCommand.ACTION_GO -> DeployCommand.ACTION_GO
-                DeployCommand.ACTION_NO -> DeployCommand.ACTION_NO
-                else -> ACTION_CARD
-            },
-            fromId,
-        )
+        handle(wordToAction(rest.trim().lowercase()), fromId)
     }
 
     /** The tap path — the callback_data without its `dep:` prefix. */
     suspend fun onTap(action: String, fromId: Long?) = handle(action, fromId)
 
+    private fun wordToAction(word: String): String = when (word) {
+        DeployCommand.ACTION_GO -> DeployCommand.ACTION_GO
+        DeployCommand.ACTION_NO -> DeployCommand.ACTION_NO
+        TARGET_WORD_BOT, TARGET_WORD_FORK, TARGET_WORD_BOTH -> word
+        else -> ACTION_CARD
+    }
+
     private suspend fun handle(action: String, fromId: Long?) {
-        if (action == ACTION_CARD) {
-            machine.arm()
-            say(CARD, false, Keyboards.deployConfirm())
+        // a target word ARMS that target and shows ITS confirm card — the
+        // newest selection is the only trusted one (the re-arm law)
+        targetOf(action)?.let { target ->
+            machine.arm(target)
+            say(confirmCard(target), false, Keyboards.deployConfirm())
             return
         }
-        when (machine.confirm(action, fromId, ownerUserId())) {
-            Verdict.Confirmed -> launch()
+        if (action == ACTION_CARD) {
+            say(TARGETS_CARD, false, Keyboards.deployTargets())
+            return
+        }
+        when (val verdict = machine.confirm(action, fromId, ownerUserId())) {
+            is Verdict.Confirmed -> launch(verdict.target)
             Verdict.Cancelled -> say(CANCELLED, false, null)
             Verdict.Expired -> say(EXPIRED, true, null)
             Verdict.NotArmed -> say(NOT_ARMED, false, null)
@@ -71,48 +86,126 @@ class DeployFlow(
 
     /** THE DOOR: announce → receipt check → spawn. The order is the whole point. */
     @Suppress("TooGenericExceptionCaught") // the spawn edge: any failure speaks LOUD, never crashes the poller
-    private suspend fun launch() {
-        val receipt = say(THE_ANNOUNCE, true, null)
+    private suspend fun launch(target: Target) {
+        val receipt = say(announceOf(target), true, null)
         if (receipt == null) {
-            logger.warn { "deploy: the announce did NOT land — spawn REFUSED (no blind restarts)" }
+            logger.warn { "deploy($target): the announce did NOT land — spawn REFUSED (no blind restarts)" }
             say(ANNOUNCE_FAILED, true, null)
             return
         }
         try {
-            spawn()
-            logger.warn {
-                "deploy: script spawned detached (announce message_id=$receipt) — this daemon may die mid-build"
+            // BOTH splits HERE, in the door: fork FIRST — its job must be armed
+            // before the daemon's deploy boots out this daemon. The order is
+            // the survival law, so it lives where the tests can pin it.
+            when (target) {
+                Target.BOTH -> {
+                    spawn(Target.FORK)
+                    spawn(Target.BOT)
+                }
+                else -> spawn(target)
             }
-            say(SPAWNED, false, null)
+            logger.warn {
+                "deploy($target): script(s) spawned detached (announce message_id=$receipt) — " +
+                    "this daemon may die mid-build"
+            }
+            say(spawnedNote(target), false, null)
         } catch (e: Exception) {
-            logger.error(e) { "deploy: the spawn FAILED — this daemon stays up" }
+            logger.error(e) { "deploy($target): the spawn FAILED — this daemon stays up" }
             say(SPAWN_FAILED + (e.message ?: e::class.simpleName.orEmpty()), true, null)
         }
+    }
+
+    private fun confirmCard(target: Target): String = when (target) {
+        Target.BOT -> CONFIRM_BOT
+        Target.FORK -> CONFIRM_FORK
+        Target.BOTH -> CONFIRM_BOTH
+    }
+
+    private fun announceOf(target: Target): String = when (target) {
+        Target.BOT -> THE_ANNOUNCE
+        Target.FORK -> THE_ANNOUNCE_FORK
+        Target.BOTH -> THE_ANNOUNCE_BOTH
+    }
+
+    private fun spawnedNote(target: Target): String = when (target) {
+        Target.BOT -> SPAWNED
+        Target.FORK -> SPAWNED_FORK
+        Target.BOTH -> SPAWNED_BOTH
     }
 
     companion object {
         /** The wiring's action word for the bare (or unrecognized) /deploy. */
         const val ACTION_CARD = "card"
 
+        /** The target words — taps arrive as `dep:<word>`, texts as the bare rest. */
+        const val TARGET_WORD_BOT = "bot"
+        const val TARGET_WORD_FORK = "fork"
+        const val TARGET_WORD_BOTH = "both"
+
+        fun targetOf(action: String): Target? = when (action) {
+            TARGET_WORD_BOT -> Target.BOT
+            TARGET_WORD_FORK -> Target.FORK
+            TARGET_WORD_BOTH -> Target.BOTH
+            else -> null
+        }
+
+        /** The selection card — WHAT can be deployed, not yet a confirmation. */
+        const val TARGETS_CARD = "🚀 <b>Deploy</b>\n¿Qué deployo? Elegí el objetivo — después te pido la confirmación."
+
         /**
-         * The card — the REAL pipeline (build with tests → install →
-         * LaunchAgent restart → armed-heartbeat verification) and the
-         * window's honest length.
+         * The confirm cards — each names the REAL pipeline it will run and
+         * the honest cost (what dies, what survives).
          */
-        val CARD = (
-            "🚀 <b>Deploy del daemon</b>\n" +
+        val CONFIRM_BOT = (
+            "🤖 <b>Deploy del daemon (Bot Kotlin)</b>\n" +
                 "build (Gradle, tests incluidos) → install → relanza el LaunchAgent → " +
                 "verifica el heartbeat armado.\n" +
                 "La confirmación vence en ${DeployCommand.WINDOW_MS / 60_000} min. ¿Confirmás?"
             )
 
-        /** The door's exact sentence — the phone hears it BEFORE the script can kill this daemon. */
+        val CONFIRM_FORK = (
+            "🍴 <b>Deploy del fork de ZCode</b>\n" +
+                "quit del app → build-install (swap de /Applications/ZCode.app) → reopen → " +
+                "verifica socket y smoke del canal.\n" +
+                "El daemon del bot SOBREVIVE; el canal 📡 se cae mientras el app compila y reabre.\n" +
+                "La confirmación vence en ${DeployCommand.WINDOW_MS / 60_000} min. ¿Confirmás?"
+            )
+
+        val CONFIRM_BOTH = (
+            "🚀 <b>Deploy de AMBOS</b>\n" +
+                "Primero el fork (el canal 📡 se cae), después el daemon (el bot se reinicia) — " +
+                "ambos como jobs de launchd hermanos: sobreviven al bootout del otro.\n" +
+                "La confirmación vence en ${DeployCommand.WINDOW_MS / 60_000} min. ¿Confirmás?"
+            )
+
+        /** The door's exact sentences — the phone hears them BEFORE any script can kill anything. */
         const val THE_ANNOUNCE = "🚀 Deployando el daemon — vuelvo en un momento"
+
+        const val THE_ANNOUNCE_FORK = (
+            "🍴 Deployando el fork de ZCode — el canal 📡 se cae y vuelve con el app nuevo"
+            )
+
+        const val THE_ANNOUNCE_BOTH = (
+            "🚀 Deployando AMBOS — primero el fork, después el daemon; vuelvo en un momento"
+            )
 
         const val SPAWNED = (
             "🛠 Script lanzado detached — el build tarda minutos y el daemon " +
                 "NUEVO saluda al boot (el script verifica heartbeat + armed + log tail). " +
                 "Log: <code>~/.zcode/bot-kotlin/logs/deploy-daemon.log</code> — /file lo trae."
+            )
+
+        const val SPAWNED_FORK = (
+            "🛠 Script del fork lanzado detached — el app compila minutos y reabre solo " +
+                "(el canal 📡 vuelve con él; el daemon sigue arriba). " +
+                "Log: <code>~/.zcode/bot-kotlin/logs/deploy-fork.log</code> — /file lo trae."
+            )
+
+        const val SPAWNED_BOTH = (
+            "🛠 Ambos scripts lanzados detached — fork y daemon compilan en paralelo " +
+                "y cada verificación saluda al volver. " +
+                "Logs: <code>~/.zcode/bot-kotlin/logs/deploy-fork.log</code> y " +
+                "<code>deploy-daemon.log</code> — /file los trae."
             )
 
         const val ANNOUNCE_FAILED = (
@@ -127,7 +220,10 @@ class DeployFlow(
                 "mandá /deploy de nuevo."
             )
 
-        const val NOT_ARMED = "🤷 No hay confirmación armada (ya se usó o nunca hubo) — mandá /deploy."
+        const val NOT_ARMED = (
+            "🤷 No hay confirmación armada (ya se usó o nunca hubo) — " +
+                "mandá /deploy y elegí el objetivo."
+            )
 
         const val NOT_OWNER = "🚫 Solo el dueño confirma el deploy."
 
