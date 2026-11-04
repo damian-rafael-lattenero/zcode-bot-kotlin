@@ -486,6 +486,10 @@ internal fun wireChannel(
         script = DeployScriptKnob.loadFork(File(cfg.homeDir, SendKnob.FILE_NAME)),
         logFile = forkDeployLog,
         plistFile = File(File(cfg.homeDir, "state"), DeploySpawn.FORK_JOB_PLIST_NAME),
+        // the fork automaton's DEFAULT mode is dryrun (measured 4/11 13:56: the
+        // phone's fork tap ran a rehearsal) — the button IS the deploy, so the
+        // real flag rides here; the two-step confirm is the safety
+        args = listOf("--real"),
         label = DeploySpawn.FORK_JOB_LABEL,
     )
     val deployFlow = DeployFlow(
