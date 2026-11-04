@@ -168,14 +168,20 @@ object TranscriptFeed {
      * law), the affordance. The text itself never rides here.
      */
     internal fun collapsedHeader(number: Int?, cp: Int): String {
+        // «generado» is a SEALED block's verdict — an unsealed tail never
+        // claims it; its size rides as the plain rung (the number law).
+        val verdict = when (number) {
+            null -> "· ${LiveTurn.fmtKDecimal(cp.toLong())}"
+            else -> "generado ${LiveTurn.fmtKDecimal(cp.toLong())}"
+        }
         val label = if (number != null) "CoT $number" else "CoT · sin sellar"
-        return "📖 <b>$label</b> generado ${LiveTurn.fmtKDecimal(cp.toLong())} — tocar para leer"
+        return "📖 <b>$label</b> $verdict — tocar para leer"
     }
 
     /** The tap's EXPANDED render: the header, then the block WHOLE. */
     internal fun expandedBlock(number: Int?, cp: Int, text: String): String {
         val label = if (number != null) "CoT $number" else "CoT · sin sellar"
-        return "📖 <b>$label</b> · ${LiveTurn.fmtK(cp)}\n<blockquote>${PyText.esc(text)}</blockquote>"
+        return "📖 <b>$label</b> · ${LiveTurn.fmtKDecimal(cp.toLong())}\n<blockquote>${PyText.esc(text)}</blockquote>"
     }
 
     /** The close's fallback: the verdict the card's own stamp line carries — real numbers, nothing invented. */
