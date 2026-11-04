@@ -781,4 +781,73 @@ class LiveTurnTest {
         assertTrue("Premios" !in done) // a Done card is a verdict, not a shelf
     }
 
+    // ---- live card v2 §1: the header's clock is zcode's, mirrored ----
+
+    @Test
+    fun theHeaderClockAnchorsOnTheForksStartedAtAndNeverRestarts() {
+        var s = reduce(
+            null,
+            ServerFrame.StreamEvent(
+                "task-9", 1, 60_000L,
+                buildJsonObject { put("type", "task_run_started"); put("startedAt", 10_000) },
+            ),
+        )
+        assertEquals(10_000L, s!!.startedAtMs, "the payload's startedAt beats the delivery clock")
+        s = reduce(
+            s,
+            ServerFrame.StreamEvent(
+                "task-9", 2, 120_000L,
+                buildJsonObject { put("type", "task_run_started"); put("startedAt", 30_000) },
+            ),
+        )
+        assertEquals(10_000L, s!!.startedAtMs, "a re-emitted start (stream recovery) never restarts the clock")
+    }
+
+    @Test
+    fun theWorkingHeadCountsFromTheTasksRealStart() {
+        // delivery at 51s, the task REALLY started at 1s: the header says so
+        var s = reduce(
+            null,
+            ServerFrame.StreamEvent(
+                "task-9", 1, 51_000L,
+                buildJsonObject { put("type", "task_run_started"); put("startedAt", 1_000) },
+            ),
+        )
+        s = reduce(s, thought("pensando"))
+        val text = LiveTurn.render(s!!, nowMs = s.lastEventAtMs!! + 1_000, channelAlive = true)
+        assertTrue("⏳ <b>Working · 1m40s</b>" in text, "the header counts from zcode's start: $text")
+    }
+
+    @Test
+    fun inProgressKeepsTheActionAliveWithItsOwnAnchor() {
+        var s: TurnLive? = null
+        s = reduce(
+            s,
+            ev(
+                "tool_call", "toolId" to str("t1"), "toolName" to str("Bash"),
+                "input" to buildJsonObject { put("command", str("npm test")) },
+            ),
+        )
+        val openedAt = s!!.tools.first().openedAtMs
+        // a sibling opens and closes — the phase drifts to Thinking
+        s = reduce(
+            s,
+            ev(
+                "tool_call", "toolId" to str("t2"), "toolName" to str("Bash"),
+                "input" to buildJsonObject { put("command", str("ls")) },
+            ),
+        )
+        s = reduce(s, ev("tool_call_update", "toolId" to str("t2"), "status" to str("completed")))
+        assertTrue(s!!.phase is TurnPhase.Thinking)
+        // t1's in_progress: back to Writing on t1's OWN anchor
+        s = reduce(
+            s,
+            ev("tool_call_update", "toolId" to str("t1"), "toolName" to str("Bash"), "status" to str("in_progress")),
+        )
+        val writing = s.phase as TurnPhase.Writing
+        assertEquals("t1", writing.toolId)
+        assertEquals(openedAt, writing.sinceMs, "the action's elapsed keeps the openedAtMs anchor")
+        assertEquals("Bash", writing.tool)
+    }
+
 }

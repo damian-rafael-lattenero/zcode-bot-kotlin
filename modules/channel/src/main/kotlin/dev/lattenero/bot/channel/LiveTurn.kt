@@ -215,6 +215,13 @@ data class TurnLive(
     val doneTools: Int = 0,
     val failedTools: Int = 0,
     val interaction: InteractionPending? = null,
+    /**
+     * The last MAIN-AGENT thought's real moment (v2 §2): the «generando CoT
+     * vs procesando…» split's anchor. Subagent lanes never touch it (their
+     * narration is the 🤖 row, not the card's thinking state); a replayed
+     * chunk never refreshes it (the replay guard returns state whole).
+     */
+    val lastThoughtAtMs: Long? = null,
     /** The fork's own retry pill (session_info_update.apiRetry / task_network_debug_status). */
     val apiRetry: ApiRetryPill? = null,
     /** The fork's typed terminal error — the honest seal of a dead turn. */
@@ -324,6 +331,14 @@ internal object StreamEvents {
     fun title(event: JsonObject): String? = event.str("title")
 
     fun status(event: JsonObject): String? = event.str("status")
+
+    /**
+     * task_run_started's payload clock — zcode's OWN start stamp, epoch ms
+     * (v2 §1). The frame's `at` is the DELIVERY clock (the daemon's
+     * `at: now()`); after a recovery burst it can be minutes late. 0/null =
+     * absent (the delivery clock keeps its fallback).
+     */
+    fun startedAt(event: JsonObject): Long = event.long("startedAt") ?: 0L
 
     fun input(event: JsonObject): JsonObject? = event.obj("input")
 
