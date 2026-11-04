@@ -104,11 +104,21 @@ batch-exported as OTLP/HTTP to `otel_endpoint`. It EXPORTS and binds
 nothing; a dead collector is one log line, never a broken turn. The
 span tree and the local-Jaeger recipe: [docs/observability.md](docs/observability.md).
 
-One-line rollback of the send flip (knob back + Python's send on):
+**Rollback after the Python retirement (read this twice).** With Python
+retired, `send: "shadow"`/`"dry-run"` mean **NOBODY speaks**: there is no
+Python send to fall back to, and the phone goes silent (only the healer's
+siren, which is send-only, would still reach it). The honest recovery
+order is:
 
-```bash
-printf '{"send": "shadow"}' > ~/.zcode/bot-kotlin/daemon.json && launchctl kickstart -k gui/$(id -u)/com.zcode.bot-daemon && python3 -c "import json,os; p=os.path.expanduser('~/.zcode/telegram-remote.json'); c=json.load(open(p)); c['mac_spectator']=True; json.dump(c,open(p,'w'),indent=2); os.chmod(p,0o600)" && cp ~/.zcode/hooks/state/zconn.json.pre-cutover ~/.zcode/hooks/state/zconn.json
-```
+1. `live` again (the daemon is the only sender): `printf '{"send": "live"}'
+   > ~/.zcode/bot-kotlin/daemon.json && launchctl kickstart -k
+   gui/$(id -u)/com.zcode.bot-daemon`
+2. If the daemon itself is the problem, restore the retired Python (the
+   `bot` repo + the inverse of `scripts/retire-python.nu`) — an explicit,
+   documented decision, never a silent knob flip.
+3. The pre-cutover zconn memory
+   (`~/.zcode/hooks/state/zconn.json.pre-cutover`) only matters for the
+   Python path; it is NOT a rollback by itself.
 
 ### The abrupt Python retirement (B3b's last step — `scripts/retire-python.nu`)
 
