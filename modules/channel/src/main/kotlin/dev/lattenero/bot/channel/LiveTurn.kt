@@ -196,6 +196,13 @@ data class TurnLive(
     /** The live CoT tail (capped at [LiveTurn.COT_TAIL_CP] code points, Python's narration cap). */
     val cotTail: String = "",
     /**
+     * The ANSWER'S live tail (capped at [LiveTurn.ANSWER_TAIL_CP]): the
+     * words the turn is writing, rendered in the card exactly as Python's
+     * `_live_box_body` did — the owner reads the answer AS IT STREAMS,
+     * not only its character count.
+     */
+    val answerTail: String = "",
+    /**
      * The SEALED CoT blocks (Python's CotSealer boxes, reasoning.py): one
      * per [LiveTurn.COT_BLOCK_CP] code points of REAL streamed thinking.
      * The full accumulation lives here; a block's text is never
@@ -427,6 +434,15 @@ object LiveTurn {
     const val COT_TAIL_CP = 2500
 
     /**
+     * The ANSWER tail's cap — Python's `_live_box_body` rendered
+     * `text[-3200:]` inside the live box while the turn wrote. The owner
+     * (3/11): «no está llegando… lo que vos decís» — the card counted
+     * characters but never showed the words. Restored at the same 3200
+     * code points, inside the same `<pre>` the Python used.
+     */
+    const val ANSWER_TAIL_CP = 3200
+
+    /**
      * The CoT BLOCK's cap — Python's COT_BOX_CAP (reasoning.py, the
      * owner's F43 model verbatim: «a box has a size; when the CoT reaches
      * the cap the box is full and is sent with its number»). A block seals
@@ -521,6 +537,12 @@ object LiveTurn {
             is TurnPhase.Writing -> {
                 lines.add(workingHead(state.title, elapsed))
                 if (phase.tool == null) {
+                    // THE WORDS, NOT THE COUNT (owner, 3/11): Python's live
+                    // box rendered `text[-3200:]` inside a <pre> while the
+                    // turn wrote — the card speaks the answer AS IT STREAMS.
+                    if (state.answerTail.isNotBlank()) {
+                        lines.add("<pre>${PyText.esc(state.answerTail)}</pre>")
+                    }
                     lines.add(
                         "✍️ <b>escribiendo la respuesta</b> · ${phase.rawChars} caracteres · " +
                             fmtDur(clockNow - phase.sinceMs),
