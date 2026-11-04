@@ -71,7 +71,7 @@ class MenuMirrorRefresher(
             ),
         )
         logger.info {
-            "menu mirror: ${mark.kind} registered for task ${taskId.takeLast(8)} " +
+            "menu mirror: ${mark.kind} registered for task ${taskId.takeLast(BotCommands.SID_TAIL)} " +
                 "(message $messageId, ${text.length} chars)"
         }
     }
@@ -80,7 +80,7 @@ class MenuMirrorRefresher(
     fun seal(taskId: String) {
         val had = state.open(taskId, clock()) != null
         state = state.seal(taskId)
-        if (had) logger.info { "menu mirror: sealed with the turn ${taskId.takeLast(8)}" }
+        if (had) logger.info { "menu mirror: sealed with the turn ${taskId.takeLast(BotCommands.SID_TAIL)}" }
     }
 
     /**
@@ -91,7 +91,16 @@ class MenuMirrorRefresher(
     suspend fun onConfigUpdate(taskId: String, options: List<ConfigOptionsUpdate.Option>) {
         val now = clock()
         state = state.expire(now)
-        val entry = state.open(taskId, now) ?: return // no open menu (or past its TTL): nothing to edit
+        val entry = state.open(taskId, now)
+        if (entry != null) refreshOpenMenu(entry, taskId, options)
+    }
+
+    /** The open menu's refresh — the gate, the ONE edit, the honest baseline law. */
+    private suspend fun refreshOpenMenu(
+        entry: MenuMirror.Entry,
+        taskId: String,
+        options: List<ConfigOptionsUpdate.Option>,
+    ) {
         val fresh = when (entry.kind) {
             MenuMirror.Kind.MODE -> freshModeRender(entry, taskId)
             MenuMirror.Kind.PLAN -> freshPlanRender(entry, taskId)

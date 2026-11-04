@@ -1,3 +1,5 @@
+@file:Suppress("TooManyFunctions") // the wiring's breadth: the stack's every piece + the mirror's register leg
+
 package dev.lattenero.bot.daemon
 
 import dev.lattenero.bot.channel.Ack
