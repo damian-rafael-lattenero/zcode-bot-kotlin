@@ -51,6 +51,10 @@ class RenderSpineTest {
         assertEquals("task-9", s.taskId)
         assertEquals(100_000L, s.atMs)
         assertEquals(5L, s.nowMs)
+        // v2 §1: the PAYLOAD's own start stamp rides the event (0 = absent)
+        val stamped = classify(frameOf("task_run_started", "startedAt" to JsonPrimitive(1_234L)), nowMs = 5L)
+        assertEquals(1_234L, assertIs<RenderEvent.Started>(stamped).startedAtMs)
+        assertEquals(0L, s.startedAtMs, "absent payload stays 0 — the delivery clock keeps its fallback")
 
         val thought = classify(
             frameOf(
@@ -136,12 +140,20 @@ class RenderSpineTest {
         assertEquals(3, streaming.tool.streamedLines)
         assertEquals(4321, streaming.tool.rawChars)
 
-        // in_progress and friends: freshness only — the additive frame
+        // v2 §3: in_progress is a REAL fold now — the fork's own «alive»
+        // signal rides as ToolRunning, never the additive frame
         val progress = classify(
-            frameOf("tool_call_update", "toolId" to str("t1"), "status" to str("in_progress")),
+            frameOf(
+                "tool_call_update",
+                "toolId" to str("t1"),
+                "toolName" to str("Bash"),
+                "status" to str("in_progress"),
+            ),
             nowMs = 12L,
         )
-        assertEquals("tool_call_update", assertIs<RenderEvent.Frame>(progress).type)
+        val running = assertIs<RenderEvent.ToolRunning>(progress)
+        assertEquals("t1", running.tool.toolId)
+        assertEquals("Bash", running.tool.name, "the ToolCall rides — a never-opened lane keeps its real name")
 
         // the close: the verdict + the string content's own counts
         val close = classify(

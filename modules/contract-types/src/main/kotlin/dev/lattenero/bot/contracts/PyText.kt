@@ -84,6 +84,31 @@ object PyText {
         return if (cpLength(collapsed) > limit) take(collapsed, limit) + "…" else collapsed
     }
 
+    /**
+     * THE FILENAME LAW (live card v2 §6): a path that fits rides unchanged;
+     * one too long elides DIRECTORIES from the LEFT («…/dir/basename») —
+     * the final basename + extension always complete, byte for byte. A
+     * basename alone longer than the budget is the CALLER's problem (the
+     * result may exceed it): the helper never cuts inside the basename.
+     */
+    // one guard per early exit (fits / no dirs) + the candidates' verdict — the law's own shape
+    @Suppress("ReturnCount")
+    fun elidePath(path: String, maxCp: Int): String {
+        if (cpLength(path) <= maxCp) return path
+        val parts = path.split('/').filter { it.isNotEmpty() }
+        if (parts.isEmpty()) return path
+        val base = parts.last()
+        val dirs = parts.dropLast(1)
+        // the LONGEST candidate that fits wins (the minimum elision); none
+        // fits → the bare basename under «…/» (still never cut inside it)
+        val candidates = (0..dirs.size).map { drop ->
+            val kept = dirs.drop(drop)
+            val head = if (kept.isEmpty()) "" else kept.joinToString("/") + "/"
+            "…/$head$base"
+        }
+        return candidates.firstOrNull { cpLength(it) <= maxCp } ?: candidates.last()
+    }
+
     /** The longest RAW prefix whose ESCAPE fits [capHtml] (audit 20/10): binary search, esc() is monotone. */
     fun htmlClip(text: String, capHtml: Int): String {
         if (cpLength(esc(text)) <= capHtml) return text

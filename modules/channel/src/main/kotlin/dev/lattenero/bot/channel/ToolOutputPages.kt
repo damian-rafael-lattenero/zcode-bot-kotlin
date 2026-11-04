@@ -15,8 +15,10 @@ import dev.lattenero.bot.contracts.PyText
  */
 object ToolOutputPages {
 
-    /** One collapsed output: the header (always visible) + numbered pages. */
-    data class Pages(val header: String, val pages: List<String>)
+    /** One collapsed output: the header (always visible) + numbered pages.
+     *  [language] fences the pages (`bash` → Telegram's code highlight,
+     *  v2 §5; null = the plain `<pre>` the non-shell pages always had). */
+    data class Pages(val header: String, val pages: List<String>, val language: String? = null)
 
     /** The page budget — well under Telegram's 4096 with the header aboard. */
     const val PAGE_CP = 2800
@@ -55,18 +57,36 @@ object ToolOutputPages {
         return pages.ifEmpty { listOf("") }
     }
 
-    /** The collapsed header's honest subtitle — the count always speaks. */
+    /**
+     * The collapsed header's honest subtitle — the count always speaks. A
+     * PATH-shaped detail elides per the filename law (v2 §6 — the basename
+     * + extension never cut); anything else (a command) previews as today.
+     */
     fun headerOf(kind: String, detail: String, lines: Int): String {
-        val shown = PyText.preview(detail, HEADER_DETAIL_CP)
+        val shown = when {
+            detail.isNotEmpty() && detail.none { it.isWhitespace() } && '/' in detail ->
+                PyText.elidePath(detail, HEADER_DETAIL_CP)
+
+            else -> PyText.preview(detail, HEADER_DETAIL_CP)
+        }
         val suffix = if (shown.isNotEmpty()) " — <code>${PyText.esc(shown)}</code>" else ""
         val noun = if (lines == 1) "1 línea" else "$lines líneas"
         return "$kind$suffix · $noun\n<i>📜 tocar para ver</i>"
     }
 
-    /** The opened page: the header + the numbered body in a `<pre>`. */
-    fun renderPage(header: String, pages: List<String>, index: Int): String {
-        val page = pages.getOrElse(index) { "" }
-        return "$header\n<pre>${PyText.esc(page)}</pre>"
+    /**
+     * The opened page: the header + the numbered body. Shell pages ride
+     * Telegram's bash highlight (v2 §5 — the closest to «fondo negro,
+     * letras verdes» a message can honestly get); non-shell pages keep the
+     * plain `<pre>`. All content through [PyText.esc], as always.
+     */
+    fun renderPage(header: String, pages: List<String>, index: Int, language: String? = null): String {
+        val page = PyText.esc(pages.getOrElse(index) { "" })
+        val body = when (language) {
+            null -> "<pre>$page</pre>"
+            else -> "<pre><code class=\"language-$language\">$page</code></pre>"
+        }
+        return "$header\n$body"
     }
 
     private fun fragment(line: String, number: Int, pageCp: Int): List<String> {
