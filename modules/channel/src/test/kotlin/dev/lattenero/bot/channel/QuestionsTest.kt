@@ -204,12 +204,13 @@ class QuestionsTest {
         val edits = mutableListOf<Pair<Long, String>>()
         var nextMid: Long? = 5L
 
-        fun board(): QuestionBoard = QuestionBoard(
+        fun board(store: QuestionBoardStore? = null): QuestionBoard = QuestionBoard(
             sendQuestion = { text, _ ->
                 sent.add(text)
                 nextMid
             },
             editQuestion = { mid, text, _ -> edits.add(mid to text) },
+            store = store,
         )
     }
 
@@ -306,6 +307,79 @@ class QuestionsTest {
         assertEquals(0, seams.edits.size) // mid=0 → no edit, no crash (resolve's own law)
     }
 
+    // ---- the board's persistence: the restart's memory (4/11's dead cards) ----
+
+    /** The seam's fake: the snapshot IS the file — one board's saves are the next board's load. */
+    private class MemoryStore : QuestionBoardStore {
+        var snapshot: Map<String, PendingQuestion> = emptyMap()
+        override fun load(): Map<String, PendingQuestion> = snapshot
+        override fun save(entries: Map<String, PendingQuestion>) {
+            snapshot = entries
+        }
+    }
+
+    @Test
+    fun theBoardRoundTripsThroughTheStoreAndTheOldCardStaysLive(): Unit = runBlocking {
+        val store = MemoryStore()
+        val a = Seams().board(store)
+        a.onStreamEvent(questionFrame("r1"))
+        a.onStreamEvent(questionFrame("r2"))
+        assertEquals(setOf("q1", "q2"), store.snapshot.keys)
+        assertEquals(5L, store.snapshot["q1"]?.mid) // the send's mid is part of the persisted state
+
+        // the RESTARTED board (same store, fresh seams): the old cards keep working
+        val seamsB = Seams()
+        val b = seamsB.board(store)
+        assertNotNull(b.byShortId("q1"))
+        // the fork's re-announcement DEDUPES into the old card — no second message, no re-issue
+        assertNull(b.onStreamEvent(questionFrame("r1")))
+        assertEquals(0, seamsB.sent.size)
+        // a tap on the OLD shortId resolves through the EXISTING path, at the OLD message id
+        b.resolve("q1", "✅")
+        assertNull(b.byShortId("q1"))
+        assertEquals(listOf(5L to "✅"), seamsB.edits)
+        assertFalse("q1" in store.snapshot) // the removal persisted too
+    }
+
+    @Test
+    fun theReloadedBoardNeverReissuesALoadedShortId(): Unit = runBlocking {
+        val store = MemoryStore()
+        val a = Seams().board(store)
+        a.onStreamEvent(questionFrame("r1"))
+        a.onStreamEvent(questionFrame("r2"))
+        val seamsB = Seams()
+        val b = seamsB.board(store)
+        assertNotNull(b.onStreamEvent(questionFrame("r3")))
+        assertEquals("q3", store.snapshot.keys.last()) // the NEW question took the NEXT id — q1/q2 keep theirs
+        assertEquals(1, seamsB.sent.size) // and it is the ONLY new card
+    }
+
+    @Test
+    fun theCapEvictionLeavesTheStoreToo(): Unit = runBlocking {
+        val store = MemoryStore()
+        val board = Seams().board(store)
+        for (i in 1..QuestionBoard.REGISTRY_CAP + 1) {
+            board.onStreamEvent(questionFrame("r$i"))
+        }
+        assertFalse("q1" in store.snapshot) // the file reflects the removal (the eviction's disk shadow)
+        assertEquals(QuestionBoard.REGISTRY_CAP, store.snapshot.size)
+    }
+
+    @Test
+    fun aReloadedMultiQuestionFormAdvancesInPlaceAtTheOldMessage(): Unit = runBlocking {
+        val store = MemoryStore()
+        val a = FlowSeams().board(store)
+        a.onStreamEvent(twoQuestionEvent("rm"))
+        assertTrue(store.snapshot["q1"]?.questions?.size == 2) // the FULL questionnaire persisted
+
+        val seamsB = FlowSeams()
+        val b = seamsB.board(store)
+        assertTrue(b.answer("q1", "main") is QuestionFlow.Advanced)
+        val (mid, text, _) = seamsB.edits.single()
+        assertEquals(9L, mid) // the OLD card's message — the restart changed nothing
+        assertTrue("pregunta 2 de 2" in text)
+    }
+
     // ---- the multi-question flow: advance IN PLACE, ONE respond at the end ----
 
     private fun elicitationFrame(requestId: String, questions: String): ServerFrame.StreamEvent =
@@ -322,12 +396,13 @@ class QuestionsTest {
         val sent = mutableListOf<String>()
         val edits = mutableListOf<Triple<Long, String, JsonObject?>>()
 
-        fun board(): QuestionBoard = QuestionBoard(
+        fun board(store: QuestionBoardStore? = null): QuestionBoard = QuestionBoard(
             sendQuestion = { text, _ ->
                 sent.add(text)
                 9L
             },
             editQuestion = { mid, text, markup -> edits.add(Triple(mid, text, markup)) },
+            store = store,
         )
     }
 
