@@ -224,6 +224,10 @@ fun main(args: Array<String>) {
         val channelHandle = stack.client.asProcess(onHeartbeat = { touch(hbChannel) }).startIn(this)
         val pingHandle = stack.client.pingProcess().startIn(this)
         val liveHandle = stack.liveView?.asProcess(onHeartbeat = { touch(File(stateDir, HB_LIVE_VIEW)) })?.startIn(this)
+        // v2 §4: the progress pings' own 5s cadence, next to the 3s tick
+        val livePingHandle = stack.liveView
+            ?.pingProcess(onHeartbeat = { touch(File(stateDir, HB_LIVE_VIEW)) })
+            ?.startIn(this)
         val pollerHandle = stack.poller
             ?.asProcess(
                 config = { dev.lattenero.bot.transport.TgConfig.load(File(cfg.baseDir, "telegram-remote.json")) },
