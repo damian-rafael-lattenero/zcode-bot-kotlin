@@ -320,6 +320,52 @@ class ParkFoldTest {
         assertEquals(edits + 1, wire.bodies.count { it.second == "editMessageText" }, "the parked card receives no more edits")
     }
 
+    @Test
+    fun aThrottledWindowNeverDelaysTheParkedSeal() = runTest {
+        val hub = LiveHub()
+        val wire = Wire()
+        val bells = mutableListOf<SealFacts>()
+        var nowSec = 2.0
+        val cooldown = Cooldown(now = { nowSec }, readFile = { null })
+        val publisher = publisher(wire, hub, cooldown = cooldown, onSeal = { bells.add(it) })
+        bornCard(wire, hub, publisher)
+        assertEquals(ParkTapTexts.ACK, publisher.park(taskId))
+        // a tool opens and closes unseen while parked: the seal HAS a remainder
+        hub.apply(
+            frame(
+                taskId,
+                "tool_call_update",
+                at = 1_100,
+                "status" to JsonPrimitive("pending"),
+                "toolId" to JsonPrimitive("t1"),
+                "toolName" to JsonPrimitive("Bash"),
+                "input" to buildJsonObject { put("command", "ls") },
+            ),
+            nowMs = 1_100,
+        )
+        hub.apply(
+            frame(
+                taskId,
+                "tool_call_update",
+                at = 1_200,
+                "status" to JsonPrimitive("completed"),
+                "toolId" to JsonPrimitive("t1"),
+                "content" to JsonPrimitive("out"),
+            ),
+            nowMs = 1_200,
+        )
+        hub.apply(
+            frame(taskId, "task_complete", at = 9_999, "stopReason" to JsonPrimitive("end_turn")),
+            nowMs = 9_999,
+        )
+        cooldown.extend(raSeconds = 60) // Telegram named the window
+        publisher.tick() // the seal tick
+        // (c) the parked seal speaks NOTHING, so the feed's back-pressure must
+        // never hold the 🔔 hostage: the turn seals and the bell fires now
+        assertEquals(1, bells.size, "the parked seal never waits for a feed it will not speak")
+        assertEquals(null, hub.peek(), "the cleanup ran — the park died with the turn")
+    }
+
     private companion object {
         const val TICK_MS = 2_000L
     }

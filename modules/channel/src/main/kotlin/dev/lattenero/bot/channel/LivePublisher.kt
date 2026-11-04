@@ -709,8 +709,8 @@ class LivePublisher(
                     val state = hub.peek()
                     if (mid != null && state != null) landParkedRender(cfg, mid, state)
                     logger.info {
-                        "live view PARKED: taskId=${taskId.takeLast(TASK_ID_TAIL)} — " +
-                            "no more edits; the 🔔 speaks at the seal"
+                        "live view PARKED: taskId=${taskId.takeLast(TASK_ID_TAIL)} " +
+                            "atMs=${state?.parked?.atMs} — no more edits; the 🔔 speaks at the seal"
                     }
                     ParkTapTexts.ACK
                 }
@@ -750,15 +750,16 @@ class LivePublisher(
         val level = verbosity.current()
         val feed = TranscriptFeed.messages(feedSeen, state, level, toolBox, verbs) +
             if (level == FeedVerbosity.SUMMARY) emptyList() else TranscriptFeed.pendingFlush(state)
-        if (feed.isNotEmpty() && telegram.throttled()) return
-        sealed = true
         // ⏸️ THE PARKED SEAL (U5c): the card keeps its frozen «▶️ sigue en
         // background» (its LAST edit already landed) and the transcript
         // stays silent — the seal speaks ONCE, through the 🔔 (the seal
         // tap below always fires; the notification carries the
         // conclusion). The cleanup below runs exactly as always, and its
-        // Clear takes the park with the turn.
+        // Clear takes the park with the turn. A parked seal has NOTHING to
+        // speak, so the feed's back-pressure must never delay the 🔔.
         val parked = state.parked != null
+        if (!parked && feed.isNotEmpty() && telegram.throttled()) return
+        sealed = true
         if (parked) {
             logger.info {
                 "live view sealed (PARKED): taskId=${state.taskId} — the card stays frozen, " +
