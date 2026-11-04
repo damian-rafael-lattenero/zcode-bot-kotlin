@@ -150,21 +150,21 @@ class ModeCommandTest {
         assertNull(ModeMenu.currentFrom("broken {"))
     }
 
-    // ── bare /mode: the card and the five rows ──
+    // ── bare /mode: the card and the FOUR rows (plan lives in /plan_mode now) ──
 
     @Test
-    fun bareModeShowsTheModeInForceAndTheFiveTaps() = runBlocking {
+    fun bareModeShowsTheModeInForceAndTheFourTaps() = runBlocking {
         val o = ops(current = "yolo")
         val reply = commands(o).handle("/mode", 1L)!!
         assertTrue("🎛 Modo: <b>🔓 Full access</b>" in reply.text, reply.text)
         assertTrue("«arreglá el login»" in reply.text)
         val r = rows(reply)
         assertEquals(
-            listOf("mo:plan", "mo:yolo", "mo:build", "mo:edit", "mo:guarded"),
+            listOf("mo:yolo", "mo:build", "mo:edit", "mo:guarded"),
             r.map { it.second },
+            "plan NEVER appears in /mode (4/11) — the keyboard renders four",
         )
-        assertTrue(r[1].first.startsWith("🎯"), "the mode in force carries 🎯: ${r[1].first}")
-        assertFalse(r[0].first.startsWith("🎯"))
+        assertTrue(r[0].first.startsWith("🎯"), "the mode in force carries 🎯: ${r[0].first}")
         assertTrue(
             o.queries.filterIsInstance<ChannelQuery.TaskSnapshot>().single().messageLimit == 1,
             "the read is the cheap one-message snapshot",
@@ -175,15 +175,30 @@ class ModeCommandTest {
     fun aLegacySnapshotAliasMarksTheRightButton() = runBlocking {
         val reply = commands(ops(current = "default")).handle("/mode", 1L)!!
         val r = rows(reply)
-        assertTrue(r[2].first.startsWith("🎯"), "default projects to build: ${r[2].first}")
-        assertTrue("🛠 Ask before changes" in r[2].first)
+        assertTrue(r[1].first.startsWith("🎯"), "default projects to build: ${r[1].first}")
+        assertTrue("🛠 Ask before changes" in r[1].first)
     }
 
     @Test
-    fun aSnapshotWithoutModeSaysSoAndPinsNothing() = runBlocking {
+    fun aSnapshotWithoutModeRendersTheDefaultFullAccess() = runBlocking {
+        // THE DEFAULT LAW (4/11: «por defecto siempre Full access»): the
+        // card says it — the label as default, never «—», 🎯 on the yolo
+        // row — and carries the honest first-turn caveat
         val reply = commands(ops(current = null)).handle("/mode", 1L)!!
-        assertTrue("🎛 Modo: <b>—</b>" in reply.text, reply.text)
-        assertTrue(rows(reply).none { it.first.startsWith("🎯") }, "an unknown is never a pick")
+        assertTrue("🎛 Modo: <b>🔓 Full access</b> (por defecto)" in reply.text, reply.text)
+        assertTrue("La primera vuelta de una charla nueva corre el default del app" in reply.text, reply.text)
+        assertFalse(reply.text.contains("—"), "never a blank: the default is SAID")
+        val r = rows(reply)
+        assertTrue(r.first { it.second == "mo:yolo" }.first.startsWith("🎯"), "the default row is the marked one")
+        assertEquals(4, r.size)
+    }
+
+    @Test
+    fun theVocabularyKeepsAcceptingPlanEvenThoughTheKeyboardNeverOffersIt() = runBlocking {
+        // old spellings and /plan_mode's write ride the same vocabulary
+        assertTrue(ModeMenu.normalize("plan") == "plan")
+        assertEquals("🗺 Plan mode", ModeMenu.byId("plan")?.label)
+        assertTrue(ModeMenu.ids().contains("plan"), "the usage line still names the real vocabulary")
     }
 
     // ── the write ──
@@ -191,11 +206,26 @@ class ModeCommandTest {
     @Test
     fun typedModeAppliesThroughTheForkAndSpeaksItsOwnWord() = runBlocking {
         val o = ops()
+        val reply = commands(o).handle("/mode edit", 2L)!!
+        assertEquals("task-77" to "edit", o.setModes.single())
+        assertTrue("🎛 Modo de «arreglá el login»: <b>📝 Edit automatically</b> ✅" in reply.text, reply.text)
+        assertTrue("aplica al próximo turno" in reply.text)
+        assertTrue(
+            rows(reply).first { it.second == "mo:edit" }.first.startsWith("🎯"),
+            "the applied mode becomes the marked one",
+        )
+    }
+
+    @Test
+    fun typedPlanStillAppliesWithTheOldSpelling() = runBlocking {
+        // the muscle-memory law: /mode plan STILL writes plan — only the
+        // /mode keyboard stopped offering it (plan lives in /plan_mode)
+        val o = ops()
         val reply = commands(o).handle("/mode plan", 2L)!!
         assertEquals("task-77" to "plan", o.setModes.single())
         assertTrue("🎛 Modo de «arreglá el login»: <b>🗺 Plan mode</b> ✅" in reply.text, reply.text)
-        assertTrue("aplica al próximo turno" in reply.text)
-        assertTrue(rows(reply)[0].first.startsWith("🎯"), "the applied mode becomes the marked one")
+        // and the keyboard that comes back offers the four, plan unmarked-none
+        assertEquals(listOf("mo:yolo", "mo:build", "mo:edit", "mo:guarded"), rows(reply).map { it.second })
     }
 
     @Test

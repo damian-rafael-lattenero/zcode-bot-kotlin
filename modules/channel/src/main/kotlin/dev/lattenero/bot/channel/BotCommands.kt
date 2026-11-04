@@ -269,6 +269,7 @@ class BotCommands(
             "subagents", "agents" -> subagents(rest)
             "plan", "plan_model_effort" -> plan() // the old name keeps muscle memory alive
             "mode" -> mode(rest)
+            "plan_mode" -> planMode(rest)
             "last" -> BotReply(lastAnswer())
             "compact" -> compact()
             "context_window" -> contextWindow()
@@ -321,7 +322,7 @@ class BotCommands(
         return fromId == owner
     }
 
-    @Suppress("CyclomaticComplexMethod") // one branch per tap vocabulary — the dispatcher's own shape
+    @Suppress("CyclomaticComplexMethod", "LongMethod") // one branch per tap vocabulary — the dispatcher's own shape
     private suspend fun routeCallback(data: String, updateId: Long): BotReply? = when {
         data.startsWith("intr:") -> interruptNow(data.removePrefix("intr:"), updateId)
 
@@ -378,6 +379,10 @@ class BotCommands(
         // /mode's picker tap (mo:<mode>): the SAME write the typed command
         // runs — one path, one vocabulary, one honest answer
         data.startsWith("mo:") -> mode(data.removePrefix("mo:"))
+
+        // /plan_mode's toggle tap (pmd:on / pmd:off — the spec's pm: was
+        // already the plan MODEL picker's): the SAME write the typed command
+        data.startsWith("pmd:") -> planMode(data.removePrefix("pmd:"))
 
         // A5's gifts: the first tap ARMS (a confirmation card), the second
         // (cly:/gfy:) fires, gxn: cancels. The planId/type/key live in the
@@ -667,6 +672,51 @@ class BotCommands(
     private suspend fun currentMode(taskId: String, ws: String?): String? =
         (ops.query(ChannelQuery.TaskSnapshot(taskId, ws, messageLimit = 1)) as? QueryAnswer.Ok)
             ?.let { ModeMenu.currentFrom(it.resultJson) }
+
+    /**
+     * /plan_mode — THE SEPARATE TOGGLE (4/11: plan left /mode's keyboard).
+     * The state is READ from the fork's truth (the snapshot's `meta.mode
+     * == "plan"`, never remembered); bare shows the card (the current
+     * state marked), typed on/off toggles directly, an unknown word is
+     * the card. ON writes `plan`; OFF writes the DEFAULT (Full access —
+     * another mode is one /mode tap away). A mode switch is NOT
+     * destructive: no owner-gate vocabulary here.
+     */
+    @Suppress("ReturnCount") // one guard per honest tier (down, no context, bare, typed, unknown)
+    private suspend fun planMode(rest: String): BotReply {
+        val ctx = when (val answer = contextAnswer()) {
+            is ContextAnswer.Ctx -> answer.value
+            ContextAnswer.None -> return BotReply(MODE_NO_CONTEXT)
+            ContextAnswer.Degraded -> return BotReply(DEGRADED)
+        }
+        val taskId = ctx.activeTaskId ?: return BotReply(MODE_NO_CONTEXT)
+        val title = history.ctxTasks(SCOPE_FOR_PICK).firstOrNull { it.sid == taskId }
+            ?.title?.takeIf { it.isNotEmpty() } ?: taskId.takeLast(SID_TAIL)
+        val current = currentMode(taskId, ctx.workspacePath)
+        when (rest.trim().lowercase()) {
+            "on" -> return planModeApply(taskId, title, on = true)
+            "off" -> return planModeApply(taskId, title, on = false)
+            // an unknown word never writes: the card again (bare included)
+        }
+        val on = PlanMode.isOn(current)
+        return BotReply(PlanMode.statusLine(title, on), markup = PlanMode.keyboard(on))
+    }
+
+    /** The toggle's write: the same setMode switch, the 🧭 voice (OFF writes the default). */
+    private suspend fun planModeApply(taskId: String, title: String, on: Boolean): BotReply {
+        val mode = ModeMenu.byId(if (on) "plan" else ModeMenu.DEFAULT_MODE_ID)
+            ?: return BotReply(DEGRADED) // unreachable with the built-in vocabulary — the honest tier, not a guess
+        return when (val answer = ops.query(ChannelQuery.SetMode(taskId, mode.id))) {
+            is QueryAnswer.Ok -> BotReply(PlanMode.applied(title, on), markup = PlanMode.keyboard(on))
+            is QueryAnswer.Unavailable -> BotReply(DEGRADED)
+            is QueryAnswer.Failed ->
+                if (answer.code == UNKNOWN_QUERY_CODE) {
+                    BotReply(MODE_OLD_FORK)
+                } else {
+                    BotReply("⚠️ No pude aplicar Plan mode (${answer.code}): ${PyText.esc(answer.message ?: "?")}")
+                }
+        }
+    }
 
     // ── A5: the coding plan's gifts (the 🎁 read and its two confirmed writes) ──
 
@@ -3102,7 +3152,8 @@ class BotCommands(
             "all_tasks" to "all conversations, loose ones included",
             "status" to "what is running + the active conversation",
             "plan_model_effort" to "plan, model and effort — choose the three, then ✅ Aceptar",
-            "mode" to "the conversation's mode — plan · build · edit · yolo · guarded",
+            "mode" to "the conversation's mode — yolo · build · edit · guarded",
+            "plan_mode" to "Plan mode ON/OFF — the separate toggle (/mode no longer offers plan)",
             "last" to "re-sends the active conversation's last answer",
             "compact" to "shrinks the active conversation's context",
             "context_window" to "context window used — tokens, model window and percent",

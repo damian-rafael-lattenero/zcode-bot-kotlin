@@ -2,6 +2,7 @@ package dev.lattenero.bot.daemon
 
 import dev.lattenero.bot.channel.BotCommands
 import dev.lattenero.bot.channel.ChannelQuery
+import dev.lattenero.bot.channel.ModeMenu
 import dev.lattenero.bot.channel.QueryAnswer
 import dev.lattenero.bot.contracts.PyText
 import dev.lattenero.bot.channel.ToolLive
@@ -156,6 +157,55 @@ internal suspend fun finalAnswerOf(
     }
     return null
 }
+
+/**
+ * THE DEFAULT-MODE ENFORCEMENT (the owner's law, 4/11: «por defecto
+ * siempre Full access»): on `task_run_started` for a watched task, read
+ * the task's snapshot `meta.mode` (the SAME one-message query the /mode
+ * card uses) — absent → fire `SetMode(taskId, "yolo")` ONCE per task.
+ * The [guard] set is the wiring's in-memory one: it dies with the
+ * process, so the fork's own truth is RE-CHECKED after every restart —
+ * an owner-chosen mode IS in meta.mode and is never stomped. A failed
+ * write frees the guard (the next turn retries); a failed READ never
+ * latches (honest best-effort, nothing fired on a dead channel). The
+ * honest caveat (the log + the /mode card's copy): the very first turn
+ * of a brand-new conversation runs the app's own default — yolo lands
+ * from the next turn.
+ */
+internal suspend fun enforceDefaultModeOnRunStart(
+    taskId: String,
+    guard: MutableSet<String>,
+    query: suspend (ChannelQuery) -> QueryAnswer,
+    workspaceOf: suspend (String) -> String?,
+    log: (String) -> Unit,
+) {
+    val ws = runCatching { workspaceOf(taskId) }.getOrNull()
+    val snapshot = query(ChannelQuery.TaskSnapshot(taskId, ws, messageLimit = 1))
+    val current = (snapshot as? QueryAnswer.Ok)?.let { ModeMenu.currentFrom(it.resultJson) }
+    if (snapshot !is QueryAnswer.Ok || current != null) {
+        log(
+            "default-mode: ...${taskId.takeLast(MODE_LOG_TAIL)} carries meta.mode=$current " +
+                "(read ${if (snapshot is QueryAnswer.Ok) "ok" else "FAILED"}) — nothing enforced " +
+                "(an owner-chosen mode is never stomped)",
+        )
+        return
+    }
+    if (!guard.add(taskId)) return // once per task, per process
+    log(
+        "default-mode: ...${taskId.takeLast(MODE_LOG_TAIL)} has NO meta.mode — firing SetMode(yolo) " +
+            "(the DEFAULT is Full access; the very first turn ran the app's own default, yolo lands next turn)",
+    )
+    when (query(ChannelQuery.SetMode(taskId, ModeMenu.DEFAULT_MODE_ID))) {
+        is QueryAnswer.Ok -> Unit
+        else -> {
+            guard.remove(taskId) // the write never landed: the next run_started retries
+            log("default-mode: SetMode(yolo) FAILED for ...${taskId.takeLast(MODE_LOG_TAIL)} — the next turn retries")
+        }
+    }
+}
+
+/** The enforcement's log tail (the full sid is noise in the daemon log). */
+private const val MODE_LOG_TAIL = 8
 
 /**
  * The index's own workspace for a task — the same read-only, short-lived
