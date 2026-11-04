@@ -92,9 +92,11 @@ class DeploySpawnTest {
         assertEquals(0, out.exit)
         assertEquals(3, calls.size)
         // the busy pre-check (`print`) first, then bootout (bootstrap refuses a
-        // loaded label), then bootstrap THIS plist
+        // loaded label), then bootstrap THIS plist. THE BOOTOUT'S ONE-ARG LAW
+        // (measured 4/11: the two-arg form fails error 5 every time — launchd
+        // reads the label as a path): ONE combined target, like enable/kickstart.
         assertEquals("print", calls[0].first())
-        assertEquals(listOf("bootout", "gui/501", DeploySpawn.JOB_LABEL), calls[1])
+        assertEquals(listOf("bootout", "gui/501/${DeploySpawn.JOB_LABEL}"), calls[1])
         assertEquals(listOf("bootstrap", "gui/501", plist.absolutePath), calls[2])
         // the rendered plist is on disk — launchctl reads the FILE, not a string
         assertTrue(plist.exists())

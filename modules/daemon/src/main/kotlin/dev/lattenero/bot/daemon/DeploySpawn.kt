@@ -178,7 +178,14 @@ class DeploySpawn(
         // bootstrap racing the bot's bootout) — the budget is now ~10 s.
         var cleared = false
         for (attempt in 1..BOOTOUT_ATTEMPTS) {
-            val bootout = launchctl.run(listOf("bootout", domain(), label))
+            // THE BOOTOUT'S ONE-ARG LAW (measured 4/11 17:5x, the root of
+            // «/deploy siempre falla»): `bootout <domain> <label>` as TWO
+            // arguments fails error 5 EVERY time — launchd reads the label as
+            // a service PATH. The house form (enable, kickstart, print) is
+            // ONE combined target: gui/<uid>/<label>. With the two-arg form
+            // the bootout never cleared, the label stayed loaded, and every
+            // bootstrap then failed error 5 — the phone's same-message failure.
+            val bootout = launchctl.run(listOf("bootout", "${domain()}/$label"))
             logger.info { "deploy job $label bootout #$attempt: exit=${bootout.exit} ${bootout.text.trim()}" }
             if (bootout.exit == 0 || bootout.exit == BOOTOUT_NOT_LOADED_EXIT) {
                 cleared = true
