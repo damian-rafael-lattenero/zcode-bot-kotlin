@@ -646,10 +646,12 @@ absent.
   (the repo's CI gate is `./gradlew test detekt` plus the no-manual-loop
   sweep; there is no `detektAll` task in this project).
 - Quality gate (V10, `agent-brain`): `./gradlew :brain-mcp:build
-  :brain-mcp:detekt :core:detekt` → BUILD SUCCESSFUL, 21 `brain-mcp` tests
-  green (including the three new `McpHttpTest` cases) and 2
-  `LogLinePolicyTest` cases green. Full `./gradlew build` reaches the eval
-  tier and fails there on three `EvalChatSuitesIT` cases:
+  :brain-mcp:detekt :core:detekt :core:test --tests '*LogLinePolicyTest'` →
+  BUILD SUCCESSFUL. `:brain-mcp:test` = 31 tests, 0 failed, 0 skipped
+  (`McpHttpTest` 15 — three of them new, `TokenAuthTest` 9,
+  `BrainMcpStdioTest` 4, `McpHttpProcessTest` 3); `LogLinePolicyTest` 2.
+  Full `./gradlew build` reaches the eval tier and fails there on three
+  `EvalChatSuitesIT` cases:
   `ProviderUnavailable: ollama chat timed out at http://127.0.0.1:11434`.
   Measured separately on the same machine: 46–56 s for an 8-token reply when
   the local model is cold (`qwen2.5:1.5b`, `-np 1`). Provider-side and
