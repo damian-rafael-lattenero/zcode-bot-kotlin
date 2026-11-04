@@ -141,13 +141,20 @@ def heartbeat_url []: nothing -> string {
 # itself cannot announce. A failed ping is logged, never fatal: the next
 # run retries, and the absence of pings is exactly what the service
 # watches for.
+#
+# THE URL IS A BEARER CREDENTIAL (this file's header says so): anyone
+# holding it can forge a ping and mask an outage. It therefore rides
+# curl's CONFIG ON STDIN (-K -), never argv — argv is visible to every
+# local observer through ps(1) for the whole call (U9 finding F2; the
+# telegram probe above already obeyed this law).
 def ping_heartbeat [url: string, telegram_down: bool, reason: string]: nothing -> nothing {
     if ($url | is-empty) {
         log_line "heartbeat SKIP: no ~/.zcode/bot-kotlin/heartbeat.url"
         return
     }
     let target = if $telegram_down { $"($url)/fail" } else { $url }
-    let res = (^curl -fsS --retry 2 --retry-delay 2 --max-time 8 $target | complete)
+    let curl_cfg = $"url = \"($target)\"\n"
+    let res = ($curl_cfg | ^curl -fsS --retry 2 --retry-delay 2 --max-time 8 -K - | complete)
     let body = ($res.stdout | str trim)
     if $res.exit_code == 0 {
         if ($body | str contains "not found") {
