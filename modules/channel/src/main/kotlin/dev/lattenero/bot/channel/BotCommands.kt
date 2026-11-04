@@ -542,12 +542,35 @@ class BotCommands(
                 planReplyFrom(set.resultJson, "✅ aplicado")
             }
 
-            is QueryAnswer.Unavailable -> BotReply(DEGRADED)
-            is QueryAnswer.Failed -> BotReply(
-                "⚠️ No pude aplicar (${set.code}): ${PyText.esc(set.message ?: "?")}",
-                markup = PlanMenu.keyboard(v, d), // the draft survives — the tap can be retried
+            // THE HONEST FAILURE (the owner's 4/11 timeout drill): the draft
+            // SURVIVES every failure — the tap can always be retried — and
+            // the copy says it, instead of the fork's opaque words.
+            is QueryAnswer.Unavailable -> BotReply(
+                "$DEGRADED\nEl draft sigue armado — tocá ✅ Aceptar cuando el canal vuelva.",
+                markup = PlanMenu.keyboard(v, d),
             )
+
+            is QueryAnswer.Failed -> applyFailure(set, v, d)
         }
+    }
+
+    /**
+     * The apply's honest failure (4/11: the Aceptar tap landed while the
+     * fork host was mid-hiccup — «(timeout): no answer in 15s» said
+     * nothing the owner could ACT on). A timeout names the real suspect
+     * (the channel dropped or the host is saturated) and the retry; any
+     * other typed refusal keeps the fork's words AND the same promise:
+     * the draft is still armed, Aceptar retries, Descartar discards.
+     */
+    private fun applyFailure(set: QueryAnswer.Failed, v: PlanMenu.Views, d: PlanMenu.Draft): BotReply {
+        val head = when (set.code) {
+            "timeout" -> "📡 El canal no respondió a tiempo (se cayó justo en ese momento o el host está saturado)."
+            else -> "⚠️ No pude aplicar (${set.code}): ${PyText.esc(set.message ?: "?")}"
+        }
+        return BotReply(
+            "$head\nEl draft sigue ARMADO — tocá ✅ Aceptar para reintentar, o ❌ Descartar para tirarlo.",
+            markup = PlanMenu.keyboard(v, d),
+        )
     }
 
     /** 📌 the app's default: the draft when there is one, else the selection in force. */
