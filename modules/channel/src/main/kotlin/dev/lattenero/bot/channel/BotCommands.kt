@@ -2045,8 +2045,27 @@ class BotCommands(
             if (sess != null) {
                 val ws = (contextAnswer() as? ContextAnswer.Ctx)?.value?.workspacePath
                 if (ws != null) {
+                    // THE GHOST LAW (measured 4/11: an attach to a KILLED
+                    // agent's store row — the store never closes it — born a
+                    // blank card no event would ever fill, and the owner read
+                    // «queda en blanco»): a row frozen longer than the ghost
+                    // mark is a DEAD agent, not a stream. Honest refusal
+                    // instead of pinning silence.
+                    val row = history.subagentsRunning(parentSid ?: "").firstOrNull { it.sid == sess }
+                    if (row != null && clock() - row.lastMs >= Keyboards.SUB_STALE_MIN * MS_PER_MINUTE) {
+                        logger.info { "callback 🔵 sa: $sess is a GHOST (store row frozen) — honest refusal" }
+                        return BotReply(
+                            "💀 «${PyText.esc(row.title.ifBlank { sess.takeLast(SID_TAIL) })}» murió sin cerrar — " +
+                                "su fila del store lleva congelada más de ${Keyboards.SUB_STALE_MIN} min y " +
+                                "no hay stream que mostrar. Su resultado: 📄 /last o /tasks.",
+                        )
+                    }
                     ops.subscribe(sess, ws)
                     hub.pin(sess)
+                    // THE INSTANT SWITCH (4/11): the fold must BE the child
+                    // NOW — a quiet child never streams first, and without
+                    // this the card stayed the parent's until its next event.
+                    hub.watchTaskId(sess)
                     logger.info { "callback 🔵 sa: STORED session ATTACHED $sess — pinned" }
                     return BotReply("👁 Subagente attachado — su turno completo fluye acá; se sella cuando cierra.")
                 }
@@ -2986,6 +3005,9 @@ class BotCommands(
         }.orEmpty()
 
     companion object {
+        /** The ms-per-minute the ghost law computes with ([Keyboards.SUB_STALE_MIN] is in minutes). */
+        private const val MS_PER_MINUTE = 60_000L
+
         /** Lazy: MENU.size can never drift from the dispatcher's real vocabulary. */
         internal val UNKNOWN: String
             get() = "🤷 Unknown command — /help lists the ${MENU.size} this bot speaks."
