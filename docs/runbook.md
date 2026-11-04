@@ -610,3 +610,248 @@ make down    # stops the containers, keeps every volume
 The reason is in `~/.zcode/AGENTS.md`: a `colima start` run from inside a
 ZCode session dies with the app's process tree, taking Postgres and
 Redpanda with it.
+
+## 5. LaunchAgents and hooks — the inventory (read-only)
+
+**This section was produced without changing anything live.** No
+`bootout`, no `disable`, no plist or config edit. States below were read
+at 2026-11-03 22:55 with `launchctl list`, `launchctl print` and
+`plutil -extract`.
+
+### 5.1 The launchd census
+
+```bash
+# [read-only] the whole census in one shot
+launchctl list | grep -i zcode
+
+# [read-only] per-label properties, straight from the installed plists
+for f in ~/Library/LaunchAgents/com.zcode.*.plist; do
+  printf '%-28s ' "$(plutil -extract Label raw "$f")"
+  printf 'keepalive=%-5s runatload=%-5s interval=%s\n' \
+    "$(plutil -extract KeepAlive raw "$f" 2>/dev/null || echo -)" \
+    "$(plutil -extract RunAtLoad raw "$f" 2>/dev/null || echo -)" \
+    "$(plutil -extract StartInterval raw "$f" 2>/dev/null || echo -)"
+done
+```
+
+| Label | Schedule | What it runs | State at 2026-11-03 22:55 | Template |
+|---|---|---|---|---|
+| `com.zcode.bot-daemon` | `KeepAlive` + `RunAtLoad` | `~/.zcode/bot-daemon/bin/daemon --home ~/.zcode/bot-kotlin` | **running**, pid 63495 | `scripts/com.zcode.bot-daemon.plist` |
+| `com.zcode.bot-healer` | every 60 s | `scripts/bot-healer.nu` | loaded, exit 0 | `scripts/com.zcode.bot-healer.plist` |
+| `com.zcode.bot-deploy` | one-shot, `RunAtLoad` | `scripts/deploy-daemon.nu` (the `/deploy` spawn) | loaded-and-stopped, exit 0 — **created at runtime** by `DeploySpawn` into `~/.zcode/bot-kotlin/state/deploy-job.plist` | rendered by the daemon, not in `scripts/` |
+| `com.zcode.deploy-fork` | manual (`RunAtLoad` **false**) | `deploy-fork-and-retire.nu --real` through a zsh wrapper | loaded, exit 0 | `scripts/com.zcode.deploy-fork.plist` |
+| `com.zcode.bot-recorder` | every 60 s | the recorder binary over `~/.zcode/hooks/state` | loaded, exit 0 | `scripts/com.zcode.bot-recorder.plist` |
+| `com.zcode.bot-comparator` | every 86400 s + `RunAtLoad` | the comparator, wrapped to always exit 0 | loaded, exit 0 | `scripts/com.zcode.bot-comparator.plist` |
+| `com.zcode.beacon` | every 60 s | `scripts/beacon.nu` → healthchecks.io + gist | loaded, exit 0 | `scripts/com.zcode.beacon.plist` |
+| `com.zcode.reopen-zcode` | `RunAtLoad` only | `sleep 8 && open -a ZCode && sleep 5 && open -a ZCode` | loaded, exit 0 | none — hand-written in place |
+| `com.zcode.agent-brain` | `KeepAlive` + `RunAtLoad`, `ThrottleInterval` 30 | `~/Projects/agent-brain/scripts/serve-brain.nu` | **running**, pid 70721 (last exit 143 = an old SIGTERM) | `~/Projects/agent-brain/scripts/` |
+| `com.zcode.agent-brain-index` | manual (both false) | `agent-brain index-repos` | loaded, **last exit 1** — `ClassNotFoundException: dev.lattenero.brain.rag.IndexerKt` | `~/Projects/agent-brain/scripts/` |
+| `com.zcode.telegram-cmds` | `Disabled` **true**, not loaded | the retired Python poller | **not loaded** | n/a (retired) |
+| `com.zcode.telegram-watch` | `Disabled` **true**, not loaded | the retired Python app watcher | **not loaded** | n/a (retired) |
+
+Two readings that are easy to get wrong:
+
+- **`launchctl list`'s second column is the last exit status, not health.**
+  `agent-brain` shows `143` (a SIGTERM from an old reload) while running
+  fine; `agent-brain-index` shows `1`, which *is* a real failure.
+- **`bot-deploy` has no plist in `scripts/`.** It is rendered at runtime
+  into `state/deploy-job.plist` on every `/deploy`; `launchctl print` names
+  that path. A `bootout`+`bootstrap` of it is what `/deploy` does — see
+  §2.3's error-5 failure mode.
+
+### 5.2 The ZCode hooks — retired, and they must stay retired
+
+```bash
+# [read-only] does the CLI config still carry a hooks key?
+jq 'has("hooks")' ~/.zcode/cli/config.json
+# false — the file has only "mcp" and "plugins"
+```
+
+The Python bot's seven hook events are **gone**. That is a deliberate fix:
+on 2026-10-30 the hooks resurrected a `watch-commands` process on every
+prompt, that process polled getUpdates with the same token as the Kotlin
+daemon, and Telegram answered 409 Conflict to both — the bot lost
+messages for four hours (`docs/incident-30-10.md`). `enabled: false` was
+not honored; deleting the key was. **Do not restore a `hooks` key that
+runs a Telegram poller for any bot on this token.**
+
+The Kotlin daemon needs no hooks: it reads the fork's CLI logs, the
+channel socket and the state files directly.
+
+`~/.zcode/hooks/` still exists, and it is a mixed bag of live contract
+and retired code:
+
+| Path | What it is | Live? |
+|---|---|---|
+| `state/` | the **shared contract** the Kotlin daemon reads and writes: `outbox.json`, `tg-cooldown`, `tg-last-ph`, `tg-offset`, `bot-session.json`, `bot-workers.json`, `turn-*.marker` (read), `agent-view-*.pid` (read), plus Python-era leftovers (`hb-transport`, `tg-busy`) that nothing here writes | **YES — do not delete** |
+| `logs/` | `prompt-worker.log` (frozen 2026-10-30 14:50), `watch-cmds.log` (frozen 2026-10-12), `watch-app.log` (frozen 2026-10-09), `errors.log` | read by the comparator's daily audit — frozen truth (§6.6) |
+| `zcode-telegram.py`, `zcode_bot/` (43 entries), `zcode_proto.py`, `__pycache__` | the retired Python implementation | no |
+| `venv/` | the retired Python 3.13 venv | no — nothing calls it |
+| `bot-provider.json` | **0600, never read, never printed** — the bot's provider key | path only |
+| `bin/bot-revive` | the Python-era red button: it kickstarts `com.zcode.telegram-cmds` (retired, `Disabled=true`, not loaded) and waits for `state/hb-transport`, which the Kotlin daemon never writes | **BROKEN — do not use** |
+| `bin/install-fork-f81b.sh` | installs a freshly built fork the moment the app quits — an older deploy path, superseded by `~/Projects/ZCode/scripts/build-install.nu` and the `deploy-fork` job (§2.5) | no |
+| `capture.sh`, `nodock.sb` | payload-capture debug hook and its sandbox profile | no |
+| `backups/` (10 dirs) | deploy backups from 27–28/10 | no |
+
+`bin/bot-revive` deserves its own line in the incident book: an emergency
+script that would fail *and say so* (`✗ the poller agent would not
+kickstart`) while the real recovery sat one command away. The Kotlin
+equivalents are §2.2 (`launchctl kickstart`) and §2.4 (`bot-healer.nu
+--force`).
+
+## 6. Consolidation proposal — the owner decides the cutover
+
+Nothing here was executed. Each item names the evidence, the step and
+its **risk**, in the order I would take them.
+
+### 6.1 The deploy job's loaded residue (the error-5 bug) — highest value
+
+**Evidence.** `com.zcode.deploy-fork` aside, the deploy job
+`com.zcode.bot-deploy` is loaded-and-stopped after every successful
+`/deploy`. On 2026-11-03 the 14:14 deploy worked
+(`deploy job com.zcode.bot-deploy armed at …` + a full build in
+`deploy-daemon.log`), then 19:37, 19:37 and 22:45 failed with
+`launchctl bootstrap com.zcode.bot-deploy failed: Bootstrap failed: 5:
+Input/output error` (daemon log, `DeploySpawn.kt:125`). `DeploySpawn`
+ignores the pre-bootstrap `bootout`'s exit code and retries the
+bootstrap once after 2 s; the label being *still loaded* is the state
+that makes both attempts answer 5.
+
+**Proposed step.** In `DeploySpawn.spawn()`: make the `bootout` verdict
+explicit — on a non-zero exit, `print` the job (`launchctl print
+gui/<uid>/com.zcode.bot-deploy`) and, when it is loaded, `kickstart` it
+instead of `bootstrap`; or retry the bootout with a short backoff and
+verify with `launchctl print` (a gone label answers `Could not find
+service "<label>" in domain for user gui: <uid>`), then bootstrap.
+Cover it with a test that fakes the three-call sequence already recorded
+in `DeploySpawnTest`.
+
+**Risk.** Low, but it is the piece that can take the bot down: a wrong
+spawn means the deploy never arms the daemon. The change is contained in
+one edge class with its own suite, and the failure leg already keeps the
+current daemon up and the phone informed. Until it lands, §8.1 is the
+manual door.
+
+### 6.2 The two retired Python LaunchAgents
+
+**Evidence.** `com.zcode.telegram-cmds.plist` and
+`com.zcode.telegram-watch.plist` are `Disabled=true` and not loaded;
+their log files have not been written since 12/10 and 09/10.
+
+**Proposed step.** `launchctl bootout gui/$(id -u)/com.zcode.telegram-cmds`
+(and `-watch`) if they ever appear loaded, then move the two plists to
+`~/Library/LaunchAgents/disabled/` (a directory launchd does not read).
+Keep `retire-python.nu`'s rollback door documented in the README until the
+owner decides the Python repo is archival.
+
+**Risk.** Medium-low: a `bootstrap` of either one is the 409 incident
+again (§5.2). Removing the *plists* only removes the temptation; it does
+not remove the code. The real loss is the rollback path the README still
+promises ("relaunch the Python agents and flip `poll` back") — if that
+door is still wanted, keep the plists and delete nothing.
+
+### 6.3 The retired Python tree and venv
+
+**Evidence.** `~/.zcode/hooks/zcode_bot/` (43 entries), `venv/`,
+`zcode_proto.py`, `zcode-telegram.py`, `__pycache__`, `backups/`,
+`capture.sh`, `nodock.sb`. The only script that still points at the
+Python tree is `bin/bot-revive` (already broken, §5.2). The Kotlin
+daemon touches **only** `state/` (and the comparator reads `logs/`).
+
+**Proposed step.** Move the code (not `state/`, not `logs/`, not
+`bot-provider.json`) to an archive directory outside `~/.zcode`, e.g.
+`~/.zcode/backup/hooks-retired-2026-11/`, after `bot-revive` is retired
+itself; keep `state/` and `logs/` where they are.
+
+**Risk.** Medium: `state/` and `logs/` are load-bearing and sit in the
+same directory. A move that takes `state/` with it would deafen the
+poller (`tg-offset` is the cursor) and orphan the outbox. Do it with the
+daemon stopped and `git`-less mv one subdirectory at a time, verifying
+`hb-*` and `tg-offset` afterwards. Also: `bot-provider.json` is 0600 and
+must never be copied into a repo.
+
+### 6.4 The spectator orchestrator and the stale turn markers
+
+**Evidence.** `spectator-orchestrator` scans `turn-*.marker` every 2 s
+and has started zero turns since 2026-10-30: the only markers present
+are three from 29–30/10, and **nothing writes markers any more** — the
+Python hooks that did are gone (§5.2), and no ZCode package writes
+`state/turn-*.marker`. Its only log line today is
+`spectator-orchestrator stopped — shutting down`. It still beats
+`hb-spectator`.
+
+**Proposed step.** Either delete the three stale markers and retire the
+orchestrator (a wiring change, one commit, `Main.kt`), or keep it and
+document it as dormant. Deleting the markers alone is the
+no-code-change half.
+
+**Risk.** Low for the deletion (they are inert inputs), but note the
+hazard that makes it worth doing: the scan is **live** — a stale marker
+whose sid is the current task and is not in `bot-workers.json` *would*
+spawn a spectator turn. Today the gate holds only because
+`bot-session.json` does not name those sids. Retiring the orchestrator
+removes the hazard and one heartbeat; it also removes the only path that
+would narrate a Mac-side turn if markers ever came back. Decide which
+future you want.
+
+### 6.5 `com.zcode.reopen-zcode`
+
+**Evidence.** One `zsh -c 'sleep 8 && open -a ZCode && sleep 5 && open -a ZCode'`
+at every login, no KeepAlive, no interval. It exists because the app's
+own "open at login" was not enough after a reboot (the 30/10 incident's
+"cerraba y no abría").
+
+**Proposed step.** Keep it while the Mac's login behavior is what it is;
+if the app's own login item is ever made reliable, retiring this is a
+one-`bootout`.
+
+**Risk.** Low to remove, **high** if removed at the wrong time: without
+the app there is no socket, so the phone can read (`/tasks`, `/status`
+answer 📡) but cannot start a turn until someone opens ZCode by hand.
+That is exactly the trade this job buys.
+
+### 6.6 The comparator's frozen truth
+
+**Evidence.** `~/.zcode/bot-kotlin/parity/report-2026-11-0{1,2,3}.json`
+all read `pythonEvents=2`, `pythonTurns=4`, `verdict=DIVERGENT`: the
+Python side of the audit has been frozen since 30/10
+(`prompt-worker.log` mtime). The shadow side keeps growing
+(`shadowOnly` 165 → 223), so the verdict can no longer change.
+
+**Proposed step.** Declare the comparator post-cutover a **museum
+instrument**: keep it running (it costs one JVM a day) or point it at a
+live truth (the daemon's own shadow decisions vs the sends it actually
+made). Do not "fix" it by deleting the Python logs — they are the last
+record of the pre-cutover baseline.
+
+**Risk.** Low to leave as-is; the risk is *misreading* it. A
+`DIVERGENT` today is structural, not evidence of a new divergence — the
+README says exactly that, and this runbook is where an operator will
+look first.
+
+### 6.7 `outbox-firehose.json` — 20 parked entries from 30/10
+
+**Evidence.** `~/.zcode/hooks/state/outbox-firehose.json` holds 20
+`{text, ts}` entries from 2026-10-30, and the lane that would read it is
+**not built**: `daemon.jsonl` says `firehose lane: OFF (no firehose_token)
+— one throat, the shared files`, and `Lanes.kt` constructs no
+`fireOutbox` without a split. The file is inert.
+
+**Proposed step.** Archive it (`mv` to `~/.zcode/backup/`) — it is
+valuable only as the forensic record of the flood that motivated the
+two-lane design (`Lanes.kt`'s header).
+
+**Risk.** Low, with one trap: if a `firehose_token` is ever added to
+`telegram-remote.json`, the lane comes alive and would replay those 20
+messages. Keeping the file *is* keeping that trap. Owner's call.
+
+### 6.8 `tg-busy` — a Python-era mutex
+
+**Evidence.** `~/.zcode/hooks/state/tg-busy` (17 bytes, mtime 2026-10-25)
+is Python's busy flag; the Kotlin daemon uses `live-view-active.json` and
+`inbound-queue.json` instead. Nothing in `modules/` reads `tg-busy`.
+
+**Proposed step.** Leave it. It is 17 bytes and deleting it buys nothing;
+documenting that it is *not* the current busy flag is worth more.
+
+**Risk.** None.
