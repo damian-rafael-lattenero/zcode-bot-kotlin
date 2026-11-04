@@ -139,13 +139,20 @@ class DeploySpawn(
             beat(BOOTOUT_BEAT_MS)
             out = launchctl.run(listOf("bootstrap", domain(), plistFile.absolutePath))
         }
-        // error 5 = disabled / stale label (measured 2/11 22:20 + 4/11 13:56):
-        // the launchd recovery recipe runs HERE now — enable the label and
-        // try the last bootstrap, so a wedged label self-heals instead of
-        // failing the phone's tap forever
+        // error 5 = disabled / stale label (measured 2/11 22:20 + 4/11 13:56
+        // + 4/11 14:4x AGAIN on bot-fork-deploy): the launchd recovery recipe
+        // runs HERE now — enable the label and try the last bootstrap, so a
+        // wedged label self-heals instead of failing the phone's tap forever.
+        // `enable` takes ONE service-target arg (gui/<uid>/<label>): the first
+        // version passed domain+label separately and launchd swallowed it as a
+        // no-op — the self-heal never healed (measured: the fork tap kept
+        // failing error 5 after the "fixed" daemon was live)
         if (out.exit != 0 && out.text.contains(ERROR_5_MARK)) {
-            launchctl.run(listOf("enable", domain(), label))
-            logger.warn { "deploy job $label bootstrap hit error 5 — enabled and retrying once" }
+            val enable = launchctl.run(listOf("enable", "${domain()}/$label"))
+            logger.warn {
+                "deploy job $label bootstrap hit error 5 — enable " +
+                    "exit=${enable.exit} ${enable.text.trim()}, retrying once"
+            }
             out = launchctl.run(listOf("bootstrap", domain(), plistFile.absolutePath))
         }
         if (out.exit != 0) {
