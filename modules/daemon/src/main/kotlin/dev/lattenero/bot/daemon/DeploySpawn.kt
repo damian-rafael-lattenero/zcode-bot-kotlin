@@ -321,9 +321,13 @@ object DeployScriptKnob {
     val DEFAULT: File =
         File(System.getProperty("user.home"), "Projects/zcode-bot-kotlin/scripts/deploy-daemon.nu")
 
-    /** The fork deploy's script — the same repo, its own one-shot automaton. */
+    /** The fork deploy's script — THE MIRROR (4/11): the same script the
+     *  shell's `zcode-deploy` runs (build-install --when-quit: build with
+     *  Telegram phase announces, the swap waits for the owner's ⌘Q — the app
+     *  is NEVER killed behind his back; the old auto-cutover retired with
+     *  Python). The knob `deploy_fork_script` still overrides. */
     val FORK_DEFAULT: File =
-        File(System.getProperty("user.home"), "Projects/zcode-bot-kotlin/scripts/deploy-fork-and-retire.nu")
+        File(System.getProperty("user.home"), "Projects/ZCode/scripts/build-install.nu")
 
     // any reading failure is the same answer: the default (SendKnob's degrade law)
     @Suppress("TooGenericExceptionCaught")

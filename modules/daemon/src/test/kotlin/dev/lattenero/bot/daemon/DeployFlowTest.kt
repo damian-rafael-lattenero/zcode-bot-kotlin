@@ -83,7 +83,7 @@ class DeployFlowTest {
         assertEquals(1, rig.spoken.size)
         val (text, _, markup) = rig.spoken.single()
         assertTrue(text.startsWith("🍴 <b>Deploy del fork de ZCode</b>"), text)
-        assertTrue(text.contains("El daemon del bot SOBREVIVE"), "the fork's honest cost is on the card")
+        assertTrue(text.contains("⌘Q"), "the fork's honest arc is on the card: build now, the swap waits for the owner's ⌘Q")
         val row = markup!!.jsonObject["inline_keyboard"]!!.jsonArray[0].jsonArray
         assertEquals("dep:go", row[0].jsonObject["callback_data"]!!.jsonPrimitive.content)
         assertEquals("dep:no", row[1].jsonObject["callback_data"]!!.jsonPrimitive.content)
