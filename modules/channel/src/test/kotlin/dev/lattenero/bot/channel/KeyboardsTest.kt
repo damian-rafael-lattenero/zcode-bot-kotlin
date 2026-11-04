@@ -230,7 +230,6 @@ class KeyboardsTest {
             Keyboards.stopConfirm(),
             Keyboards.subagentsViewButtons(inactiveView = false),
             Keyboards.subagentsViewButtons(inactiveView = true),
-            Keyboards.liveCard("session_0f84de0cf002474fe596446e627129dc"),
         )
     }
 
@@ -311,22 +310,7 @@ class KeyboardsTest {
             if (text.startsWith("⚡")) assertTrue(data.startsWith("intr:"), "⚡ interrupts: $data")
             if (text.startsWith("🟢")) assertTrue(data.startsWith("t:"), "🟢 rows attach tasks: $data")
             if (text.startsWith("🔵")) assertTrue(data.startsWith("sn:"), "🔵 rows open the detail card: $data")
-            if (text.startsWith("⏸️")) assertTrue(data.startsWith("bg:"), "⏸️ parks the live card: $data")
         }
-    }
-
-    @Test
-    fun theLiveCardCarriesOneParkButtonAndTheBytesNeverBreathe() {
-        // THE OWNER'S ⏸️ (3/11): ONE button on the live card's own row —
-        // the card has no other buttons (the fold buttons ride their own
-        // collapsed messages), so the row grammar's primary action IS the row
-        val worst = "session_0f84de0cf002474fe596446e627129dc" // t:<sid>'s 43-byte worst case
-        val kb = Keyboards.liveCard(worst)
-        val row = rowsOf(kb)
-        assertEquals(1, row.size, "one row")
-        assertEquals(listOf("⏸️ A background" to "bg:$worst"), row.single(), "one button, the park tap")
-        assertTrue(Keyboards.callbackDataValid("bg:$worst"), "bg: is t: + 1 byte — the 64-byte law holds")
-        assertTrue("bg:$worst".toByteArray().size <= 64)
     }
 
     @Test

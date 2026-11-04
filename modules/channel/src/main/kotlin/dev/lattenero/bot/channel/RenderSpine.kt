@@ -217,25 +217,6 @@ sealed interface RenderEvent {
      */
     data class Page(val boxId: Int, val page: Int) : RenderEvent
 
-    /**
-     * THE PARK TAP'S FACT (U5c, the owner's ⏸️): the `bg:` button's tap
-     * parks the card — the fold's own state ([TurnLive.parked]), never a
-     * machine beside it. The event is TASK-SCOPED like every verb: a
-     * foreign or expired task parks NOTHING (the honest miss the toast
-     * names) and a second tap on a parked card folds nothing (the
-     * one-shot). [atMs] is the tap's own clock — the fact's stamp, never a
-     * rendered timer.
-     */
-    data class Park(val taskId: String, val atMs: Long) : RenderEvent
-
-    /**
-     * THE PARK'S ONE EDIT LANDED (U5c): «▶️ sigue en background» is on the
-     * card's message now — the fact, not the request. A throttled edit
-     * folds nothing (the publisher retries it on the next tick); a second
-     * landing folds nothing either (the tap edits the card ONCE).
-     */
-    data class ParkLanded(val taskId: String) : RenderEvent
-
     /** The turn is spent (the seal's cleanup, a ☢️ nuclear): the fold's reset. */
     data object Clear : RenderEvent
 }

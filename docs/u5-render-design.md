@@ -5,6 +5,10 @@
 > parpadeante, agent live) sobre KapStream»). This document exists so the
 > risk is spent on design, not on a big-bang. English per the plan
 > convention; the owner's visual laws are quoted verbatim where they bind.
+>
+> **2026-11-04: the ⏸️ park (`bg:`) described in U5c was REMOVED by owner
+> order.** Everything else stands; the park rows below are the design's
+> record, not the shipped surface.
 
 ## What exists today (the floor, not the target)
 
