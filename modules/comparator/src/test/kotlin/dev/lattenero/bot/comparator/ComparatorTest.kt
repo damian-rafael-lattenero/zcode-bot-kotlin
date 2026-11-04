@@ -5,6 +5,8 @@ import java.time.Instant
 import java.time.ZoneOffset
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 /** The truth parsers against the REAL production formats (pinned 2026-10-29). */
 class TruthLogsTest {
@@ -170,5 +172,32 @@ class ParityTest {
         val z = ZconnParity(0, 0, 0, 5, 0, 0, null, null)
         val s = SpectatorParity(0, 0, 3, 0, 0, 0, 0)
         assertEquals("INSUFFICIENT", Parity.verdict(z, s))
+    }
+
+    @Test
+    fun aFrozenReferenceIsInsufficientNotForeverDivergent() {
+        // 2026-11-04 (the retirement): Python's logs stop, the shadow side
+        // keeps growing — "shadowOnly > 0" would print DIVERGENT every day
+        // forever. A reference that has not moved inside the window proves
+        // nothing: the honest verdict is INSUFFICIENT.
+        val z = ZconnParity(
+            pythonEvents = 2,
+            shadowEvents = 235,
+            matched = 2,
+            beforeCoverage = 25,
+            pythonOnly = 0,
+            shadowOnly = 233,
+            maxDriftS = 1.2,
+            medianDriftS = 1.2,
+        )
+        val s = SpectatorParity(4, 60, 0, 3, 0, 1, 57)
+        val now = 1_793_400_000.0
+        assertEquals("DIVERGENT", Parity.verdict(z, s, baselineNewestTs = now - 60.0, nowS = now))
+        assertEquals(
+            "INSUFFICIENT",
+            Parity.verdict(z, s, baselineNewestTs = now - Parity.BASELINE_STALE_S - 1, nowS = now),
+        )
+        assertTrue(Parity.baselineStale(now - Parity.BASELINE_STALE_S - 1, now))
+        assertFalse(Parity.baselineStale(null, now), "no reference at all is the plain INSUFFICIENT path")
     }
 }
