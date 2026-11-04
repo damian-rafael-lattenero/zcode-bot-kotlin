@@ -136,12 +136,12 @@ object TranscriptFeed {
 
     /**
      * The collapsed block's header — the whole message until the tap
-     * expands it: number, size, the affordance. The text itself never
-     * rides here.
+     * expands it: number, the «generado Xk» verdict (v2 §4, the number
+     * law), the affordance. The text itself never rides here.
      */
     internal fun collapsedHeader(number: Int?, cp: Int): String {
         val label = if (number != null) "CoT $number" else "CoT · sin sellar"
-        return "📖 <b>$label</b> · ${LiveTurn.fmtK(cp)} — tocar para leer"
+        return "📖 <b>$label</b> generado ${LiveTurn.fmtKDecimal(cp.toLong())} — tocar para leer"
     }
 
     /** The tap's EXPANDED render: the header, then the block WHOLE. */

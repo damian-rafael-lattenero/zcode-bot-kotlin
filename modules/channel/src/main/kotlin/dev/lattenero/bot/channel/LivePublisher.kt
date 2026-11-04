@@ -484,6 +484,7 @@ class LivePublisher(
         sealed = false
         titleResolvedFor = null // the new task's card resolves its own title
         feedSeen = null // the new turn's transcript starts clean — history is never replayed
+        resetPacing() // the pings' counter dies with the replaced turn
     }
 
     /**
@@ -706,6 +707,7 @@ class LivePublisher(
         statusMessageId = null
         statusTaskId = null
         feedSeen = null
+        resetPacing() // the turn is spent — the pings' counter dies with it
     }
 
     /**
@@ -796,6 +798,95 @@ class LivePublisher(
                 },
             )
 
+    /**
+     * THE PROGRESS PINGS' Process (v2 §4) — the 5s cadence is schedule
+     * algebra, same idiom as [asProcess], started next to it in Main.
+     * The pacing state lives HERE (the fold stays pure).
+     */
+    fun pingProcess(onHeartbeat: () -> Unit = {}): Process<Unit> =
+        Kap { pingTick() }
+            .repeat(Schedule.spaced(PING_CADENCE))
+            .process(
+                name = "live-view-pings",
+                restart = RestartPolicy.exponential(base = 1.seconds, max = 15.seconds),
+                heartbeatEvery = 30.seconds,
+                onHeartbeat = onHeartbeat,
+                onRestart = { attempt, error, delay ->
+                    logger.warn(error) { "live view ping failed — restart $attempt in $delay" }
+                },
+            )
+
+    // ---- the 5s pings (v2 §4) ---------------------------------------------------
+
+    /** The pings' pacing state — PUBLISHER state, the fold stays pure. */
+    private var pingCounter = 0
+    private var pingActionKey: String? = null
+    private var pingLastThoughtChars = -1
+    private var pingLastEditKey: String? = null
+
+    /** One pass of the 5s cadence. MUTEXED with the tick (shared cells). */
+    suspend fun pingTick() = tickMutex.withLock { pingTickLocked() }
+
+    // one guard per silence/skip verdict — the ping's own honesty ladder
+    @Suppress("ReturnCount", "CyclomaticComplexMethod")
+    private suspend fun pingTickLocked() {
+        val cfg = config()
+        if (!cfg.configured) return
+        val state = hub.peek() ?: return
+        val now = clock()
+        // THE RESETS (v2 §4): the action's counter dies on Done and on task
+        // switch — a new action's pings count from 1 again
+        if (state.phase is TurnPhase.Done || (statusTaskId != null && statusTaskId != state.taskId)) resetPacing()
+        if (state.phase is TurnPhase.Done) return
+        // THE LIVE LAW: pings speak only a genuinely live turn — the same
+        // conditions the card's frozen clock reads, never a frozen turn
+        if (!channelAlive() || state.typedError != null || state.apiRetry != null) return
+        val silence = now - (state.lastEventAtMs ?: now)
+        if (silence >= LiveTurn.STALE_SOFT_MS) return // frozen — silence is data
+        // FLOOD SAFETY (the standing law): the ping rides the firehose; a
+        // cooldown window would DELAY the send — a delayed ping is a queued
+        // ping. DROP it: never queue, never burst, max one per 5s per turn.
+        if (telegram.throttled()) return
+        when (val phase = state.phase) {
+            is TurnPhase.Thinking -> {
+                // CoT streaming (fresh per §2): the deltas are flowing NOW.
+                // No new chars since the last ping = silence is data — skip.
+                val fresh = state.lastThoughtAtMs != null && now - state.lastThoughtAtMs < LiveTurn.COT_QUIET_MS
+                if (!fresh || state.thoughtChars == pingLastThoughtChars) return
+                if (pingActionKey != PING_THINKING) resetPacing(PING_THINKING)
+                pingCounter += 1
+                pingLastThoughtChars = state.thoughtChars
+                speak("${pingCounter} - generando CoT ${LiveTurn.fmtKDecimal(state.thoughtChars.toLong())}", null)
+            }
+
+            is TurnPhase.Writing -> {
+                val lane = phase.toolId?.let { id -> state.tools.firstOrNull { it.toolId == id } }
+                // Edit streaming only (a live +A/−R): bash and the answer
+                // stream NO pings — the card already carries them
+                val diff = lane?.takeIf { it.name in WRITE_EDIT_TOOLS && (it.added != null || it.removed != null) }
+                if (diff == null) return
+                val basename = (diff.input?.str("file_path") ?: diff.input?.str("path") ?: diff.name)
+                    .substringAfterLast('/')
+                val editKey = "$basename +${diff.added ?: 0} −${diff.removed ?: 0}"
+                if (pingActionKey != diff.toolId) resetPacing(diff.toolId)
+                if (editKey == pingLastEditKey) return // the counts did not change
+                pingCounter += 1
+                pingLastEditKey = editKey
+                speak("${pingCounter} - editando archivo $basename +${diff.added ?: 0} −${diff.removed ?: 0}", null)
+            }
+
+            is TurnPhase.Done, TurnPhase.Idle -> return
+        }
+    }
+
+    /** The pacing's reset — the whole cell set when the action changes. */
+    private fun resetPacing(actionKey: String? = null) {
+        pingActionKey = actionKey
+        pingCounter = 0
+        pingLastThoughtChars = -1
+        pingLastEditKey = null
+    }
+
     private var birthCooldownTicks = 0
     private var birthFailLogged = false
     private var lastBirthAtMs: Long? = null
@@ -804,6 +895,12 @@ class LivePublisher(
 
     private companion object {
         val EDIT_CADENCE = 3.seconds
+
+        /** The progress pings' cadence (v2 §4) — one ping per 5s per turn, max. */
+        val PING_CADENCE = 5.seconds
+
+        /** The Thinking phase's action identity (the pings' counter key). */
+        private const val PING_THINKING = "thinking"
 
         /** Two births never ride closer than this (the flap's flood guard). */
         const val BIRTH_SPACING_MS = 30_000L

@@ -652,4 +652,140 @@ class LivePublisherTest {
         hub.keepalive("t1", 5) // an old seq never rewinds the counter
         assertEquals(79L, hub.peek()!!.lastSeq)
     }
+
+    // ---- the 5s progress pings (v2 §4) ----------------------------------------
+
+    @Test
+    fun thePingSpeaksWhileTheCoTFlowsAndSkipsSilenceAndBash() = runTest {
+        val taskId = "task-9"
+        val hub = LiveHub()
+        hub.apply(frame(taskId, "task_run_started", at = 1_000), nowMs = 1_000)
+        hub.apply(frame(taskId, "agent_thought_chunk", at = 1_050, "content" to JsonPrimitive("p".repeat(3000))), nowMs = 1_050)
+        val wire = Wire()
+        val spoken = mutableListOf<String>()
+        var now = 6_000L
+        val publisher = publisher(wire, hub, spoken, clock = { now })
+        publisher.pingTick()
+        assertTrue("1 - generando CoT 3k" in spoken, "the first ping of the action counts 1: $spoken")
+        // new chars, one cadence later: the counter climbs (the number law)
+        hub.apply(frame(taskId, "agent_thought_chunk", at = 6_050, "content" to JsonPrimitive("q".repeat(1500))), nowMs = 6_050)
+        now = 11_000L
+        publisher.pingTick()
+        assertTrue("2 - generando CoT 4,5k" in spoken, "the counter climbs with new chars: $spoken")
+        // NO new chars since the last ping: silence is data — skip
+        now = 16_000L
+        publisher.pingTick()
+        assertEquals(2, spoken.size, "no new chars, no ping")
+        // a bash lane streams NO pings — the card already carries the command
+        hub.apply(
+            frame(
+                taskId, "tool_call", at = 16_100,
+                "toolId" to JsonPrimitive("tb"), "toolName" to JsonPrimitive("Bash"),
+                "input" to buildJsonObject { put("command", "npm test") },
+            ),
+            nowMs = 16_100,
+        )
+        now = 21_000L
+        publisher.pingTick()
+        assertEquals(2, spoken.size, "bash streams no pings")
+    }
+
+    @Test
+    fun thePingCounterResetsWhenTheActionChanges() = runTest {
+        val taskId = "task-9"
+        val hub = LiveHub()
+        hub.apply(frame(taskId, "task_run_started", at = 1_000), nowMs = 1_000)
+        hub.apply(frame(taskId, "agent_thought_chunk", at = 1_050, "content" to JsonPrimitive("c".repeat(2500))), nowMs = 1_050)
+        val wire = Wire()
+        val spoken = mutableListOf<String>()
+        var now = 6_000L
+        val publisher = publisher(wire, hub, spoken, clock = { now })
+        publisher.pingTick()
+        hub.apply(frame(taskId, "agent_thought_chunk", at = 6_050, "content" to JsonPrimitive("d".repeat(2500))), nowMs = 6_050)
+        now = 11_000L
+        publisher.pingTick()
+        assertTrue("2 - generando CoT 5k" in spoken, "$spoken")
+        // an Edit with a LIVE diff opens: the identity changes — count from 1
+        hub.apply(
+            frame(
+                taskId, "tool_call_update", at = 11_100, "status" to JsonPrimitive("pending"),
+                "toolId" to JsonPrimitive("te"), "toolName" to JsonPrimitive("Edit"),
+                "input" to buildJsonObject {
+                    put("file_path", "/w/report.txt"); put("old_string", "a\nb\nc"); put("new_string", "a\nX\nc\nd")
+                },
+            ),
+            nowMs = 11_100,
+        )
+        now = 16_200L
+        publisher.pingTick()
+        assertTrue("1 - editando archivo report.txt +3 −2" in spoken, "the new action's pings count from 1: $spoken")
+        // the counts did not change: skip
+        now = 21_300L
+        publisher.pingTick()
+        assertEquals(3, spoken.size, "unchanged counts, no ping")
+        // the counts move: the counter climbs within the SAME action
+        hub.apply(
+            frame(
+                taskId, "tool_call_update", at = 21_400, "status" to JsonPrimitive("pending"),
+                "toolId" to JsonPrimitive("te"), "toolName" to JsonPrimitive("Edit"),
+                "input" to buildJsonObject {
+                    put("file_path", "/w/report.txt")
+                    put("old_string", "a\nb\nc\nd\ne")
+                    put("new_string", "a\nX\nc\nd\ne\nf")
+                },
+            ),
+            nowMs = 21_400,
+        )
+        now = 26_500L
+        publisher.pingTick()
+        assertTrue("2 - editando archivo report.txt +5 −4" in spoken, "$spoken")
+    }
+
+    @Test
+    fun thePingDropsUnderCooldownPressure() = runTest {
+        val taskId = "task-9"
+        val hub = LiveHub()
+        hub.apply(frame(taskId, "task_run_started", at = 1_000), nowMs = 1_000)
+        hub.apply(frame(taskId, "agent_thought_chunk", at = 1_050, "content" to JsonPrimitive("p".repeat(3000))), nowMs = 1_050)
+        val wire = Wire()
+        val spoken = mutableListOf<String>()
+        var nowSec = 2.0
+        val cooldown = Cooldown(now = { nowSec }, readFile = { null })
+        val publisher = publisher(wire, hub, spoken, cooldown = cooldown, clock = { 6_000L })
+        cooldown.extend(raSeconds = 60) // Telegram named the window
+        publisher.pingTick()
+        assertTrue(spoken.isEmpty(), "a window would DELAY the ping — the ping DROPS (never queues, never bursts)")
+        nowSec = 5_000.0 // the window lifted: the next cadence speaks it, counting from 1 still
+        publisher.pingTick()
+        assertTrue("1 - generando CoT 3k" in spoken, "$spoken")
+    }
+
+    @Test
+    fun thePingSkipsAFrozenOrPilledTurnAndDiesWithIt() = runTest {
+        val taskId = "task-9"
+        val hub = LiveHub()
+        hub.apply(frame(taskId, "task_run_started", at = 1_000), nowMs = 1_000)
+        hub.apply(frame(taskId, "agent_thought_chunk", at = 1_050, "content" to JsonPrimitive("p".repeat(3000))), nowMs = 1_050)
+        val wire = Wire()
+        val spoken = mutableListOf<String>()
+        // 199s of silence: the frozen clock's territory — no pings
+        val publisher = publisher(wire, hub, spoken, clock = { 200_000L })
+        publisher.pingTick()
+        assertTrue(spoken.isEmpty(), "a frozen turn pings nothing")
+        // the fork's retry pill: not a live turn either
+        hub.apply(
+            frame(
+                taskId, "session_info_update", at = 200_100,
+                "apiRetry" to buildJsonObject { put("attempt", 1); put("reason", "rate_limited") },
+            ),
+            nowMs = 200_100,
+        )
+        publisher.pingTick()
+        assertTrue(spoken.isEmpty(), "a pilled turn pings nothing")
+        // the turn completes: the counter dies with it, nothing more speaks
+        hub.apply(frame(taskId, "agent_thought_chunk", at = 200_200, "content" to JsonPrimitive("x")), nowMs = 200_200)
+        hub.apply(frame(taskId, "task_complete", at = 200_300, "stopReason" to JsonPrimitive("end_turn")), nowMs = 200_300)
+        publisher.pingTick()
+        assertTrue(spoken.isEmpty(), "a Done turn pings nothing")
+    }
 }
