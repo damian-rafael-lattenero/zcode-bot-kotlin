@@ -64,7 +64,30 @@ class DeploySpawn(
      * [BOOTOUT_BEAT_MS], the waiting is a suspension.
      */
     private val beat: suspend (Long) -> Unit = { delay(it) },
+    /** Injectable for the tests (the log-alive detector reads the wall clock). */
+    private val nowMs: () -> Long = System::currentTimeMillis,
 ) {
+
+    /** The honest busy answer — both detectors name what they saw. */
+    private fun busyMessage(): String =
+        "el deploy job $label ya está CORRIENDO — hay un deploy en curso (launchd lo dice, " +
+            "o su log sigue vivo); esperá a que termine (el fork tarda ~15 min) y volvé a tocar"
+
+    /** The job's own log is being written RIGHT NOW: a mid-build deploy job. */
+    private fun jobLogAlive(): Boolean =
+        logFile.exists() && (nowMs() - logFile.lastModified()) < JOB_LOG_ALIVE_MS
+
+    /**
+     * The ladder's honest exit: refuse a RUNNING job (busy — never
+     * bootstrap it), let a dead wedge fall through to the enable self-heal.
+     */
+    private fun refuseIfRunning() {
+        val probe = launchctl.run(listOf("print", "${domain()}/$label"))
+        if (probe.text.contains(JOB_RUNNING_MARK) || jobLogAlive()) {
+            throw IllegalStateException(busyMessage())
+        }
+        logger.warn { "deploy job $label wedged (error 5) but not running — the enable self-heal proceeds" }
+    }
 
     /**
      * The one-shot job's plist — pure, so the suite pins the contract:
@@ -131,12 +154,14 @@ class DeploySpawn(
         // 16:28-16:39, the owner tapped fork/both AGAIN while the 16:28 fork
         // deploy was mid-build) and double-running a deploy is the real
         // hazard. The honest answer names the state, not launchd noise.
+        // TWO detectors, because launchd's state string lied once (measured
+        // 16:39: the guard passed while the job was mid-build): the print's
+        // state/pid AND the job's own log being alive (a build writes to it
+        // every few seconds; a log silent 5 minutes is a dead — or hung,
+        // equally un-double-run-able — job).
         val precheck = launchctl.run(listOf("print", "${domain()}/$label"))
-        if (precheck.text.contains(JOB_RUNNING_MARK)) {
-            throw IllegalStateException(
-                "el deploy job $label ya está CORRIENDO — hay un deploy en curso; " +
-                    "esperá a que termine (el fork tarda ~15 min) y volvé a tocar",
-            )
+        if (precheck.text.contains(JOB_RUNNING_MARK) || jobLogAlive()) {
+            throw IllegalStateException(busyMessage())
         }
         plistFile.parentFile?.mkdirs()
         plistFile.writeText(plist())
@@ -151,11 +176,23 @@ class DeploySpawn(
         // fight. 5 attempts: the wedge can outlive 3 (~4 s) when concurrent
         // launchd work hits the same domain (measured at 16:28, the fork's
         // bootstrap racing the bot's bootout) — the budget is now ~10 s.
+        var cleared = false
         for (attempt in 1..BOOTOUT_ATTEMPTS) {
             val bootout = launchctl.run(listOf("bootout", domain(), label))
             logger.info { "deploy job $label bootout #$attempt: exit=${bootout.exit} ${bootout.text.trim()}" }
-            if (bootout.exit == 0 || bootout.exit == BOOTOUT_NOT_LOADED_EXIT) break
+            if (bootout.exit == 0 || bootout.exit == BOOTOUT_NOT_LOADED_EXIT) {
+                cleared = true
+                break
+            }
             if (attempt < BOOTOUT_ATTEMPTS) beat(BOOTOUT_BEAT_MS)
+        }
+        if (!cleared) {
+            // THE LADDER EXHAUSTED ON ERROR 5: a job that is actually RUNNING
+            // (measured 16:39 — the second tap raced the 16:28 fork build)
+            // is the BUSY case and must NEVER be bootstrapped (the
+            // double-deploy hazard; the enable self-heal below is for a
+            // DISABLED/stale label, not a live one).
+            refuseIfRunning()
         }
         var out = launchctl.run(listOf("bootstrap", domain(), plistFile.absolutePath))
         if (out.exit != 0) {
@@ -228,6 +265,9 @@ class DeploySpawn(
 
         /** `launchctl print`'s marker for an ACTIVE deploy job — the busy guard's trigger. */
         const val JOB_RUNNING_MARK = "state = running"
+
+        /** A job log written this recently means the deploy is mid-run (the second busy detector). */
+        const val JOB_LOG_ALIVE_MS = 5 * 60_000L
 
         /** launchd's own error-5 signature (disabled/stale label — the enable+retry trigger). */
         const val ERROR_5_MARK = "Bootstrap failed: 5"

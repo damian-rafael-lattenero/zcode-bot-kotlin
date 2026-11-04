@@ -110,6 +110,21 @@ fun reduce(
     }
 
     RenderEvent.Clear -> null // the turn is spent: the fold's own reset
+
+    // THE ATTACH'S INSTANT SWITCH (measured 4/11): a `t:` tap on an IDLE task
+    // never receives a frame, so the fold kept watching the previous turn and
+    // the 🎯 stayed on the first row forever. The attach's switch is a REAL
+    // task switch — the same fresh seed a frame for a foreign task would
+    // build — just without waiting for traffic. Re-attaching the current task
+    // changes nothing (WatchTask's lane-clear already ran).
+    is RenderEvent.SwitchTask -> when {
+        state == null || state.taskId != event.taskId -> RenderState.empty.copy(
+            taskId = event.taskId,
+            title = event.taskId.takeLast(LiveTurn.TITLE_TAIL),
+        )
+
+        else -> state
+    }
 }
 
 /**

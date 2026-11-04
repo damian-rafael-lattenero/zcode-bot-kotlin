@@ -105,6 +105,17 @@ class LiveHub {
         mutex.withLock { fold(RenderEvent.WatchTask, SimpleLineDiffer) }
     }
 
+    /**
+     * THE ATTACH'S INSTANT SWITCH (4/11): the tapped task becomes the watched
+     * turn NOW — an idle task never receives a frame, so without this the
+     * card (and the 🎯 mark that reads the fold) stayed on the previous task
+     * until its next event. The next tick's task-switch law does the rest:
+     * the old card seals once, the tapped task's card is born.
+     */
+    suspend fun watchTaskId(taskId: String) {
+        mutex.withLock { fold(RenderEvent.SwitchTask(taskId), SimpleLineDiffer) }
+    }
+
     /** The current lane scope — read FROM the fold (the sa: tap's resolution and tests). */
     suspend fun watchedLaneId(): String? = mutex.withLock { states.value?.watchedLane }
 

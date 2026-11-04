@@ -1589,6 +1589,10 @@ class BotCommands(
         ops.subscribe(sid, ws)
         hub.unpin() // a task attach is the WHOLE world — any pin or lane scope dies here
         hub.watchTask()
+        // THE ATTACH'S INSTANT SWITCH (4/11): an idle task never streams, so
+        // without this the card AND the 🎯 stayed on the previous turn until
+        // its next event — the owner's «no me la deja marcada».
+        hub.watchTaskId(sid)
         logger.info { "callback 🟢 t: pipe ATTACHED to $sid (running=$live) — bind attempt rides along" }
         val title = row?.title?.takeIf { it.isNotEmpty() } ?: sid.takeLast(SID_TAIL)
         val watchLine = if (live) {
