@@ -572,6 +572,13 @@ internal fun wireChannel(
         verbosity,
         deployFlow = deployFlow,
         lastPrompt = lastPrompt,
+        // THE BOARD'S OWN THROAT: the wired board SENT the cards — the taps
+        // must consult THE SAME instance. This argument was lost in the
+        // 10afea7/376e564 merge and every tap hit the default-EMPTY board:
+        // 100% of question taps answered «ya no está pendiente» (measured
+        // 4/11 all day — my AskUserQuestions and the plan approvals ride
+        // these very cards)
+        board = board,
         liveView = liveView,
         promptTap = promptTap,
         brain = brain,
@@ -693,15 +700,18 @@ private fun buildPoller(
     queue: InboundQueue,
     history: TasksHistory,
     // the /verbosity store (the commands WRITE it — the publisher reads it
-    // per tick) and the questions' board: the answer round-trip (default
-    // constructed — the send-less board registers and seals quietly)
+    // per tick) and the questions' board — REQUIRED, no default: the lost
+    // argument in the 10afea7/376e564 merge silently default-constructed an
+    // EMPTY board and 100% of the question taps answered «ya no está
+    // pendiente» (measured 4/11). A missing board must fail the COMPILE,
+    // never the owner's tap.
     verbosity: VerbositySetting,
+    board: QuestionBoard,
     // /retry's ammo (Python's F22) — the last FIRED prompt's store
     lastPrompt: LastPrompt,
     // B6 — /deploy's flow (the door): the intercepts below hand it the
     // /deploy texts and the dep: taps BEFORE the dispatcher ever sees them
     deployFlow: DeployFlow,
-    board: QuestionBoard = QuestionBoard(),
     // the collapsed CoT blocks' taps (the cb: buttons) — the live view IS
     // the registry (it spoke the messages and holds the ids + texts)
     liveView: LivePublisher? = null,
