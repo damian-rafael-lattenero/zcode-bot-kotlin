@@ -199,8 +199,9 @@ object TranscriptFeed {
         }
     }
 
-    /** The command as the shell would see it (a list joins with spaces). */
-    private fun commandOf(input: JsonObject?): String? = when (val cmd = input?.get("command")) {
+    /** The command as the shell would see it (a list joins with spaces).
+     *  SHARED — the card's bash block and the pager speak the same text. */
+    internal fun commandOf(input: JsonObject?): String? = when (val cmd = input?.get("command")) {
         is JsonArray -> cmd.joinToString(" ") { PyText.pyStr(it) }
         is JsonPrimitive -> if (cmd.isString) cmd.content else null
         else -> null
@@ -216,7 +217,6 @@ object TranscriptFeed {
         (input?.get("offset") as? JsonPrimitive)?.content?.toIntOrNull() ?: 0
 
     /** The tools whose output is collapsed behind the pager. */
-    private val SHELL_TOOLS = setOf("Bash", "Shell")
     private val READ_TOOLS = setOf("Read", "View")
 
     /** The open one-liner's detail cap (the card's lane line uses the same window). */
