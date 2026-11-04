@@ -281,6 +281,31 @@ class QuestionsTest {
         assertNotNull(board.byShortId("q${QuestionBoard.REGISTRY_CAP + 1}"))
     }
 
+    @Test
+    // `: Unit` (the assertNotNull law): a non-void @Test never runs in Jupiter
+    fun theCapEvictionSealsTheEldestCardInsteadOfLeavingItArmed(): Unit = runBlocking {
+        val seams = Seams()
+        val board = seams.board()
+        for (i in 1..QuestionBoard.REGISTRY_CAP + 1) {
+            board.onStreamEvent(questionFrame("r$i"))
+        }
+        assertNull(board.byShortId("q1")) // the eldest evicted...
+        // ...and its card DIED on screen (4/11: the armed dead button answered «ya no está pendiente»)
+        assertEquals(listOf(5L to QuestionBoard.EVICTION_TEXT), seams.edits)
+    }
+
+    @Test
+    fun theEvictionOfAnUnsentCardStaysQuiet(): Unit = runBlocking {
+        val seams = Seams()
+        seams.nextMid = null
+        val board = seams.board()
+        for (i in 1..QuestionBoard.REGISTRY_CAP + 1) {
+            board.onStreamEvent(questionFrame("r$i"))
+        }
+        assertNull(board.byShortId("q1"))
+        assertEquals(0, seams.edits.size) // mid=0 → no edit, no crash (resolve's own law)
+    }
+
     // ---- the multi-question flow: advance IN PLACE, ONE respond at the end ----
 
     private fun elicitationFrame(requestId: String, questions: String): ServerFrame.StreamEvent =
