@@ -494,11 +494,26 @@ internal fun wireChannel(
         logFile = forkDeployLog,
         plistFile = File(File(cfg.homeDir, "state"), DeploySpawn.FORK_JOB_PLIST_NAME),
         // the fork automaton's DEFAULT mode is dryrun (measured 4/11 13:56: the
-        // phone's fork tap ran a rehearsal) — the button IS the deploy, so the
-        // real flag rides here; the two-step confirm is the safety
+        // phone's fork tap ran a rehearsal) — the tap IS the deploy (the
+        // one-tap law), so the real flag rides here
         args = listOf("--real"),
         label = DeploySpawn.FORK_JOB_LABEL,
     )
+    // THE ROW-DIE EDIT (4/11, the one-tap law): when a target fires, the
+    // targets card's button row dies IN PLACE — the mirror's exact edit
+    // throat (LiveTelegram.edit over the shared cooldown file, the bot's
+    // own chat). Null api (SHADOW / DRY-RUN) = the closure answers false
+    // (the edit never flies): the row stays as decoration and the flow's
+    // in-flight refusal answers its taps (best-effort either way).
+    val deployTelegram = lanes.api?.let { api ->
+        LiveTelegram(
+            api = api,
+            cooldown = Cooldown(readFile = { File(pythonState, LaneFiles.COOLDOWN).takeIf { it.exists() } }),
+        )
+    }
+    val deployEdit: suspend (Long, String, JsonObject?) -> Boolean = { messageId, text, markup ->
+        deployTelegram?.edit(TgConfig.load(remote), messageId, text, markup) ?: false
+    }
     val deployFlow = DeployFlow(
         machine = DeployCommand(),
         say = { text, loud, markup ->
@@ -539,6 +554,7 @@ internal fun wireChannel(
                 )
             }
         },
+        edit = deployEdit,
         ownerUserId = { TgConfig.load(remote).ownerUserId },
     )
 
