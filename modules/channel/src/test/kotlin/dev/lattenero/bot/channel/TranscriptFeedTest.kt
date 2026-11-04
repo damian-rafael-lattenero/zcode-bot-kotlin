@@ -95,6 +95,29 @@ class TranscriptFeedTest {
     }
 
     @Test
+    fun aSubagentsInnerToolsNeverSpeakOnTheParentCard() {
+        // measured live 4/11: the parent card was narrating a subagent's inner
+        // tools («están llegando cosas de los subagentes… debería estar en
+        // silencio»). The parent speaks ONLY its own tools (parentToolUseId
+        // null) + the 🤖 lane summary the card already draws; a sa:-scoped
+        // card speaks exactly the watched lane.
+        val cmd = buildJsonObject { put("command", "grep -r x .") }
+        val laneOpen = closed("t-lane", name = "Read", status = null, input = cmd).copy(parentToolUseId = "calls-1")
+        val ownOpen = closed("t-own", name = "Bash", status = null, input = cmd)
+        val prev = turn(tools = listOf(laneOpen, ownOpen))
+        val curr = turn(
+            tools = listOf(laneOpen.copy(status = "completed"), ownOpen.copy(status = "completed")),
+        )
+        val parent = TranscriptFeed.messages(prev, curr, FeedVerbosity.NORMAL, { it.toolId }, verbs)
+        assertEquals(listOf("t-own"), parent.map { it.text }, "the parent card never narrates a subagent's inner tool")
+
+        val scoped = curr.copy(watchedLane = "calls-1")
+        val scopedPrev = prev.copy(watchedLane = "calls-1")
+        val scopedMsgs = TranscriptFeed.messages(scopedPrev, scoped, FeedVerbosity.NORMAL, { it.toolId }, verbs)
+        assertEquals(listOf("t-lane"), scopedMsgs.map { it.text }, "a scoped card speaks exactly its lane")
+    }
+
+    @Test
     fun aToolCloseSpeaksTheInjectedBoxOnce() {
         val cmd = buildJsonObject { put("command", "grep -r x .") }
         val prev = turn(tools = listOf(closed("t1", name = "Grep", status = null, input = cmd)))

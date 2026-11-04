@@ -82,11 +82,21 @@ object TranscriptFeed {
             out += FeedMessage(collapsedHeader(i + 1, PyText.cpLength(curr.cotBlocks[i])), block = i + 1)
         }
 
+        // THE LANE SCOPE (measured live 4/11: «están llegando cosas de los
+        // subagentes y ahora está frenada»): a subagent's INNER tools are its
+        // own narration, never the parent card's transcript — the parent keeps
+        // the dispatch tool's line plus the 🤖 lane summary the card renders.
+        // A `sa:`-scoped card speaks exactly its lane. Unscoped = only
+        // parentToolUseId == null.
+        val scope = curr.watchedLane
+        fun visible(tool: ToolLive): Boolean =
+            if (scope == null) tool.parentToolUseId == null else tool.parentToolUseId == scope
+
         // the tool CLOSES — real content per lane, one message each. A lane
         // that opened AND closed between two ticks still speaks its close
         // (the content carrier); its open one-liner would be noise.
-        val prevTools = prev.tools.associateBy { it.toolId }
-        curr.tools.forEach { lane ->
+        val prevTools = prev.tools.filter(::visible).associateBy { it.toolId }
+        curr.tools.filter(::visible).forEach { lane ->
             val before = prevTools[lane.toolId]
             if (lane.status != null && (before == null || before.status == null)) {
                 val collapsed = collapseOf(lane)
@@ -102,7 +112,7 @@ object TranscriptFeed {
         // the tool OPENS — the VERBOSE extra: a one-liner the moment a lane
         // appears, so the transcript shows the action as it STARTS
         if (level == FeedVerbosity.VERBOSE) {
-            curr.tools.forEach { lane ->
+            curr.tools.filter(::visible).forEach { lane ->
                 if (lane.status == null && lane.toolId !in prevTools) {
                     out += FeedMessage.of(openLine(lane, verbs))
                 }
