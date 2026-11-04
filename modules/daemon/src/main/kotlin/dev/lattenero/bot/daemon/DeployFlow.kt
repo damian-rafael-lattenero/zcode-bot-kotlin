@@ -194,8 +194,8 @@ class DeployFlow(
         const val TARGETS_CARD = (
             "🚀 <b>Deploy</b>\n¿Qué deployo? Tocar ES lanzar — una única vez, la botonera muere al toque:\n" +
                 "🤖 <b>Bot Kotlin</b> — build (tests incluidos) → install → el LaunchAgent reinicia el daemon\n" +
-                "🍴 <b>ZCode Fork</b> — build AHORA (~15 min, avisos por fases) → deja el swap armado → " +
-                "VOS hacés ⌘Q en la Mac y el swap + reopen salen solos\n" +
+                "🍴 <b>ZCode Fork</b> — build AHORA (~15 min, avisos por fases, la app sigue viva) → " +
+                "cierra ZCode solo → swap → reabre (unos segundos de canal 📡 al final)\n" +
                 "🚀 <b>Ambos</b> — fork PRIMERO, después el daemon (jobs hermanos de launchd)"
             )
 
@@ -214,8 +214,8 @@ class DeployFlow(
         const val THE_ANNOUNCE = "🚀 Deployando el daemon — vuelvo en un momento"
 
         const val THE_ANNOUNCE_FORK = (
-            "🍴 Deploy del fork armado — construyo el fork (~15 min, te aviso por fases); " +
-                "al terminar: ⌘Q en la Mac para el swap"
+            "🍴 Deploy del fork armado — construyo el fork (~15 min, te aviso por fases, " +
+                "la app sigue viva); al final CIERRA ZCode solo, hace el swap y la reabre"
             )
 
         const val THE_ANNOUNCE_BOTH = (
@@ -230,8 +230,8 @@ class DeployFlow(
 
         const val SPAWNED_FORK = (
             "🛠 Script del fork lanzado detached (el MISMO de <code>zcode-deploy</code>) — " +
-                "el build tarda ~15 min y te habla por fases; al terminar, ⌘Q en la Mac " +
-                "dispara el swap + reopen (avisos por Telegram). " +
+                "el build tarda ~15 min y te habla por fases con la app viva; al final " +
+                "CIERRA ZCode solo, hace el swap y la reabre (avisos por Telegram). " +
                 "Log: <code>~/.zcode/bot-kotlin/logs/deploy-fork.log</code> — /file lo trae."
             )
 
