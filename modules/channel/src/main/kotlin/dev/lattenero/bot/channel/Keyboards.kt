@@ -275,13 +275,6 @@ object Keyboards {
     }
 
     /**
-     * B6's /deploy confirmation row (Python's _cmd_deploy two-step, the
-     * datas the mission pins): the go can only be produced by THIS button.
-     * The wiring intercepts `dep:` taps BEFORE the callback fallback — the
-     * sst: law: a stray data must never ride to the agent as the owner's
-     * own words.
-     */
-    /**
      * The ⚡/⏳ question's row (the owner's law, 2/11 23:12: «quiero que me
      * pregunte empujar o encolar»): a busy child is never cut or queued by
      * our own judgment — ONE tap decides, and the pending text flies then.
@@ -297,21 +290,12 @@ object Keyboards {
         }
     }
 
-    fun deployConfirm(): JsonObject = buildJsonObject {
-        putJsonArray("inline_keyboard") {
-            add(
-                buildJsonArray {
-                    add(button("🚀 Deploy", "dep:go"))
-                    add(button("❌ No", "dep:no"))
-                },
-            )
-        }
-    }
-
     /**
-     * 2026-11-04 — /deploy's TARGET selection: bot / fork / both, one row.
-     * The tap arms THAT target (the go/no confirm row stays untouched —
-     * the target lives in the arm, not in the confirm's callback).
+     * 2026-11-04, THE ONE-TAP LAW — /deploy's target row IS the deploy:
+     * bot / fork / both, one row, no confirm half (the tap fires the door
+     * and the flow strips THIS keyboard from the card). The wiring
+     * intercepts `dep:` taps BEFORE the callback fallback — the sst: law:
+     * a stray data must never ride to the agent as the owner's own words.
      */
     fun deployTargets(): JsonObject = buildJsonObject {
         putJsonArray("inline_keyboard") {

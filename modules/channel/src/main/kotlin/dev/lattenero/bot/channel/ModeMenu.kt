@@ -42,6 +42,18 @@ object ModeMenu {
 
     private val BY_ID = MODES.associateBy { it.id }
 
+    /**
+     * THE DEFAULT (the owner's law, 4/11: «por defecto siempre Full
+     * access»): a conversation whose snapshot has NO `meta.mode` IS
+     * Full access — the card says it (🎯 on the yolo row, the label said
+     * as default, never «—»), and the wiring's `task_run_started`
+     * enforcement WRITES it into the fork so the app runs it too.
+     */
+    const val DEFAULT_MODE_ID = "yolo"
+
+    /** The mode in force: the snapshot's, or [DEFAULT_MODE_ID] when it carries none. */
+    fun effective(current: String?): String = current ?: DEFAULT_MODE_ID
+
     /** The typed/tapped word → the mode, case-insensitive (Python lowercases too). */
     fun byId(raw: String?): Mode? = BY_ID[raw?.trim()?.lowercase()]
 
@@ -67,18 +79,38 @@ object ModeMenu {
         normalize(root.obj("meta")?.str("mode"))
     }.getOrNull()
 
-    /** Python's card: the conversation, the mode in force, the tap promise. */
+    /**
+     * Python's card: the conversation, the mode in force, the tap promise.
+     * A snapshot with NO mode says «Full access (por defecto)» and carries
+     * the honest caveat (4/11): the very first turn of a brand-new
+     * conversation runs the app's own default — the enforcement lands yolo
+     * for the NEXT turn. Never «—»: the default is SAID, never a blank.
+     */
     fun statusLine(title: String, current: String?): String {
-        val label = byId(current)?.label ?: current ?: "—"
-        return "🎯 «${PyText.esc(title)}»\n🎛 Modo: <b>${PyText.esc(label)}</b>\n" +
-            "Tocá para cambiar (aplica al próximo turno):"
+        val eff = effective(current)
+        val label = byId(eff)?.label ?: eff
+        return if (current == null) {
+            "🎯 «${PyText.esc(title)}»\n🎛 Modo: <b>${PyText.esc(label)}</b> (por defecto)\n" +
+                "La primera vuelta de una charla nueva corre el default del app; " +
+                "Full access entra desde la próxima.\nTocá para cambiar (aplica al próximo turno):"
+        } else {
+            "🎯 «${PyText.esc(title)}»\n🎛 Modo: <b>${PyText.esc(label)}</b>\n" +
+                "Tocá para cambiar (aplica al próximo turno):"
+        }
     }
 
-    /** The five rows, one intent each; the mode in force carries 🎯 (never a bare ●). */
+    /**
+     * FOUR rows, one intent each — plan NEVER appears here (4/11: plan
+     * lives in /plan_mode now); the mode in force carries 🎯 (never a
+     * bare ●). The vocabulary keeps all five: an old card's mo:plan tap
+     * and the typed word still work, and /plan_mode writes through the
+     * same switch.
+     */
     fun keyboard(current: String?): JsonObject = buildJsonObject {
+        val eff = effective(current)
         putJsonArray("inline_keyboard") {
-            MODES.forEach { m ->
-                val mark = if (m.id == current) "🎯" else "○"
+            MODES.filter { it.id != "plan" }.forEach { m ->
+                val mark = if (m.id == eff) "🎯" else "○"
                 add(buildJsonArray { add(Keyboards.button("$mark ${m.label}", "mo:${m.id}")) })
             }
         }

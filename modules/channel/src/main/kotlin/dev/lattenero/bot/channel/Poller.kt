@@ -190,6 +190,16 @@ class Poller(
             return PollOutcome(next, 0, cursorLost = true)
         }
         for (message in messages) {
+            // THE REPLAY FIX (4/11): an update that can KILL this daemon
+            // mid-dispatch commits its cursor THROUGH ITSELF FIRST. If the
+            // dispatch dies with the process (the nuclear ladder's own
+            // self-kickstart, the deploy script's bootout), the restart
+            // must not RE-DELIVER the update: every in-process single-flight
+            // gate (nuclearGate, the deploy's consumed arm) dies with the
+            // process and cannot protect across it (measured: nuclear fired
+            // twice, deploys chained «muchas veces»). Everything else keeps
+            // the at-least-once post-commit law untouched.
+            if (isSuicidal(message)) saveCursor(message.updateId + 1)
             try {
                 dispatch(cfg, message)
             } catch (e: CancellationException) {
@@ -380,3 +390,32 @@ internal fun largestPhoto(sizes: kotlinx.serialization.json.JsonArray): JsonObje
                 { it.long("file_size") ?: 0L },
             ),
         )
+
+/**
+ * THE SUICIDAL UPDATES (the offset law's OWN vocabulary, 4/11): the
+ * updates whose dispatch can KILL this daemon — the nuclear ladder's
+ * self-kickstart, /stop's hard half, the bot/both deploys' bootout of
+ * THIS process. Deliberately SEPARATE from [isDestructiveTap]'s
+ * DESTRUCTIVE vocabularies (that one is the owner gate, a different
+ * concern — never merged): the `intr:/odp:/sst:/gfy` interrupts do NOT
+ * kill this process, so they stay post-commit; `deploy` pre-commits
+ * WHOLE (bare /deploy replaying the card twice is harmless, but a simple
+ * law beats a clever one).
+ */
+private val SUICIDAL_COMMANDS = setOf("nuclear", "nuke", "stop", "deploy")
+private val SUICIDAL_TAP_PREFIXES = listOf("nuc:", "stop:", "dep:")
+
+/** True when dispatching [update] may kill this process → the cursor commits BEFORE it. */
+internal fun isSuicidal(update: InboundUpdate): Boolean = when (update) {
+    is InboundUpdate.Message -> {
+        val cmd = BotCommands.parseCommand(update.text)?.first
+        cmd != null && cmd in SUICIDAL_COMMANDS
+    }
+
+    // the tap prefixes PLUS the existing destructive verdict — a callback
+    // whose data SPELLS the words (the fallback's own shapes) pre-commits too
+    is InboundUpdate.Callback ->
+        SUICIDAL_TAP_PREFIXES.any(update.data::startsWith) || isDestructiveTap(update.data)
+
+    is InboundUpdate.Attachment -> false
+}
