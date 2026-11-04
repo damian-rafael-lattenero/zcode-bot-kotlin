@@ -165,9 +165,9 @@ class DeployFlow(
 
         val CONFIRM_FORK = (
             "🍴 <b>Deploy del fork de ZCode</b>\n" +
-                "quit del app → build-install (swap de /Applications/ZCode.app) → reopen → " +
-                "verifica socket y smoke del canal.\n" +
-                "El daemon del bot SOBREVIVE; el canal 📡 se cae mientras el app compila y reabre.\n" +
+                "build del fork AHORA (~15 min, te aviso por fases) → deja el swap armado → " +
+                "VOS hacés ⌘Q en la Mac y el swap + reopen salen solos.\n" +
+                "Durante el build no se toca nada: el canal sigue vivo; solo cae en tu ⌘Q (el swap tarda segundos).\n" +
                 "La confirmación vence en ${DeployCommand.WINDOW_MS / 60_000} min. ¿Confirmás?"
             )
 
@@ -182,7 +182,8 @@ class DeployFlow(
         const val THE_ANNOUNCE = "🚀 Deployando el daemon — vuelvo en un momento"
 
         const val THE_ANNOUNCE_FORK = (
-            "🍴 Deployando el fork de ZCode — el canal 📡 se cae y vuelve con el app nuevo"
+            "🍴 Deploy del fork armado — construyo el fork (~15 min, te aviso por fases); " +
+                "al terminar: ⌘Q en la Mac para el swap"
             )
 
         const val THE_ANNOUNCE_BOTH = (
@@ -196,8 +197,9 @@ class DeployFlow(
             )
 
         const val SPAWNED_FORK = (
-            "🛠 Script del fork lanzado detached — el app compila minutos y reabre solo " +
-                "(el canal 📡 vuelve con él; el daemon sigue arriba). " +
+            "🛠 Script del fork lanzado detached (el MISMO de <code>zcode-deploy</code>) — " +
+                "el build tarda ~15 min y te habla por fases; al terminar, ⌘Q en la Mac " +
+                "dispara el swap + reopen (avisos por Telegram). " +
                 "Log: <code>~/.zcode/bot-kotlin/logs/deploy-fork.log</code> — /file lo trae."
             )
 
