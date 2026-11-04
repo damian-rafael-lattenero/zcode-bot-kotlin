@@ -71,6 +71,7 @@ class LivePublisherTest {
         verbosity: VerbositySetting = VolatileVerbosity(),
         cooldown: Cooldown = Cooldown(readFile = { null }),
         finalAnswer: suspend (String) -> String? = { null },
+        clock: () -> Long = { TICK_MS },
         // NOT last: the existing tests' trailing lambda binds resolveTitle
         onSeal: suspend (SealFacts) -> Unit = {},
         resolveTitle: suspend (String) -> String? = { null },
@@ -86,7 +87,7 @@ class LivePublisherTest {
             speak = { text, _ -> spoken.add(text); 777L },
             toolBox = toolBox,
             finalAnswer = finalAnswer,
-            clock = { TICK_MS },
+            clock = clock,
             verbosity = verbosity,
             resolveTitle = resolveTitle,
             onSeal = onSeal,
@@ -170,7 +171,8 @@ class LivePublisherTest {
         hub.apply(frame(taskId, "agent_thought_chunk", at = 1_050, "content" to JsonPrimitive("arranco")), nowMs = 1_050)
         val wire = Wire()
         val spoken = mutableListOf<String>()
-        val publisher = publisher(wire, hub, spoken)
+        var now = TICK_MS
+        val publisher = publisher(wire, hub, spoken, clock = { now })
         publisher.tick() // the birth — feedSeen snapshots here
         val afterBirth = wire.bodies.size
         val blockText = "p".repeat(3000)
@@ -178,6 +180,7 @@ class LivePublisherTest {
             frame(taskId, "agent_thought_chunk", at = 1_100, "content" to JsonPrimitive(blockText)),
             nowMs = 1_100,
         )
+        now += 31_000L // the swap's re-birth is a SECOND birth: the spacing applies
         publisher.tick() // the block sealed → the COLLAPSED message speaks, the card swaps
         // THE COLLAPSE (2/11): the header + the affordance — the text never
         // rides the chat until the tap opens it
@@ -269,10 +272,12 @@ class LivePublisherTest {
         hub.apply(frame(taskId, "task_run_started", at = 1_000), nowMs = 1_000)
         hub.apply(frame(taskId, "agent_thought_chunk", at = 1_050, "content" to JsonPrimitive("arranco")), nowMs = 1_050)
         val wire = Wire()
-        val publisher = publisher(wire, hub)
+        var now = TICK_MS
+        val publisher = publisher(wire, hub, clock = { now })
         publisher.tick() // the birth
         val afterBirth = wire.bodies.size
         hub.apply(frame(taskId, "agent_thought_chunk", at = 1_100, "content" to JsonPrimitive("más")), nowMs = 1_100)
+        now += 31_000L // the redraw is a SECOND birth: the spacing gate applies
         publisher.tick()
         val methods = wire.bodies.drop(afterBirth).map { it.second }
         assertTrue("deleteMessage" in methods, "the old card dies")
@@ -293,8 +298,9 @@ class LivePublisherTest {
         hub.apply(frame(taskId, "agent_thought_chunk", at = 1_050, "content" to JsonPrimitive("arranco")), nowMs = 1_050)
         val wire = Wire()
         var nowSec = 2.0
+        var clockMs = TICK_MS
         val cooldown = Cooldown(now = { nowSec }, readFile = { null })
-        val publisher = publisher(wire, hub, cooldown = cooldown)
+        val publisher = publisher(wire, hub, cooldown = cooldown, clock = { clockMs })
         publisher.tick() // the birth
         val afterBirth = wire.bodies.size
         hub.apply(frame(taskId, "agent_thought_chunk", at = 1_100, "content" to JsonPrimitive("más")), nowMs = 1_100)
@@ -306,6 +312,7 @@ class LivePublisherTest {
         )
         // the window lifts: the card re-draws with the CURRENT state
         nowSec = 5_000.0
+        clockMs += 31_000L // the redraw is a SECOND birth: the spacing gate applies
         publisher.tick()
         val methods = wire.bodies.drop(afterBirth).map { it.second }
         assertTrue("deleteMessage" in methods && methods.last() == "sendMessage")
@@ -346,12 +353,14 @@ class LivePublisherTest {
         hub.apply(frame(taskId, "agent_thought_chunk", at = 1_050, "content" to JsonPrimitive("arranco")), nowMs = 1_050)
         val wire = Wire()
         val spoken = mutableListOf<String>()
+        var now = TICK_MS
         val publisher = publisher(
             wire,
             hub,
             spoken,
             toolBox = { "BOX(${it.name})" },
             verbosity = VolatileVerbosity().apply { set(FeedVerbosity.NORMAL) },
+            clock = { now },
         )
         publisher.tick() // the birth — feedSeen snapshots here
         hub.apply(
@@ -380,6 +389,7 @@ class LivePublisherTest {
             ),
             nowMs = 1_600,
         )
+        now += 31_000L // the close's card swap is a SECOND birth: the spacing applies
         publisher.tick()
         assertTrue(
             spoken.any { "⚡ <b>Bash</b>" in it && "tocar para ver" in it },
@@ -395,11 +405,13 @@ class LivePublisherTest {
         hub.apply(frame(taskId, "agent_thought_chunk", at = 1_050, "content" to JsonPrimitive("arranco")), nowMs = 1_050)
         val wire = Wire()
         val spoken = mutableListOf<String>()
+        var now = TICK_MS
         val publisher = publisher(
             wire,
             hub,
             spoken,
             verbosity = VolatileVerbosity().apply { set(FeedVerbosity.SUMMARY) },
+            clock = { now },
         )
         publisher.tick() // birth
         val afterBirth = wire.bodies.size
@@ -420,6 +432,7 @@ class LivePublisherTest {
             ),
             nowMs = 1_200,
         )
+        now += 31_000L // the redraw is a SECOND birth: the spacing gate applies
         publisher.tick()
         assertEquals(emptyList(), spoken.toList(), "SUMMARY: the feed is silent — the DATA obeys the level")
         val methods = wire.bodies.drop(afterBirth).map { it.second }
