@@ -35,6 +35,17 @@ internal fun attachmentRefusal(sizeBytes: Long?): String? =
 private val FILENAME_SAFE = ('a'..'z') + ('A'..'Z') + ('0'..'9') + listOf('.', '_', '-')
 
 /**
+ * U9/F1's owner-facing sentence: the poller consumed a backlog it never
+ * dispatched because the cursor was absent/corrupt. The number is what was
+ * dropped; the reason is why dropping beat replaying; the last line is the
+ * remedy the owner actually has.
+ */
+internal fun cursorLostText(skipped: Int): String =
+    "🕳️ Se perdió el cursor de Telegram (archivo ausente o ilegible): descarté $skipped update(s) " +
+        "viejos SIN re-ejecutarlos — un replay volvería a correr /nuclear o /deploy de antes. " +
+        "Si mandaste algo hace un rato y no hubo respuesta, mandalo de nuevo."
+
+/**
  * The wire's filename reduced to a safe on-disk name (no paths, no
  * separators) — a name with no safe character at all («///») is no
  * filename: the honest fallback.
