@@ -735,8 +735,18 @@ class LivePublisher(
      * from its very first message.
      */
     private suspend fun tryBirth(cfg: TgConfig, state: TurnLive, text: String) {
-        if (birthCooldownTicks > 0) {
-            birthCooldownTicks -= 1
+        // THE BIRTH SPACING (measured 4/11): a channel flap re-births the SAME
+        // task's card on EVERY reconnect — 18 births in one minute is a
+        // Telegram flood waiting for the next penalty. A re-birth of the SAME
+        // task waits out the spacing (the card returns next tick); a genuine
+        // task SWITCH never waits (that birth is the never-silence law). The
+        // blocked-birth cooldown rides the same gate.
+        val now = clock()
+        val lastSameTaskBirth = lastBirthAtMs?.takeIf { lastBirthTaskId == state.taskId }
+        val spaced = birthCooldownTicks > 0 ||
+            (lastSameTaskBirth != null && now - lastSameTaskBirth < BIRTH_SPACING_MS)
+        if (spaced) {
+            if (birthCooldownTicks > 0) birthCooldownTicks -= 1
             return
         }
         val born = telegram.birth(cfg, text, null)
@@ -755,6 +765,8 @@ class LivePublisher(
         sealed = false
         statusTaskId = state.taskId
         lastText = text
+        lastBirthAtMs = now
+        lastBirthTaskId = state.taskId
         orphanStore?.save(born, state.taskId) // the boot seal's pointer
         logger.info { "live view born: taskId=${state.taskId} message_id=$statusMessageId" }
     }
@@ -775,10 +787,15 @@ class LivePublisher(
 
     private var birthCooldownTicks = 0
     private var birthFailLogged = false
+    private var lastBirthAtMs: Long? = null
+    private var lastBirthTaskId: String? = null
     private val tickMutex = Mutex()
 
     private companion object {
         val EDIT_CADENCE = 3.seconds
+
+        /** Two births never ride closer than this (the flap's flood guard). */
+        const val BIRTH_SPACING_MS = 30_000L
 
         /** A blocked birth retries every ~30s (10 ticks × 3s), not every tick. */
         const val BIRTH_RETRY_TICKS = 10
