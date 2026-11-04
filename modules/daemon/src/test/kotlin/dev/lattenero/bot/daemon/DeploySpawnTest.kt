@@ -99,6 +99,111 @@ class DeploySpawnTest {
         assertContains(plist.readText(), DeploySpawn.JOB_LABEL)
     }
 
+    // 2026-11-04 hardening v3 — the BOOTOUT has its own ladder: a wedged
+    // label (error 5) clears itself seconds later; two taps in a row wedged
+    // each other and the single bootout poisoned every bootstrap after it.
+
+    @Test
+    fun aWedgedBootoutClearsItselfOnTheNextTry() = runTest {
+        var bootouts = 0
+        var bootstraps = 0
+        val fake = Launchctl { args ->
+            when (args.first()) {
+                "bootout" -> {
+                    bootouts++
+                    if (bootouts == 1) LaunchctlResult(5, "Boot-out failed: 5: Input/output error")
+                    else LaunchctlResult(0, "")
+                }
+                "bootstrap" -> {
+                    bootstraps++
+                    LaunchctlResult(0, "")
+                }
+                else -> LaunchctlResult(0, "")
+            }
+        }
+        val out = DeploySpawn(
+            script,
+            log,
+            plist,
+            uid = "501",
+            javaHome = "/jdk-25",
+            home = "/Users/fake",
+            launchctl = fake,
+            beat = {},
+        ).spawn()
+        assertEquals(0, out.exit)
+        assertEquals(2, bootouts) // the wedged one + the retry that cleared it
+        assertEquals(1, bootstraps) // the bootstrap ran ONCE, against a CLEAN label
+    }
+
+    @Test
+    fun aNotLoadedBootoutProceedsWithoutBeating() = runTest {
+        // rc=3 (No such process) = nothing to clear — the ladder accepts it
+        // and goes straight to the bootstrap
+        val calls = mutableListOf<List<String>>()
+        val beats = mutableListOf<Long>()
+        val fake = Launchctl { args ->
+            calls += args
+            when (args.first()) {
+                "bootout" -> LaunchctlResult(3, "Boot-out failed: 3: No such process")
+                else -> LaunchctlResult(0, "")
+            }
+        }
+        val out = DeploySpawn(
+            script,
+            log,
+            plist,
+            uid = "501",
+            javaHome = "/jdk-25",
+            home = "/Users/fake",
+            launchctl = fake,
+            beat = { beats += it },
+        ).spawn()
+        assertEquals(0, out.exit)
+        assertEquals(1, calls.count { it.first() == "bootout" })
+        assertEquals(emptyList(), beats) // no retry beat: not-loaded IS the good answer
+    }
+
+    @Test
+    fun theBootoutLadderIsBounded() = runTest {
+        // three wedged bootouts still reach the bootstrap ladder (whose
+        // enable-on-5 may cure the label) — but nothing loops forever
+        var bootouts = 0
+        var enables = 0
+        var bootstraps = 0
+        val fake = Launchctl { args ->
+            when (args.first()) {
+                "bootout" -> {
+                    bootouts++
+                    LaunchctlResult(5, "Boot-out failed: 5: Input/output error")
+                }
+                "bootstrap" -> {
+                    bootstraps++
+                    LaunchctlResult(5, "Bootstrap failed: 5: Input/output error")
+                }
+                "enable" -> {
+                    enables++
+                    LaunchctlResult(0, "")
+                }
+                else -> LaunchctlResult(0, "")
+            }
+        }
+        val spawn = DeploySpawn(
+            script,
+            log,
+            plist,
+            uid = "501",
+            javaHome = "/jdk-25",
+            home = "/Users/fake",
+            launchctl = fake,
+            beat = {},
+        )
+        assertFailsWith<IllegalStateException> { spawn.spawn() }
+        assertEquals(DeploySpawn.BOOTOUT_ATTEMPTS, bootouts)
+        assertEquals(1, enables)
+        assertEquals(3, bootstraps) // beat-retry + enable-retry, bounded
+    }
+
     @Test
     fun aRacingBootoutIsRetriedOnceSoASecondDeployOfTheDayStillLands() = runTest {
         // measured 2/11 22:20: the job was still loaded from the 22:11 run,
