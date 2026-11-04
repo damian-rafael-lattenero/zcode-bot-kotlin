@@ -8,6 +8,9 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
+/** The bot's configured owner — the taps the suite sends come from him. */
+private const val OWNER = 7L
+
 /**
  * The tap vocabulary's reply contract, ON the dispatcher (KeyboardsTest
  * pins the pure table, BotCommandsTest the t: re-bind): the F17 pair
@@ -59,6 +62,7 @@ class CallbackTapsTest {
         ops = o,
         hub = LiveHub(),
         daemonReset = resets,
+        ownerUserId = { OWNER },
         clock = { 1_000_000L },
         history = object : TasksHistory {
             override suspend fun ctxTasks(limit: Int) = emptyList<TaskRow>()
@@ -80,13 +84,14 @@ class CallbackTapsTest {
             ops = o,
             hub = hub,
             daemonReset = { "ladder ok" },
+            ownerUserId = { OWNER },
             clock = { 1_000_000L },
             blockTaps = CoTTaps { id ->
                 toggled.add(id)
                 null
             },
         )
-        assertEquals(null, cmds.onCallback("cb:7", 1L), "a working tap is silent")
+        assertEquals(null, cmds.onCallback("cb:7", 1L, OWNER), "a working tap is silent")
         assertEquals(listOf(7), toggled)
         assertTrue(o.queries.isEmpty(), "the tap never touches the channel")
         // the UNWIRED tap (a stale button, a bot restart): the honest note
@@ -94,9 +99,10 @@ class CallbackTapsTest {
             ops = o,
             hub = LiveHub(),
             daemonReset = { "ladder ok" },
+            ownerUserId = { OWNER },
             clock = { 1_000_000L },
         )
-        val reply = bare.onCallback("cb:1", 2L)!!
+        val reply = bare.onCallback("cb:1", 2L, OWNER)!!
         assertTrue("botón quedó de otro turno" in reply.text)
         assertTrue(o.queries.isEmpty())
         // one block sealed in the hub: the tap never touches it (the
@@ -121,7 +127,7 @@ class CallbackTapsTest {
             answers["botStatus"] = status
             answers["stop"] = """{"stopped":["task-77"]}"""
         }
-        val reply = commands(o).onCallback("intr:task-77", 1L)!!
+        val reply = commands(o).onCallback("intr:task-77", 1L, OWNER)!!
         assertEquals("⚡ Interrumpido — tu mensaje entra ya.", reply.text)
         assertEquals(
             listOf<ChannelQuery>(ChannelQuery.Stop("task-77")),
@@ -133,7 +139,7 @@ class CallbackTapsTest {
     @Test
     fun aRefusedPushPointsAtTheHardWay() = runBlocking {
         val o = FakeOps().apply { answers["botStatus"] = status } // no canned stop -> Failed
-        val reply = commands(o).onCallback("intr:task-77", 2L)!!
+        val reply = commands(o).onCallback("intr:task-77", 2L, OWNER)!!
         assertTrue("⚠️ No pude interrumpir (internal)" in reply.text, reply.text)
         assertTrue("/stop go es la vía dura" in reply.text)
     }
@@ -141,7 +147,7 @@ class CallbackTapsTest {
     @Test
     fun theKeepQueuedTapSpeaksWithoutTouchingTheChannel() = runBlocking {
         val o = FakeOps().apply { answers["botStatus"] = status }
-        val reply = commands(o).onCallback("qgo:task-77", 3L)!!
+        val reply = commands(o).onCallback("qgo:task-77", 3L, OWNER)!!
         assertEquals("📬 Queda encolado — entra cuando el turno termine.", reply.text)
         assertTrue(o.queries.isEmpty(), "the natural wait is a no-op by design")
     }
@@ -151,7 +157,7 @@ class CallbackTapsTest {
         val o = FakeOps().apply { answers["botStatus"] = status }
         var runs = 0
         val reply = commands(o, resets = { runs += 1; "2 stopped, app booted" })
-            .onCallback("nuc:go", 4L)!!
+            .onCallback("nuc:go", 4L, OWNER)!!
         assertEquals(1, runs)
         assertTrue(reply.text.startsWith("☢️ Nuclear go — 2 stopped, app booted"), reply.text)
     }
@@ -160,7 +166,7 @@ class CallbackTapsTest {
     fun theCancelTapTouchesNothing() = runBlocking {
         val o = FakeOps().apply { answers["botStatus"] = status }
         var runs = 0
-        val reply = commands(o, resets = { runs += 1; "never" }).onCallback("nuc:no", 5L)!!
+        val reply = commands(o, resets = { runs += 1; "never" }).onCallback("nuc:no", 5L, OWNER)!!
         assertEquals("🙅 Cancelled — nothing was touched.", reply.text)
         assertEquals(0, runs)
         assertTrue(o.queries.isEmpty())
@@ -172,7 +178,7 @@ class CallbackTapsTest {
             answers["botStatus"] = status
             answers["stopAll"] = """{"stopped":["task-77","task-02"]}"""
         }
-        val reply = commands(o).onCallback("stop:go", 6L)!!
+        val reply = commands(o).onCallback("stop:go", 6L, OWNER)!!
         assertEquals("💀 Hard stop: 2 run(s) stopped — every active task's turn.", reply.text)
         assertTrue(o.queries.any { it is ChannelQuery.StopAll })
     }
@@ -215,15 +221,22 @@ class CallbackTapsTest {
             ops = FakeOps(),
             hub = LiveHub(),
             daemonReset = { "" },
+            ownerUserId = { OWNER },
             clock = { 1L },
             boxTaps = taps,
         )
-        kotlin.test.assertNull(wired.onCallback("bp:7:2", 1L))
-        kotlin.test.assertNull(wired.onCallback("bf:7", 2L))
+        kotlin.test.assertNull(wired.onCallback("bp:7:2", 1L, OWNER))
+        kotlin.test.assertNull(wired.onCallback("bf:7", 2L, OWNER))
         assertEquals(listOf("open:7:2", "fold:7"), calls)
 
-        val bare = BotCommands(ops = FakeOps(), hub = LiveHub(), daemonReset = { "" }, clock = { 1L })
-        assertEquals(BoxTaps.MISS, bare.onCallback("bp:7:0", 3L)!!.text)
-        assertEquals(BoxTaps.MISS, bare.onCallback("bf:7", 4L)!!.text)
+        val bare = BotCommands(
+            ops = FakeOps(),
+            hub = LiveHub(),
+            daemonReset = { "" },
+            clock = { 1L },
+            ownerUserId = { OWNER },
+        )
+        assertEquals(BoxTaps.MISS, bare.onCallback("bp:7:0", 3L, OWNER)!!.text)
+        assertEquals(BoxTaps.MISS, bare.onCallback("bf:7", 4L, OWNER)!!.text)
     }
 }

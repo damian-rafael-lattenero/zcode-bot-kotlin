@@ -11,6 +11,9 @@ import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
+/** The bot's configured owner — the taps the suite sends come from him. */
+private const val OWNER = 7L
+
 /**
  * A5's bot half: the coding plan's gifts on /quota — the read (both planes,
  * each degradable), the two CONFIRMED writes (a claim changes the account's
@@ -109,6 +112,7 @@ class GiftsCommandTest {
         ops = o,
         hub = LiveHub(),
         daemonReset = { "" },
+        ownerUserId = { OWNER },
         clock = { 1_000L }, // the gifts' expireAt values (1e6/2e6/3e6) are all in the future
         history = FakeHistory(),
     )
@@ -231,7 +235,7 @@ class GiftsCommandTest {
     fun theFirstTapAsksAndSaysWhatTheClaimChanges() = runBlocking {
         val bc = commands(ops())
         bc.handle("/quota", 1L)
-        val confirm = bc.onCallback("cl:global-build", 2L)!!
+        val confirm = bc.onCallback("cl:global-build", 2L, OWNER)!!
         assertTrue("¿Reclamar «ZCODE GLOBAL BUILD»?" in confirm.text, confirm.text)
         assertTrue("300M tokens · GLM-5.3-Flash (único)" in confirm.text, confirm.text)
         assertTrue("cambio de plan" in confirm.text)
@@ -246,8 +250,8 @@ class GiftsCommandTest {
         val o = ops()
         val bc = commands(o)
         bc.handle("/quota", 1L)
-        bc.onCallback("cl:global-build", 2L)
-        val done = bc.onCallback("cly:", 3L)!!
+        bc.onCallback("cl:global-build", 2L, OWNER)
+        val done = bc.onCallback("cly:", 3L, OWNER)!!
         assertEquals("global-build", o.claimPlanId)
         assertTrue("✅ <b>Reclamado: ZCODE GLOBAL BUILD</b>" in done.text, done.text)
         assertTrue("estado active" in done.text, done.text)
@@ -261,15 +265,15 @@ class GiftsCommandTest {
         }
         val bc = commands(o)
         bc.handle("/quota", 1L)
-        bc.onCallback("cl:global-build", 2L)
-        val done = bc.onCallback("cly:", 3L)!!
+        bc.onCallback("cl:global-build", 2L, OWNER)
+        val done = bc.onCallback("cly:", 3L, OWNER)!!
         assertTrue("El server rechazó el reclamo (1003): campaign ended" in done.text, done.text)
     }
 
     @Test
     fun aClaimWithoutAnArmedOfferIsTheHonestNudge() = runBlocking {
         val bc = commands(ops())
-        assertEquals(BotCommands.GIFT_NOTHING_ARMED, bc.onCallback("cly:", 5L)!!.text)
+        assertEquals(BotCommands.GIFT_NOTHING_ARMED, bc.onCallback("cly:", 5L, OWNER)!!.text)
     }
 
     @Test
@@ -282,8 +286,8 @@ class GiftsCommandTest {
         }
         val bc = commands(o)
         bc.handle("/quota", 1L)
-        bc.onCallback("cl:global-build", 2L)
-        val done = bc.onCallback("cly:", 3L)!!
+        bc.onCallback("cl:global-build", 2L, OWNER)
+        val done = bc.onCallback("cly:", 3L, OWNER)!!
         assertEquals(BotCommands.GIFT_CAPTCHA, done.text)
         val row = done.markup!!.jsonObject["inline_keyboard"]!!.jsonArray[0].jsonArray[0].jsonObject
         assertEquals("🌐 Abrir la web (planes)", row["text"]!!.jsonPrimitive.content)
@@ -296,7 +300,7 @@ class GiftsCommandTest {
         assertNull(row["callback_data"], "a url button opens the browser — no callback to answer")
         // learned: the SAME plan never burns another attempt — the next 🎁
         // tap goes straight to the browser door, no confirmation, no server hit
-        val again = bc.onCallback("cl:global-build", 4L)!!
+        val again = bc.onCallback("cl:global-build", 4L, OWNER)!!
         assertEquals(BotCommands.GIFT_CAPTCHA, again.text)
         assertTrue(again.markup != null, "the door rides along")
         assertEquals(1, o.claimPlanIdCount, "exactly ONE claim hit the server")
@@ -307,8 +311,8 @@ class GiftsCommandTest {
         val o = ops()
         val bc = commands(o)
         bc.handle("/quota", 1L)
-        bc.onCallback("cl:global-build", 2L)
-        assertEquals("📬 Cancelado — no se tocó nada.", bc.onCallback("gxn:", 3L)!!.text)
+        bc.onCallback("cl:global-build", 2L, OWNER)
+        assertEquals("📬 Cancelado — no se tocó nada.", bc.onCallback("gxn:", 3L, OWNER)!!.text)
         assertNull(o.claimPlanId)
     }
 
@@ -316,7 +320,7 @@ class GiftsCommandTest {
     fun anOfferThatVanishedBeforeTheTapIsNamedAsSuch() = runBlocking {
         val o = ops()
         val bc = commands(o)
-        assertEquals("🤷 Esa oferta ya no está — corré /quota de nuevo.", bc.onCallback("cl:gone", 1L)!!.text)
+        assertEquals("🤷 Esa oferta ya no está — corré /quota de nuevo.", bc.onCallback("cl:gone", 1L, OWNER)!!.text)
         assertNull(o.claimPlanId)
     }
 
@@ -327,10 +331,10 @@ class GiftsCommandTest {
         val o = ops()
         val bc = commands(o)
         bc.handle("/quota", 1L)
-        val confirm = bc.onCallback("gf:FIVE_HOUR", 2L)!!
+        val confirm = bc.onCallback("gf:FIVE_HOUR", 2L, OWNER)!!
         assertTrue("¿Usar un reset de 5 horas?" in confirm.text, confirm.text)
         assertTrue("Te quedan <b>2</b>" in confirm.text, confirm.text)
-        val done = bc.onCallback("gfy:", 3L)!!
+        val done = bc.onCallback("gfy:", 3L, OWNER)!!
         assertTrue("✅ Reset usado (5h)" in done.text, done.text)
         assertEquals("FIVE_HOUR", o.resetQuery!!.resetType)
         assertEquals("task-77", o.resetQuery!!.taskId)
@@ -344,15 +348,15 @@ class GiftsCommandTest {
         }
         val bc = commands(o)
         bc.handle("/quota", 1L)
-        bc.onCallback("gf:WEEK", 2L)
-        assertEquals(BotCommands.GIFT_OLD_FORK, bc.onCallback("gfy:", 3L)!!.text)
+        bc.onCallback("gf:WEEK", 2L, OWNER)
+        assertEquals(BotCommands.GIFT_OLD_FORK, bc.onCallback("gfy:", 3L, OWNER)!!.text)
     }
 
     @Test
     fun aResetThatVanishedIsNamedAsSuch() = runBlocking {
         val o = ops(gifts = """{"reset":{"week":[{"expireAt":500}]}}""")
         val bc = commands(o)
-        assertEquals("🤷 Ese reset ya no está — corré /quota de nuevo.", bc.onCallback("gf:WEEK", 1L)!!.text)
+        assertEquals("🤷 Ese reset ya no está — corré /quota de nuevo.", bc.onCallback("gf:WEEK", 1L, OWNER)!!.text)
         assertNull(o.resetQuery)
     }
 

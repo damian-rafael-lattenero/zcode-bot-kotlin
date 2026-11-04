@@ -11,6 +11,9 @@ import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
+/** The bot's configured owner — the taps the suite sends come from him. */
+private const val OWNER = 7L
+
 /**
  * /mode — the conversation's collaboration mode (Python's `_cmd_mode`),
  * now through the fork's OWN switch (the A4 `setMode` cap). The pure half
@@ -80,6 +83,7 @@ class ModeCommandTest {
         ops = o,
         hub = LiveHub(),
         daemonReset = { "" },
+        ownerUserId = { OWNER },
         history = FakeHistory(),
     )
 
@@ -197,7 +201,7 @@ class ModeCommandTest {
     @Test
     fun aTapRunsTheSameWrite() = runBlocking {
         val o = ops()
-        val reply = commands(o).onCallback("mo:edit", 3L)!!
+        val reply = commands(o).onCallback("mo:edit", 3L, OWNER)!!
         assertEquals("task-77" to "edit", o.setModes.single())
         assertTrue("📝 Edit automatically" in reply.text, reply.text)
     }

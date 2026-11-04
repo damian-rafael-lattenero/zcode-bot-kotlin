@@ -10,6 +10,9 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
+/** The bot's configured owner — the taps the suite sends come from him. */
+private const val OWNER = 7L
+
 /**
  * The taps' round-trip: qa:<sid>:<i> flies the respond frame and seals the
  * question honestly; qf:<sid> arms the NEXT line as the answer (one shot);
@@ -101,6 +104,7 @@ class QuestionsTapTest {
             ops,
             LiveHub(),
             daemonReset = { "" },
+            ownerUserId = { OWNER },
             history = object : TasksHistory {
                 override suspend fun ctxTasks(limit: Int) = emptyList<TaskRow>()
                 override suspend fun modelSelection(sid: String): ModelSel? = null
@@ -124,7 +128,7 @@ class QuestionsTapTest {
         val cmds = commands(ops, board)
         feed(board, permEvent)
 
-        val reply = cmds.onCallback("qa:q1:1", 99)
+        val reply = cmds.onCallback("qa:q1:1", 99, OWNER)
         assertEquals(1, ops.responds.size)
         val frame = ops.responds[0]
         assertEquals("permission", frame.kind)
@@ -140,7 +144,7 @@ class QuestionsTapTest {
     @Test
     fun staleTapSaysSo() = runBlocking {
         val cmds = commands(FakeOps(), Seams().board())
-        val reply = cmds.onCallback("qa:zz:0", 1)
+        val reply = cmds.onCallback("qa:zz:0", 1, OWNER)
         assertEquals("⏳ Esa pregunta ya no está pendiente.", reply?.text)
     }
 
@@ -153,7 +157,7 @@ class QuestionsTapTest {
         feed(board, permEvent)
         ops.answer = RespondAnswer.Failed("already_resolved", "interaction ya resuelta")
 
-        assertNull(cmds.onCallback("qa:q1:0", 5))
+        assertNull(cmds.onCallback("qa:q1:0", 5, OWNER))
         assertEquals(7L to "⚠️ El tap no entró (already_resolved): interaction ya resuelta", seams.edits.single())
         assertNull(board.byShortId("q1"))
     }
@@ -167,7 +171,7 @@ class QuestionsTapTest {
         feed(board, permEvent)
         ops.answer = RespondAnswer.Unavailable
 
-        val reply = cmds.onCallback("qa:q1:0", 5)
+        val reply = cmds.onCallback("qa:q1:0", 5, OWNER)
         assertTrue(reply?.text?.contains("canal") == true)
         assertNotNull(board.byShortId("q1")) // armed: the owner retries
     }
@@ -183,7 +187,7 @@ class QuestionsTapTest {
                "schema":{"interaction":"plan_approval","plan":"1"},"message":"?"}""",
         )
 
-        cmds.onCallback("qa:q1:0", 7)
+        cmds.onCallback("qa:q1:0", 7, OWNER)
         assertEquals("plan", ops.responds[0].kind)
         assertEquals("accept", ops.responds[0].action)
 
@@ -193,7 +197,7 @@ class QuestionsTapTest {
             """{"type":"elicitation_request","taskId":"task-q","requestId":"rq4",
                "schema":{"interaction":"plan_approval","plan":"2"},"message":"?"}""",
         ) // q2 — a FRESH requestId so the dedupe lets the decline tap live
-        cmds.onCallback("qa:q2:1", 8)
+        cmds.onCallback("qa:q2:1", 8, OWNER)
         assertEquals("plan", ops.responds[0].kind)
         assertEquals("decline", ops.responds[0].action)
     }
@@ -206,7 +210,7 @@ class QuestionsTapTest {
         val cmds = commands(ops, board)
         feed(board, elicitationEvent)
 
-        cmds.onCallback("qf:q1", 10) // the ✍️ arm
+        cmds.onCallback("qf:q1", 10, OWNER) // the ✍️ arm
         assertNull(cmds.handle("la main", 11)) // the answer: Resolved → the edit is the feedback
 
         assertEquals(1, ops.responds.size)
@@ -228,7 +232,7 @@ class QuestionsTapTest {
         cmds.handle("otra cosa", 12) // the arm is gone: the text rides the normal route (the router's own tests cover that path)
         assertEquals(
             "⏳ Esa pregunta ya no está pendiente.",
-            cmds.onCallback("qf:q1", 13)?.text, // the board sealed: no re-arm, no second answer
+            cmds.onCallback("qf:q1", 13, OWNER)?.text, // the board sealed: no re-arm, no second answer
         )
     }
 
@@ -240,7 +244,7 @@ class QuestionsTapTest {
         feed(board, elicitationEvent)
         ops.answer = RespondAnswer.Unavailable
 
-        cmds.onCallback("qf:q1", 10)
+        cmds.onCallback("qf:q1", 10, OWNER)
         val reply = cmds.handle("la main", 11)
         assertTrue(reply?.text?.contains("armada") == true) // the honest retry copy (CHANNEL_DOWN is English)
         assertNotNull(board.byShortId("q1")) // still armed
@@ -261,14 +265,14 @@ class QuestionsTapTest {
         feed(board, multiElicitationEvent)
         assertEquals(1, seams.sent.size) // ONE message for the whole questionnaire
 
-        assertNull(cmds.onCallback("qa:q1:0", 20)) // q1: main — the edit IS the feedback
+        assertNull(cmds.onCallback("qa:q1:0", 20, OWNER)) // q1: main — the edit IS the feedback
         assertEquals(0, ops.responds.size) // no frame yet — the questionnaire is half done
         assertEquals(1, seams.edits.size)
         assertTrue("pregunta 2 de 2" in seams.edits[0].second)
         assertTrue("¿qué runtime?" in seams.edits[0].second)
         assertEquals("¿qué runtime?", board.byShortId("q1")?.title)
 
-        assertNull(cmds.onCallback("qa:q1:0", 21)) // q2: node — the LAST answer
+        assertNull(cmds.onCallback("qa:q1:0", 21, OWNER)) // q2: node — the LAST answer
         assertEquals(1, ops.responds.size) // exactly ONE frame, at the end
         val frame = ops.responds[0]
         assertEquals("elicitation", frame.kind)
@@ -287,7 +291,7 @@ class QuestionsTapTest {
 
         assertEquals(
             "⏳ Esa pregunta ya no está pendiente.",
-            cmds.onCallback("qa:q1:0", 22)?.text, // the double tap: honest failure, no second frame
+            cmds.onCallback("qa:q1:0", 22, OWNER)?.text, // the double tap: honest failure, no second frame
         )
         assertEquals(1, ops.responds.size)
     }
@@ -300,10 +304,10 @@ class QuestionsTapTest {
         val cmds = commands(ops, board)
         feed(board, optionlessSecondEvent)
 
-        assertNull(cmds.onCallback("qa:q1:0", 30)) // q1 by tap → the message advances to q2
+        assertNull(cmds.onCallback("qa:q1:0", 30, OWNER)) // q1 by tap → the message advances to q2
         assertEquals(0, ops.responds.size)
 
-        val arm = cmds.onCallback("qf:q1", 31) // the ✍️ arm — NOW it names question 2
+        val arm = cmds.onCallback("qf:q1", 31, OWNER) // the ✍️ arm — NOW it names question 2
         assertTrue(arm?.text?.contains("Notas") == true)
 
         assertNull(cmds.handle("una nota larga", 32)) // q2 by text → the ONE frame flies
@@ -330,14 +334,14 @@ class QuestionsTapTest {
         val cmds = commands(ops, board)
         feed(board, multiElicitationEvent)
 
-        cmds.onCallback("qa:q1:1", 40) // q1: dev — partial state only
+        cmds.onCallback("qa:q1:1", 40, OWNER) // q1: dev — partial state only
         assertEquals(0, ops.responds.size)
         board.resolveByRequestId("rm", "✅ Respondido desde la app.")
         assertNull(board.byShortId("q1"))
 
         assertEquals(
             "⏳ Esa pregunta ya no está pendiente.",
-            cmds.onCallback("qa:q1:0", 41)?.text, // the stale tap: honest miss
+            cmds.onCallback("qa:q1:0", 41, OWNER)?.text, // the stale tap: honest miss
         )
         assertEquals(0, ops.responds.size) // NO orphan respond
         assertEquals(2, seams.edits.size) // the advance edit + the seal — nothing more

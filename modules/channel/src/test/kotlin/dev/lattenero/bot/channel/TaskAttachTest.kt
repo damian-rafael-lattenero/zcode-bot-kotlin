@@ -6,6 +6,9 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
+/** The bot's configured owner — the taps the suite sends come from him. */
+private const val OWNER = 7L
+
 /**
  * The /tasks row tap (`t:<sid>`): ATTACH to that task's live pipe — the
  * owner's 30/10 rule («yo quiero seleccionar cualquier task y empezar a
@@ -122,6 +125,7 @@ class TaskAttachTest {
         ops = ops,
         hub = LiveHub(),
         daemonReset = { "fake ladder" },
+        ownerUserId = { OWNER },
         clock = { 1_000_000L },
         history = FakeHistory(rows),
         defaultWorkspacePath = "/Users/damian/.zcode/workspace/default",
@@ -133,7 +137,7 @@ class TaskAttachTest {
             botStatusJson = boundStatus.replace("\"task-02\"", "\"task-77\"")
             answers["activeTaskIds"] = """["task-77"]"""
         }
-        val reply = commands(ops).onCallback("t:task-77", 5L)!!
+        val reply = commands(ops).onCallback("t:task-77", 5L, OWNER)!!
         // THE feature: the pipe attach happened, whatever the bind did
         assertEquals(listOf("task-77" to app), ops.subscribed)
         assertTrue("👁" in reply.text)
@@ -147,7 +151,7 @@ class TaskAttachTest {
         // no conversation bound, nothing running: the watch lands, the bind
         // re-arms the next text into the freshly watched task
         val ops = FakeOps(draftStatus).apply { answers["activeTaskIds"] = """[]""" }
-        val reply = commands(ops).onCallback("t:task-77", 5L)!!
+        val reply = commands(ops).onCallback("t:task-77", 5L, OWNER)!!
         assertEquals(listOf("task-77" to app), ops.subscribed)
         assertTrue("«unificador» suscripto" in reply.text)
         assertTrue("próximo turno" in reply.text)
@@ -163,7 +167,7 @@ class TaskAttachTest {
             // awaited reply (the bot-side pre-check is gone from the tap)
             cannedBindReplies = listOf("⏳ The previous task's turn is still running")
         }
-        val reply = commands(ops).onCallback("t:task-77", 5L)!!
+        val reply = commands(ops).onCallback("t:task-77", 5L, OWNER)!!
         assertEquals(listOf("task-77" to app), ops.subscribed)
         assertTrue("👁" in reply.text)
         assertTrue("⏳" in reply.text) // the host's honest refusal rides along
@@ -172,7 +176,7 @@ class TaskAttachTest {
     @Test
     fun tapOnAnUnknownSidWithoutContextIsHonest() = runBlocking {
         val ops = FakeOps(noContextStatus)
-        val reply = commands(ops).onCallback("t:task-99", 5L)!!
+        val reply = commands(ops).onCallback("t:task-99", 5L, OWNER)!!
         assertTrue(ops.subscribed.isEmpty()) // nothing to attach to — no silent fake watch
         assertTrue("🤷" in reply.text)
         assertTrue("/tasks" in reply.text)
@@ -184,7 +188,7 @@ class TaskAttachTest {
         // first» — the bind needs no bot-side context, the HOST decides. The
         // fork's project boundary (Task not found) is the honest answer.
         val ops = FakeOps(noContextStatus).apply { cannedBindReplies = listOf("Task not found") }
-        val reply = commands(ops).onCallback("t:task-77", 5L)!!
+        val reply = commands(ops).onCallback("t:task-77", 5L, OWNER)!!
         assertEquals(listOf("task-77" to app), ops.subscribed) // the attach happened
         assertTrue("👁" in reply.text)
         assertTrue("🚧" in reply.text, "the project boundary speaks, not the routing boilerplate")
@@ -195,7 +199,7 @@ class TaskAttachTest {
     @Test
     fun aContextlessTapInTheSameWorkspaceBindsFine() = runBlocking {
         val ops = FakeOps(noContextStatus) // the fake's default: the host confirms silently
-        val reply = commands(ops).onCallback("t:task-77", 5L)!!
+        val reply = commands(ops).onCallback("t:task-77", 5L, OWNER)!!
         assertTrue("🎯" in reply.text, "the host confirmed the bind — context not needed")
         assertTrue("send text first" !in reply.text)
     }
@@ -300,13 +304,14 @@ class TaskAttachTest {
             ops = ops,
             hub = hub,
             daemonReset = { "fake ladder" },
+            ownerUserId = { OWNER },
             clock = { 1_000_000L },
             history = FakeHistory(rows),
             defaultWorkspacePath = "/Users/damian/.zcode/workspace/default",
         )
         // the parent turn is live with the subagent lane open (the stream's own truth)
         hub.apply(streamEvent("task-02", """{"type":"tool_call","toolId":"$laneId","toolName":"Task"}""", 1), 1_000_000L)
-        val reply = bc.onCallback("sa:$laneTail", 7L)!!
+        val reply = bc.onCallback("sa:$laneTail", 7L, OWNER)!!
         assertEquals(laneId, hub.watchedLaneId())
         assertTrue("Subagente" in reply.text)
         assertTrue("misma carta que una task" in reply.text)
@@ -315,7 +320,7 @@ class TaskAttachTest {
     @Test
     fun laneTapOnAGoneSubagentIsHonest() = runBlocking {
         val ops = FakeOps(boundStatus)
-        val reply = commands(ops).onCallback("sa:deadbeefdeadbeef", 7L)!!
+        val reply = commands(ops).onCallback("sa:deadbeefdeadbeef", 7L, OWNER)!!
         assertTrue("🤷" in reply.text)
         assertTrue("/tasks" in reply.text)
     }
@@ -332,6 +337,7 @@ class TaskAttachTest {
             ops = ops,
             hub = hub,
             daemonReset = { "fake ladder" },
+            ownerUserId = { OWNER },
             clock = { 1_000_000L },
             history = history,
             defaultWorkspacePath = "/Users/damian/.zcode/workspace/default",
@@ -345,7 +351,7 @@ class TaskAttachTest {
             ),
             1_000_000L,
         )
-        val reply = bc.onCallback("sa:$laneTail", 7L)!!
+        val reply = bc.onCallback("sa:$laneTail", 7L, OWNER)!!
         // the REAL link: subscribed to the CHILD's session, card pinned to it
         assertEquals(listOf("sess_subagent_$agentId" to app), ops.subscribed)
         assertEquals("sess_subagent_$agentId", hub.peekPin())
@@ -363,6 +369,7 @@ class TaskAttachTest {
             ops = ops,
             hub = hub,
             daemonReset = { "fake ladder" },
+            ownerUserId = { OWNER },
             clock = { 1_000_000L },
             history = FakeHistory(rows), // runningSubs stays empty
             defaultWorkspacePath = "/Users/damian/.zcode/workspace/default",
@@ -375,7 +382,7 @@ class TaskAttachTest {
             ),
             1_000_000L,
         )
-        val reply = bc.onCallback("sa:$laneTail", 7L)!!
+        val reply = bc.onCallback("sa:$laneTail", 7L, OWNER)!!
         assertTrue(ops.subscribed.isEmpty())
         assertEquals(laneId, hub.watchedLaneId())
         assertNull(hub.peekPin())
@@ -467,6 +474,7 @@ class TaskAttachTest {
             ops = ops,
             hub = hub,
             daemonReset = { "fake ladder" },
+            ownerUserId = { OWNER },
             clock = { 1_000_000L },
             history = history,
             defaultWorkspacePath = "/Users/damian/.zcode/workspace/default",
@@ -479,14 +487,14 @@ class TaskAttachTest {
             ),
             1_000_000L,
         )
-        val arm = bc.onCallback("so:$laneTail", 9L)!!
+        val arm = bc.onCallback("so:$laneTail", 9L, OWNER)!!
         assertTrue("Armado" in arm.text) // the arm rides the attach
         assertEquals(1, ops.subscribed.size) // the tap ALSO attaches
         // the FIRST free text after the arm is the ORDER — a BUSY child
         // earns the ⚡/⏳ question first, then the tap flies
         val question = bc.handle("cambiale el título a la carta", 10L)!!
         assertTrue("Empujar" in question.text, "got: $question")
-        val ack = bc.onCallback("odp:1", 10L)!!
+        val ack = bc.onCallback("odp:1", 10L, OWNER)!!
         assertTrue("Orden entregada" in ack.text, "got: $ack")
         assertEquals(listOf("cambiale el título a la carta" to "sess_subagent_agent_x"), ops.orders)
         // the arm is ONE shot: the next text rides the normal routing again
@@ -513,6 +521,7 @@ class TaskAttachTest {
             ops = ops,
             hub = hub,
             daemonReset = { "fake ladder" },
+            ownerUserId = { OWNER },
             clock = { 1_000_000L },
             history = history,
             defaultWorkspacePath = "/Users/damian/.zcode/workspace/default",
@@ -525,13 +534,13 @@ class TaskAttachTest {
             ),
             1_000_000L,
         )
-        bc.onCallback("so:$laneTail", 9L)!!
+        bc.onCallback("so:$laneTail", 9L, OWNER)!!
         // BUSY → the bot ASKS (the owner's 23:12 law), never cuts on its own
         val question = bc.handle("cortá y leé esto", 10L)!!
         assertTrue("Empujar" in question.text, "got: $question")
         assertTrue("Encolar" in question.text, question.text)
         assertEquals(0, ops.orders.size, "nothing flew before the owner's choice")
-        val ack = bc.onCallback("odp:1", 11L)!!
+        val ack = bc.onCallback("odp:1", 11L, OWNER)!!
         assertTrue("Le corté el turno" in ack.text, "got: $ack")
         assertTrue("AHORA" in ack.text, ack.text)
         assertEquals(listOf("cortá y leé esto" to "sess_subagent_agent_x"), ops.orders)
@@ -553,6 +562,7 @@ class TaskAttachTest {
             ops = ops,
             hub = hub,
             daemonReset = { "fake ladder" },
+            ownerUserId = { OWNER },
             clock = { 1_000_000L },
             history = history,
             defaultWorkspacePath = "/Users/damian/.zcode/workspace/default",
@@ -565,9 +575,9 @@ class TaskAttachTest {
             ),
             1_000_000L,
         )
-        bc.onCallback("so:$laneTail", 9L)!!
+        bc.onCallback("so:$laneTail", 9L, OWNER)!!
         bc.handle("dejalo para después", 10L)!!
-        val ack = bc.onCallback("odq:1", 11L)!!
+        val ack = bc.onCallback("odq:1", 11L, OWNER)!!
         assertTrue("Orden entregada" in ack.text, "got: $ack")
         assertTrue("Le corté el turno" !in ack.text)
         assertEquals(listOf("dejalo para después" to "sess_subagent_agent_x"), ops.orders)
@@ -588,6 +598,7 @@ class TaskAttachTest {
             ops = ops,
             hub = hub,
             daemonReset = { "fake ladder" },
+            ownerUserId = { OWNER },
             clock = { 1_000_000L },
             history = history,
             defaultWorkspacePath = "/Users/damian/.zcode/workspace/default",
@@ -597,9 +608,9 @@ class TaskAttachTest {
         assertTrue("cazar la causa raíz" in data, "the store's row must render: $data")
         assertTrue("sn:${sess.takeLast(16)}" in data) // the name tap carries the session tail
         // the name tap: the DETAIL CARD — then the card's attach subscribes
-        val card = bc.onCallback("sn:${sess.takeLast(16)}", 4L)!!
+        val card = bc.onCallback("sn:${sess.takeLast(16)}", 4L, OWNER)!!
         assertTrue("cazar la causa raíz del bus" in card.text, "the full title: ${card.text}")
-        val attach = bc.onCallback("sa:${sess.takeLast(16)}", 5L)!!
+        val attach = bc.onCallback("sa:${sess.takeLast(16)}", 5L, OWNER)!!
         assertEquals(listOf(sess to app), ops.subscribed)
         assertEquals(sess, hub.peekPin())
         assertTrue("attachado" in attach.text)
@@ -609,7 +620,7 @@ class TaskAttachTest {
     fun taskRowOrderTapArmsTheTaskSession() = runBlocking {
         val ops = FakeOps(boundStatus).apply { answers["activeTaskIds"] = """[]""" }
         val bc = commands(ops)
-        val arm = bc.onCallback("so:task-77", 8L)!!
+        val arm = bc.onCallback("so:task-77", 8L, OWNER)!!
         // the task's OWN session: subscribed (the pipe) + armed (the order)
         assertEquals(listOf("task-77" to app), ops.subscribed)
         assertTrue("sin bind" in arm.text)
@@ -653,11 +664,12 @@ class TaskAttachTest {
             ops = ops,
             hub = hub,
             daemonReset = { "fake ladder" },
+            ownerUserId = { OWNER },
             clock = { 1_000_000L },
             history = FakeHistory(rows),
             defaultWorkspacePath = "/Users/damian/.zcode/workspace/default",
         )
-        val arm = bc.onCallback("so:zzzzzzzzzzzzzzzz", 9L)!!
+        val arm = bc.onCallback("so:zzzzzzzzzzzzzzzz", 9L, OWNER)!!
         assertTrue("no da señal viva" in arm.text, "got: ${arm.text}")
         assertTrue(ops.subscribed.isEmpty(), "a refused arm attaches no pipe")
         assertEquals(0, ops.orders.size)
@@ -681,6 +693,7 @@ class TaskAttachTest {
             ops = ops,
             hub = hub,
             daemonReset = { "fake ladder" },
+            ownerUserId = { OWNER },
             clock = { 1_000_000L },
             history = history,
             defaultWorkspacePath = "/Users/damian/.zcode/workspace/default",
@@ -693,7 +706,7 @@ class TaskAttachTest {
             ),
             1_000_000L,
         )
-        val arm = bc.onCallback("so:$laneTail", 9L)!!
+        val arm = bc.onCallback("so:$laneTail", 9L, OWNER)!!
         assertTrue("Armado" in arm.text, "got: ${arm.text}")
         // the child ENDS while the arm sits armed: the card is pinned to
         // the child's stream (the sa: full form — the hub drops the
@@ -722,12 +735,13 @@ class TaskAttachTest {
             ops = ops,
             hub = hub,
             daemonReset = { "fake ladder" },
+            ownerUserId = { OWNER },
             clock = { 1_000_000L },
             history = history,
             defaultWorkspacePath = "/Users/damian/.zcode/workspace/default",
         )
         history.runningTitled = listOf(RunningSubagent(sess, "mission larga", lastMs = 1_000_000L - 60_000))
-        val arm = bc.onCallback("so:zzzzzzzzzzzzzzzz", 9L)!!
+        val arm = bc.onCallback("so:zzzzzzzzzzzzzzzz", 9L, OWNER)!!
         assertTrue("Armado" in arm.text, "a fresh row arms: ${arm.text}")
         history.runningTitled = listOf(RunningSubagent(sess, "mission larga", lastMs = 1_000_000L - 16 * 60_000))
         val ack = bc.handle("se te congeló?", 10L)!!
@@ -745,6 +759,7 @@ class TaskAttachTest {
             ops = ops,
             hub = hub,
             daemonReset = { "fake ladder" },
+            ownerUserId = { OWNER },
             clock = { 1_000_000L },
             history = FakeHistory(rows),
             defaultWorkspacePath = "/Users/damian/.zcode/workspace/default",
@@ -765,7 +780,7 @@ class TaskAttachTest {
             inactiveView = false,
         ).toString()
         assertTrue(longMission !in rowLabel, "the row label stays capped")
-        val card = bc.onCallback("sn:$laneTail", 9L)!!
+        val card = bc.onCallback("sn:$laneTail", 9L, OWNER)!!
         assertTrue(longMission in card.text, "the FULL mission in the card: ${card.text}")
         assertTrue("⏳ vivo hace" in card.text)
         val datas = card.markup.toString()
@@ -784,6 +799,7 @@ class TaskAttachTest {
             ops = ops,
             hub = hub,
             daemonReset = { "fake ladder" },
+            ownerUserId = { OWNER },
             clock = { 1_000_000L },
             history = FakeHistory(rows),
             defaultWorkspacePath = "/Users/damian/.zcode/workspace/default",
@@ -804,7 +820,7 @@ class TaskAttachTest {
             ),
             1_000_000L,
         )
-        val card = bc.onCallback("sn:$laneTail", 9L)!!
+        val card = bc.onCallback("sn:$laneTail", 9L, OWNER)!!
         assertTrue("💀 terminó" in card.text, "got: ${card.text}")
         assertEquals(null, card.markup, "a dead card earns no buttons")
     }
@@ -824,6 +840,7 @@ class TaskAttachTest {
             ops = ops,
             hub = hub,
             daemonReset = { "fake ladder" },
+            ownerUserId = { OWNER },
             clock = { 1_000_000L },
             history = history,
             defaultWorkspacePath = "/Users/damian/.zcode/workspace/default",
@@ -836,7 +853,7 @@ class TaskAttachTest {
             ),
             1_000_000L,
         )
-        val arm = bc.onCallback("so:$laneTail", 9L)!!
+        val arm = bc.onCallback("so:$laneTail", 9L, OWNER)!!
         assertTrue("Armado" in arm.text)
         ops.orderAnswer = InboundAnswer.Failed(
             code = "internal",
@@ -845,7 +862,7 @@ class TaskAttachTest {
         // the child is BUSY: the bot asks first (⚡/⏳) — the ⚡ tap flies
         val question = bc.handle("hace un resumen", 10L)!!
         assertTrue("Empujar" in question.text, "got: $question")
-        val ack = bc.onCallback("odp:1", 11L)!!
+        val ack = bc.onCallback("odp:1", 11L, OWNER)!!
         assertTrue("NO entró" in ack.text, "got: $ack")
         assertTrue("sessionNotFound" in ack.text, "the verbatim rides: ${ack.text}")
         assertTrue("NO voló" in ack.text)

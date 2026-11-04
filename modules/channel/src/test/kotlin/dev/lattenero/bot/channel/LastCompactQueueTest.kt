@@ -8,6 +8,9 @@ import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
+/** The bot's configured owner — the taps the suite sends come from him. */
+private const val OWNER = 7L
+
 /**
  * The three new commands against a fake channel: /last re-speaks the
  * snapshot's answer (the shower's own convention — raw body, ✂️ note at
@@ -91,6 +94,7 @@ class LastCompactQueueTest {
         ops = ops,
         hub = LiveHub(),
         daemonReset = { "fake" },
+        ownerUserId = { OWNER },
         clock = { 1_000_000L },
         history = NoHistory(),
     )
@@ -193,7 +197,7 @@ class LastCompactQueueTest {
     fun launchFiresByHandAndEmptiesTheRow() = runBlocking {
         val o = ops()
         o.enqueueInbound("hola", "tg-11", 100L)
-        val reply = commands(o).onCallback("ql:tg-11", 2L)
+        val reply = commands(o).onCallback("ql:tg-11", 2L, OWNER)
         assertTrue(reply!!.text.startsWith("🚀"))
         assertTrue(o.inbound.any { it.first == "hola" && it.second == "tg-11-manual" })
         assertTrue(o.parked.isEmpty())
@@ -204,7 +208,7 @@ class LastCompactQueueTest {
         val o = ops()
         o.enqueueInbound("hola", "tg-11", 100L)
         o.available = false
-        val reply = commands(o).onCallback("ql:tg-11", 2L)
+        val reply = commands(o).onCallback("ql:tg-11", 2L, OWNER)
         assertTrue(reply!!.text.startsWith("📡"))
         assertEquals(1, o.parked.size) // a manual launch never LOSES the text
         assertEquals("hola", o.parked[0].text)
@@ -212,7 +216,7 @@ class LastCompactQueueTest {
 
     @Test
     fun launchAnswersHonestlyWhenTheDrainBeatTheTap() = runBlocking {
-        assertTrue("Ya no está" in commands(ops()).onCallback("ql:tg-404", 1L)!!.text)
+        assertTrue("Ya no está" in commands(ops()).onCallback("ql:tg-404", 1L, OWNER)!!.text)
     }
 
     @Test
@@ -220,7 +224,7 @@ class LastCompactQueueTest {
         val o = ops()
         o.enqueueInbound("hola", "tg-11", 100L)
         o.enqueueInbound("cha", "tg-12", 200L)
-        val reply = commands(o).onCallback("qd:tg-11", 2L)
+        val reply = commands(o).onCallback("qd:tg-11", 2L, OWNER)
         assertTrue("🗑" in reply!!.text)
         assertTrue("1 left" in reply.text)
         assertEquals(listOf("cha"), o.parked.map { it.text })
