@@ -731,6 +731,10 @@ private fun buildPoller(
         // the bot explains its own silences: a long mute window ends with the
         // apology (loud — the owner must learn WHY it was quiet, from the bot)
         onReconnected = { window -> speak(window.render(), true, null) },
+        // U9/F1: a cursor that was never live (fresh state / poisoned file)
+        // means the fetched backlog was CONSUMED, not replayed — a silent
+        // drop would be a lie by omission, so the owner hears it
+        onCursorLost = { skipped -> speak(cursorLostText(skipped), true, null) },
         // E2: one completed pass of the reader — whatever it fetched
         onCycle = { metrics.pollerCycle() },
         dispatch = { cfg, update ->

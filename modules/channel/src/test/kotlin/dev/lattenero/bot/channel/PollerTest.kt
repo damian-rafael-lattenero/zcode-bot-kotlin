@@ -37,7 +37,12 @@ class PollerTest {
         dispatch: suspend (TgConfig, InboundUpdate) -> Unit = { _, _ -> },
     ): Poller {
         val api = TgApi({ cfg }, engineFactory = factory(body, status))
-        return Poller(api = api, offsetFile = File(dir, "tg-offset"), dispatch = dispatch)
+        // U9/F1: dispatch only rides a LIVE cursor. A test that seeds its
+        // own cursor keeps it; the ones that only read an outcome get the
+        // neutral live-at-0 state.
+        val cursor = File(dir, "tg-offset")
+        if (!cursor.exists()) TgOffset.save(cursor, 0)
+        return Poller(api = api, offsetFile = cursor, dispatch = dispatch)
     }
 
     private fun factory(body: String, status: HttpStatusCode = HttpStatusCode.OK): HttpClientEngineFactory<MockEngineConfig> =
@@ -107,6 +112,7 @@ class PollerTest {
         val dir = tempDir()
         val noOwner = cfg.copy(ownerUserId = null)
         val seen = mutableListOf<String>()
+        TgOffset.save(File(dir, "tg-offset"), 0) // a LIVE cursor: the owner gate is what this test isolates
         val api = TgApi({ noOwner }, engineFactory = factory("""{"result":[${update(10, "hi")}]}"""))
         val poller = Poller(api = api, offsetFile = File(dir, "tg-offset"), dispatch = { _, m -> if (m is InboundUpdate.Message) seen.add(m.text) })
         poller.cycle(noOwner)
@@ -189,6 +195,7 @@ class PollerTest {
         val dir = tempDir()
         val outcomes = mutableListOf<PollOutcome>()
         val api = TgApi({ cfg }, engineFactory = factory("""{"result":[${update(10, "hola")}]}"""))
+        TgOffset.save(File(dir, "tg-offset"), 0) // a LIVE cursor: this test pins the E2 tap, not F1
         val poller = Poller(
             api = api,
             offsetFile = File(dir, "tg-offset"),
