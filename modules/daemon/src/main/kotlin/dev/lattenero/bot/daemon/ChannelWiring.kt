@@ -2,7 +2,6 @@ package dev.lattenero.bot.daemon
 
 import dev.lattenero.bot.channel.Ack
 import dev.lattenero.bot.channel.BotCommands
-import dev.lattenero.bot.channel.ParkTapTexts
 import dev.lattenero.bot.channel.BrainCommands
 import dev.lattenero.bot.channel.ChannelClient
 import dev.lattenero.bot.channel.DeployCommand
@@ -763,33 +762,17 @@ private fun buildPoller(
 
                 is InboundUpdate.Callback -> {
                     metrics.pollerCallback()
+                    answerCallback(liveApi, update.callbackId)
                     when {
-                        // ⏸️ THE PARK TAP (bg:<taskId>, the owner's 3/11):
-                        // answered ONCE, with its own honest toast — a
-                        // callback query answers once, so this branch never
-                        // reaches the bare ack below. The toast IS the ack
-                        // («▶️ A background — te aviso al terminar») or the
-                        // honest refusal (an unknown/expired card never
-                        // lies); the park's effect rides the live view.
-                        update.data.startsWith("bg:") -> {
-                            val ack = liveView?.park(update.data.removePrefix("bg:"))
-                            answerCallback(liveApi, update.callbackId, ack ?: ParkTapTexts.REFUSAL)
-                        }
+                        // B6 — the deploy taps: intercepted BEFORE the
+                        // callback fallback (the sst: law: a stray data must
+                        // never ride to the agent as the owner's own words —
+                        // «/deploy go» launching a build would be the graver bug)
+                        update.data.startsWith("dep:") ->
+                            deployFlow.onTap(update.data.removePrefix("dep:"), update.fromId)
 
-                        else -> {
-                            answerCallback(liveApi, update.callbackId)
-                            when {
-                                // B6 — the deploy taps: intercepted BEFORE the
-                                // callback fallback (the sst: law: a stray data must
-                                // never ride to the agent as the owner's own words —
-                                // «/deploy go» launching a build would be the graver bug)
-                                update.data.startsWith("dep:") ->
-                                    deployFlow.onTap(update.data.removePrefix("dep:"), update.fromId)
-
-                                else -> commands.onCallback(update.data, update.updateId)
-                                    ?.let { speak(it.text, false, it.markup) }
-                            }
-                        }
+                        else -> commands.onCallback(update.data, update.updateId)
+                            ?.let { speak(it.text, false, it.markup) }
                     }
                 }
             }
