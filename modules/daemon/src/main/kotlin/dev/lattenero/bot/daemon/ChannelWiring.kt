@@ -209,6 +209,12 @@ internal fun wireChannel(
     val socketFile = File(cfg.baseDir, ChannelSpec.SOCKET_FILENAME)
     val remote = File(cfg.baseDir, "telegram-remote.json")
 
+    // THE BOARD'S OWN STORE (the restart's memory, measured 4/11): one JSON
+    // in the daemon's own state dir — after a restart the old cards keep
+    // working and the fork's re-announcements dedupe into them. LastPrompt's
+    // exact construction pattern.
+    val questionStore = FileQuestionBoardStore(File(File(cfg.homeDir, "state"), QUESTION_BOARD_FILE))
+
     // THE QUESTIONS' throat (the answer round-trip): the commands lane's
     // OWN files — the chat the owner's taps already ride. A hanging
     // question is critical: the live-view law applies (the cooldown never
@@ -224,8 +230,9 @@ internal fun wireChannel(
         QuestionBoard(
             sendQuestion = { text, markup -> questionTelegram.ask(TgConfig.load(remote), text, markup) ?: 0L },
             editQuestion = { mid, text, markup -> questionTelegram.edit(TgConfig.load(remote), mid, text, markup) },
+            store = questionStore,
         )
-    } ?: QuestionBoard()
+    } ?: QuestionBoard(store = questionStore)
 
     // THE OPEN MENU MIRROR — declared before the client (its stream
     // callback captures the holder, the busTaps pattern): assigned right
@@ -600,6 +607,9 @@ private const val VERBOSITY_FILE = "verbosity.txt"
 
 /** /retry's ammo (Python's F22) — the last FIRED prompt's own file (LastPrompt). */
 private const val LAST_PROMPT_FILE = "last-prompt.json"
+
+/** The question board's persisted registry (the restart's memory, FileQuestionBoardStore's file). */
+private const val QUESTION_BOARD_FILE = "question-board.json"
 private val QUEUE_DRAIN_DELAY = 1.seconds
 
 /**

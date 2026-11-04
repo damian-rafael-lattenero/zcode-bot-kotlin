@@ -39,6 +39,11 @@ import java.util.concurrent.atomic.AtomicInteger
  * ArmedOrder's one-shot mechanics: the next text IS the answer (of the
  * question on screen).
  *
+ * The registry survives a restart ([QuestionBoardStore], injected — the
+ * daemon owns the FILE, this module never touches java.io): the old cards
+ * keep working and the fork's re-announcements dedupe into them — never a
+ * dead card, never a misrouted tap.
+ *
  * The fork's multi-answer contract (verified in the fork's own sources,
  * packages/services/src/bots/botsService.ts `buildBotElicitationContent`):
  * `content.answers` keyed by each QUESTION's text (missing key = skipped,
@@ -344,12 +349,44 @@ class QuestionBoard(
     private val sendQuestion: suspend (text: String, markup: JsonObject) -> Long? = { _, _ -> null },
     /** The honest seal's edit: the outcome replaces the question, the buttons die. */
     private val editQuestion: suspend (mid: Long, text: String, markup: JsonObject?) -> Unit = { _, _, _ -> },
+    /** The persistence seam (null = the pure in-memory board — the suite's default). */
+    private val store: QuestionBoardStore? = null,
 ) {
 
     private val lock = Any()
     private val byShortId = LinkedHashMap<String, PendingQuestion>()
     private val shortIdByRequestId = HashMap<String, String>()
     private val counter = AtomicInteger(0)
+
+    init {
+        // THE RESTARTED BOARD (measured 4/11): the store's entries come back
+        // EXACTLY as they left — the old card keeps its short id AND its
+        // message id, its taps resolve through the EXISTING paths, and the
+        // fork's re-announcement dedupes into it (the old card stays the
+        // live one — never a second card, never a re-issued q1). A key that
+        // does not parse only costs its counter seed; nextShortId's
+        // collision loop keeps the ids unique regardless.
+        store?.load()?.forEach { (sid, question) ->
+            byShortId[sid] = question
+            shortIdByRequestId[question.requestId] = sid
+            sid.removePrefix(SHORT_ID_PREFIX).toIntOrNull()?.let { n ->
+                if (n > counter.get()) counter.set(n)
+            }
+        }
+    }
+
+    /** The next short id — collision-free even against the LOADED entries (a restart never re-issues q1). */
+    private fun nextShortId(): String {
+        while (true) {
+            val sid = "$SHORT_ID_PREFIX${counter.incrementAndGet()}"
+            if (sid !in byShortId) return sid
+        }
+    }
+
+    /** The disk shadow of every mutation — the write is the store's own (it degrades, never throws). */
+    private fun persist() {
+        store?.save(synchronized(lock) { byShortId.toMap() })
+    }
 
     /**
      * The stream's entry: parse, dedupe by requestId (the fork's recovery
@@ -367,7 +404,7 @@ class QuestionBoard(
         val parsed = parseQuestionEvent(frame.event) ?: return null
         val registered = synchronized(lock) {
             shortIdByRequestId[parsed.requestId]?.let { return null }
-            val sid = "q${counter.incrementAndGet()}"
+            val sid = nextShortId()
             shortIdByRequestId[parsed.requestId] = sid
             byShortId[sid] = parsed
             val evicted = mutableListOf<PendingQuestion>()
@@ -380,6 +417,7 @@ class QuestionBoard(
             }
             Registration(sid, evicted)
         }
+        persist() // the insert + the evictions are committed BEFORE the send flies
         // THE EVICTION'S HONESTY (measured 4/11): a retired card keeps armed
         // buttons whose taps now answer «ya no está pendiente» — a dead
         // button pretending to be live. The seal edit flies OUTSIDE the lock
@@ -392,6 +430,7 @@ class QuestionBoard(
             synchronized(lock) {
                 byShortId[registered.shortId]?.let { byShortId[registered.shortId] = it.copy(mid = mid) }
             }
+            persist() // the mid is part of the persisted state (the seal's edit target)
         }
         return parsed
     }
@@ -434,6 +473,7 @@ class QuestionBoard(
         }
         return when (step) {
             is AnswerStep.Stored -> {
+                persist() // the ADVANCED copy is the stored state — the disk follows
                 if (step.question.mid > 0) {
                     val onScreen = step.question
                     editQuestion(onScreen.mid, questionText(onScreen), questionKeyboard(shortId, onScreen))
@@ -453,8 +493,12 @@ class QuestionBoard(
 
     /** The honest seal: edit the question message with the outcome, drop the buttons, drop the entry. */
     suspend fun resolve(shortId: String, outcome: String) {
-        val question = synchronized(lock) { byShortId.remove(shortId) } ?: return
-        synchronized(lock) { shortIdByRequestId.remove(question.requestId) }
+        val question = synchronized(lock) {
+            val removed = byShortId.remove(shortId)
+            removed?.let { shortIdByRequestId.remove(it.requestId) }
+            removed
+        } ?: return
+        persist() // the seal empties the registry — the store follows (one lock pass, both maps)
         if (question.mid > 0) editQuestion(question.mid, outcome, null)
     }
 
@@ -474,7 +518,10 @@ class QuestionBoard(
         /** The registry's cap — the oldest question evicts (the stream's replay cannot grow it unbounded). */
         const val REGISTRY_CAP = 32
 
-        /** The evicted card's honest seal (4/11: an armed dead button lies — its tap answers «ya no está pendiente»). */
+        /** The short ids' shape (`q1`, `q2`, …) — the tap wire's key AND the reload's counter seed. */
+        const val SHORT_ID_PREFIX = "q"
+
+        /** The evicted card's honest seal (4/11: an armed dead button's tap answers «ya no está pendiente»). */
         const val EVICTION_TEXT =
             "🗑 Pregunta retirada — llegaron $REGISTRY_CAP pendientes; mandá la respuesta por texto si sigue vigente"
 
