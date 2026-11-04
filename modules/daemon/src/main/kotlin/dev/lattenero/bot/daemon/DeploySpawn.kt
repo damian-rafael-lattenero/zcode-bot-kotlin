@@ -129,11 +129,20 @@ class DeploySpawn(
         plistFile.parentFile?.mkdirs()
         plistFile.writeText(plist())
         logFile.parentFile?.mkdirs()
-        // the bootout's own verdict is LOGGED, never discarded again: a
-        // stale "not bootable" label was invisible here (the 4/11 13:56
-        // error-5 wedge had no breadcrumb)
-        val bootout = launchctl.run(listOf("bootout", domain(), label))
-        logger.info { "deploy job $label bootout: exit=${bootout.exit} ${bootout.text.trim()}" }
+        // THE BOOTOUT HAS ITS OWN LADDER now: a wedged label (error 5) clears
+        // itself seconds later — measured 4/11: two taps 27 s apart wedged
+        // each other, the single bootout ate the error and poisoned EVERY
+        // bootstrap after it (the phone's 🤖 tap failed while a manual
+        // bootout two minutes later succeeded on the first try). rc=3 (not
+        // loaded) is a fine outcome — nothing to clear. The bootstrap never
+        // runs against a bootout that was still failing error 5 without a
+        // fight.
+        for (attempt in 1..BOOTOUT_ATTEMPTS) {
+            val bootout = launchctl.run(listOf("bootout", domain(), label))
+            logger.info { "deploy job $label bootout #$attempt: exit=${bootout.exit} ${bootout.text.trim()}" }
+            if (bootout.exit == 0 || bootout.exit == BOOTOUT_NOT_LOADED_EXIT) break
+            if (attempt < BOOTOUT_ATTEMPTS) beat(BOOTOUT_BEAT_MS)
+        }
         var out = launchctl.run(listOf("bootstrap", domain(), plistFile.absolutePath))
         if (out.exit != 0) {
             beat(BOOTOUT_BEAT_MS)
@@ -196,6 +205,12 @@ class DeploySpawn(
 
         /** The beat between a failed bootstrap and its one retry (lib/deploy.nu's measured fix). */
         const val BOOTOUT_BEAT_MS = 2_000L
+
+        /** The bootout's own retry ladder — a wedged label clears itself on a later try. */
+        const val BOOTOUT_ATTEMPTS = 3
+
+        /** `Boot-out failed: 3: No such process` — the label is not loaded; nothing to clear. */
+        const val BOOTOUT_NOT_LOADED_EXIT = 3
 
         /** launchd's own error-5 signature (disabled/stale label — the enable+retry trigger). */
         const val ERROR_5_MARK = "Bootstrap failed: 5"
