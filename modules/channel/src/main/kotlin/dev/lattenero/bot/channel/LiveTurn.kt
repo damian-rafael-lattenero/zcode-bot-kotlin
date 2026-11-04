@@ -166,6 +166,25 @@ data class BoxLive(
     }
 }
 
+/**
+ * THE PARK'S FOLD STATE (U5c) — the owner's ⏸️ as a VALUE, not a machine
+ * living beside the fold: the `bg:` tap folds a [RenderEvent.Park] and the
+ * card is parked in the state itself. [atMs] is the tap's own clock (the
+ * fact's stamp — the parked card renders NO timers on purpose); [landed] is
+ * the ONE final edit's fact («▶️ sigue en background» is already on the
+ * message), so a throttled tap retries and a landed one never re-edits.
+ *
+ * The park lives exactly as long as its state: the seal's [RenderEvent.Clear],
+ * a task switch and a ☢️ nuclear take it with the world — a NEW turn for the
+ * same task is therefore never parked, by construction, not by cleanup.
+ */
+data class ParkLive(
+    /** The tap's own clock — the fact's stamp, never a rendered timer. */
+    val atMs: Long,
+    /** The ONE final edit landed: the card's last shape is the parked render. */
+    val landed: Boolean = false,
+)
+
 /** The whole visible turn, one immutable value per event. */
 data class TurnLive(
     val taskId: String,
@@ -205,6 +224,13 @@ data class TurnLive(
      * tool's lifecycle). Null = the whole task's stream.
      */
     val watchedLane: String? = null,
+    /**
+     * THE PARK (U5c, the owner's ⏸️, 3/11): non-null = the card is parked —
+     * the publisher stops editing it (no redraw, no feed), the fold keeps
+     * consuming the turn, and the seal still runs so the 🔔 carries the
+     * conclusion exactly once. Null = the live card's edits flow.
+     */
+    val parked: ParkLive? = null,
     val doneTools: Int = 0,
     val failedTools: Int = 0,
     val interaction: InteractionPending? = null,

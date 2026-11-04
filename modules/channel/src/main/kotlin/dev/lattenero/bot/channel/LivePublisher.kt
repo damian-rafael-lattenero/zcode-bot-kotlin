@@ -39,14 +39,12 @@ class LiveHub {
     /** THE SCAN'S ACCUMULATOR — the fold's state, held. Written ONLY by [fold]. */
     private val states = MutableStateFlow<TurnLive?>(null)
 
-    /** The lane scope (a sa: attach's fallback) — null watches the whole task's stream. */
-    private var watchedLane: String? = null
-
     /**
      * A pinned card (a sa: attach's full form — the subagent's OWN session):
      * other tasks' events — the parent's among them — are DROPPED until the
      * pin lifts, or the single-task hub would flip the card back at the
-     * parent's every event.
+     * parent's every event. The pin is the CARD'S IDENTITY (which message is
+     * this), not render state: the fold's own state never carries it.
      */
     private var pinnedTaskId: String? = null
 
@@ -68,21 +66,17 @@ class LiveHub {
     ): TurnLive? = mutex.withLock {
         // the pinned view owns the hub: drop everyone else's frames whole
         if (pinnedTaskId != null && frame.taskId != pinnedTaskId) return@withLock states.value
-        val fresh = when {
-            // a new task's event replaces the watched turn (a /task pick or a
-            // new subscribe): the old turn's status message stays sealed in the chat
-            states.value != null && states.value!!.taskId != frame.taskId -> {
-                watchedLane = null // a task switch is also a lane-switch: scope dies with the task
-                null
-            }
-            else -> states.value
-        }
+        // THE LANE SCOPE IS THE FOLD'S (U5c): the card's own watchedLane —
+        // a task switch is also a lane-switch (a foreign task's state
+        // carries no scope), so the scope dies with the task by
+        // construction, not by a second var to clear.
+        val scope = states.value?.takeIf { it.taskId == frame.taskId }?.watchedLane
         // a lane-scoped card folds ONLY its subagent's events plus the root
         // tool's own lifecycle (arrival/close — the honest end signal)
-        if (watchedLane != null && fresh != null) {
+        if (scope != null) {
             val ev = frame.event
-            val passes = StreamEvents.parentToolUseId(ev) == watchedLane ||
-                StreamEvents.toolId(ev) == watchedLane
+            val passes = StreamEvents.parentToolUseId(ev) == scope ||
+                StreamEvents.toolId(ev) == scope
             if (!passes) return@withLock states.value
         }
         fold(classifyFrame(frame, nowMs), differ)
@@ -103,22 +97,16 @@ class LiveHub {
 
     /** A sa: attach: the card speaks ONLY that subagent's stream (subagent implements task). */
     suspend fun attachLane(laneId: String) {
-        mutex.withLock {
-            watchedLane = laneId
-            fold(RenderEvent.ScopeLane(laneId), SimpleLineDiffer)
-        }
+        mutex.withLock { fold(RenderEvent.ScopeLane(laneId), SimpleLineDiffer) }
     }
 
     /** Back to the whole task's stream (a t: attach clears any lane scope). */
     suspend fun watchTask() {
-        mutex.withLock {
-            watchedLane = null
-            fold(RenderEvent.WatchTask, SimpleLineDiffer)
-        }
+        mutex.withLock { fold(RenderEvent.WatchTask, SimpleLineDiffer) }
     }
 
-    /** The current lane scope — the sa: tap's resolution and tests. */
-    suspend fun watchedLaneId(): String? = mutex.withLock { watchedLane }
+    /** The current lane scope — read FROM the fold (the sa: tap's resolution and tests). */
+    suspend fun watchedLaneId(): String? = mutex.withLock { states.value?.watchedLane }
 
     /**
      * The card's real title, resolved OUTSIDE the stream (the fork's
@@ -175,6 +163,28 @@ class LiveHub {
      */
     suspend fun page(boxId: Int, pageIndex: Int) {
         mutex.withLock { fold(RenderEvent.Page(boxId, pageIndex), SimpleLineDiffer) }
+    }
+
+    /**
+     * THE PARK TAP (U5c): the verdict is the FOLD's ([ParkTap.verdict]) and
+     * a [ParkTap.Verdict.PARKED] answer folds the [RenderEvent.Park] in the
+     * SAME critical section — the decision and its fact are one step, so a
+     * seal never interleaves between them. A refusal folds nothing (the
+     * honest miss: a foreign/expired card parks NOTHING).
+     */
+    suspend fun park(taskId: String, cardTaskId: String?, atMs: Long): ParkTap.Verdict = mutex.withLock {
+        val verdict = ParkTap.verdict(states.value, cardTaskId, taskId)
+        if (verdict == ParkTap.Verdict.PARKED) fold(RenderEvent.Park(taskId, atMs), SimpleLineDiffer)
+        verdict
+    }
+
+    /**
+     * THE PARK'S ONE EDIT LANDED (U5c): the fold mirrors the fact —
+     * «▶️ sigue en background» is on the card's message, the publisher stops
+     * retrying it, and no other edit can follow.
+     */
+    suspend fun parkLanded(taskId: String) {
+        mutex.withLock { fold(RenderEvent.ParkLanded(taskId), SimpleLineDiffer) }
     }
 
     suspend fun peek(): TurnLive? = mutex.withLock { states.value }
@@ -323,17 +333,6 @@ class LivePublisher(
     private var giftsOkAtMs: Long = 0
 
     /**
-     * ⏸️ THE PARK MACHINE (the owner's 3/11, owner-approved): which
-     * taskIds are parked — an in-memory set keyed by taskId, one-shot per
-     * card ([ParkGate]). A parked card receives NO more edits; the seal
-     * still runs and the 🔔 carries the conclusion.
-     */
-    private val parks = ParkGate()
-
-    /** The parked render's flag: false until the ONE final edit lands. */
-    private var parkRenderLanded: Boolean = false
-
-    /**
      * THE CoT REGISTRY (the collapsed blocks' tap world) — built lazily
      * on the publisher's telegram edit leg. All access rides [tickMutex]
      * (the taps land here too): the registry itself stays a plain holder.
@@ -417,9 +416,9 @@ class LivePublisher(
         hub.tick(now)
         val peeked = hub.peek()
         if (peeked == null) {
-            // the hub went empty (a spent seal's cleanup, a ☢️ nuclear): no
-            // park outlives the world — a fresh card is never parked
-            parks.worldEnded()
+            // the hub went empty (a spent seal's cleanup, a ☢️ nuclear): the
+            // fold's Clear already took the park with the world — a fresh
+            // card is never parked, by construction
             return
         }
         var state: TurnLive = peeked
@@ -478,14 +477,16 @@ class LivePublisher(
             seal(cfg, mid, state, now)
             return
         }
-        // ⏸️ THE PARK GATE (the owner's 3/11): a parked card receives NO
+        // ⏸️ THE PARK GATE (U5c, the owner's 3/11): a parked card receives NO
         // more edits — no redraw, no feed (the live-stream noise he is
-        // escaping). The fold above kept consuming every event (the seal's
-        // facts stay complete), the watchdog above kept the bus alive; the
-        // seal below still runs and the 🔔 carries the conclusion. One-shot:
-        // the seal itself drops the park with the card.
-        if (parks.isParked(state.taskId)) {
-            if (!parkRenderLanded) landParkedRender(cfg, mid, state) // the cooldown's deferred render
+        // escaping). The park is the FOLD's state ([TurnLive.parked]): the
+        // fold above kept consuming every event (the seal's facts stay
+        // complete), the watchdog above kept the bus alive; the seal below
+        // still runs and the 🔔 carries the conclusion. The state's Clear
+        // takes the park with the card — a fresh turn is never parked.
+        val park = state.parked
+        if (park != null) {
+            if (!park.landed) landParkedRender(cfg, mid, state) // the cooldown's deferred render
             return
         }
         drainFeed(cfg, state, now)
@@ -495,7 +496,7 @@ class LivePublisher(
 
     /** The task-switch corpse seal: the watched turn was replaced — the old card speaks once and dies.
      *  The honest correction outranks the park (a frozen «sigue en background» would lie); the park
-     *  dies with the card — the one-shot's law. */
+     *  dies with the old state — the fold's own task-switch law. */
     private suspend fun sealReplaced(cfg: TgConfig, mid: Long) {
         telegram.edit(
             cfg,
@@ -503,7 +504,6 @@ class LivePublisher(
             "⛓️ turno reemplazado — esta vista era de otra tarea; la nueva tiene su propio cartel.",
         )
         logger.info { "live view REPLACED: old taskId=$statusTaskId message_id=$mid" }
-        statusTaskId?.let { parks.endCard(it) }
         statusMessageId = null
         statusTaskId = null
         lastText = ""
@@ -692,19 +692,19 @@ class LivePublisher(
      * «▶️ sigue en background» as its LAST edit — the turn keeps running
      * and streaming into the fold, and when the turn seals the owner gets
      * the existing 🏁 notification with the conclusion (the seal tap
-     * always fires; the gate never touches it). MUTEXED with the tick
-     * like every tap. The answer is the TOAST's honest words: the ack,
-     * the already-parked no-op, or the refusal (an unknown/expired card
-     * never lies).
+     * always fires; the gate never touches it). MUTEXED with the tick like
+     * every tap. The park is the FOLD's state (U5c): [LiveHub.park] answers
+     * the verdict and folds the fact in one step — the answer is the
+     * TOAST's honest words: the ack, the already-parked no-op, or the
+     * refusal (an unknown/expired card never lies).
      */
     suspend fun park(taskId: String): String = tickMutex.withLock {
         val cfg = config()
         if (!cfg.configured) {
             ParkTapTexts.NO_TELEGRAM
         } else {
-            when (parks.park(taskId, statusTaskId)) {
-                ParkGate.Verdict.PARKED -> {
-                    parkRenderLanded = false
+            when (hub.park(taskId, statusTaskId, clock())) {
+                ParkTap.Verdict.PARKED -> {
                     val mid = statusMessageId
                     val state = hub.peek()
                     if (mid != null && state != null) landParkedRender(cfg, mid, state)
@@ -715,8 +715,8 @@ class LivePublisher(
                     ParkTapTexts.ACK
                 }
 
-                ParkGate.Verdict.ALREADY -> ParkTapTexts.ALREADY
-                ParkGate.Verdict.UNKNOWN -> ParkTapTexts.REFUSAL
+                ParkTap.Verdict.ALREADY -> ParkTapTexts.ALREADY
+                ParkTap.Verdict.UNKNOWN -> ParkTapTexts.REFUSAL
             }
         }
     }
@@ -725,11 +725,12 @@ class LivePublisher(
      * The park's ONE final edit — the SAME edit-throat ([LiveTelegram.edit])
      * and the SAME cooldown rules: under a 429 window it does not land, and
      * the publisher's tick retries it (the parked card is never left
-     * without its honest render; it is also never edited twice).
+     * without its honest render; it is also never edited twice — the
+     * landing folds into the state, which is what stops the retry).
      */
     private suspend fun landParkedRender(cfg: TgConfig, mid: Long, state: TurnLive) {
         if (telegram.edit(cfg, mid, LiveTurn.parkText(state), Keyboards.liveCard(state.taskId))) {
-            parkRenderLanded = true
+            hub.parkLanded(state.taskId) // the fact: «▶️ sigue en background» is on the message
         }
     }
 
@@ -751,12 +752,13 @@ class LivePublisher(
             if (level == FeedVerbosity.SUMMARY) emptyList() else TranscriptFeed.pendingFlush(state)
         if (feed.isNotEmpty() && telegram.throttled()) return
         sealed = true
-        // ⏸️ THE PARKED SEAL: the card keeps its frozen «▶️ sigue en
+        // ⏸️ THE PARKED SEAL (U5c): the card keeps its frozen «▶️ sigue en
         // background» (its LAST edit already landed) and the transcript
         // stays silent — the seal speaks ONCE, through the 🔔 (the seal
         // tap below always fires; the notification carries the
-        // conclusion). The cleanup below runs exactly as always.
-        val parked = parks.isParked(state.taskId)
+        // conclusion). The cleanup below runs exactly as always, and its
+        // Clear takes the park with the turn.
+        val parked = state.parked != null
         if (parked) {
             logger.info {
                 "live view sealed (PARKED): taskId=${state.taskId} — the card stays frozen, " +
@@ -785,7 +787,6 @@ class LivePublisher(
         // only the entry cap prunes it. The PIN dies only if THIS turn is
         // its card: the parent sealing must not steal a child's pin.
         hub.clear(state.taskId)
-        parks.endCard(state.taskId) // THE ONE-SHOT: the park dies with its card — a new turn is never parked
         orphanStore?.clear()
         statusMessageId = null
         statusTaskId = null
