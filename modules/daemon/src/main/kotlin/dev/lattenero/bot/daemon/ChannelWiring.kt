@@ -493,10 +493,12 @@ internal fun wireChannel(
         script = DeployScriptKnob.loadFork(File(cfg.homeDir, SendKnob.FILE_NAME)),
         logFile = forkDeployLog,
         plistFile = File(File(cfg.homeDir, "state"), DeploySpawn.FORK_JOB_PLIST_NAME),
-        // the fork automaton's DEFAULT mode is dryrun (measured 4/11 13:56: the
-        // phone's fork tap ran a rehearsal) — the button IS the deploy, so the
-        // real flag rides here; the two-step confirm is the safety
-        args = listOf("--real"),
+        // THE MIRROR (4/11): the fork button runs the SAME script+args as the
+        // shell's `zcode-deploy` — build-install --when-quit. The build speaks
+        // its phases to Telegram; the swap waits for the owner's ⌘Q (the app
+        // is never killed behind his back; the channel only drops at the
+        // swap). The two-step confirm is the safety.
+        args = listOf("--when-quit"),
         label = DeploySpawn.FORK_JOB_LABEL,
     )
     val deployFlow = DeployFlow(
