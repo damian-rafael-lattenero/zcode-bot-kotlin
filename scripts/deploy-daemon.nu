@@ -24,10 +24,12 @@ def main []: nothing -> nothing {
     (date now | format date "%s") | save -f ($data | path join "state/deploying")
 
     step "building (Gradle daemon on 25)"
+    announce "🚀 deploy bot 1/4 — building (Gradle + detekt + tests; el build es el tramo largo)"
     cd $repo
     ^./gradlew -q :modules:daemon:installDist detekt test
 
     step $"installing to ($dest)"
+    announce "🚀 deploy bot 2/4 — installing"
     mkdir $dest
     mkdir ($data | path join "state")
     mkdir ($data | path join "shadow")
@@ -39,6 +41,7 @@ def main []: nothing -> nothing {
     # The healer is installed BEFORE the daemon's own restart: if the
     # bootstrap below ever fails, this is the job that brings it back.
     step "LaunchAgent com.zcode.bot-healer (the bot's own dead-man's switch)"
+    announce "🚀 deploy bot 3/4 — LaunchAgents (healer + daemon)"
     bootstrap-agent $repo "com.zcode.bot-healer"
 
     step $"LaunchAgent ($LABEL) \(KeepAlive: launchd is the dumb outer ring\)"
@@ -46,6 +49,7 @@ def main []: nothing -> nothing {
     bootstrap-agent $repo $LABEL
 
     step "verification: first heartbeat + armed state (deadline 15s)"
+    announce "🚀 deploy bot 4/4 — verification (heartbeat + estado armado, deadline 15 s)"
     let hb = ($data | path join "state/hb-zconn-shadow")
     let zconn = ($data | path join "state/zconn.json")
     mut ok = false
