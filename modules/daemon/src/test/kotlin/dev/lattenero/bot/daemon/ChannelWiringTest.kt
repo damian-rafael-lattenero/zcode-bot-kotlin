@@ -1,6 +1,7 @@
 package dev.lattenero.bot.daemon
 
 import dev.lattenero.bot.channel.LiveHub
+import dev.lattenero.bot.channel.QueryAnswer
 import dev.lattenero.bot.channel.ServerFrame
 import dev.lattenero.bot.channel.ToolLive
 import kotlinx.coroutines.test.runTest
@@ -103,5 +104,74 @@ class ChannelWiringTest {
         assertNull(snapshotAnswerOf("""{"messages":[{"role":"user","content":"x"}]}"""))
         assertNull(snapshotAnswerOf("""{"messages":[{"role":"assistant","content":"  "}]}"""))
         assertNull(snapshotAnswerOf("not json"))
+    }
+
+    // ── THE DEFAULT-MODE ENFORCEMENT (4/11: «por defecto siempre Full access») ──
+
+    /** The fake query leg: canned snapshot answers, the SetMode recorder. */
+    private class FakeQuery {
+        val setModes = mutableListOf<Pair<String, String>>()
+        var snapshotAnswer: QueryAnswer = QueryAnswer.Ok("""{"meta":{"mode":"build"},"messages":[]}""")
+        var setModeAnswer: QueryAnswer = QueryAnswer.Ok("""{"ok":true}""")
+
+        suspend fun leg(query: dev.lattenero.bot.channel.ChannelQuery): QueryAnswer = when (query) {
+            is dev.lattenero.bot.channel.ChannelQuery.SetMode -> {
+                setModes.add(query.taskId to query.mode)
+                setModeAnswer
+            }
+
+            else -> snapshotAnswer
+        }
+    }
+
+    private val guard = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
+    private suspend fun enforce(q: FakeQuery, taskId: String = "task-77") {
+        enforceDefaultModeOnRunStart(
+            taskId,
+            guard = guard,
+            query = { query -> q.leg(query) },
+            workspaceOf = { "/ws" },
+            log = { },
+        )
+    }
+
+    @Test
+    fun aTaskWithoutMetaModeGetsYoloWrittenOnce() = runTest {
+        val q = FakeQuery().apply { snapshotAnswer = QueryAnswer.Ok("""{"meta":{},"messages":[]}""") }
+        enforce(q)
+        assertEquals(listOf("task-77" to "yolo"), q.setModes, "the default IS Full access — written, not assumed")
+        enforce(q) // the second run_started never re-fires: once per task
+        assertEquals(1, q.setModes.size)
+    }
+
+    @Test
+    fun anOwnerChosenModeIsNeverStomped() = runTest {
+        val q = FakeQuery().apply { snapshotAnswer = QueryAnswer.Ok("""{"meta":{"mode":"build"},"messages":[]}""") }
+        enforce(q)
+        assertEquals(0, q.setModes.size, "the mode IS in meta.mode — the fork's truth wins")
+    }
+
+    @Test
+    fun aFailedSnapshotReadNeverFiresAndNeverLatches() = runTest {
+        val q = FakeQuery().apply { snapshotAnswer = QueryAnswer.Unavailable }
+        enforce(q)
+        assertEquals(0, q.setModes.size, "nothing fires on a dead channel")
+        // the guard stayed free: the NEXT turn (channel back) fires
+        q.snapshotAnswer = QueryAnswer.Ok("""{"meta":{},"messages":[]}""")
+        enforce(q)
+        assertEquals(listOf("task-77" to "yolo"), q.setModes)
+    }
+
+    @Test
+    fun aFailedSetModeFreesTheGuardForTheNextTurn() = runTest {
+        val q = FakeQuery().apply {
+            snapshotAnswer = QueryAnswer.Ok("""{"meta":{},"messages":[]}""")
+            setModeAnswer = QueryAnswer.Unavailable
+        }
+        enforce(q)
+        assertEquals(1, q.setModes.size)
+        enforce(q) // the write never landed: the next run_started retries
+        assertEquals(2, q.setModes.size, "the retry is honest: one fire per LANDED write")
     }
 }

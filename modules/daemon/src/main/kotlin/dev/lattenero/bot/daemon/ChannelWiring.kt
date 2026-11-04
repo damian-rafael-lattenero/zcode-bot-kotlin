@@ -282,6 +282,11 @@ internal fun wireChannel(
     // the texts that arrived mid-turn fire as inbounds now
     val queue = InboundQueue(File(File(cfg.homeDir, "state"), QUEUE_FILE))
     var drainQueue: suspend () -> Unit = {}
+    // THE DEFAULT-MODE ENFORCEMENT (4/11): the holder pattern (drainQueue's
+    // law) — the stream callback below captures it, the body binds right
+    // after the client exists. Fires SetMode(yolo) once per task whose
+    // snapshot carries NO meta.mode (the default IS Full access).
+    var enforceDefaultMode: suspend (String) -> Unit = {}
     // U1b: the producer is assigned right after the client exists (its
     // final-answer read is a channel query) — the callback reads the holder.
     var busTaps: BusProducer? = null
@@ -322,6 +327,12 @@ internal fun wireChannel(
 
                 "task_error" ->
                     board.resolveTask(frame.taskId, "⌛ El turno terminó — la pregunta quedó sin responder.")
+
+                // THE DEFAULT-MODE ENFORCEMENT (4/11): a turn starting for a
+                // watched task is the moment the default (Full access) is
+                // WRITTEN when the conversation never chose one — the same
+                // snapshot read the /mode card uses, fired once per task
+                "task_run_started" -> enforceDefaultMode(frame.taskId)
 
                 "permission_response", "elicitation_response" ->
                     (frame.event["requestId"] as? JsonPrimitive)?.content?.let {
@@ -365,6 +376,21 @@ internal fun wireChannel(
         // future watchdog keys HERE: a missing heartbeat is a dead bus.
         onKeepalive = { frame -> hub.keepalive(frame.taskId, frame.seq) },
     )
+
+    // THE DEFAULT-MODE ENFORCEMENT's body (the late bind — the callback above
+    // captured the holder): the same snapshot read the /mode card uses, the
+    // guard set dies with the process so the fork's truth is re-checked after
+    // every restart (an owner-chosen mode is never stomped: it IS in meta.mode).
+    val yoloGuard = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    enforceDefaultMode = { taskId ->
+        enforceDefaultModeOnRunStart(
+            taskId,
+            guard = yoloGuard,
+            query = { q -> client.query(q) },
+            workspaceOf = { sid -> workspacePathOf(cfg.baseDir, sid) },
+            log = { message -> logger.info { message } },
+        )
+    }
 
     // U1b — the bus producer (ADR-019): OFF by default (the knob is read at
     // boot in Main; OFF means this block does not run, not even a file stat).
