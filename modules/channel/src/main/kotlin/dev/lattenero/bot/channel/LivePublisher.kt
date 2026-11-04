@@ -165,28 +165,6 @@ class LiveHub {
         mutex.withLock { fold(RenderEvent.Page(boxId, pageIndex), SimpleLineDiffer) }
     }
 
-    /**
-     * THE PARK TAP (U5c): the verdict is the FOLD's ([ParkTap.verdict]) and
-     * a [ParkTap.Verdict.PARKED] answer folds the [RenderEvent.Park] in the
-     * SAME critical section — the decision and its fact are one step, so a
-     * seal never interleaves between them. A refusal folds nothing (the
-     * honest miss: a foreign/expired card parks NOTHING).
-     */
-    suspend fun park(taskId: String, cardTaskId: String?, atMs: Long): ParkTap.Verdict = mutex.withLock {
-        val verdict = ParkTap.verdict(states.value, cardTaskId, taskId)
-        if (verdict == ParkTap.Verdict.PARKED) fold(RenderEvent.Park(taskId, atMs), SimpleLineDiffer)
-        verdict
-    }
-
-    /**
-     * THE PARK'S ONE EDIT LANDED (U5c): the fold mirrors the fact —
-     * «▶️ sigue en background» is on the card's message, the publisher stops
-     * retrying it, and no other edit can follow.
-     */
-    suspend fun parkLanded(taskId: String) {
-        mutex.withLock { fold(RenderEvent.ParkLanded(taskId), SimpleLineDiffer) }
-    }
-
     suspend fun peek(): TurnLive? = mutex.withLock { states.value }
 
     /**
@@ -417,8 +395,7 @@ class LivePublisher(
         val peeked = hub.peek()
         if (peeked == null) {
             // the hub went empty (a spent seal's cleanup, a ☢️ nuclear): the
-            // fold's Clear already took the park with the world — a fresh
-            // card is never parked, by construction
+            // fold's Clear already took the turn with the world
             return
         }
         var state: TurnLive = peeked
@@ -477,26 +454,12 @@ class LivePublisher(
             seal(cfg, mid, state, now)
             return
         }
-        // ⏸️ THE PARK GATE (U5c, the owner's 3/11): a parked card receives NO
-        // more edits — no redraw, no feed (the live-stream noise he is
-        // escaping). The park is the FOLD's state ([TurnLive.parked]): the
-        // fold above kept consuming every event (the seal's facts stay
-        // complete), the watchdog above kept the bus alive; the seal below
-        // still runs and the 🔔 carries the conclusion. The state's Clear
-        // takes the park with the card — a fresh turn is never parked.
-        val park = state.parked
-        if (park != null) {
-            if (!park.landed) landParkedRender(cfg, mid, state) // the cooldown's deferred render
-            return
-        }
         drainFeed(cfg, state, now)
         val liveMid = statusMessageId ?: return // the swap's re-birth is throttled: the card returns next tick
         redrawCard(cfg, state, now, liveMid)
     }
 
-    /** The task-switch corpse seal: the watched turn was replaced — the old card speaks once and dies.
-     *  The honest correction outranks the park (a frozen «sigue en background» would lie); the park
-     *  dies with the old state — the fold's own task-switch law. */
+    /** The task-switch corpse seal: the watched turn was replaced — the old card speaks once and dies. */
     private suspend fun sealReplaced(cfg: TgConfig, mid: Long) {
         telegram.edit(
             cfg,
@@ -688,53 +651,6 @@ class LivePublisher(
     }
 
     /**
-     * ⏸️ THE PARK TAP (bg:<taskId>, the owner's 3/11): the card PARKS —
-     * «▶️ sigue en background» as its LAST edit — the turn keeps running
-     * and streaming into the fold, and when the turn seals the owner gets
-     * the existing 🏁 notification with the conclusion (the seal tap
-     * always fires; the gate never touches it). MUTEXED with the tick like
-     * every tap. The park is the FOLD's state (U5c): [LiveHub.park] answers
-     * the verdict and folds the fact in one step — the answer is the
-     * TOAST's honest words: the ack, the already-parked no-op, or the
-     * refusal (an unknown/expired card never lies).
-     */
-    suspend fun park(taskId: String): String = tickMutex.withLock {
-        val cfg = config()
-        if (!cfg.configured) {
-            ParkTapTexts.NO_TELEGRAM
-        } else {
-            when (hub.park(taskId, statusTaskId, clock())) {
-                ParkTap.Verdict.PARKED -> {
-                    val mid = statusMessageId
-                    val state = hub.peek()
-                    if (mid != null && state != null) landParkedRender(cfg, mid, state)
-                    logger.info {
-                        "live view PARKED: taskId=${taskId.takeLast(TASK_ID_TAIL)} " +
-                            "atMs=${state?.parked?.atMs} — no more edits; the 🔔 speaks at the seal"
-                    }
-                    ParkTapTexts.ACK
-                }
-
-                ParkTap.Verdict.ALREADY -> ParkTapTexts.ALREADY
-                ParkTap.Verdict.UNKNOWN -> ParkTapTexts.REFUSAL
-            }
-        }
-    }
-
-    /**
-     * The park's ONE final edit — the SAME edit-throat ([LiveTelegram.edit])
-     * and the SAME cooldown rules: under a 429 window it does not land, and
-     * the publisher's tick retries it (the parked card is never left
-     * without its honest render; it is also never edited twice — the
-     * landing folds into the state, which is what stops the retry).
-     */
-    private suspend fun landParkedRender(cfg: TgConfig, mid: Long, state: TurnLive) {
-        if (telegram.edit(cfg, mid, LiveTurn.parkText(state), Keyboards.liveCard(state.taskId))) {
-            hub.parkLanded(state.taskId) // the fact: «▶️ sigue en background» is on the message
-        }
-    }
-
-    /**
      * The seal: the turn's record, the transcript's REMAINDER (closes and
      * blocks folded after the last drain — a late attach's history, the
      * events between two ticks), the unsealed thought tail, then the
@@ -750,22 +666,9 @@ class LivePublisher(
         val level = verbosity.current()
         val feed = TranscriptFeed.messages(feedSeen, state, level, toolBox, verbs) +
             if (level == FeedVerbosity.SUMMARY) emptyList() else TranscriptFeed.pendingFlush(state)
-        // ⏸️ THE PARKED SEAL (U5c): the card keeps its frozen «▶️ sigue en
-        // background» (its LAST edit already landed) and the transcript
-        // stays silent — the seal speaks ONCE, through the 🔔 (the seal
-        // tap below always fires; the notification carries the
-        // conclusion). The cleanup below runs exactly as always, and its
-        // Clear takes the park with the turn. A parked seal has NOTHING to
-        // speak, so the feed's back-pressure must never delay the 🔔.
-        val parked = state.parked != null
-        if (!parked && feed.isNotEmpty() && telegram.throttled()) return
+        if (feed.isNotEmpty() && telegram.throttled()) return
         sealed = true
-        if (parked) {
-            logger.info {
-                "live view sealed (PARKED): taskId=${state.taskId} — the card stays frozen, " +
-                    "the 🔔 carries the conclusion"
-            }
-        } else if (feed.isEmpty()) {
+        if (feed.isEmpty()) {
             telegram.edit(cfg, mid, LiveTurn.sealText(state, now))
         } else {
             telegram.delete(cfg, mid)
@@ -776,13 +679,13 @@ class LivePublisher(
         // the store's answer is RAW markdown/content — Telegram's HTML law
         // requires the escape (measured 31/10: a literal tag in the content
         // 400'd the send every tick until the breaker opened)
-        if (answer != null && !parked) speak(PyText.esc(answer), null)
+        if (answer != null) speak(PyText.esc(answer), null)
         logger.info {
             "live view sealed: taskId=${state.taskId} reason=${(state.phase as TurnPhase.Done).stopReason} " +
                 "thought=${state.thoughtChars} tools=${state.doneTools} answer=${answer?.length ?: 0} chars " +
-                "feed=${feed.size} parked=$parked"
+                "feed=${feed.size}"
         }
-        sealTap(state, answer, now, answerSpoken = answer != null && !parked)
+        sealTap(state, answer, now, answerSpoken = answer != null)
         // THE REGISTRY SURVIVES THE SEAL (the collapsed buttons keep
         // working after the turn ends — the owner reads the CoT calmly);
         // only the entry cap prunes it. The PIN dies only if THIS turn is
@@ -836,7 +739,7 @@ class LivePublisher(
             birthCooldownTicks -= 1
             return
         }
-        val born = telegram.birth(cfg, text, Keyboards.liveCard(state.taskId))
+        val born = telegram.birth(cfg, text, null)
         if (born == null) {
             if (!birthFailLogged) {
                 logger.warn {
