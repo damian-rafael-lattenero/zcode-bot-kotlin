@@ -40,12 +40,18 @@ sealed interface RenderEvent {
         val nowMs: Long
     }
 
-    /** `task_run_started` — a fresh turn's first signal. */
+    /**
+     * `task_run_started` — a fresh turn's first signal. [startedAtMs] is the
+     * PAYLOAD's own stamp (zcode's task start, epoch ms; 0 = absent — the
+     * delivery clock keeps its fallback): the header's time is zcode's,
+     * mirrored, never the bus's delivery moment.
+     */
     data class Started(
         override val taskId: String,
         override val seq: Long,
         override val atMs: Long,
         override val nowMs: Long,
+        val startedAtMs: Long = 0,
     ) : FromFrame
 
     /**
@@ -88,6 +94,21 @@ sealed interface RenderEvent {
 
     /** `tool_call_update` with a terminal status — the lane's verdict. EXACT stage. */
     data class ToolClose(
+        override val taskId: String,
+        override val seq: Long,
+        override val atMs: Long,
+        override val nowMs: Long,
+        val tool: ToolCall,
+    ) : FromFrame
+
+    /**
+     * `tool_call_update` with `status:"in_progress"` — the fork's OWN
+     * «this action is alive» signal (v2 §3, folded, never dropped to the
+     * additive Frame anymore). Touches the lane's clock and restores the
+     * Writing phase on the lane's OWN anchor (the reducer's law); the
+     * ToolCall rides so a never-opened lane still gets its real name.
+     */
+    data class ToolRunning(
         override val taskId: String,
         override val seq: Long,
         override val atMs: Long,
@@ -287,7 +308,7 @@ private fun classifyStream(frame: ServerFrame.StreamEvent, nowMs: Long): RenderE
     val seq = frame.seq
     val atMs = frame.at
     return when (StreamEvents.type(event)) {
-        StreamEvents.RUN_STARTED -> RenderEvent.Started(taskId, seq, atMs, nowMs)
+        StreamEvents.RUN_STARTED -> RenderEvent.Started(taskId, seq, atMs, nowMs, StreamEvents.startedAt(event))
 
         StreamEvents.THOUGHT -> RenderEvent.Thought(
             taskId = taskId,
@@ -358,6 +379,10 @@ private fun classifyTool(frame: ServerFrame.StreamEvent, nowMs: Long): RenderEve
 
         StreamEvents.TOOL_UPDATE -> when (StreamEvents.status(frame.event)) {
             "pending" -> RenderEvent.ToolOpen(taskId, seq, atMs, nowMs, openToolCall(frame.event), final = false)
+
+            // the fork's own «the action is alive» — a REAL fold, never the
+            // additive frame (v2 §3): the lane's clock and the phase move
+            "in_progress" -> RenderEvent.ToolRunning(taskId, seq, atMs, nowMs, openToolCall(frame.event))
 
             "completed", "failed", "denied", "stopped" ->
                 RenderEvent.ToolClose(taskId, seq, atMs, nowMs, closeToolCall(frame.event))
