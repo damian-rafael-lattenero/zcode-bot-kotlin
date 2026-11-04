@@ -495,6 +495,13 @@ class BotCommands(
     private fun liveDraft(): PlanMenu.Draft? =
         planDraft?.takeIf { clock() - it.atMs <= PLAN_DRAFT_TTL_MS }
 
+    /**
+     * The mirror's read of the OPEN PLAN DRAFT (the refresher's 🟡 lines):
+     * the live draft inside its TTL, or null — validity against the fresh
+     * catalog is the REFRESHER's check (it owns the fresh read).
+     */
+    fun openDraft(): PlanMenu.Draft? = liveDraft()
+
     /** One draft step's render — the status line ALWAYS says what would be applied. */
     private fun draftStep(
         v: PlanMenu.Views,
@@ -590,7 +597,14 @@ class BotCommands(
                 "(commits 3d07cace+, falta el deploy del fork).",
         )
         val draft = liveDraft()?.takeIf { v.draftValid(it) }
-        return BotReply(PlanMenu.statusLine(v, title, draft), markup = PlanMenu.keyboard(v, draft))
+        return BotReply(
+            PlanMenu.statusLine(v, title, draft),
+            markup = PlanMenu.keyboard(v, draft),
+            // THE MIRROR MARK: the open menu self-refreshes on the fork's
+            // config_option_update — keyed by the active task (no active
+            // task = no stream events for it = no mirror, the honest nothing)
+            mirror = value.activeTaskId?.let { MenuMirror.Mark(it, value.workspacePath, MenuMirror.Kind.PLAN) },
+        )
     }
 
     private fun planReplyFrom(resultJson: String, note: String): BotReply {
@@ -621,7 +635,13 @@ class BotCommands(
         val requested = rest.trim().lowercase()
         if (requested.isEmpty()) {
             val current = currentMode(taskId, ctx.workspacePath)
-            return BotReply(ModeMenu.statusLine(title, current), markup = ModeMenu.keyboard(current))
+            // THE MIRROR MARK: this menu self-refreshes on the fork's
+            // config_option_update (the wiring registers the born message)
+            return BotReply(
+                ModeMenu.statusLine(title, current),
+                markup = ModeMenu.keyboard(current),
+                mirror = MenuMirror.Mark(taskId, ctx.workspacePath, MenuMirror.Kind.MODE),
+            )
         }
         val mode = ModeMenu.byId(requested)
             ?: return BotReply(
