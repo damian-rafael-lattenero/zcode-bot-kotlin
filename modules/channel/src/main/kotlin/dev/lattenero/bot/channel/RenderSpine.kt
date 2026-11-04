@@ -193,6 +193,15 @@ sealed interface RenderEvent {
     data object WatchTask : RenderEvent
 
     /**
+     * THE ATTACH'S INSTANT SWITCH (4/11): a `t:` tap points the watched turn
+     * at the tapped task NOW — an idle task never receives a frame, so
+     * without this the fold (and the 🎯 mark that reads it) stayed on the
+     * previous turn until its next event. The fold builds the same fresh seed
+     * a foreign task's first frame would.
+     */
+    data class SwitchTask(val taskId: String) : RenderEvent
+
+    /**
      * A COLLAPSED OUTPUT BOX was born (U5b): the feed spoke the collapsed
      * header with its one 📜 button and the send FLEW — the born fact (the
      * message id included) folds here. The event is the FACT, not the
