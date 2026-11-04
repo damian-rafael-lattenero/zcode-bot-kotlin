@@ -252,6 +252,47 @@ class TaskAttachTest {
     }
 
     @Test
+    fun detachReturnsTheCardToTheWholeTasksStream() = runBlocking {
+        val hub = LiveHub()
+        val t = "task-77"
+        hub.apply(streamEvent(t, """{"type":"tool_call","toolId":"$laneId","toolName":"Task"}""", 1), 1_000_000L)
+        hub.attachLane(laneId)
+        // scoped: the parent's own narration is dropped
+        hub.apply(
+            streamEvent(t, """{"type":"agent_thought_chunk","content":"soy el padre","parentToolUseId":null}""", 2),
+            1_000_001L,
+        )
+        assertEquals(0, hub.peek()!!.thoughtChars)
+        // THE DETACH (a t: attach clears the lane scope): the whole stream folds again
+        hub.watchTask()
+        assertNull(hub.watchedLaneId(), "the scope is the fold's state — the detach clears it")
+        hub.apply(
+            streamEvent(t, """{"type":"agent_thought_chunk","content":"el padre habla","parentToolUseId":null}""", 3),
+            1_000_002L,
+        )
+        assertEquals("el padre habla".length, hub.peek()!!.thoughtChars, "the whole stream is back")
+        assertTrue("el padre habla" in hub.peek()!!.cotTail)
+    }
+
+    @Test
+    fun aLaneScopeDiesWithItsTaskAndAForeignEventFoldsFresh() = runBlocking {
+        val hub = LiveHub()
+        hub.apply(streamEvent("task-77", """{"type":"tool_call","toolId":"$laneId","toolName":"Task"}""", 1), 1_000_000L)
+        hub.attachLane(laneId)
+        // THE U5a LAW: another task's event replaces the watched turn — the
+        // scope is the FOLD's, so the fresh seed carries none: the foreign
+        // event is never gated by (nor leaks into) the old task's lane
+        val fresh = hub.apply(
+            streamEvent("task-02", """{"type":"agent_thought_chunk","content":"otra task","parentToolUseId":null}""", 2),
+            1_000_001L,
+        )!!
+        assertEquals("task-02", fresh.taskId)
+        assertEquals("otra task".length, fresh.thoughtChars, "a foreign event folds whole")
+        assertNull(fresh.watchedLane, "the scope died with its task")
+        assertNull(hub.watchedLaneId())
+    }
+
+    @Test
     fun laneTapResolvesTheTailAndScopesTheCard() = runBlocking {
         val ops = FakeOps(boundStatus).apply { answers["activeTaskIds"] = """[]""" }
         val hub = LiveHub()
