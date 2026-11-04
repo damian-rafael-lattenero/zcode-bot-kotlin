@@ -173,6 +173,12 @@ data class BoxLive(
     val messageId: Long,
     /** The page the message shows: [FOLDED] = the header + its one button. */
     val page: Int = FOLDED,
+    /**
+     * The pages' fence language (v2 §5): `bash` for a shell's output — the
+     * tap's render wraps the numbered body in the bash code block; null =
+     * the plain `<pre>`. Carried by the fold: the tap renders FROM here.
+     */
+    val language: String? = null,
 ) {
     companion object {
         /** The folded mark: the message shows its header, no page open. */

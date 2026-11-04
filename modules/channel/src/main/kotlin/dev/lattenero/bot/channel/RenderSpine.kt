@@ -235,6 +235,8 @@ sealed interface RenderEvent {
         val header: String,
         val pages: List<String>,
         val messageId: Long,
+        /** The pages' fence language (v2 §5) — `bash` for a shell's output. */
+        val language: String? = null,
     ) : RenderEvent
 
     /**

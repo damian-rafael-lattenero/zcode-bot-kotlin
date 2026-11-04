@@ -788,4 +788,107 @@ class LivePublisherTest {
         publisher.pingTick()
         assertTrue(spoken.isEmpty(), "a Done turn pings nothing")
     }
+
+    // ---- the pager's bash fence + the long-command feed law (v2 §3/§5) --------
+
+    @Test
+    fun theShellPagerOpensItsPagesInsideTheBashFence() = runTest {
+        val taskId = "task-9"
+        val hub = LiveHub()
+        hub.apply(frame(taskId, "task_run_started", at = 1_000), nowMs = 1_000)
+        hub.apply(frame(taskId, "agent_thought_chunk", at = 1_050, "content" to JsonPrimitive("arranco")), nowMs = 1_050)
+        val wire = Wire()
+        val spoken = mutableListOf<String>()
+        var now = TICK_MS
+        val publisher = publisher(wire, hub, spoken, toolBox = { "BOX(${it.name})" }, clock = { now })
+        publisher.tick() // birth
+        hub.apply(
+            frame(
+                taskId, "tool_call", at = 1_500,
+                "toolId" to JsonPrimitive("tb"), "toolName" to JsonPrimitive("Bash"),
+                "input" to buildJsonObject { put("command", "ls") },
+            ),
+            nowMs = 1_500,
+        )
+        hub.apply(
+            frame(
+                taskId, "tool_call_update", at = 1_600, "status" to JsonPrimitive("completed"),
+                "toolId" to JsonPrimitive("tb"), "content" to JsonPrimitive("out one\nout two"),
+            ),
+            nowMs = 1_600,
+        )
+        now += 31_000L // the close's card swap is a SECOND birth: the spacing applies
+        publisher.tick() // the close collapses behind its pager button
+        val box = hub.peek()?.boxes?.single()
+        assertEquals("bash", box?.language, "the fold carries the fence language for a shell's box")
+        // THE TAP: the numbered page opens inside the bash code block (the
+        // wire body is JSON — the fence's quotes ride escaped)
+        assertEquals(null, publisher.open(box!!.boxId, 0))
+        val opened = wire.bodies.last { it.second == "editMessageText" }.first
+        assertTrue("language-bash" in opened, "the shell's page rides the bash fence: $opened")
+        assertTrue("<pre><code" in opened && "code></pre>" in opened, opened)
+        assertTrue("1│ out one" in opened, "the numbering law unchanged: $opened")
+    }
+
+    @Test
+    fun aLongCommandTravelsTheFeedCompleteNeverElided() = runTest {
+        // the card showed 1800 cp + «✂️ … el comando completo va en el feed» —
+        // the feed keeps the promise: the command WHOLE, chunked only when a
+        // single message would exceed Telegram's 4096, never cut mid-command
+        val taskId = "task-9"
+        val hub = LiveHub()
+        hub.apply(frame(taskId, "task_run_started", at = 1_000), nowMs = 1_000)
+        hub.apply(frame(taskId, "agent_thought_chunk", at = 1_050, "content" to JsonPrimitive("arranco")), nowMs = 1_050)
+        val wire = Wire()
+        val spoken = mutableListOf<String>()
+        var now = TICK_MS
+        val publisher = publisher(wire, hub, spoken, clock = { now })
+        publisher.tick() // birth — feedSeen snapshots
+        hub.apply(
+            frame(
+                taskId, "tool_call", at = 1_500,
+                "toolId" to JsonPrimitive("tbig"), "toolName" to JsonPrimitive("Bash"),
+                "input" to buildJsonObject { put("command", "y".repeat(4000)) },
+            ),
+            nowMs = 1_500,
+        )
+        publisher.tick() // the open drains: the long command speaks, the card swaps
+        val chunks = spoken.filter { "language-bash" in it }
+        assertEquals(2, chunks.size, "4000 cp over the 3000-chunk: two messages, the whole command: $chunks")
+        assertTrue("y".repeat(3000) in chunks[0] && "(1/2)" in chunks[0], chunks[0])
+        assertTrue("y".repeat(1000) in chunks[1] && "(2/2)" in chunks[1], chunks[1])
+    }
+
+    @Test
+    fun theLongCommandIsDataEvenUnderNormalVerbosity() = runTest {
+        val taskId = "task-9"
+        val hub = LiveHub()
+        hub.apply(frame(taskId, "task_run_started", at = 1_000), nowMs = 1_000)
+        hub.apply(frame(taskId, "agent_thought_chunk", at = 1_050, "content" to JsonPrimitive("arranco")), nowMs = 1_050)
+        val wire = Wire()
+        val spoken = mutableListOf<String>()
+        var now = TICK_MS
+        val publisher = publisher(
+            wire,
+            hub,
+            spoken,
+            verbosity = VolatileVerbosity().apply { set(FeedVerbosity.NORMAL) },
+            clock = { now },
+        )
+        publisher.tick() // birth — feedSeen snapshots
+        hub.apply(
+            frame(
+                taskId, "tool_call", at = 1_500,
+                "toolId" to JsonPrimitive("tbig"), "toolName" to JsonPrimitive("Bash"),
+                "input" to buildJsonObject { put("command", "y".repeat(4000)) },
+            ),
+            nowMs = 1_500,
+        )
+        publisher.tick()
+        assertTrue(
+            spoken.any { "language-bash" in it && "(1/2)" in it },
+            "the card promised «va en el feed» — NORMAL speaks the data too: $spoken",
+        )
+        assertTrue(spoken.none { "▶️" in it }, "but the open one-liner stays quiet under NORMAL")
+    }
 }

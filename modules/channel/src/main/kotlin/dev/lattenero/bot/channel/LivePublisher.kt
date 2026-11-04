@@ -162,10 +162,20 @@ class LiveHub {
 
     /**
      * A collapsed output box was born (U5b): the feed spoke it, the send
-     * flew — the born fact (id, header, pages, message id) folds.
+     * flew — the born fact (id, header, pages, message id, fence language)
+     * folds.
      */
-    suspend fun boxBorn(taskId: String, boxId: Int, header: String, pages: List<String>, messageId: Long) {
-        mutex.withLock { fold(RenderEvent.BoxBorn(taskId, boxId, header, pages, messageId), SimpleLineDiffer) }
+    suspend fun boxBorn(
+        taskId: String,
+        boxId: Int,
+        header: String,
+        pages: List<String>,
+        messageId: Long,
+        language: String? = null,
+    ) {
+        mutex.withLock {
+            fold(RenderEvent.BoxBorn(taskId, boxId, header, pages, messageId, language), SimpleLineDiffer)
+        }
     }
 
     /**
@@ -594,8 +604,8 @@ class LivePublisher(
         val base = state.taskId.hashCode() and BOX_ID_MASK
         val boxId = (hub.peek()?.boxes?.maxOfOrNull { it.boxId } ?: base) + 1
         val mid = send(Keyboards.boxOpen(boxId)) ?: return
-        hub.boxBorn(state.taskId, boxId, pages.header, pages.pages, mid)
-        logger.info { "box born: id=$boxId message_id=$mid pages=${pages.pages.size}" }
+        hub.boxBorn(state.taskId, boxId, pages.header, pages.pages, mid, pages.language)
+        logger.info { "box born: id=$boxId message_id=$mid pages=${pages.pages.size} language=${pages.language}" }
     }
 
     /**
@@ -633,7 +643,7 @@ class LivePublisher(
             val ok = telegram.edit(
                 cfg,
                 box.messageId,
-                ToolOutputPages.renderPage(box.header, box.pages, index),
+                ToolOutputPages.renderPage(box.header, box.pages, index, box.language),
                 Keyboards.boxPages(registryId, index, box.pages.size),
             )
             if (ok) hub.page(registryId, index) // the mirror: the message shows page `index` now
