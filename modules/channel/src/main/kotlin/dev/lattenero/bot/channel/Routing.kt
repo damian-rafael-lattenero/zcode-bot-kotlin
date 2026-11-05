@@ -144,19 +144,6 @@ private fun freshBindRoute(facts: RouteFacts): RoutePlan {
 /** The pseudo-target for /tasks new's armed text: the draft itself (no bind). */
 internal const val DRAFT_TARGET = "(draft)"
 
-/**
- * 2026-11-05 — the DEDICATED CONVERSATION's plan: when the daemon pins one
- * (`bind_task_id` in daemon.json), the free-text router SKIPS the
- * follow-the-open-conversation table entirely. The pin is the destination —
- * bound before the text (the context may aim anywhere), parked if its turn
- * is mid-flight (F17), the honest refusal when the channel is down.
- */
-internal fun planRoutePinned(facts: RouteFacts, pin: String): RoutePlan = when {
-    !facts.contextReachable -> RoutePlan.Refuse(RouteTexts.CHANNEL_DOWN)
-    pin in facts.running -> RoutePlan.Enqueue(pin, "pinned conversation is mid-turn (F17)")
-    else -> RoutePlan.Fire(pin, bind = true, reason = "pinned conversation (bind_task_id)")
-}
-
 /** The router's owner-facing texts — the owner's Spanish, one line each. */
 internal object RouteTexts {
     const val CHANNEL_DOWN =
