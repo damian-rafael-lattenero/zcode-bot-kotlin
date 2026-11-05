@@ -17,24 +17,24 @@ class LiveVerbsTest {
         // reading: the file rides the verb's detail
         val read = LIVE_VERBS.of("Read", buildJsonObject { put("file_path", "/w/Main.kt") }, isMcp = false)
         assertEquals("📖", read.emoji)
-        assertEquals("reading", read.verb)
+        assertEquals("leyendo", read.verb)
         assertEquals("/w/Main.kt", read.detail)
 
         val write = LIVE_VERBS.of("Write", buildJsonObject { put("file_path", "/w/New.kt") }, isMcp = false)
         assertEquals("✏️", write.emoji)
-        assertEquals("writing", write.verb)
+        assertEquals("escribiendo", write.verb)
 
         val edit = LIVE_VERBS.of("Edit", buildJsonObject { put("file_path", "/w/Main.kt") }, isMcp = false)
-        assertEquals("editing", edit.verb)
+        assertEquals("editando", edit.verb)
 
         val shell = LIVE_VERBS.of("Bash", buildJsonObject { put("command", "npm test") }, isMcp = false)
         assertEquals("⚡", shell.emoji)
-        assertEquals("shell", shell.verb)
+        assertEquals("ejecutando bash", shell.verb)
         assertEquals("npm test", shell.detail)
 
         val sub = LIVE_VERBS.of("Task", null, isMcp = false)
         assertEquals("🤖", sub.emoji)
-        assertEquals("subagent", sub.verb)
+        assertEquals("subagente", sub.verb)
 
         val mcp = LIVE_VERBS.of("anything", null, isMcp = true)
         assertEquals("🔌", mcp.emoji)

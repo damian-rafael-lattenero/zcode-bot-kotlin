@@ -22,12 +22,14 @@ val LIVE_VERBS: ToolVerbifier = ToolVerbifier { name, input, isMcp ->
             ToolVerb("🔌", "mcp", name.substringAfter("mcp__", name))
 
         else -> when (ToolBox.familyOf(name)) {
-            ToolBox.Family.READ -> ToolVerb("📖", "reading", input?.let(ToolBox::filePathOf).orEmpty())
-            ToolBox.Family.WRITE -> ToolVerb("✏️", "writing", input?.let(ToolBox::filePathOf).orEmpty())
-            ToolBox.Family.EDIT -> ToolVerb("✏️", "editing", input?.let(ToolBox::filePathOf).orEmpty())
-            ToolBox.Family.SHELL -> ToolVerb("⚡", "shell", input?.let(::cmdOf).orEmpty())
-            ToolBox.Family.SUBAGENT -> ToolVerb("🤖", "subagent")
-            ToolBox.Family.SEARCH -> ToolVerb("🔎", "searching", input?.let(::patternOf).orEmpty())
+            // the owner's 5/11 words: «Ejecutando Bash, o Haciendo Lectura,
+            // o haciendo escritura» — the card's NOW line speaks Spanish
+            ToolBox.Family.READ -> ToolVerb("📖", "leyendo", input?.let(ToolBox::filePathOf).orEmpty())
+            ToolBox.Family.WRITE -> ToolVerb("✏️", "escribiendo", input?.let(ToolBox::filePathOf).orEmpty())
+            ToolBox.Family.EDIT -> ToolVerb("✏️", "editando", input?.let(ToolBox::filePathOf).orEmpty())
+            ToolBox.Family.SHELL -> ToolVerb("⚡", "ejecutando bash", input?.let(::cmdOf).orEmpty())
+            ToolBox.Family.SUBAGENT -> ToolVerb("🤖", "subagente")
+            ToolBox.Family.SEARCH -> ToolVerb("🔎", "buscando", input?.let(::patternOf).orEmpty())
             ToolBox.Family.TODO -> ToolVerb("📋", "todos")
             ToolBox.Family.OTHER -> ToolVerb("🔧", name, input?.let(ToolBox::filePathOf).orEmpty())
         }

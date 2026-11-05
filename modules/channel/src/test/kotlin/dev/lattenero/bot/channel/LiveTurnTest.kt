@@ -247,9 +247,9 @@ class LiveTurnTest {
         // LIVE: fresh event (2s old) — the clocks tick
         val last = s!!.lastEventAtMs!!
         val text = LiveTurn.render(s, nowMs = last + 2_000, channelAlive = true)
-        // THE WORKING HEADER (the owner's 2/11 law: the desktop pill's
-        // mirror — hace cuánto empezó la tarea) + the NOW line beneath it
-        assertTrue("⏳ <b>Working · 2s</b>" in text)
+        // THE WORKING HEADER (the owner's 5/11 words: «Procesando... xS» —
+        // hace cuánto empezó la tarea) + the NOW line beneath it
+        assertTrue("⏳ <b>Procesando... 2s</b>" in text)
         assertTrue("🧠 <b>generando CoT</b> · 40 caracteres" in text, "a fresh delta IS the CoT flowing: $text")
         assertTrue("40 caracteres" in text) // the counter, with the total
         assertTrue("💓" !in text) // THE HEART IS DEAD (the owner's 30/10 verdict)
@@ -263,15 +263,16 @@ class LiveTurnTest {
         assertTrue("📡" in dead)
         assertTrue("frozen · 5s sin eventos · 0 listos" in dead)
 
-        // THE OWNER'S RULE: 42s of silence — the clocks FREEZE at the last
-        // real event (the elapsed stays 0s) and the silence speaks honestly
-        val frozen = LiveTurn.render(s, nowMs = last + 42_000, channelAlive = true)
-        assertTrue("(42s sin eventos)" in frozen)
-        assertTrue("⏳ <b>Working · 0s</b>" in frozen, "the turn timer froze at the last event")
-        assertTrue("🧠 <b>procesando…</b> (42s sin eventos)" in frozen, "a frozen card never claims «generando»: $frozen")
+        // THE OWNER'S 5/11 RULE: 42s of silence with the channel ALIVE — the
+        // clock KEEPS RUNNING (a silent model may be legitimately grinding;
+        // «Procesando... xS» ticks on) while the silence itself speaks
+        val quiet = LiveTurn.render(s, nowMs = last + 42_000, channelAlive = true)
+        assertTrue("(42s sin eventos)" in quiet)
+        assertTrue("⏳ <b>Procesando... 42s</b>" in quiet, "the timer runs while the channel lives")
+        assertTrue("🧠 <b>procesando…</b> (42s sin eventos)" in quiet, "a quiet card never claims «generando»: $quiet")
         // 42s of silence is still «en vivo» — the line carries the honest age,
         // «frozen» is reserved for the cut stream (the hard word lives at 90s)
-        assertTrue("en vivo · último evento hace 42s" in frozen)
+        assertTrue("en vivo · último evento hace 42s" in quiet)
         val cut = LiveTurn.render(s, nowMs = last + 120_000, channelAlive = true)
         assertTrue("frozen · 2m00s sin eventos" in cut)
     }
