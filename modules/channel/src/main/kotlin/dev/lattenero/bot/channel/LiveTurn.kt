@@ -112,6 +112,12 @@ internal val SHELL_TOOLS = setOf("Bash", "Shell")
  */
 internal val WRITE_EDIT_TOOLS = setOf("Edit", "MultiEdit", "Replace", "Write", "Create", "New")
 
+/** A write/edit lane's file path — the [📄 archivo completo] door's key (the owner, 5/11). */
+internal fun ToolLive.editFilePath(): String? =
+    takeIf { name in WRITE_EDIT_TOOLS && input != null }?.let { lane ->
+        listOf("file_path", "path").firstNotNullOfOrNull { k -> lane.input?.str(k)?.takeIf { it.isNotEmpty() } }
+    }
+
 /**
  * The fork's TYPED terminal error (ZCodeTaskError: error, code?, detail?,
  * attribution?{source, reason, statusCode, providerErrorCode, retryable}) —

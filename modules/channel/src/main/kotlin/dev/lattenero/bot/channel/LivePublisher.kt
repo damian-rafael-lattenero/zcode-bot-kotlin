@@ -312,6 +312,13 @@ class LivePublisher(
      * card's cleanup runs untouched.
      */
     private val onSeal: suspend (SealFacts) -> Unit = {},
+    /**
+     * THE FILE VIEWER (the owner, 5/11): write/edit closes earn the
+     * «📄 archivo completo» button — the menu owns the path registry and
+     * the fresh-at-tap read; the publisher only attaches the door. Null =
+     * the closes stay buttonless (tests, unwired daemons).
+     */
+    private val fileMenu: FileMenu? = null,
 ) : CoTTaps, BoxTaps {
 
     /** the message being edited — the publisher's only mutable cell (§7 escape hatch). */
@@ -581,6 +588,12 @@ class LivePublisher(
             // button; the fold keeps the numbered pages for the taps
             msg.pages?.let { pages ->
                 speakBox(state, pages) { markup -> speak(msg.text, markup) }
+                return@forEach
+            }
+            // A WRITE/EDIT CLOSE: the diff speaks WITH the file door —
+            // «📄 archivo completo» reads the file fresh at tap time
+            if (msg.editPath != null && fileMenu != null) {
+                speak(msg.text, fileMenu.buttonFor(msg.editPath))
                 return@forEach
             }
             val block = msg.block ?: run {

@@ -12,6 +12,7 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.http.content.TextContent
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -750,6 +751,72 @@ class LivePublisherTest {
     }
 
     @Test
+    fun theEditCloseSpeaksItsDiffWithTheFileDoor() = runTest {
+        // THE FILE DOOR (the owner, 5/11): a write/edit close carries the
+        // diff AND «📄 archivo completo» — the tap reads the file fresh
+        val taskId = "task-9"
+        val hub = LiveHub()
+        hub.apply(frame(taskId, "task_run_started", at = 1_000), nowMs = 1_000)
+        hub.apply(frame(taskId, "agent_thought_chunk", at = 1_050, "content" to JsonPrimitive("arranco")), nowMs = 1_050)
+        val wire = Wire()
+        val spoken = mutableListOf<String>()
+        val markups = mutableListOf<JsonObject?>()
+        var now = 2_000L
+        val fileMenu = FileMenu(
+            read = { "el archivo entero" },
+            edit = { _, _, _ -> true },
+            send = { text, markup ->
+                spoken += text
+                markups += markup
+                99L
+            },
+        )
+        val publisher = LivePublisher(
+            hub = hub,
+            telegram = LiveTelegram(
+                api = TgApi({ cfg }, engineFactory = wire.factory),
+                cooldown = Cooldown(readFile = { null }),
+            ),
+            config = { cfg },
+            channelAlive = { true },
+            speak = { text, markup ->
+                spoken += text
+                markups += markup
+                777L
+            },
+            finalAnswer = { null },
+            clock = { now },
+            toolBox = { lane -> "✏️ ${lane.input?.str("file_path")} listo" },
+            fileMenu = fileMenu,
+        )
+        publisher.tick() // the birth
+        // the lane OPENS (pending) and then closes — a close without a lane is dropped by the fold
+        hub.apply(
+            frame(
+                taskId, "tool_call_update", at = 2_050, "status" to JsonPrimitive("pending"),
+                "toolId" to JsonPrimitive("te"), "toolName" to JsonPrimitive("Edit"),
+                "input" to buildJsonObject {
+                    put("file_path", "/w/Main.kt"); put("old_string", "a"); put("new_string", "b\nc")
+                },
+            ),
+            nowMs = 2_050,
+        )
+        hub.apply(
+            frame(
+                taskId, "tool_call_update", at = 2_100, "status" to JsonPrimitive("completed"),
+                "toolId" to JsonPrimitive("te"), "toolName" to JsonPrimitive("Edit"),
+            ),
+            nowMs = 2_100,
+        )
+        now += 31_000L // the feed speaks; the card reclaims on the same tick
+        publisher.tick()
+        val withDoor = spoken.zip(markups).any { (text, markup) ->
+            "Main.kt" in text && "📄 archivo completo" in (markup?.toString() ?: "")
+        }
+        assertTrue(withDoor, "the edit close carries the file door: ${spoken.joinToString(" | ")}")
+    }
+
+    @Test
     fun theEditPingAccumulatesTheFilesRunningTotalAcrossLanes() = runTest {
         // THE OWNER'S LADDER (5/11): «+21 −12 → +55 −12 → +94 −16» is the SAME
         // file accumulating across its edits — every lane the turn touched
@@ -761,9 +828,9 @@ class LivePublisherTest {
         val spoken = mutableListOf<String>()
         var now = 6_000L
         val publisher = publisher(wire, hub, spoken, clock = { now })
-        fun editFrame(toolId: String, old: String, new: String, status: String? = null) = frame(
+        fun editFrame(toolId: String, old: String, new: String, status: String = "pending") = frame(
             taskId, "tool_call_update", at = now + 100,
-            *(if (status != null) arrayOf("status" to JsonPrimitive(status)) else arrayOf()),
+            "status" to JsonPrimitive(status),
             "toolId" to JsonPrimitive(toolId), "toolName" to JsonPrimitive("Edit"),
             "input" to buildJsonObject {
                 put("file_path", "/w/report.txt"); put("old_string", old); put("new_string", new)
