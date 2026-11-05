@@ -117,11 +117,17 @@ fun reduce(
     // the 🎯 stayed on the first row forever. The attach's switch is a REAL
     // task switch — the same fresh seed a frame for a foreign task would
     // build — just without waiting for traffic. Re-attaching the current task
-    // changes nothing (WatchTask's lane-clear already ran).
+    // changes nothing (WatchTask's lane-clear already ran). The 5/11 blank
+    // card: the seed carries the attach's clock (an unstamped seed read
+    // `now - 0` — the watchdog barked at 1.79 billion «seconds» of silence)
+    // and arms [TurnLive.attachAwaited] — the attached-Idle session's honest
+    // card, born silent no more.
     is RenderEvent.SwitchTask -> when {
         state == null || state.taskId != event.taskId -> RenderState.empty.copy(
             taskId = event.taskId,
             title = event.taskId.takeLast(LiveTurn.TITLE_TAIL),
+            lastEventAtMs = event.nowMs.takeIf { it > 0 },
+            attachAwaited = true,
         )
 
         else -> state
@@ -157,10 +163,14 @@ private fun reduceFrame(state: RenderState?, event: RenderEvent.FromFrame, diffe
             // minutes late after a recovery burst). MIN-GUARD: a re-emitted
             // task_run_started never restarts the clock — the time counts
             // from when the TASK started, not from the re-delivery.
+            // THE AWAIT'S END (5/11): the turn the attach awaited has begun.
             val anchored = event.startedAtMs.takeIf { it > 0 }
                 ?: event.atMs.takeIf { it > 0 }
                 ?: event.nowMs
-            refreshed.copy(startedAtMs = minOf(refreshed.startedAtMs ?: anchored, anchored))
+            refreshed.copy(
+                startedAtMs = minOf(refreshed.startedAtMs ?: anchored, anchored),
+                attachAwaited = false,
+            )
         }
 
         is RenderEvent.Thought -> reduceThought(refreshed, event)

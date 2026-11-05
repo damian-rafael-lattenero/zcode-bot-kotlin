@@ -110,10 +110,12 @@ class LiveHub {
      * turn NOW — an idle task never receives a frame, so without this the
      * card (and the 🎯 mark that reads the fold) stayed on the previous task
      * until its next event. The next tick's task-switch law does the rest:
-     * the old card seals once, the tapped task's card is born.
+     * the old card seals once, the tapped task's card is born. [nowMs]
+     * stamps the seed — the attach IS a real event (the 5/11 blank card:
+     * an unstamped seed's silence counted from the epoch).
      */
-    suspend fun watchTaskId(taskId: String) {
-        mutex.withLock { fold(RenderEvent.SwitchTask(taskId), SimpleLineDiffer) }
+    suspend fun watchTaskId(taskId: String, nowMs: Long = 0L) {
+        mutex.withLock { fold(RenderEvent.SwitchTask(taskId, nowMs), SimpleLineDiffer) }
     }
 
     /** The current lane scope — read FROM the fold (the sa: tap's resolution and tests). */
@@ -428,7 +430,11 @@ class LivePublisher(
         }
         var state: TurnLive = peeked
         refreshGifts(now)
-        if (statusMessageId == null && state.phase != TurnPhase.Idle) {
+        // THE ATTACH'S AWAIT (5/11): an explicitly-attached IDLE session
+        // births its honest card («ningún turno corriendo ahora») — the old
+        // law left the owner staring at NOTHING after every sa: attach to a
+        // stored child whose turn was over
+        if (statusMessageId == null && (state.phase != TurnPhase.Idle || state.attachAwaited)) {
             // THE REAL TITLE (the owner's 30/10 verdict: «644150daf013» in
             // his card's head): ONE resolution attempt per turn, exactly at
             // the birth tick — the birth message and every render/seal then
@@ -456,8 +462,11 @@ class LivePublisher(
         // the fold's own staleness (the Tick event reduced it) — the same
         // clock the card renders with, held in state, not a side channel
         val silenceMs = state.staleMs ?: (now - (state.lastEventAtMs ?: 0))
+        // an awaited attach (an idle session, no turn running) has no bus to
+        // revive — its honest silence is the card's own words
+        val barkable = state.phase !is TurnPhase.Done && !state.attachAwaited
         if (
-            state.phase !is TurnPhase.Done &&
+            barkable &&
             silenceMs > STREAM_WATCHDOG_SILENCE_MS &&
             now - lastWatchdogAtMs > STREAM_WATCHDOG_SILENCE_MS
         ) {

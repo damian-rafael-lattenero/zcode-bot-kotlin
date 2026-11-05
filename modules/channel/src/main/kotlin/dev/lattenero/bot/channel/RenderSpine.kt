@@ -218,9 +218,12 @@ sealed interface RenderEvent {
      * at the tapped task NOW — an idle task never receives a frame, so
      * without this the fold (and the 🎯 mark that reads it) stayed on the
      * previous turn until its next event. The fold builds the same fresh seed
-     * a foreign task's first frame would.
+     * a foreign task's first frame would. [nowMs] stamps the seed's clock
+     * (the 5/11 blank card: an unstamped seed read `now - 0` and the
+     * watchdog barked at 1.79 billion seconds of «silence») and arms the
+     * ATTACH'S AWAIT — an idle session's honest card, born silent no more.
      */
-    data class SwitchTask(val taskId: String) : RenderEvent
+    data class SwitchTask(val taskId: String, val nowMs: Long = 0L) : RenderEvent
 
     /**
      * A COLLAPSED OUTPUT BOX was born (U5b): the feed spoke the collapsed
