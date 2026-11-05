@@ -128,9 +128,10 @@ fun reduce(
             title = event.taskId.takeLast(LiveTurn.TITLE_TAIL),
             lastEventAtMs = event.nowMs.takeIf { it > 0 },
             attachAwaited = true,
+            watchedHold = true, // THE HOLD (5/11): the explicit attach sticks
         )
 
-        else -> state
+        else -> state // re-attaching the held task re-arms nothing — it already holds
     }
 }
 
@@ -177,18 +178,20 @@ private fun reduceFrame(state: RenderState?, event: RenderEvent.FromFrame, diffe
 
         is RenderEvent.Answering -> reduceAnswer(refreshed, event)
 
-        is RenderEvent.ToolOpen -> reduceToolArrival(refreshed, event, differ)
+        is RenderEvent.ToolOpen -> reduceToolArrival(flushProse(refreshed), event, differ)
 
         is RenderEvent.ToolRunning -> reduceToolRunning(refreshed, event, differ)
 
-        is RenderEvent.ToolClose -> reduceToolClose(refreshed, event, differ)
+        is RenderEvent.ToolClose -> reduceToolClose(flushProse(refreshed), event, differ)
 
-        is RenderEvent.Sealed -> refreshed.copy(
-            phase = TurnPhase.Done(stopReason = event.stopReason, atMs = event.nowMs),
-            usageTokens = event.usageTokens ?: refreshed.usageTokens,
-            interaction = null,
-            // a clean complete keeps an earlier pill untouched; the error's own seal sets it
-            typedError = event.error ?: refreshed.typedError,
+        is RenderEvent.Sealed -> flushProse(
+            refreshed.copy(
+                phase = TurnPhase.Done(stopReason = event.stopReason, atMs = event.nowMs),
+                usageTokens = event.usageTokens ?: refreshed.usageTokens,
+                interaction = null,
+                // a clean complete keeps an earlier pill untouched; the error's own seal sets it
+                typedError = event.error ?: refreshed.typedError,
+            ),
         )
 
         is RenderEvent.InteractionAsked -> refreshed.copy(
@@ -274,6 +277,9 @@ private fun reduceAnswer(state: RenderState, event: RenderEvent.Answering): Rend
     return state.copy(
         answerChars = chars,
         answerTail = LiveTurn.takeLastCodePoints(state.answerTail + delta, LiveTurn.ANSWER_TAIL_CP),
+        // THE VOICE'S SEGMENT (5/11): the prose accumulates for its violet
+        // message — spoken whole when the model moves to a tool (or seals)
+        prosePending = (state.prosePending + delta).takeLast(LiveTurn.ANSWER_TAIL_CP),
         phase = when (val phase = state.phase) {
             is TurnPhase.Done -> phase
             else -> TurnPhase.Writing(
@@ -287,6 +293,24 @@ private fun reduceAnswer(state: RenderState, event: RenderEvent.Answering): Rend
         apiRetry = if (delta.isNotEmpty()) null else state.apiRetry,
     )
 }
+
+/**
+ * THE VOICE'S BOUNDARY (5/11): a tool's arrival/closing or the seal ends
+ * the current prose segment — the pending words become a SPENT segment,
+ * the feed speaks it as one violet message, in order. Blank pending =
+ * nothing to spend (a tool after a tool).
+ */
+internal fun flushProse(state: RenderState): RenderState {
+    val pending = state.prosePending.trim('\n')
+    if (pending.isBlank()) return state
+    return state.copy(
+        proseSpent = (state.proseSpent + pending).takeLast(PROSE_SPENT_CAP),
+        prosePending = "",
+    )
+}
+
+/** The spent segments' ceiling — the feed's diff only needs the newest. */
+private const val PROSE_SPENT_CAP = 24
 
 /**
  * tool_call (final, input complete) opens-or-fills the lane with the

@@ -272,6 +272,26 @@ data class TurnLive(
      * attached, no turn running, the card returns when one starts.
      */
     val attachAwaited: Boolean = false,
+    /**
+     * THE VOICE'S SEGMENTS (5/11): the LLM's mid-turn prose accumulates in
+     * [prosePending] while it streams (the card's live tail still shows it
+     * as always) and at every boundary — a tool opens or closes, the turn
+     * seals — [flushProse] spends it into [proseSpent]: the feed speaks
+     * each segment as ONE violet rich message, in order. Bounded at both
+     * ends (segments' count, each segment's length).
+     */
+    val prosePending: String = "",
+    val proseSpent: List<String> = emptyList(),
+    /**
+     * THE WATCH'S HOLD (measured 5/11: «no se desuscribe de lo anterior» —
+     * and its inverse: the attach that WOULD not stick): an explicit
+     * SwitchTask attach arms the hold — other tasks' frames are DROPPED
+     * while it lives, so a previous task's running traffic can never steal
+     * the card back. The owner attaches elsewhere to move it. The IMPLICIT
+     * world (the hub's birth-on-traffic before any attach) holds nothing:
+     * foreign events still flip the card, exactly as they always did.
+     */
+    val watchedHold: Boolean = false,
 ) {
     companion object {
         /**

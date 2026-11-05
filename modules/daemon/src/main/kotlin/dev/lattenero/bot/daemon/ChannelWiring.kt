@@ -627,6 +627,12 @@ internal fun wireChannel(
             send = { text, markup -> fireSpeak(text, false, markup) },
         )
     }
+    // THE VIOLET VOICE's knob (5/11): rich_voice in daemon.json, ON by
+    // default (his explicit order makes ON safe) — OFF is the pre-feature
+    // voice, byte for byte
+    val richVoice = RichVoiceKnob.load(File(cfg.homeDir, SendKnob.FILE_NAME)).on
+    if (!richVoice) logger.warn { "rich_voice knob: OFF — the LLM's voice rides plain texts" }
+
     val liveView = buildLiveView(
         send,
         lanes,
@@ -639,6 +645,7 @@ internal fun wireChannel(
         workspaceOf = { sid -> workspacePathOf(cfg.baseDir, sid) },
         onSeal = notifs?.onSeal ?: NotificationsWire.noSeal,
         fileMenu = fileMenu,
+        richVoice = richVoice,
     )
     val poller = buildPoller(
         cfg,
@@ -715,6 +722,8 @@ private fun buildLiveView(
     onSeal: suspend (SealFacts) -> Unit = NotificationsWire.noSeal,
     /** The file viewer (5/11) — write/edit closes earn «📄 archivo completo». */
     fileMenu: FileMenu? = null,
+    /** The violet voice (5/11) — rich messages for the LLM's prose. */
+    richVoice: Boolean = true,
 ): LivePublisher? {
     val lane = lanes.live
     if (lane == null || !send.ownsSpectator) return null
@@ -775,6 +784,7 @@ private fun buildLiveView(
         },
         onSeal = onSeal,
         fileMenu = fileMenu,
+        richVoice = richVoice,
     )
 }
 
