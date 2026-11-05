@@ -66,6 +66,13 @@ class LiveHub {
     ): TurnLive? = mutex.withLock {
         // the pinned view owns the hub: drop everyone else's frames whole
         if (pinnedTaskId != null && frame.taskId != pinnedTaskId) return@withLock states.value
+        // THE WATCH'S HOLD (5/11): an explicit attach is the owner's choice —
+        // a previous task's still-subscribed running traffic never steals the
+        // card back (the live flip-flop 15:13-15:39: born/REPLACED every few
+        // seconds, «funciona horrible, no se desuscribe»). The implicit
+        // pre-attach world holds nothing and keeps the traffic-following law.
+        val held = states.value
+        if (held?.watchedHold == true && held.taskId != frame.taskId) return@withLock held
         // THE LANE SCOPE IS THE FOLD'S (U5c): the card's own watchedLane —
         // a task switch is also a lane-switch (a foreign task's state
         // carries no scope), so the scope dies with the task by

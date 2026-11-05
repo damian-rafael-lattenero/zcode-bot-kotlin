@@ -271,6 +271,50 @@ class TaskAttachTest {
     }
 
     @Test
+    fun theExplicitAttachHoldsAgainstThePreviousTasksTraffic() = runBlocking {
+        // THE 5/11 FLIP-FLOP (the owner: «funciona horrible, no se desuscribe
+        // de lo anterior», «⛓️ turno reemplazado» en bucle): tapping task B
+        // while task A still streams let A's next event STEAL the card back —
+        // the fold flipped on every frame of the still-subscribed task. THE
+        // HOLD: an explicit attach is the owner's choice; foreign frames are
+        // dropped until he attaches elsewhere.
+        val hub = LiveHub()
+        val a = "task-77"
+        val b = "task-02"
+        // A is live and streaming (the busy previous conversation)
+        hub.apply(streamEvent(a, """{"type":"agent_thought_chunk","content":"A piensa"}""", 1), 1_000_000L)
+        // THE OWNER TAPS B: the explicit attach — the instant switch
+        hub.watchTaskId(b, 1_000_100L)
+        assertEquals(b, hub.peek()?.taskId, "the card is B the moment he taps")
+        // A's traffic arrives (it is still subscribed): DROPPED — the card holds
+        hub.apply(streamEvent(a, """{"type":"agent_thought_chunk","content":"A sigue"}""", 2), 1_000_200L)
+        assertEquals(b, hub.peek()?.taskId, "A's traffic cannot steal the card back")
+        assertEquals(0, hub.peek()!!.thoughtChars, "A's words never touch B's card")
+        // B's own events fold normally
+        hub.apply(streamEvent(b, """{"type":"agent_thought_chunk","content":"B habla"}""", 3), 1_000_300L)
+        assertEquals(b, hub.peek()?.taskId)
+        assertTrue("B habla" in hub.peek()!!.cotTail)
+        // the owner taps A again: the hold MOVES with his choice
+        hub.watchTaskId(a, 1_000_400L)
+        hub.apply(streamEvent(b, """{"type":"agent_thought_chunk","content":"B insiste"}""", 4), 1_000_500L)
+        assertEquals(a, hub.peek()?.taskId, "the hold follows the newest attach")
+        assertTrue("B insiste" !in hub.peek()!!.cotTail)
+    }
+
+    @Test
+    fun theImplicitWorldStillFollowsTraffic() = runBlocking {
+        // no explicit attach yet (hold=false): a foreign task's event still
+        // replaces the watched turn — the 4/11 instant-switch law intact
+        val hub = LiveHub()
+        hub.apply(streamEvent("task-77", """{"type":"agent_thought_chunk","content":"uno"}""", 1), 1_000_000L)
+        val flipped = hub.apply(
+            streamEvent("task-02", """{"type":"agent_thought_chunk","content":"dos"}""", 2),
+            1_000_100L,
+        )
+        assertEquals("task-02", flipped?.taskId, "no attach, no hold — traffic still rules")
+    }
+
+    @Test
     fun detachReturnsTheCardToTheWholeTasksStream() = runBlocking {
         val hub = LiveHub()
         val t = "task-77"
