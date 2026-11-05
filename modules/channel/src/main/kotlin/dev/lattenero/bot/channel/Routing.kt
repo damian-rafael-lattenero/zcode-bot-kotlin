@@ -36,6 +36,16 @@ internal data class RouteFacts(
     /** The app's open conversation: freshest alive task of the bot's workspace. */
     val openSid: String?,
     val openTitle: String?,
+    /**
+     * THE OWNER'S SELECTION (the 5/11 exam): the /tasks tap's explicit
+     * choice, alive in the index when the facts were gathered. An armed
+     * selection outranks EVERY heuristic — the freshest-row rebind can
+     * never clobber the tap again (measured live 16:05: the owner tapped
+     * B and his text flew to «go_to_background» because the index's
+     * updated_at said so).
+     */
+    val selectedSid: String? = null,
+    val selectedTitle: String? = null,
 ) {
     companion object {
         val DEGRADED = RouteFacts(
@@ -87,11 +97,33 @@ internal fun planRoute(facts: RouteFacts, newIntent: Boolean): RoutePlan = when 
         reason = "new-intent (/tasks new armed the draft)",
     )
 
+    // THE OWNER'S SELECTION (5/11): the tap IS the law — the text flies AT
+    // the chosen sid (the atomic bindTaskId rides the wire every time, so
+    // no heuristic can re-aim it); mid-turn it parks on the CHOSEN one
+    facts.selectedSid != null -> selectedRoute(facts)
+
     facts.activeTaskId != null && !facts.activeAlive -> tombstoneRoute(facts)
 
     facts.activeTaskId != null -> activeRoute(facts)
 
     else -> freshBindRoute(facts)
+}
+
+/** An explicit /tasks tap holds the aim: the freshest-row heuristic is mute. */
+private fun selectedRoute(facts: RouteFacts): RoutePlan {
+    val selected = facts.selectedSid!!
+    return if (selected in facts.running) {
+        RoutePlan.Enqueue(
+            selected,
+            "the owner's tapped conversation is mid-turn (F17) — the text parks on IT",
+        )
+    } else {
+        RoutePlan.Fire(
+            selected,
+            bind = true,
+            reason = "the owner's tap «${facts.selectedTitle ?: selected}» — the text flies AT it",
+        )
+    }
 }
 
 /** The bound task is deleted/archived: naked inbound would CREATE — re-aim or refuse. */
