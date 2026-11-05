@@ -262,6 +262,16 @@ data class TurnLive(
      * frames own: the ticker proves nothing about the model.
      */
     val staleMs: Long? = null,
+    /**
+     * THE ATTACH'S AWAIT (measured 5/11: «silencio de radio total»): a
+     * SwitchTask attach to an IDLE session (a stored child whose turn is
+     * over) never receives a frame — without this flag the publisher
+     * refused to birth an Idle card and the owner stared at NOTHING. The
+     * fold seeds it on the attach and the first task_run_started clears
+     * it (the awaited turn began). The card births with the honest line:
+     * attached, no turn running, the card returns when one starts.
+     */
+    val attachAwaited: Boolean = false,
 ) {
     companion object {
         /**
@@ -539,7 +549,14 @@ object LiveTurn {
         val elapsed = state.startedAtMs?.let { fmtDur(clockNow - it) } ?: "—"
         val lines = mutableListOf<String>()
         when (val phase = state.phase) {
-            is TurnPhase.Idle -> lines.add("💻 <b>«${PyText.esc(state.title)}»</b> — suscripto, nada corriendo")
+            is TurnPhase.Idle -> lines.add(
+                if (state.attachAwaited) {
+                    "👁 <b>«${PyText.esc(state.title)}»</b> attachado — ningún turno corriendo ahora; " +
+                        "la carta entra cuando arranque el próximo."
+                } else {
+                    "💻 <b>«${PyText.esc(state.title)}»</b> — suscripto, nada corriendo"
+                },
+            )
 
             is TurnPhase.Done -> lines.add(
                 "${if (state.failedTools > 0) "⚠️" else "✅"} <b>«${PyText.esc(state.title)}»</b>" +
