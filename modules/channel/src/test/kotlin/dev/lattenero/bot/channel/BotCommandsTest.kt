@@ -324,6 +324,79 @@ class BotCommandsTest {
     }
 
     @Test
+    fun theTapIsIntentTheTextFliesAtItEvenWhenTheIndexDisagrees() = runBlocking {
+        // THE 16:05 CASE (the owner's report, measured live): he tapped B,
+        // but the tasks-index said another conversation was «open» — the
+        // router's freshest-row law re-bound his text to «go_to_background».
+        // THE SELECTION LAW: an explicit tap outranks every heuristic — the
+        // atomic bindTaskId carries HIS sid on the wire, always.
+        val boundTo02 = """
+            {"bot":{"id":"daemon-local","enabled":true},
+             "context":{"workspacePath":"$botWs","activeTaskId":"task-02","mode":"task"}}
+        """.trimIndent()
+        val o = ops().apply {
+            botStatusJson = boundStatus // the fork context still says task-77
+            answers["botStatus"] = boundStatus
+            bindCap = true
+            awaitReplyFor = { text ->
+                if (text.startsWith("/task ")) listOf("Workspace: bot\n------\nTask: second (task-02)\nState: idle") else emptyList()
+            }
+        }
+        val (bc, _) = commands(o)
+        bc.onCallback("t:task-02", 20L, OWNER)!! // the tap: CONFIRMED, intent armed
+        bc.reply("hola elegida", 21L)
+        assertEquals(
+            listOf("task-02" to "hola elegida"), // (bindTaskId, text) — the wire's order
+            o.atomicBinds,
+            "the text flies AT the tapped task, whatever the index's freshest row says",
+        )
+        // the status speaks the standing choice
+        assertTrue("🎯 elegida: «second»" in bc.reply("/status", 22L)!!)
+    }
+
+    @Test
+    fun theTappedTaskMidTurnParksTheTextOnIt() = runBlocking {
+        val o = ops().apply {
+            botStatusJson = boundStatus
+            answers["botStatus"] = boundStatus
+            answers["activeTaskIds"] = """["task-02"]""" // the CHOSEN task is mid-turn
+            bindCap = true
+            awaitReplyFor = { text ->
+                if (text.startsWith("/task ")) listOf("Task: second (task-02)\nState: running") else emptyList()
+            }
+        }
+        val (bc, _) = commands(o)
+        bc.onCallback("t:task-02", 30L, OWNER)!!
+        val reply = bc.reply("esto para cuando termine", 31L)!!
+        assertTrue(o.queued.isNotEmpty(), "the text parked (F17) on the CHOSEN conversation")
+        assertTrue("second" in reply, "the park names the chosen task: $reply")
+    }
+
+    @Test
+    fun theSelectionThatDiesFallsBackToTheStandingLaws() = runBlocking {
+        val o = ops().apply {
+            botStatusJson = draftStatus
+            answers["botStatus"] = draftStatus
+            bindCap = true
+            awaitReplyFor = { text ->
+                if (text.startsWith("/task ")) listOf("Task: second (task-02)") else emptyList()
+            }
+        }
+        val history = FakeHistory(rows, alive = { it != "task-02" }) // the tap's task dies after
+        val bc = BotCommands(
+            ops = o, hub = LiveHub(), daemonReset = { "x" }, ownerUserId = { OWNER },
+            clock = { 1_000_000L }, history = history, defaultWorkspacePath = defaultWs,
+        )
+        bc.onCallback("t:task-02", 40L, OWNER)!! // armed... then the task vanishes
+        bc.reply("hola", 41L)
+        assertEquals(
+            listOf("task-77" to "hola"),
+            o.atomicBinds,
+            "a dead selection never fires at a ghost — the standing laws resume",
+        )
+    }
+
+    @Test
     fun tombstonedBindNeverCreatesFiresTheRebindInstead() = runBlocking {
         // 29/10's live failure: the context pointed at a DELETED task — naked
         // inbound would tombstone into a fresh conversation
