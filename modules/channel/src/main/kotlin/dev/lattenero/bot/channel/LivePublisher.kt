@@ -49,6 +49,15 @@ class LiveHub {
     private var pinnedTaskId: String? = null
 
     /**
+     * THE WATCH'S HOLD — the owner's explicit choice (a SwitchTask attach),
+     * HUB state on purpose: a seal clears the fold whole and a fold-borne
+     * hold died with it (measured 16:09-16:10 — the flip loop returned the
+     * moment the watched turn sealed). Only the owner's next attach moves
+     * it; only ☢️ nuclear wipes it.
+     */
+    private var heldTaskId: String? = null
+
+    /**
      * The fold's one step — the ONLY writer of the accumulator. `differ`
      * only matters for the frame events (an edit's +N/−M); the verbs fold
      * with the house default, which they never touch.
@@ -68,11 +77,13 @@ class LiveHub {
         if (pinnedTaskId != null && frame.taskId != pinnedTaskId) return@withLock states.value
         // THE WATCH'S HOLD (5/11): an explicit attach is the owner's choice —
         // a previous task's still-subscribed running traffic never steals the
-        // card back (the live flip-flop 15:13-15:39: born/REPLACED every few
-        // seconds, «funciona horrible, no se desuscribe»). The implicit
-        // pre-attach world holds nothing and keeps the traffic-following law.
-        val held = states.value
-        if (held?.watchedHold == true && held.taskId != frame.taskId) return@withLock held
+        // card back (the live flip-flop 15:13-16:10: born/REPLACED every few
+        // seconds, «funciona horrible, no se desuscribe», «⛓️» en bucle). The
+        // hold is HUB state — it SURVIVES the watched turn's seal (a seal
+        // nulls the fold; a fold-borne hold died with it and the loop
+        // returned at the next traffic). The implicit pre-attach world holds
+        // nothing and keeps the traffic-following law.
+        if (heldTaskId != null && frame.taskId != heldTaskId) return@withLock states.value
         // THE LANE SCOPE IS THE FOLD'S (U5c): the card's own watchedLane —
         // a task switch is also a lane-switch (a foreign task's state
         // carries no scope), so the scope dies with the task by
@@ -122,7 +133,10 @@ class LiveHub {
      * an unstamped seed's silence counted from the epoch).
      */
     suspend fun watchTaskId(taskId: String, nowMs: Long = 0L) {
-        mutex.withLock { fold(RenderEvent.SwitchTask(taskId, nowMs), SimpleLineDiffer) }
+        mutex.withLock {
+            heldTaskId = taskId // the hold moves with the owner's newest tap
+            fold(RenderEvent.SwitchTask(taskId, nowMs), SimpleLineDiffer)
+        }
     }
 
     /** The current lane scope — read FROM the fold (the sa: tap's resolution and tests). */
@@ -230,6 +244,7 @@ class LiveHub {
         }
         fold(RenderEvent.Clear, SimpleLineDiffer)
         if (sealedTaskId == null || pinnedTaskId == sealedTaskId) pinnedTaskId = null
+        if (sealedTaskId == null) heldTaskId = null // ☢️ nuclear: everything dies
     }
 
     private companion object {

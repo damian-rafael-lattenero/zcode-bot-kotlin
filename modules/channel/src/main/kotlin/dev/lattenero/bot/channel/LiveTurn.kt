@@ -282,16 +282,6 @@ data class TurnLive(
      */
     val prosePending: String = "",
     val proseSpent: List<String> = emptyList(),
-    /**
-     * THE WATCH'S HOLD (measured 5/11: «no se desuscribe de lo anterior» —
-     * and its inverse: the attach that WOULD not stick): an explicit
-     * SwitchTask attach arms the hold — other tasks' frames are DROPPED
-     * while it lives, so a previous task's running traffic can never steal
-     * the card back. The owner attaches elsewhere to move it. The IMPLICIT
-     * world (the hub's birth-on-traffic before any attach) holds nothing:
-     * foreign events still flip the card, exactly as they always did.
-     */
-    val watchedHold: Boolean = false,
 ) {
     companion object {
         /**
