@@ -33,6 +33,9 @@ class BotCommandsTest {
         /** The awaited bind's canned replies (taskRunning/taskMissing texts). */
         var awaitReplies: List<String> = emptyList()
 
+        /** Per-command awaited replies (the /project → /task ladder needs both). */
+        var awaitReplyFor: (String) -> List<String> = { _ -> awaitReplies }
+
         /** Server-side effect of an inbound command (tests flip botStatus on /task). */
         var onInbound: (String) -> Unit = {}
 
@@ -65,7 +68,7 @@ class BotCommandsTest {
             awaited.add(text to messageId)
             if (bindTaskId != null) atomicBinds.add(bindTaskId to text)
             onInbound(text)
-            return InboundAnswer.Answered(duplicate = false, replies = awaitReplies)
+            return InboundAnswer.Answered(duplicate = false, replies = awaitReplyFor(text))
         }
 
         /** The atomic binds (bindTaskId → text) — empty unless the wiring speaks the cap. */
@@ -488,7 +491,10 @@ class BotCommandsTest {
         }
         val (bc, _) = commands(o)
         val reply = bc.onCallback("t:task-02", 99L, OWNER)!!
-        assertTrue("🎯 Tu texto va a «second»" in reply.text) // bindAttempt's copy — the host's verdict confirmed
+        // the owner's 5/11 law: the tap's next message is a 100%-sure
+        // confirmation, read back from the fork's own state
+        assertTrue("✅ CONFIRMADO: «second» es la conversación activa" in reply.text)
+        assertTrue("(verificado leyendo el fork" in reply.text)
         assertEquals(listOf("/task task-02" to "tg-99-bind"), o.awaited)
     }
 
@@ -784,7 +790,7 @@ class BotCommandsTest {
         }
         val (bc, _) = commands(o)
         val reply = bc.reply("/tasks @task-02", 8L)!!
-        assertTrue("🎯 Active conversation: «second»" in reply)
+        assertTrue("✅ CONFIRMADO: «second» es la conversación activa" in reply)
         assertEquals(listOf("/task task-02" to "tg-8-bind"), o.awaited)
     }
 
@@ -800,5 +806,97 @@ class BotCommandsTest {
         val (bc, _) = commands(ops())
         val reply = bc.reply("/tasks 0", 1L)!!
         assertTrue("Conversations by project" in reply)
+    }
+
+    /** The 5/11 dead end, now a ladder: «Task not found» → /project → /task → read-back ✅. */
+    @Test
+    fun theTapLadderMovesTheForkToTheTaskProjectAndConfirms() = runBlocking {
+        val boundTo02InBot = """
+            {"bot":{"id":"daemon-local","enabled":true},
+             "context":{"workspacePath":"$botWs","activeTaskId":"task-02","mode":"task"}}
+        """.trimIndent()
+        var switched = false
+        val o = ops().apply {
+            botStatusJson = boundStatus
+            answers["botStatus"] = boundStatus
+            onInbound = { text ->
+                if (text.startsWith("/project ")) {
+                    switched = true
+                    answers["botStatus"] = boundStatus
+                }
+                if (text.startsWith("/task ")) answers["botStatus"] = boundTo02InBot
+            }
+            awaitReplyFor = { text ->
+                when {
+                    text.startsWith("/task ") && !switched -> listOf("Task not found.")
+                    text.startsWith("/task ") ->
+                        listOf("Workspace: bot\nModel: x\n------\nTask: second (task-02)\nState: idle")
+                    text.startsWith("/project ") -> listOf("Workspace: bot\nModel: x\n------\nTask: draft\nState: draft")
+                    else -> emptyList()
+                }
+            }
+        }
+        val (bc, _) = commands(o)
+        val reply = bc.onCallback("t:task-02", 42L, OWNER)!!
+        assertTrue("✅ CONFIRMADO: «second» es la conversación activa" in reply.text)
+        assertTrue("moví el fork a su proyecto «bot»" in reply.text)
+        assertEquals(
+            listOf(
+                "/task task-02" to "tg-42-bind",
+                "/project $botWs" to "tg-42-ws",
+                "/task task-02" to "tg-42-bind",
+            ),
+            o.awaited,
+        )
+    }
+
+    /** The fork's own word when the workspace switch hits a running turn — reported, never lied. */
+    @Test
+    fun theTapLadderReportsTheForksTaskRunningWord() = runBlocking {
+        val o = ops().apply {
+            botStatusJson = boundStatus
+            answers["botStatus"] = boundStatus
+            awaitReplyFor = { text ->
+                when {
+                    text.startsWith("/task ") -> listOf("Task not found.")
+                    text.startsWith("/project ") ->
+                        listOf("The current task is still running. Try again later, or use **/stop** to stop the current task.")
+                    else -> emptyList()
+                }
+            }
+        }
+        val (bc, _) = commands(o)
+        val reply = bc.onCallback("t:task-02", 43L, OWNER)!!
+        assertTrue("⏳ Para activar «second» tengo que mudar el fork a su proyecto" in reply.text)
+        assertTrue("/stop primero" in reply.text)
+        assertEquals(listOf("/task task-02" to "tg-43-bind", "/project $botWs" to "tg-43-ws"), o.awaited)
+    }
+
+    /** A bind whose read-back contradicts the command is a FAILURE — never a decorated ✅. */
+    @Test
+    fun theBindThatTheReadbackContradictsIsHonest() = runBlocking {
+        val o = ops().apply {
+            botStatusJson = boundStatus
+            answers["botStatus"] = boundStatus // activeTaskId stays task-77 no matter what fires
+            awaitReplyFor = { text -> if (text.startsWith("/task ")) listOf("Workspace: app\nModel: x") else emptyList() }
+        }
+        val (bc, _) = commands(o)
+        val reply = bc.onCallback("t:task-02", 44L, OWNER)!!
+        assertTrue("⚠️ El bind no pudo confirmarse" in reply.text)
+        assertTrue("task-77" in reply.text, "the contradiction names what actually stayed active")
+    }
+
+    /** The host accepted the bind while the read-back stayed silent — the reply says so, no «verificado». */
+    @Test
+    fun theUnverifiableBindSaysSo() = runBlocking {
+        val o = ops().apply {
+            answers.remove("botStatus") // the poll can't run at all
+            awaitReplyFor = { text -> if (text.startsWith("/task ")) listOf("Workspace: app\nModel: x") else emptyList() }
+        }
+        val (bc, _) = commands(o)
+        val reply = bc.onCallback("t:task-02", 45L, OWNER)!!
+        assertTrue("🎯 Tu texto va a «second»" in reply.text)
+        assertTrue("no dejó releer el estado" in reply.text)
+        assertTrue("✅ CONFIRMADO" !in reply.text)
     }
 }

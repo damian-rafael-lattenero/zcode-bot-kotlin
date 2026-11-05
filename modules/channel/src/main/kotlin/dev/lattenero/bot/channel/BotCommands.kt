@@ -1187,6 +1187,9 @@ class BotCommands(
         when (val bind = bindTo(plan.sid, updateId)) {
             is BindOutcome.Confirmed -> logger.info { "route: bound to ${plan.sid} (${bind.how})" }
 
+            is BindOutcome.ConfirmedUnverified ->
+                logger.info { "route: bound to ${plan.sid} (${bind.how}) — the text still flies" }
+
             is BindOutcome.Refused -> {
                 // the pre-check said idle but a turn started mid-switch — the
                 // server's own refusal text already reached the chat via the
@@ -1484,13 +1487,18 @@ class BotCommands(
     }
 
     /**
-     * The bind's three outcomes. [Confirmed] carries HOW (the awaited
-     * command's reply or the botStatus poll — both count); [Refused] is
-     * the server's own word (taskRunning/taskMissing — locale texts
-     * matched by their stable markers); [Failed] is transport-level.
+     * The bind's four outcomes. [Confirmed] carries HOW (the reply's own
+     * read-back or the botStatus poll — both count); [ConfirmedUnverified]
+     * is the host's bare word when the read-back couldn't run at all (the
+     * reply must never claim «verificado» then); [Refused] is the
+     * server's own word (taskRunning/taskMissing — locale texts matched
+     * by their stable markers); [Failed] is transport-level or a
+     * read-back that contradicts the command.
      */
     internal sealed interface BindOutcome {
         data class Confirmed(val how: String) : BindOutcome
+
+        data class ConfirmedUnverified(val how: String) : BindOutcome
 
         data class Refused(val reply: String, val fallback: String) : BindOutcome
 
@@ -1499,10 +1507,16 @@ class BotCommands(
 
     /**
      * Fires the botsService's own `/task <id>` — AWAITED (the replies are
-     * the verdict) — and CONFIRMS via botStatus (the server does not
-     * serialize inbounds: the command's write and the poll are separate).
+     * the verdict) — and CONFIRMS by READ-BACK (the owner's 5/11 law: the
+     * next message after a tap must be a 100%-sure confirmation, so a
+     * bare «the command didn't complain» is never enough). Two proofs,
+     * in order: the status reply itself names the task (`Task: title
+     * (sess_…)` — formatStatusTaskLine), then a botStatus poll that must
+     * say `activeTaskId == taskId`. Only when the channel answers the
+     * command but botStatus stays unanswerable the whole window does the
+     * host's bare verdict stand (rare, degraded — and the reply says so).
      */
-    @Suppress("ReturnCount") // one guard per outcome (answered+confirmed, refused, gave up)
+    @Suppress("ReturnCount") // one exit per transport shape, then the verdict helpers
     private suspend fun bindTo(taskId: String, updateId: Long): BindOutcome {
         val sent = ops.sendInboundAwait("/task $taskId", "tg-$updateId-bind", clock())
         val replies = when (sent) {
@@ -1518,26 +1532,102 @@ class BotCommands(
         logger.info {
             "bind: /task $taskId replied ${replies.size} line(s)${firstReply?.let { ": $it" } ?: ""}"
         }
-        replies.firstOrNull { TASK_RUNNING_MARKER in it }?.let {
-            return BindOutcome.Refused(reply = it, fallback = "taskRunning — the old task still runs")
-        }
-        replies.firstOrNull { TASK_MISSING_MARKER in it }?.let {
-            return BindOutcome.Refused(reply = it, fallback = "taskMissing — not in the bot's workspace/project")
-        }
-        if (sent is InboundAnswer.Answered) {
-            // hot-fix 2's law: the awaited reply IS the verdict — an answered
-            // await with no refusal markers means the host re-pointed (the
-            // old botStatus poll demanded a context a fresh tap may not have,
-            // which answered the owner's taps with «send text first» noise)
-            return BindOutcome.Confirmed(how = "awaited verdict")
-        }
-        repeat(BIND_CONFIRM_TRIES) {
-            delay(BIND_CONFIRM_EVERY_MS)
-            if ((contextAnswer() as? ContextAnswer.Ctx)?.value?.activeTaskId == taskId) {
-                return BindOutcome.Confirmed(how = "botStatus poll")
+        bindRefusal(replies)?.let { return it }
+        return if (sent is InboundAnswer.Answered) {
+            answeredVerdict(taskId, replies)
+        } else {
+            when (val poll = pollActiveTask(taskId)) {
+                PollVerdict.Confirmed -> BindOutcome.Confirmed(how = "botStatus poll")
+                is PollVerdict.Contradicted, PollVerdict.Unanswerable ->
+                    BindOutcome.Failed("botStatus never said activeTaskId=$taskId")
             }
         }
-        return BindOutcome.Failed("botStatus never said activeTaskId=$taskId")
+    }
+
+    /** The refusal markers, matched once — taskRunning (the live verdict) first. */
+    private fun bindRefusal(replies: List<String>): BindOutcome.Refused? =
+        replies.firstOrNull { TASK_RUNNING_MARKER in it }?.let {
+            BindOutcome.Refused(reply = it, fallback = "taskRunning — the old task still runs")
+        }
+            ?: replies.firstOrNull { TASK_MISSING_MARKER in it }?.let {
+                BindOutcome.Refused(reply = it, fallback = "taskMissing — not in the bot's workspace/project")
+            }
+
+    /** The answered command's read-back: the reply's own task name, then the poll. */
+    private suspend fun answeredVerdict(taskId: String, replies: List<String>): BindOutcome =
+        if (replies.any { "($taskId)" in it }) {
+            BindOutcome.Confirmed(how = "readback in reply")
+        } else {
+            when (val poll = pollActiveTask(taskId)) {
+                PollVerdict.Confirmed -> BindOutcome.Confirmed(how = "botStatus poll")
+                is PollVerdict.Contradicted -> {
+                    logger.warn {
+                        "bind: /task $taskId awaited ok but the read-back says ${poll.active ?: "nothing"}"
+                    }
+                    BindOutcome.Failed("read-back never agreed: active=${poll.active ?: "?"}")
+                }
+
+                // unanswerable the whole window — the host's word is all there is
+                PollVerdict.Unanswerable -> BindOutcome.ConfirmedUnverified("awaited verdict, read-back silent")
+            }
+        }
+
+    /** The poll's three truths: the id agreed, another id held the ground, or the read-back stayed silent. */
+    private sealed interface PollVerdict {
+        data object Confirmed : PollVerdict
+
+        data class Contradicted(val active: String?) : PollVerdict
+
+        data object Unanswerable : PollVerdict
+    }
+
+    /** botStatus polled until it names [taskId] — bounded by [BIND_CONFIRM_TRIES] rounds. */
+    @Suppress("ReturnCount") // each truth exits once
+    private suspend fun pollActiveTask(taskId: String): PollVerdict {
+        var sawOther: String? = null
+        repeat(BIND_CONFIRM_TRIES) {
+            delay(BIND_CONFIRM_EVERY_MS)
+            when (val ctx = contextAnswer()) {
+                is ContextAnswer.Ctx ->
+                    if (ctx.value.activeTaskId == taskId) {
+                        return PollVerdict.Confirmed
+                    } else {
+                        sawOther = ctx.value.activeTaskId
+                    }
+
+                ContextAnswer.None, ContextAnswer.Degraded -> return PollVerdict.Unanswerable
+            }
+        }
+        return PollVerdict.Contradicted(sawOther)
+    }
+
+    /**
+     * The tap's cross-project ladder, rung one: `/project <ws>` — AWAITED,
+     * same verdict discipline as [bindTo] (the workspace path matches by
+     * value in the fork's resolveWorkspaceByValue, and the daemon bot is
+     * allowed every workspace). Refused = the fork's own word (still
+     * running / no such workspace) — never guessed.
+     */
+    private suspend fun bindWorkspace(ws: String, updateId: Long): BindOutcome =
+        when (val sent = ops.sendInboundAwait("/project $ws", "tg-$updateId-ws", clock())) {
+            is InboundAnswer.Answered -> workspaceVerdict(ws, sent.replies)
+            is InboundAnswer.Unavailable -> BindOutcome.Failed("channel down")
+            is InboundAnswer.Failed -> BindOutcome.Failed(sent.code)
+            is InboundAnswer.TimedOut -> BindOutcome.Failed("/project timed out")
+        }
+
+    /** The switch's verdict, matched by the same stable markers the bind reads. */
+    private fun workspaceVerdict(ws: String, replies: List<String>): BindOutcome {
+        logger.info { "bind workspace: /project $ws replied ${replies.size} line(s)" }
+        return when {
+            replies.any { TASK_RUNNING_MARKER in it } ->
+                BindOutcome.Refused(reply = TASK_RUNNING_MARKER, fallback = "taskRunning blocks the workspace switch")
+
+            replies.any { WS_MISSING_MARKER in it } ->
+                BindOutcome.Refused(reply = WS_MISSING_MARKER, fallback = "workspaceMissing")
+
+            else -> BindOutcome.Confirmed(how = "workspace switched")
+        }
     }
 
     // ---- the commands -------------------------------------------------------
@@ -1674,7 +1764,7 @@ class BotCommands(
         } else {
             "👁 «${PyText.esc(title)}» suscripto — la carta en vivo entra cuando arranque su próximo turno."
         }
-        return BotReply("$watchLine\n${bindAttempt(sid, updateId, title)}")
+        return BotReply("$watchLine\n${bindAttempt(sid, updateId, title, row?.ws)}")
     }
 
     /**
@@ -1682,23 +1772,75 @@ class BotCommands(
      * owner's 2/11 confusion: a context-less tap answered the free-text
      * boilerplate «send text first» instead of the truth). The bind needs
      * no bot-side context — the HOST's verdict is the truth: taskRunning,
-     * Task not found (the deliberate project boundary), or confirmed.
+     * Task not found, or confirmed BY READ-BACK (the owner's 5/11 law:
+     * the tap's next message is a 100%-sure «this is the active one»).
+     * The 5/11 ladder: «Task not found» used to be a dead end (five taps
+     * on one row, five refusals — the task simply lived in another
+     * workspace) — now the tap moves the fork's context to the task's
+     * own project first (`/project <ws>`, the daemon bot is allowed every
+     * workspace) and binds again; a refusal there is the fork's word,
+     * reported as-is.
      */
-    private suspend fun bindAttempt(sid: String, updateId: Long, title: String): String =
+    private suspend fun bindAttempt(sid: String, updateId: Long, title: String, rowWs: String?): String =
         when (val bind = bindTo(sid, updateId)) {
             is BindOutcome.Confirmed ->
-                "🎯 Tu texto va a «${PyText.esc(title)}» — la conversación activa es esa."
+                "✅ CONFIRMADO: «${PyText.esc(title)}» es la conversación activa " +
+                    "(verificado leyendo el fork — ${PyText.esc(sid.takeLast(SID_TAIL))}). " +
+                    "Todo tu texto va ahí."
+
+            is BindOutcome.ConfirmedUnverified ->
+                "🎯 Tu texto va a «${PyText.esc(title)}» — la conversación activa es esa " +
+                    "(el fork lo confirmó; el canal no dejó releer el estado)."
 
             is BindOutcome.Refused ->
                 if (TASK_MISSING_MARKER in bind.reply) {
-                    "🚧 «${PyText.esc(title)}» vive en otro proyecto/workspace — la leés en vivo (👁), " +
-                        "pero tu texto no puede apuntarla: la frontera de proyecto del fork es deliberada."
+                    crossProjectLadder(sid, updateId, title, rowWs)
                 } else {
                     "⏳ ${PyText.esc(bind.reply)} — tu texto sigue yendo a la activa; el 👁 ya está puesto."
                 }
 
+            is BindOutcome.Failed ->
+                "⚠️ El bind no pudo confirmarse: ${PyText.esc(bind.reason)} — " +
+                    "el 👁 ya está puesto; probá de nuevo con /tasks."
+        }
+
+    /** The «Task not found» second chance: move the fork to the task's own project, bind again. */
+    private suspend fun crossProjectLadder(sid: String, updateId: Long, title: String, rowWs: String?): String {
+        if (rowWs == null) {
+            return "🚧 «${PyText.esc(title)}» vive en otro proyecto/workspace — la leés en vivo (👁), " +
+                "pero tu texto no puede apuntarla: la frontera de proyecto del fork es deliberada."
+        }
+        return when (val ws = bindWorkspace(rowWs, updateId)) {
+            // ConfirmedUnverified cannot arise here (no read-back runs in the
+            // switch) — merged so the exhaustiveness follows the shared type
+            is BindOutcome.Confirmed, is BindOutcome.ConfirmedUnverified ->
+                when (val rebind = bindTo(sid, updateId)) {
+                    is BindOutcome.Confirmed ->
+                        "✅ CONFIRMADO: «${PyText.esc(title)}» es la conversación activa — también moví " +
+                            "el fork a su proyecto «${PyText.esc(rowWs.substringAfterLast('/'))}» " +
+                            "(verificado leyendo el fork — ${PyText.esc(sid.takeLast(SID_TAIL))}). Todo tu texto va ahí."
+
+                    is BindOutcome.ConfirmedUnverified ->
+                        "🎯 «${PyText.esc(title)}» quedó activa tras mudar el fork a su proyecto " +
+                            "(el fork lo confirmó; sin relectura). Tu texto va ahí."
+
+                    is BindOutcome.Refused -> "⏳ ${PyText.esc(rebind.reply)} — el 👁 ya está puesto."
+                    is BindOutcome.Failed -> RouteTexts.BIND_FAILED
+                }
+
+            is BindOutcome.Refused ->
+                if (TASK_RUNNING_MARKER in ws.reply) {
+                    "⏳ Para activar «${PyText.esc(title)}» tengo que mudar el fork a su proyecto " +
+                        "(«${PyText.esc(rowWs.substringAfterLast('/'))}»), pero la task actual sigue corriendo — " +
+                        "/stop primero o esperá a que termine. Nada cambió; el 👁 ya está puesto."
+                } else {
+                    "🚧 «${PyText.esc(title)}» vive en «${PyText.esc(rowWs.substringAfterLast('/'))}» y el fork " +
+                        "no reconoce ese workspace — la leés en vivo (👁); el texto no puede apuntarla."
+                }
+
             is BindOutcome.Failed -> RouteTexts.BIND_FAILED
         }
+    }
 
     /** One armed order: the next free text flies to this session. The §7 escape hatch. */
     private data class ArmedOrder(val sessionId: String, val title: String)
@@ -2191,22 +2333,9 @@ class BotCommands(
                 "/stop first, then pick again."
         }
         val row = history.ctxTasks(SCOPE_FOR_PICK).firstOrNull { it.sid == sid }
-        when (val bind = bindTo(sid, updateId)) {
-            is BindOutcome.Confirmed -> logger.info { "pick $sid bound (${bind.how})" }
-
-            is BindOutcome.Refused -> {
-                logger.warn { "pick $sid refused: ${bind.reply} (${bind.fallback})" }
-                return "⏳ ${PyText.esc(bind.reply)}"
-            }
-
-            is BindOutcome.Failed -> {
-                logger.warn { "pick $sid failed: ${bind.reason}" }
-                return RouteTexts.BIND_FAILED
-            }
-        }
         val title = row?.title?.takeIf { it.isNotEmpty() } ?: sid.takeLast(SID_TAIL)
-        return "🎯 Active conversation: «${PyText.esc(title)}»\n" +
-            "All text you send runs there — the live view streams it."
+        // the SAME confirmed-text law the tap follows — one selection, one truth
+        return bindAttempt(sid, updateId, title, row?.ws)
     }
 
     /** Python's `/task new [project]`: arms the next free text to CREATE (live: the botsService draft). */
@@ -3123,6 +3252,7 @@ class BotCommands(
         /** The botsService's own refusal replies, matched by their stable markers (en-US). */
         const val TASK_RUNNING_MARKER = "still running"
         const val TASK_MISSING_MARKER = "Task not found"
+        const val WS_MISSING_MARKER = "No available workspace found."
 
         /** The owner's 2/11 law: the lists are BUTTONS only — a typed number just re-shows them. */
         internal const val NO_NUMBERS_HINT =
