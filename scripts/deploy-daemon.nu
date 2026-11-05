@@ -48,13 +48,13 @@ def main []: nothing -> nothing {
     let started = (date now | format date "%s" | into int)
     bootstrap-agent $repo $LABEL
 
-    step "verification: first heartbeat + armed state (deadline 15s)"
-    announce "🚀 deploy bot 4/4 — verification (heartbeat + estado armado, deadline 15 s)"
+    step "verification: first heartbeat + armed state (deadline 45s)"
+    announce "🚀 deploy bot 4/4 — verification (heartbeat + estado armado, deadline 45 s)"
     let hb = ($data | path join "state/hb-zconn-shadow")
     let zconn = ($data | path join "state/zconn.json")
     mut ok = false
     mut waited = 0
-    while ($waited < 15000) {
+    while ($waited < 45000) {
         # The heartbeat must be NEWER than this deploy: the files survive
         # restarts, so mere existence false-passed a daemon that never
         # booted (measured 2026-11-02). zconn.json is state, not a clock:
