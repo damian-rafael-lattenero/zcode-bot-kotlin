@@ -247,6 +247,19 @@ class BotCommands(
     /** /tasks new's pending intent: the NEXT free text skips the bind and CREATES (Python's /task new). */
     private var newIntent = false
 
+    /**
+     * THE OWNER'S SELECTION (the 5/11 exam): the /tasks tap's explicit
+     * choice — the router's freshest-row heuristic can NEVER clobber it
+     * (measured live 16:05: his text flew to «go_to_background» because
+     * the index said «open conversation moved»). Armed by a CONFIRMED tap
+     * bind, moved by the next tap, wiped by ☢️ and /tasks new; a selection
+     * that dies in the index is cleared at facts time (the old laws
+     * resume). It rides EVERY fire on the wire (bindTaskId) — the sid is
+     * the aim, not a memory the next route may override.
+     */
+    private var selectedSid: String? = null
+    private var selectedTitle: String? = null
+
     /** The question's free-text arm: the shortId whose question eats the NEXT line (the qf: tap). */
     private var pendingAnswerFor: String? = null
 
@@ -1447,15 +1460,34 @@ class BotCommands(
             val active = ctx.value.activeTaskId
             val activeAlive = active == null || runCatching { history.taskAlive(active) }.getOrDefault(true)
             val open = openConversation(ws)
+            // the selection dies with its task: a vanished sid falls back to
+            // the standing laws instead of firing at a ghost
+            val selection = selectedSid
+                ?.takeIf { runCatching { history.taskAlive(it) }.getOrDefault(false) }
+            if (selection == null) {
+                selectedSid = null
+                selectedTitle = null
+            }
+            // the chosen task may run in ANOTHER workspace: its own running
+            // check rides the facts (an atomic Fire into a mid-turn task in a
+            // foreign workspace would die on taskRunning and LOSE the text —
+            // the park-on-the-chosen law needs its turn to be visible)
+            val selectedRunning = selection?.let { chosen ->
+                history.ctxTasks(SCOPE_FOR_PICK).firstOrNull { it.sid == chosen }?.ws
+                    ?.takeIf { it != ws }
+                    ?.let { foreign -> runningIds(foreign) }
+            }.orEmpty()
             RouteFacts(
                 contextReachable = true,
                 contextPresent = true,
                 workspacePath = ws,
                 activeTaskId = active,
                 activeAlive = activeAlive,
-                running = running,
+                running = running + selectedRunning,
                 openSid = open?.id,
                 openTitle = open?.title?.takeIf { it.isNotEmpty() },
+                selectedSid = selection,
+                selectedTitle = selectedTitle,
             )
         }
     }
@@ -1813,14 +1845,20 @@ class BotCommands(
      */
     private suspend fun bindAttempt(sid: String, updateId: Long, title: String, rowWs: String?): String =
         when (val bind = bindTo(sid, updateId)) {
-            is BindOutcome.Confirmed ->
+            is BindOutcome.Confirmed -> {
+                selectedSid = sid // THE TAP IS INTENT (5/11): it survives until he chooses otherwise
+                selectedTitle = title
                 "✅ CONFIRMADO: «${PyText.esc(title)}» es la conversación activa " +
                     "(verificado leyendo el fork — ${PyText.esc(sid.takeLast(SID_TAIL))}). " +
-                    "Todo tu texto va ahí."
+                    "Todo tu texto va ahí — tu elección se mantiene hasta que elijas otra."
+            }
 
-            is BindOutcome.ConfirmedUnverified ->
+            is BindOutcome.ConfirmedUnverified -> {
+                selectedSid = sid
+                selectedTitle = title
                 "🎯 Tu texto va a «${PyText.esc(title)}» — la conversación activa es esa " +
                     "(el fork lo confirmó; el canal no dejó releer el estado)."
+            }
 
             is BindOutcome.Refused ->
                 if (TASK_MISSING_MARKER in bind.reply) {
@@ -2380,6 +2418,8 @@ class BotCommands(
             return DEGRADED
         }
         newIntent = true
+        selectedSid = null // a fresh conversation is a new world — the old tap dies
+        selectedTitle = null
         return "🆕 New conversation in ${PyText.esc(ws.substringAfterLast('/'))} — " +
             "send the first message and it starts."
     }
@@ -2397,6 +2437,13 @@ class BotCommands(
                 )
                 lines.add(activeLine(ctx.value.activeTaskId, ctx.value.workspacePath))
                 modelLine(ctx.value.activeTaskId, ctx.value.mode)?.let(lines::add)
+                // THE OWNER'S SELECTION (5/11): the choice that outranks the heuristics
+                selectedSid?.let { chosen ->
+                    lines.add(
+                        "🎯 elegida: «${PyText.esc(selectedTitle ?: chosen.takeLast(SID_TAIL))}» — " +
+                            "tu texto va ahí hasta que elijas otra",
+                    )
+                }
                 when (val answer = ops.query(ChannelQuery.ActiveTaskIds(ctx.value.workspacePath))) {
                     is QueryAnswer.Ok -> {
                         val ids = parseStrings(answer.resultJson)
@@ -2504,6 +2551,8 @@ class BotCommands(
         }
         try {
             val summary = daemonReset()
+            selectedSid = null // ☢️: everything dies — the selection with it
+            selectedTitle = null
             return "☢️ Nuclear go — $summary"
         } finally {
             nuclearGate.set(false)
