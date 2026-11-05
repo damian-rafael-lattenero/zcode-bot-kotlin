@@ -302,6 +302,33 @@ class TaskAttachTest {
     }
 
     @Test
+    fun theHoldSurvivesTheWatchedTurnsSeal() = runBlocking {
+        // THE 16:09 LOOP (the fold-borne hold died with every seal): the
+        // watched turn sealed, the fold nulled, the traffic re-seeded the
+        // card and the flip returned. The hold is HUB state: a seal NEVER
+        // lifts it — only the owner's next tap (or ☢️) moves it.
+        val hub = LiveHub()
+        val a = "task-77"
+        val b = "task-02"
+        hub.watchTaskId(b, 1_000_000L)
+        hub.apply(streamEvent(b, """{"type":"agent_thought_chunk","content":"B trabaja"}""", 1), 1_000_100L)
+        // B's turn completes and the publisher's seal clears the fold
+        hub.apply(streamEvent(b, """{"type":"task_complete","stopReason":"end_turn"}""", 2), 1_000_200L)
+        hub.clear(b)
+        assertEquals(null, hub.peek(), "the seal spent the fold")
+        // A's traffic arrives after the seal: STILL dropped — the hold lives
+        hub.apply(streamEvent(a, """{"type":"agent_thought_chunk","content":"A aprovecha"}""", 3), 1_000_300L)
+        assertEquals(null, hub.peek(), "A's traffic cannot re-seed the card past the hold")
+        // B's next turn re-lights the card (its frames pass the hold)
+        hub.apply(streamEvent(b, """{"type":"task_run_started","startedAt":1000400}""", 4), 1_000_400L)
+        assertEquals(b, hub.peek()?.taskId, "the held task's own turn returns the card")
+        // only the ☢️ nuclear wipes the hold
+        hub.clear()
+        hub.apply(streamEvent(a, """{"type":"agent_thought_chunk","content":"A vuelve"}""", 5), 1_000_500L)
+        assertEquals(a, hub.peek()?.taskId, "nuclear lifted the hold — traffic rules again")
+    }
+
+    @Test
     fun theImplicitWorldStillFollowsTraffic() = runBlocking {
         // no explicit attach yet (hold=false): a foreign task's event still
         // replaces the watched turn — the 4/11 instant-switch law intact
