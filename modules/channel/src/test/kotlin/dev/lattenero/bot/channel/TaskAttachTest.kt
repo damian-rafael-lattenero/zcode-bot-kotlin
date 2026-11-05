@@ -57,11 +57,14 @@ class TaskAttachTest {
                     "\"activeTaskId\":\"${text.removePrefix("/task ")}\"",
                 ).replace("\"activeTaskId\":null", "\"activeTaskId\":\"${text.removePrefix("/task ")}\"")
             }
-            return InboundAnswer.Answered(duplicate = false, replies = cannedBindReplies)
+            return InboundAnswer.Answered(duplicate = false, replies = awaitReplyFor(text))
         }
 
         /** The host's canned bind verdict (empty = confirmed silently). */
         var cannedBindReplies: List<String> = emptyList()
+
+        /** Per-command verdicts — the /project → /task ladder needs both. */
+        var awaitReplyFor: (String) -> List<String> = { _ -> cannedBindReplies }
 
         override suspend fun enqueueInbound(text: String, messageId: String, receivedAt: Long): Int = 1
 
@@ -143,7 +146,9 @@ class TaskAttachTest {
         assertTrue("👁" in reply.text)
         assertTrue("«unificador» en vivo" in reply.text)
         assertTrue("/last" in reply.text) // the honest history note
-        assertTrue("🎯" in reply.text) // the bind confirmed (it was already the active task)
+        // the bind confirmed BY READ-BACK (it was already the active task —
+        // the 5/11 law: the tap's next message is the 100%-sure confirmation)
+        assertTrue("✅ CONFIRMADO: «unificador» es la conversación activa" in reply.text)
     }
 
     @Test
@@ -155,7 +160,7 @@ class TaskAttachTest {
         assertEquals(listOf("task-77" to app), ops.subscribed)
         assertTrue("«unificador» suscripto" in reply.text)
         assertTrue("próximo turno" in reply.text)
-        assertTrue("🎯" in reply.text)
+        assertTrue("✅ CONFIRMADO" in reply.text) // the bind read back from the fork's own state
     }
 
     @Test
@@ -186,13 +191,23 @@ class TaskAttachTest {
     fun aContextlessTapBindsByTheHostsVerdictNeverTheRoutingBoilerplate() = runBlocking {
         // the owner's 2/11: context None + a REAL sid answered «send text
         // first» — the bind needs no bot-side context, the HOST decides. The
-        // fork's project boundary (Task not found) is the honest answer.
-        val ops = FakeOps(noContextStatus).apply { cannedBindReplies = listOf("Task not found") }
+        // 5/11 ladder: «Task not found» fires /project first; when even the
+        // workspace is unknown to the fork, the boundary speaks — honestly.
+        val ops = FakeOps(noContextStatus).apply {
+            awaitReplyFor = { text ->
+                when {
+                    text.startsWith("/task ") -> listOf("Task not found.")
+                    text.startsWith("/project ") -> listOf("No available workspace found.")
+                    else -> emptyList()
+                }
+            }
+        }
         val reply = commands(ops).onCallback("t:task-77", 5L, OWNER)!!
         assertEquals(listOf("task-77" to app), ops.subscribed) // the attach happened
         assertTrue("👁" in reply.text)
         assertTrue("🚧" in reply.text, "the project boundary speaks, not the routing boilerplate")
-        assertTrue("frontera" in reply.text)
+        assertTrue("no reconoce ese workspace" in reply.text)
+        assertTrue(ops.inbound.any { it.startsWith("/project ") }, "the ladder tried the workspace move")
         assertTrue("send text first" !in reply.text, "the router's line NEVER rides a tap")
     }
 

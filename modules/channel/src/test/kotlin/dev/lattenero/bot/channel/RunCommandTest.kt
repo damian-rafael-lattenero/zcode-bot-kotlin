@@ -74,6 +74,14 @@ class RunCommandTest {
         ): InboundAnswer {
             awaited.add(text)
             statusAfterAwait?.let { botStatusJson = it }
+            // production's /task verdict carries the status that NAMES the
+            // task — the bind's in-band read-back (the 5/11 confirmation law)
+            if (text.startsWith("/task ")) {
+                return InboundAnswer.Answered(
+                    duplicate = false,
+                    replies = listOf("Workspace: app\n------\nTask: x (${text.removePrefix("/task ")})\nState: idle"),
+                )
+            }
             return awaitAnswer
         }
 
