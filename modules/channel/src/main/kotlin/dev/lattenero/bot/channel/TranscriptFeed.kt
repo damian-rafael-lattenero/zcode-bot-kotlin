@@ -22,6 +22,12 @@ data class FeedMessage(
      * tap. Null = a plain data message.
      */
     val pages: ToolOutputPages.Pages? = null,
+    /**
+     * A WRITE/EDIT close's file path (the owner, 5/11): the message earns
+     * the [📄 archivo completo] button — the publisher owns the registry,
+     * the feed only marks which message is a file close. Null = no button.
+     */
+    val editPath: String? = null,
 ) {
     companion object {
         /** A plain data message (a tool close, an open one-liner). */
@@ -105,7 +111,14 @@ object TranscriptFeed {
                     return@forEach
                 }
                 val box = if (lane.input == null) "" else toolBox(lane)
-                out += FeedMessage.of(box.ifBlank { closeFallback(lane, verbs) })
+                // THE FILE BUTTON (the owner, 5/11): a write/edit close earns
+                // «📄 archivo completo» — the path rides the message, the
+                // publisher's registry builds the door
+                val editPath = lane.editFilePath()
+                out += FeedMessage(
+                    text = box.ifBlank { closeFallback(lane, verbs) },
+                    editPath = editPath,
+                )
             }
         }
 

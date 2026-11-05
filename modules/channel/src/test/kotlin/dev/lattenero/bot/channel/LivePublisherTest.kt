@@ -12,6 +12,7 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.http.content.TextContent
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -194,7 +195,7 @@ class LivePublisherTest {
         assertEquals("deleteMessage", methods.first())
         assertEquals("sendMessage", methods[1])
         val reborn = wire.bodies.last { it.second == "sendMessage" }.first
-        assertTrue("⏳ <b>Working" in reborn, "the re-born card IS the process card")
+        assertTrue("⏳ <b>Procesando..." in reborn, "the re-born card IS the process card")
         assertTrue("📖 CoT: 1 bloque plegado" in reborn, "the card carries the CoT row (count only)")
     }
 
@@ -262,11 +263,11 @@ class LivePublisherTest {
     }
 
     @Test
-    fun everyStateChangeRedrawsTheCardLastNeverAnEdit() = runTest {
-        // THE CARD IS THE PROCESS (the owner, 2/11: «la quiero debajo de
-        // todo SIEMPRE»): a changed render DELETES and RE-BIRTHS the card
-        // as the last message — an in-place edit would stay buried under
-        // whatever spoke after it
+    fun theCardEditsInPlaceWithinTheWindowAndReclaimsTheBottomAfterIt() = runTest {
+        // THE 5/11 LAW («no estoy viendo el cartel»): a changed render EDITS
+        // the card in place (the seconds tick without a new message); the
+        // delete+re-birth that keeps it «debajo de todo» fires at most once
+        // per spacing window — the 4/11 flicker (card missing up to 30s) died
         val taskId = "task-9"
         val hub = LiveHub()
         hub.apply(frame(taskId, "task_run_started", at = 1_000), nowMs = 1_000)
@@ -276,13 +277,21 @@ class LivePublisherTest {
         val publisher = publisher(wire, hub, clock = { now })
         publisher.tick() // the birth
         val afterBirth = wire.bodies.size
-        hub.apply(frame(taskId, "agent_thought_chunk", at = 1_100, "content" to JsonPrimitive("más")), nowMs = 1_100)
-        now += 31_000L // the redraw is a SECOND birth: the spacing gate applies
+        // WITHIN the window: the render changed (the seconds ticked) — the
+        // card EDITS itself, no delete, no new message, no flood
+        now += 5_000L
         publisher.tick()
-        val methods = wire.bodies.drop(afterBirth).map { it.second }
-        assertTrue("deleteMessage" in methods, "the old card dies")
-        assertTrue(methods.last() == "sendMessage", "the card is REBORN last")
-        assertTrue("editMessageText" !in methods, "never an edit — an edit cannot move the card")
+        val inWindow = wire.bodies.drop(afterBirth).map { it.second }
+        assertEquals(listOf("editMessageText"), inWindow, "the seconds tick by EDITING the same message")
+        val edited = wire.bodies.last { it.second == "editMessageText" }.first
+        assertTrue("⏳ <b>Procesando..." in edited, "the card speaks the owner's wording: $edited")
+        // the window lifts: the next change RECLAIMS the bottom — delete +
+        // re-birth, once per window at most
+        now += 31_000L
+        publisher.tick()
+        val reclaim = wire.bodies.drop(afterBirth + inWindow.size).map { it.second }
+        assertTrue("deleteMessage" in reclaim, "the old card dies to reclaim the bottom")
+        assertTrue(reclaim.last() == "sendMessage", "the card is REBORN last")
         // a quiet tick (no events, fixed clock): the render did not change —
         // nothing moves (the change law keeps the 429 budget alive)
         val before = wire.bodies.size
@@ -666,12 +675,12 @@ class LivePublisherTest {
         var now = 6_000L
         val publisher = publisher(wire, hub, spoken, clock = { now })
         publisher.pingTick()
-        assertTrue("1 - generando CoT 3k" in spoken, "the first ping of the action counts 1: $spoken")
+        assertTrue("🧠 thinking 3k" in spoken, "the first ping of the action counts 1: $spoken")
         // new chars, one cadence later: the counter climbs (the number law)
         hub.apply(frame(taskId, "agent_thought_chunk", at = 6_050, "content" to JsonPrimitive("q".repeat(1500))), nowMs = 6_050)
         now = 11_000L
         publisher.pingTick()
-        assertTrue("2 - generando CoT 4,5k" in spoken, "the counter climbs with new chars: $spoken")
+        assertTrue("🧠 thinking 4,5k" in spoken, "the counter climbs with new chars: $spoken")
         // NO new chars since the last ping: silence is data — skip
         now = 16_000L
         publisher.pingTick()
@@ -704,7 +713,7 @@ class LivePublisherTest {
         hub.apply(frame(taskId, "agent_thought_chunk", at = 6_050, "content" to JsonPrimitive("d".repeat(2500))), nowMs = 6_050)
         now = 11_000L
         publisher.pingTick()
-        assertTrue("2 - generando CoT 5k" in spoken, "$spoken")
+        assertTrue("🧠 thinking 5k" in spoken, "$spoken")
         // an Edit with a LIVE diff opens: the identity changes — count from 1
         hub.apply(
             frame(
@@ -718,7 +727,7 @@ class LivePublisherTest {
         )
         now = 16_200L
         publisher.pingTick()
-        assertTrue("1 - editando archivo report.txt +3 −2" in spoken, "the new action's pings count from 1: $spoken")
+        assertTrue("✏️ Editando archivo report.txt +3 −2" in spoken, "the new action's pings count from 1: $spoken")
         // the counts did not change: skip
         now = 21_300L
         publisher.pingTick()
@@ -738,7 +747,106 @@ class LivePublisherTest {
         )
         now = 26_500L
         publisher.pingTick()
-        assertTrue("2 - editando archivo report.txt +5 −4" in spoken, "$spoken")
+        assertTrue("✏️ Editando archivo report.txt +5 −4" in spoken, "$spoken")
+    }
+
+    @Test
+    fun theEditCloseSpeaksItsDiffWithTheFileDoor() = runTest {
+        // THE FILE DOOR (the owner, 5/11): a write/edit close carries the
+        // diff AND «📄 archivo completo» — the tap reads the file fresh
+        val taskId = "task-9"
+        val hub = LiveHub()
+        hub.apply(frame(taskId, "task_run_started", at = 1_000), nowMs = 1_000)
+        hub.apply(frame(taskId, "agent_thought_chunk", at = 1_050, "content" to JsonPrimitive("arranco")), nowMs = 1_050)
+        val wire = Wire()
+        val spoken = mutableListOf<String>()
+        val markups = mutableListOf<JsonObject?>()
+        var now = 2_000L
+        val fileMenu = FileMenu(
+            read = { "el archivo entero" },
+            edit = { _, _, _ -> true },
+            send = { text, markup ->
+                spoken += text
+                markups += markup
+                99L
+            },
+        )
+        val publisher = LivePublisher(
+            hub = hub,
+            telegram = LiveTelegram(
+                api = TgApi({ cfg }, engineFactory = wire.factory),
+                cooldown = Cooldown(readFile = { null }),
+            ),
+            config = { cfg },
+            channelAlive = { true },
+            speak = { text, markup ->
+                spoken += text
+                markups += markup
+                777L
+            },
+            finalAnswer = { null },
+            clock = { now },
+            toolBox = { lane -> "✏️ ${lane.input?.str("file_path")} listo" },
+            fileMenu = fileMenu,
+        )
+        publisher.tick() // the birth
+        // the lane OPENS (pending) and then closes — a close without a lane is dropped by the fold
+        hub.apply(
+            frame(
+                taskId, "tool_call_update", at = 2_050, "status" to JsonPrimitive("pending"),
+                "toolId" to JsonPrimitive("te"), "toolName" to JsonPrimitive("Edit"),
+                "input" to buildJsonObject {
+                    put("file_path", "/w/Main.kt"); put("old_string", "a"); put("new_string", "b\nc")
+                },
+            ),
+            nowMs = 2_050,
+        )
+        hub.apply(
+            frame(
+                taskId, "tool_call_update", at = 2_100, "status" to JsonPrimitive("completed"),
+                "toolId" to JsonPrimitive("te"), "toolName" to JsonPrimitive("Edit"),
+            ),
+            nowMs = 2_100,
+        )
+        now += 31_000L // the feed speaks; the card reclaims on the same tick
+        publisher.tick()
+        val withDoor = spoken.zip(markups).any { (text, markup) ->
+            "Main.kt" in text && "📄 archivo completo" in (markup?.toString() ?: "")
+        }
+        assertTrue(withDoor, "the edit close carries the file door: ${spoken.joinToString(" | ")}")
+    }
+
+    @Test
+    fun theEditPingAccumulatesTheFilesRunningTotalAcrossLanes() = runTest {
+        // THE OWNER'S LADDER (5/11): «+21 −12 → +55 −12 → +94 −16» is the SAME
+        // file accumulating across its edits — every lane the turn touched
+        // that file counts, sealed lanes included, not just the live rung
+        val taskId = "task-9"
+        val hub = LiveHub()
+        hub.apply(frame(taskId, "task_run_started", at = 1_000), nowMs = 1_000)
+        val wire = Wire()
+        val spoken = mutableListOf<String>()
+        var now = 6_000L
+        val publisher = publisher(wire, hub, spoken, clock = { now })
+        fun editFrame(toolId: String, old: String, new: String, status: String = "pending") = frame(
+            taskId, "tool_call_update", at = now + 100,
+            "status" to JsonPrimitive(status),
+            "toolId" to JsonPrimitive(toolId), "toolName" to JsonPrimitive("Edit"),
+            "input" to buildJsonObject {
+                put("file_path", "/w/report.txt"); put("old_string", old); put("new_string", new)
+            },
+        )
+        // first edit: +3 −2 — the ladder's first rung
+        hub.apply(editFrame("te1", "a\nb\nc", "a\nX\nc\nd"), nowMs = now + 100)
+        publisher.pingTick()
+        assertTrue("✏️ Editando archivo report.txt +3 −2" in spoken, "$spoken")
+        // it seals; a SECOND edit on the same file opens with +2 −1: the
+        // running total is the FILE's (+3−2 + +2−1 = +5 −3), not the rung's
+        hub.apply(editFrame("te1", "a\nb\nc", "a\nX\nc\nd", status = "completed"), nowMs = now + 100)
+        hub.apply(editFrame("te2", "x\ny", "x\nz\nw"), nowMs = now + 100)
+        now += 5_100L
+        publisher.pingTick()
+        assertTrue("✏️ Editando archivo report.txt +5 −3" in spoken, "the ladder accumulates the file: $spoken")
     }
 
     @Test
@@ -757,7 +865,7 @@ class LivePublisherTest {
         assertTrue(spoken.isEmpty(), "a window would DELAY the ping — the ping DROPS (never queues, never bursts)")
         nowSec = 5_000.0 // the window lifted: the next cadence speaks it, counting from 1 still
         publisher.pingTick()
-        assertTrue("1 - generando CoT 3k" in spoken, "$spoken")
+        assertTrue("🧠 thinking 3k" in spoken, "$spoken")
     }
 
     @Test

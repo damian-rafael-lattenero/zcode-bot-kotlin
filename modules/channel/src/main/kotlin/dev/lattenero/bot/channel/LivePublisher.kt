@@ -312,6 +312,13 @@ class LivePublisher(
      * card's cleanup runs untouched.
      */
     private val onSeal: suspend (SealFacts) -> Unit = {},
+    /**
+     * THE FILE VIEWER (the owner, 5/11): write/edit closes earn the
+     * «📄 archivo completo» button — the menu owns the path registry and
+     * the fresh-at-tap read; the publisher only attaches the door. Null =
+     * the closes stay buttonless (tests, unwired daemons).
+     */
+    private val fileMenu: FileMenu? = null,
 ) : CoTTaps, BoxTaps {
 
     /** the message being edited — the publisher's only mutable cell (§7 escape hatch). */
@@ -498,34 +505,45 @@ class LivePublisher(
     }
 
     /**
-     * THE CARD IS ALWAYS LAST: a changed render re-draws the card as a
-     * NEW last message (the owner's law, 2/11 — «la quiero debajo de
-     * todo SIEMPRE»), never an in-place edit something may have buried.
-     * Only on change (the 429 budget is shared); under a 429 window the
-     * redraw skips whole — the card stays where it is, stale but present,
-     * and the next tick re-draws when the window lifts.
+     * THE CARD EDITS IN PLACE, THE RECLAIM IS BOUNDED (the owner's 5/11
+     * verdict: «no estoy viendo el cartel»): a changed render now EDITS the
+     * message (Telegram's editMessageText — the seconds tick without a
+     * single new message), and the delete+re-birth that keeps the card
+     * «debajo de todo» fires at most ONCE per [BIRTH_SPACING_MS] window —
+     * the 4/11 flicker died right here (the old redraw deleted first and
+     * the spacing law then blocked the re-birth: the card went MISSING for
+     * up to 30s at a stretch — six births in 2.5 minutes). Under a 429
+     * window the whole redraw skips — the card stays where it is, stale
+     * but present, and the next tick re-draws when the window lifts.
      */
     private suspend fun redrawCard(cfg: TgConfig, state: TurnLive, now: Long, liveMid: Long) {
         val text = LiveTurn.render(state, now, channelAlive(), verbs, giftsForCard(now))
         if (text == lastText) return // nothing visible changed: the card stays
         if (telegram.throttled()) return
-        telegram.delete(cfg, liveMid)
-        statusMessageId = null
-        lastText = ""
-        tryBirth(cfg, state, text)
+        val reclaimDue = now - (lastBirthAtMs ?: 0L) >= BIRTH_SPACING_MS
+        if (reclaimDue) {
+            telegram.delete(cfg, liveMid)
+            statusMessageId = null
+            lastText = ""
+            tryBirth(cfg, state, text)
+        } else {
+            if (telegram.edit(cfg, liveMid, text)) lastText = text
+        }
     }
 
     /**
      * The TRANSCRIPT FEED's drain: [TranscriptFeed]'s diff between the
      * seen pointer and this tick's state, spoken through the render lane.
-     * When it speaks, THE CARD SWAPS — delete, the feed goes out, the
-     * card is REBORN as the last message with its CURRENT render (the
-     * owner's rule: «el thinking box siempre se tiene que redibujar como
-     * último mensaje de todo» — a feed message may never bury the card).
+     * The feed speaks FIRST and the card follows it down (the owner's
+     * rule: «el thinking box siempre se tiene que redibujar como último
+     * mensaje de todo») — but the reclaim rides [redrawCard]'s bounded
+     * window (the 5/11 law): when the spacing window is open the card
+     * swaps last as before; when it is not, the feed speaks below the
+     * card and the next window's tick reclaims the bottom — the card is
+     * NEVER deleted without a re-birth guaranteed (the 4/11 orphan).
      * Back-pressure: a cooldown window skips the whole drain WITHOUT
      * advancing the seen pointer — the next tick re-speaks the same diff
-     * when it lifts; the parked outbox and the re-born card never race
-     * for the chat's order.
+     * when it lifts.
      */
     // one guard per early exit (silent level, throttle window) — the drain's own shape
     @Suppress("ReturnCount")
@@ -540,20 +558,21 @@ class LivePublisher(
         feedSeen = state
         if (feed.isEmpty()) return
         val mid = statusMessageId
-        if (mid == null) {
-            speakFeed(feed, state) // no card yet: the feed speaks, the birth lands below it
-        } else {
-            telegram.delete(cfg, mid)
-            statusMessageId = null
-            lastText = ""
-            speakFeed(feed, state)
-            // the card re-born LAST with its CURRENT render — above
-            // nothing, below everything
-            tryBirth(cfg, state, LiveTurn.render(state, now, channelAlive(), verbs, giftsForCard(now)))
+        speakFeed(feed, state)
+        if (mid != null) {
+            val reclaimDue = now - (lastBirthAtMs ?: 0L) >= BIRTH_SPACING_MS
+            if (reclaimDue) {
+                telegram.delete(cfg, mid)
+                statusMessageId = null
+                lastText = ""
+                tryBirth(cfg, state, LiveTurn.render(state, now, channelAlive(), verbs, giftsForCard(now)))
+            }
+            // window closed: the card stays above the feed this round — the
+            // next window's redrawCard reclaims the bottom (edit-in-place law)
         }
         logger.info {
             "transcript feed: ${feed.size} message(s) spoken " +
-                "(card=${if (mid != null) "swapped" else "absent"})"
+                "(card=${if (mid != null) "reclaim" else "absent"})"
         }
     }
 
@@ -569,6 +588,12 @@ class LivePublisher(
             // button; the fold keeps the numbered pages for the taps
             msg.pages?.let { pages ->
                 speakBox(state, pages) { markup -> speak(msg.text, markup) }
+                return@forEach
+            }
+            // A WRITE/EDIT CLOSE: the diff speaks WITH the file door —
+            // «📄 archivo completo» reads the file fresh at tap time
+            if (msg.editPath != null && fileMenu != null) {
+                speak(msg.text, fileMenu.buttonFor(msg.editPath))
                 return@forEach
             }
             val block = msg.block ?: run {
@@ -866,7 +891,9 @@ class LivePublisher(
                 if (pingActionKey != PING_THINKING) resetPacing(PING_THINKING)
                 pingCounter += 1
                 pingLastThoughtChars = state.thoughtChars
-                speak("${pingCounter} - generando CoT ${LiveTurn.fmtKDecimal(state.thoughtChars.toLong())}", null)
+                val text = "🧠 thinking ${LiveTurn.fmtKDecimal(state.thoughtChars.toLong())}"
+                speak(text, null)
+                logger.info { "progress ping #$pingCounter: $text (taskId=${state.taskId.takeLast(TASK_ID_TAIL)})" }
             }
 
             is TurnPhase.Writing -> {
@@ -877,17 +904,32 @@ class LivePublisher(
                 if (diff == null) return
                 val basename = (diff.input?.str("file_path") ?: diff.input?.str("path") ?: diff.name)
                     .substringAfterLast('/')
-                val editKey = "$basename +${diff.added ?: 0} −${diff.removed ?: 0}"
+                // THE FILE'S RUNNING TOTAL (the owner's 5/11 ladder: +21 →
+                // +55 → +94 is the SAME file accumulating across its edits —
+                // every lane this turn touched that file counts, open and
+                // sealed alike; the single lane's diff alone is a rung, not
+                // the ladder)
+                val totals = state.tools
+                    .filter { it.name in WRITE_EDIT_TOOLS }
+                    .filter { toolBasename(it) == basename }
+                    .fold(0 to 0) { acc, t -> acc.first + (t.added ?: 0) to acc.second + (t.removed ?: 0) }
+                val editKey = "$basename +${totals.first} −${totals.second}"
                 if (pingActionKey != diff.toolId) resetPacing(diff.toolId)
                 if (editKey == pingLastEditKey) return // the counts did not change
                 pingCounter += 1
                 pingLastEditKey = editKey
-                speak("${pingCounter} - editando archivo $basename +${diff.added ?: 0} −${diff.removed ?: 0}", null)
+                val text = "✏️ Editando archivo $basename +${totals.first} −${totals.second}"
+                speak(text, null)
+                logger.info { "progress ping #$pingCounter: $text (taskId=${state.taskId.takeLast(TASK_ID_TAIL)})" }
             }
 
             is TurnPhase.Done, TurnPhase.Idle -> return
         }
     }
+
+    /** A write/edit lane's file basename — the ladder's grouping key. */
+    private fun toolBasename(lane: ToolLive): String =
+        (lane.input?.str("file_path") ?: lane.input?.str("path") ?: lane.name).substringAfterLast('/')
 
     /** The pacing's reset — the whole cell set when the action changes. */
     private fun resetPacing(actionKey: String? = null) {

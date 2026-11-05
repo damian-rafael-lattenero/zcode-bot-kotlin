@@ -112,6 +112,12 @@ internal val SHELL_TOOLS = setOf("Bash", "Shell")
  */
 internal val WRITE_EDIT_TOOLS = setOf("Edit", "MultiEdit", "Replace", "Write", "Create", "New")
 
+/** A write/edit lane's file path — the [📄 archivo completo] door's key (the owner, 5/11). */
+internal fun ToolLive.editFilePath(): String? =
+    takeIf { name in WRITE_EDIT_TOOLS && input != null }?.let { lane ->
+        listOf("file_path", "path").firstNotNullOfOrNull { k -> lane.input?.str(k)?.takeIf { it.isNotEmpty() } }
+    }
+
 /**
  * The fork's TYPED terminal error (ZCodeTaskError: error, code?, detail?,
  * attribution?{source, reason, statusCode, providerErrorCode, retryable}) —
@@ -519,14 +525,14 @@ object LiveTurn {
          */
         giftsLine: String? = null,
     ): String {
-        // THE OWNER'S RULE («los segundos no deben correr»): when reality
-        // is not advancing — silence, a dead channel, an error pill — every
-        // clock in this render derives from the LAST REAL EVENT, never from
-        // the present. A ticking timer during an outage is the lie class
-        // he has rejected three times.
+        // THE OWNER'S RULE («los segundos no deben correr»), 5/11 edition: the
+        // clock RUNS while the channel is alive and the turn holds no error
+        // (a silent model may be legitimately grinding — his «Procesando...
+        // xS» ticks on); it FREEZES only on a dead channel, a typed error or
+        // an api-retry pill — the outage lies he rejected three times. The
+        // footer still reports the silence honestly («último evento hace…»).
         val silence = silenceMs(state, nowMs)
         val frozen = !channelAlive ||
-            silence >= STALE_SOFT_MS ||
             state.typedError != null ||
             state.apiRetry != null
         val clockNow = if (frozen) (state.lastEventAtMs ?: nowMs) else nowMs
@@ -632,9 +638,9 @@ object LiveTurn {
         return lines.joinToString("\n")
     }
 
-    /** THE WORKING HEADER — the desktop pill's mirror: «⏳ Working · 3m 51s — «título»». */
+    /** THE WORKING HEADER — the owner's 5/11 words: «⏳ Procesando... 3m 51s — «título»». */
     private fun workingHead(title: String, elapsed: String): String =
-        "⏳ <b>Working · $elapsed</b> — «${PyText.esc(title)}»"
+        "⏳ <b>Procesando... $elapsed</b> — «${PyText.esc(title)}»"
 
     /**
      * One open lane's line: the verb + its detail (the shell's command, the

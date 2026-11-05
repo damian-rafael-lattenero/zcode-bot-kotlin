@@ -8,6 +8,8 @@ import dev.lattenero.bot.channel.BotReply
 import dev.lattenero.bot.channel.BrainCommands
 import dev.lattenero.bot.channel.ChannelClient
 import dev.lattenero.bot.channel.DeployCommand
+import dev.lattenero.bot.channel.FileMenu
+import dev.lattenero.bot.channel.FileTaps
 import dev.lattenero.bot.channel.ChannelOps
 import dev.lattenero.bot.channel.ChannelQuery
 import dev.lattenero.bot.channel.ChannelSpec
@@ -600,6 +602,31 @@ internal fun wireChannel(
     val lastPrompt = LastPrompt(File(File(cfg.homeDir, "state"), LAST_PROMPT_FILE))
 
 
+    // THE FILE VIEWER (the owner, 5/11): one menu, two doors — the
+    // publisher attaches «📄 archivo completo» to write/edit closes, the
+    // commands answer its taps. The read is FRESH AT TAP TIME (his
+    // choice), capped honestly at 2 MB (a phone viewer's ceiling, the
+    // cap SPEAKS inside the content — never a silent truncation).
+    val fileMenu: FileMenu? = lanes.live?.let { lane ->
+        val viewerTelegram = LiveTelegram(api = lane.api, cooldown = lane.cooldown, lastPh = lane.lastPh)
+        FileMenu(
+            read = { path ->
+                runCatching {
+                    val file = java.io.File(path)
+                    when {
+                        !file.isFile -> null
+                        file.length() > FILE_VIEWER_MAX_BYTES ->
+                            "(archivo de ${file.length() / 1_000_000} MB — truncado a los primeros 2 MB)\n" +
+                                file.readText().take(FILE_VIEWER_MAX_BYTES.toInt())
+
+                        else -> file.readText()
+                    }
+                }.getOrNull()
+            },
+            edit = { mid, text, markup -> viewerTelegram.edit(lane.config(), mid, text, markup) },
+            send = { text, markup -> fireSpeak(text, false, markup) },
+        )
+    }
     val liveView = buildLiveView(
         send,
         lanes,
@@ -611,6 +638,7 @@ internal fun wireChannel(
         verbosity,
         workspaceOf = { sid -> workspacePathOf(cfg.baseDir, sid) },
         onSeal = notifs?.onSeal ?: NotificationsWire.noSeal,
+        fileMenu = fileMenu,
     )
     val poller = buildPoller(
         cfg,
@@ -638,6 +666,7 @@ internal fun wireChannel(
         brain = brain,
         metrics = metrics,
         mirror = mirrorRefresh,
+        fileTaps = fileMenu,
     )
     return ChannelStack(client, liveView, poller, hub, busTaps, notifs?.watcher)
 }
@@ -657,6 +686,9 @@ private const val LAST_PROMPT_FILE = "last-prompt.json"
 
 /** The question board's persisted registry (the restart's memory, FileQuestionBoardStore's file). */
 private const val QUESTION_BOARD_FILE = "question-board.json"
+
+/** The file viewer's honest ceiling — the cap speaks inside the content. */
+private const val FILE_VIEWER_MAX_BYTES = 2_000_000L
 private val QUEUE_DRAIN_DELAY = 1.seconds
 
 /**
@@ -681,6 +713,8 @@ private fun buildLiveView(
     workspaceOf: suspend (String) -> String?,
     /** 🔔 the seal tap — the notifications' hook on the card's own seal. */
     onSeal: suspend (SealFacts) -> Unit = NotificationsWire.noSeal,
+    /** The file viewer (5/11) — write/edit closes earn «📄 archivo completo». */
+    fileMenu: FileMenu? = null,
 ): LivePublisher? {
     val lane = lanes.live
     if (lane == null || !send.ownsSpectator) return null
@@ -740,6 +774,7 @@ private fun buildLiveView(
             }
         },
         onSeal = onSeal,
+        fileMenu = fileMenu,
     )
 }
 
@@ -782,6 +817,9 @@ private fun buildPoller(
     // THE OPEN MENU MIRROR (null when the live api is missing): the dispatch
     // registers the born /mode and /plan_model_effort menus into it
     mirror: MenuMirrorRefresher? = null,
+    // THE FILE VIEWER's taps (5/11) — fvm:/fvp: ride the same menu the
+    // publisher attaches its doors with
+    fileTaps: FileTaps? = null,
 ): Poller? {
     if (!pollOn) return null
     val liveApi = api ?: TgApi({ TgConfig.load(remote) })
@@ -897,6 +935,7 @@ private fun buildPoller(
         // the collapsed outputs' pager (the same publisher owns both
         // registries: the tap edits the message it spoke)
         boxTaps = liveView,
+        fileTaps = fileTaps,
         lastPrompt = lastPrompt,
         brain = brain,
         // THE OWNER'S ID — the SAME config read /deploy's door makes
