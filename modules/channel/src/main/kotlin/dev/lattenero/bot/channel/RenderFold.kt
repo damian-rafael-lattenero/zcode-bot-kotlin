@@ -128,7 +128,6 @@ fun reduce(
             title = event.taskId.takeLast(LiveTurn.TITLE_TAIL),
             lastEventAtMs = event.nowMs.takeIf { it > 0 },
             attachAwaited = true,
-            watchedHold = true, // THE HOLD (5/11): the explicit attach sticks
         )
 
         else -> state // re-attaching the held task re-arms nothing — it already holds
