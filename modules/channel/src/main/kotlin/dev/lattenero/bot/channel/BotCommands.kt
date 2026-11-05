@@ -213,6 +213,12 @@ class BotCommands(
      */
     private val boxTaps: BoxTaps? = null,
     /**
+     * THE FILE VIEWER's taps (the `fvm:`/`fvp:` buttons, the owner's 5/11):
+     * a write/edit close's «📄 archivo completo» reads the file FRESH AT
+     * TAP TIME and pages it in place. Null (unwired) = the honest miss.
+     */
+    private val fileTaps: FileTaps? = null,
+    /**
      * The last fired prompt's store (Python's F22): the SAVE rides the
      * free-text fire path's success branch, /retry reads it back. Null =
      * unwired (tests): /retry answers the honest «nada» and the save is
@@ -434,6 +440,30 @@ class BotCommands(
                 BotReply(BoxTaps.MISS)
             } else {
                 boxTaps.fold(id)?.let { BotReply(it) }
+            }
+        }
+
+        // THE FILE VIEWER (the owner, 5/11): fvm:<id> opens the file FRESH
+        // (read at tap time — later edits included), fvp:<id>:<page> turns
+        // the numbered pages, each tap a fresh re-read. Unwired/unknown =
+        // the honest miss, never silence.
+        data.startsWith("fvm:") -> {
+            val id = data.removePrefix("fvm:").toIntOrNull()
+            if (id == null || fileTaps == null) {
+                BotReply("🤷 Ese botón quedó de otro turno — el registro de archivos ya no lo tiene.")
+            } else {
+                fileTaps.open(id)?.let { BotReply(it) }
+            }
+        }
+
+        data.startsWith("fvp:") -> {
+            val parts = data.removePrefix("fvp:").split(":")
+            val id = parts.getOrNull(0)?.toIntOrNull()
+            val page = parts.getOrNull(1)?.toIntOrNull() ?: 0
+            if (id == null || fileTaps == null) {
+                BotReply("🤷 Ese botón quedó de otro turno — el registro de archivos ya no lo tiene.")
+            } else {
+                fileTaps.page(id, page)?.let { BotReply(it) }
             }
         }
 

@@ -832,7 +832,7 @@ class LiveTurnTest {
         )
         s = reduce(s, thought("pensando"))
         val text = LiveTurn.render(s!!, nowMs = s.lastEventAtMs!! + 1_000, channelAlive = true)
-        assertTrue("⏳ <b>Working · 1m40s</b>" in text, "the header counts from zcode's start: $text")
+        assertTrue("⏳ <b>Procesando... 1m40s</b>" in text, "the header counts from zcode's start: $text")
     }
 
     @Test

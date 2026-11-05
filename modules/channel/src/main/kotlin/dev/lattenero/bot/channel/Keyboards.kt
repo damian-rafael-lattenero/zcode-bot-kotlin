@@ -455,6 +455,36 @@ object Keyboards {
     private const val PAGES_PER_ROW = 5
 
     /**
+     * THE FILE VIEWER's doors (the owner, 5/11): a WRITE/EDIT close's one
+     * button reads the file FRESH AT TAP TIME — `fvm:<id>`; the opened
+     * viewer's pages navigate with the same numbered-row idiom the boxes
+     * use (`fvp:<id>:<page>`), plus the way back that re-opens page 1
+     * (a re-read, like every page tap — the freshness is the law).
+     */
+    fun fileOpen(registryId: Int): JsonObject = buildJsonObject {
+        putJsonArray("inline_keyboard") {
+            add(buildJsonArray { add(button("📄 archivo completo", "fvm:$registryId")) })
+        }
+    }
+
+    fun filePages(registryId: Int, index: Int, count: Int): JsonObject = buildJsonObject {
+        putJsonArray("inline_keyboard") {
+            val rows = (0 until count).chunked(PAGES_PER_ROW)
+            for (row in rows) {
+                add(
+                    buildJsonArray {
+                        for (i in row) {
+                            val label = if (i == index) "▸${i + 1}" else "${i + 1}"
+                            add(button(label, "fvp:$registryId:$i"))
+                        }
+                    },
+                )
+            }
+            if (count > 1) add(buildJsonArray { add(button("📄 inicio", "fvp:$registryId:0")) })
+        }
+    }
+
+    /**
      * /queue's rows: one per parked text, 🚀 launch + 🗑 discard on the
      * same row (the owner decides per text, not per queue). The preview
      * is one line, capped; `ql:tg-<updateId>` worst case ≈ 20 bytes —
