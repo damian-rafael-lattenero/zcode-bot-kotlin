@@ -28,6 +28,12 @@ data class FeedMessage(
      * the feed only marks which message is a file close. Null = no button.
      */
     val editPath: String? = null,
+    /**
+     * THE VOICE (5/11): the LLM's own prose, one spent segment — the
+     * publisher speaks it as a violet rich message. Null = not a voice
+     * message.
+     */
+    val prose: String? = null,
 ) {
     companion object {
         /** A plain data message (a tool close, an open one-liner). */
@@ -80,6 +86,12 @@ object TranscriptFeed {
         if (level == FeedVerbosity.SUMMARY) return emptyList()
         if (prev == null || prev.taskId != curr.taskId) return emptyList()
         val out = mutableListOf<FeedMessage>()
+
+        // THE VOICE'S SPENT SEGMENTS (5/11): every prose the model spoke
+        // since the last tick, each one violet message, oldest first
+        for (i in prev.proseSpent.size until curr.proseSpent.size) {
+            out += FeedMessage(text = "", prose = curr.proseSpent[i])
+        }
 
         // the SEALED CoT blocks — every one below [prev.cotBlocks.size] was
         // already spoken; the diff never re-speaks history. COLLAPSED: the
