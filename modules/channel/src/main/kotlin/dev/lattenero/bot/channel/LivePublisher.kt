@@ -321,6 +321,14 @@ class LivePublisher(
      * the closes stay buttonless (tests, unwired daemons).
      */
     private val fileMenu: FileMenu? = null,
+    /**
+     * THE VIOLET VOICE's knob (the owner, 5/11, daemon.json `rich_voice`):
+     * the LLM's prose segments, the CoT blocks and the final answer travel
+     * as rich messages — pullquote/pre/expandable blocks (Bot API 10.x),
+     * each send falling back to the HTML blockquote on any rejection.
+     * false = the pre-feature shapes (plain texts, the toggle buttons).
+     */
+    private val richVoice: Boolean = true,
 ) : CoTTaps, BoxTaps {
 
     /** the message being edited — the publisher's only mutable cell (§7 escape hatch). */
@@ -590,9 +598,19 @@ class LivePublisher(
      * block via its registry, a tool output box BY FOLDING its birth (U5b
      * — the fold names the id, the send names the message). The collapsed
      * header is all the chat sees until the owner asks.
+     *
+     * THE VIOLET VOICE (5/11, knob-gated): the LLM's prose segments and
+     * the CoT blocks travel as RICH messages — pullquotes for the talk,
+     * the native expandable quote for the thinking (no custom button, the
+     * client collapses/expands). richVoice=false keeps the old shapes.
      */
     private suspend fun speakFeed(feed: List<FeedMessage>, state: TurnLive) {
         feed.forEach { msg ->
+            // THE VOICE: the model's own prose — one violet message
+            msg.prose?.takeIf { richVoice }?.let { prose ->
+                telegram.sendRich(config(), RichVoice.proseBlocks(prose))
+                return@forEach
+            }
             // a COLLAPSED tool output: the header speaks with its one
             // button; the fold keeps the numbered pages for the taps
             msg.pages?.let { pages ->
@@ -613,6 +631,11 @@ class LivePublisher(
                 0 -> state.cotPending.takeIf { it.isNotBlank() }
                 else -> state.cotBlocks.getOrNull(block - 1)
             } ?: return@forEach
+            // the thinking: NATIVE expand/collapse (10.3's expandable quote)
+            // — the custom toggle button retires with the rich client
+            if (richVoice && telegram.sendRich(config(), listOf(RichVoice.thinkingBlock(text))) != null) {
+                return@forEach
+            }
             cotBlocks.speakCollapsed(
                 number = if (block == 0) null else block,
                 text = text,
@@ -732,10 +755,16 @@ class LivePublisher(
             speak(LiveTurn.sealText(state, now), null)
         }
         val answer = finalAnswer(state.taskId)?.takeIf { it.isNotBlank() }
-        // the store's answer is RAW markdown/content — Telegram's HTML law
-        // requires the escape (measured 31/10: a literal tag in the content
-        // 400'd the send every tick until the breaker opened)
-        if (answer != null) speak(PyText.esc(answer), null)
+        // THE VOICE'S LAST WORD (5/11): the final answer IS the LLM talking —
+        // it seals as a violet rich message (pullquote prose + pre code).
+        // NEVER LOST: a violet send that could not fly (a cooldown window
+        // opened mid-seal) falls back to the parked speak lane — the answer
+        // arrives, even degraded. richVoice=false keeps the escaped plain
+        // text (the HTML law comment below still governs that leg).
+        if (answer != null) {
+            val violet = if (richVoice) telegram.sendRich(cfg, RichVoice.proseBlocks(answer)) else null
+            if (violet == null) speak(PyText.esc(answer), null)
+        }
         logger.info {
             "live view sealed: taskId=${state.taskId} reason=${(state.phase as TurnPhase.Done).stopReason} " +
                 "thought=${state.thoughtChars} tools=${state.doneTools} answer=${answer?.length ?: 0} chars " +
