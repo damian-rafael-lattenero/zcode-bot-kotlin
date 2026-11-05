@@ -104,6 +104,47 @@ class LiveTelegram(
         null
     }
 
+    /**
+     * THE VIOLET SEND (the owner, 5/11): the LLM's voice as a Bot API 10.x
+     * rich message — [RichVoice] builds the blocks, this is the leg.
+     * BEST-EFFORT with the honest degradation: any rejection (a Bot API
+     * that never heard of 10.x, a client too old, a malformed block)
+     * falls back ONCE to the classic HTML blockquote send — the same
+     * quote-look on every client, the channel never dies with the API
+     * version. The cooldown gates it like every send.
+     */
+    @Suppress("TooGenericExceptionCaught", "ReturnCount") // the live view never raises; one exit per leg
+    suspend fun sendRich(cfg: TgConfig, blocks: List<JsonObject>, markup: JsonObject? = null): Long? {
+        if (cooldown.active()) return null
+        return try {
+            messageIdOf(api.call("sendRichMessage", RichVoice.compose(cfg, blocks, markup)))
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            logger.info { "rich send fell back to blockquote: ${e.message}" }
+            fallbackQuote(cfg, blocks, markup)
+        }
+    }
+
+    /** The degradation: the same voice as an HTML blockquote (every client's violet). */
+    @Suppress("TooGenericExceptionCaught") // the live view never raises (Python's bare except)
+    private suspend fun fallbackQuote(cfg: TgConfig, blocks: List<JsonObject>, markup: JsonObject?): Long? = try {
+        val text = blocks.joinToString("\n\n") { block ->
+            val body = block["text"]?.let { it as? JsonPrimitive }?.content ?: ""
+            when (block["type"]?.let { it as? JsonPrimitive }?.content) {
+                "pre" -> "<pre>${PyText.esc(body)}</pre>"
+                "expandable_blockquote" -> "<blockquote expandable>${PyText.esc(body)}</blockquote>"
+                else -> "<blockquote>${PyText.esc(body)}</blockquote>"
+            }
+        }
+        messageIdOf(api.call("sendMessage", SendRequest.compose(cfg, text, loud = false, markup = markup)))
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        logger.warn { "violet fallback failed: ${e.message}" }
+        null
+    }
+
     /** Best-effort editMessageText; false when skipped or failed. The markup rides when present. */
     @Suppress("TooGenericExceptionCaught", "ReturnCount") // the live view never raises (Python's bare except)
     suspend fun edit(cfg: TgConfig, messageId: Long, text: String, markup: JsonObject? = null): Boolean {

@@ -74,6 +74,7 @@ class LivePublisherTest {
         finalAnswer: suspend (String) -> String? = { null },
         clock: () -> Long = { TICK_MS },
         resubscribe: suspend (String) -> Unit = {},
+        richVoice: Boolean = true,
         // NOT last: the existing tests' trailing lambda binds resolveTitle
         onSeal: suspend (SealFacts) -> Unit = {},
         resolveTitle: suspend (String) -> String? = { null },
@@ -92,6 +93,7 @@ class LivePublisherTest {
             clock = clock,
             verbosity = verbosity,
             resubscribe = resubscribe,
+            richVoice = richVoice,
             resolveTitle = resolveTitle,
             onSeal = onSeal,
         )
@@ -218,18 +220,18 @@ class LivePublisherTest {
             nowMs = 1_100,
         )
         now += 31_000L // the swap's re-birth is a SECOND birth: the spacing applies
-        publisher.tick() // the block sealed → the COLLAPSED message speaks, the card swaps
-        // THE COLLAPSE (2/11): the header + the affordance — the text never
-        // rides the chat until the tap opens it
-        val collapsed = spoken.firstOrNull { "CoT 1" in it }
-        assertTrue(collapsed != null, "the block's collapsed message spoke")
-        assertTrue("tocar para leer" in collapsed!!)
-        assertTrue(blockText !in collapsed, "the whole-block send is GONE")
-        // the swap's order: the card dies, the feed speaks (the speak lane),
-        // the card is REBORN — deleteMessage then the birth sendMessage
+        publisher.tick() // the block sealed → the NATIVE expandable quote speaks, the card swaps
+        // THE NATIVE THINKING (5/11): the whole block travels INSIDE the
+        // rich message — the client collapses/expands it, no custom button
+        val rich = wire.bodies.firstOrNull { it.second == "sendRichMessage" }
+        assertTrue(rich != null, "the block's violet message spoke")
+        assertTrue("expandable_blockquote" in rich!!.first)
+        // the swap's order: the card dies, the voice speaks, the card is
+        // REBORN — delete → sendRichMessage → birth sendMessage
         val methods = wire.bodies.drop(afterBirth).map { it.second }
-        assertEquals("deleteMessage", methods.first())
-        assertEquals("sendMessage", methods[1])
+        assertEquals("sendRichMessage", methods.first(), "the voice speaks first")
+        assertEquals("deleteMessage", methods[1], "then the stale card dies")
+        assertEquals("sendMessage", methods[2], "the card is reborn LAST")
         val reborn = wire.bodies.last { it.second == "sendMessage" }.first
         assertTrue("⏳ <b>Procesando..." in reborn, "the re-born card IS the process card")
         assertTrue("📖 CoT: 1 bloque plegado" in reborn, "the card carries the CoT row (count only)")
@@ -237,16 +239,17 @@ class LivePublisherTest {
 
     @Test
     fun theTapExpandsTheBlockInPlaceAndFoldsItBack() = runTest {
-        // THE OWNER'S REFINEMENT, verbatim (2/11): «el lugar para que
-        // aparezca el texto ES EN EL BOTÓN del CoT» — the tap edits the
-        // collapsed message with the block WHOLE; another tap folds it
+        // THE LEGACY TOGGLE (richVoice=false — the knob's world): «el lugar
+        // para que aparezca el texto ES EN EL BOTÓN del CoT» — the tap edits
+        // the collapsed message with the block WHOLE; another tap folds it.
+        // The RICH world's expand is native (theCoTSeals... pins that).
         val taskId = "task-9"
         val hub = LiveHub()
         hub.apply(frame(taskId, "task_run_started", at = 1_000), nowMs = 1_000)
         hub.apply(frame(taskId, "agent_thought_chunk", at = 1_050, "content" to JsonPrimitive("arranco")), nowMs = 1_050)
         val wire = Wire()
         val spoken = mutableListOf<String>()
-        val publisher = publisher(wire, hub, spoken)
+        val publisher = publisher(wire, hub, spoken, richVoice = false)
         publisher.tick() // the birth
         val blockText = "el pensamiento sellado completo"
         hub.apply(
@@ -281,7 +284,7 @@ class LivePublisherTest {
         val spoken = mutableListOf<String>()
         var nowSec = 2.0
         val cooldown = Cooldown(now = { nowSec }, readFile = { null })
-        val publisher = publisher(wire, hub, spoken, cooldown = cooldown)
+        val publisher = publisher(wire, hub, spoken, cooldown = cooldown, richVoice = false)
         publisher.tick() // the birth
         hub.apply(
             frame(taskId, "agent_thought_chunk", at = 1_100, "content" to JsonPrimitive("q".repeat(3000))),
@@ -497,7 +500,7 @@ class LivePublisherTest {
         val spoken = mutableListOf<String>()
         var nowSec = 2.0
         val cooldown = Cooldown(now = { nowSec }, readFile = { null })
-        val publisher = publisher(wire, hub, spoken, cooldown = cooldown)
+        val publisher = publisher(wire, hub, spoken, cooldown = cooldown, richVoice = false)
         publisher.tick() // birth — feedSeen snapshots here
         spoken.clear()
         hub.apply(
@@ -527,6 +530,7 @@ class LivePublisherTest {
             spoken,
             toolBox = { "BOX(${it.name})" },
             finalAnswer = { "LA RESPUESTA" },
+            richVoice = false,
         )
         publisher.tick() // birth — feedSeen snapshots (no tools yet)
         spoken.clear()
@@ -665,6 +669,7 @@ class LivePublisherTest {
             spoken,
             verbosity = VolatileVerbosity().apply { set(FeedVerbosity.SUMMARY) },
             finalAnswer = { "LA RESPUESTA" },
+            richVoice = false,
         )
         publisher.tick() // birth
         spoken.clear()
@@ -883,6 +888,113 @@ class LivePublisherTest {
         now += 5_100L
         publisher.pingTick()
         assertTrue("✏️ Editando archivo report.txt +5 −3" in spoken, "the ladder accumulates the file: $spoken")
+    }
+
+    @Test
+    fun theVoiceSpeaksProseSegmentsAsRichMessages() = runTest {
+        // THE VIOLET CHANNEL (5/11): the LLM's mid-turn prose — «El meter es
+        // real…» — accumulates while streaming and at the tool boundary it
+        // SPENDS: one rich pullquote message, in order, then the close
+        val taskId = "task-9"
+        val hub = LiveHub()
+        hub.apply(frame(taskId, "task_run_started", at = 1_000), nowMs = 1_000)
+        hub.apply(frame(taskId, "agent_thought_chunk", at = 1_050, "content" to JsonPrimitive("arranco")), nowMs = 1_050)
+        val wire = Wire()
+        val spoken = mutableListOf<String>()
+        var now = 2_000L
+        val publisher = publisher(wire, hub, spoken, clock = { now })
+        publisher.tick() // the birth
+        // the model TALKS (the prose streams), then opens a tool
+        hub.apply(
+            frame(taskId, "agent_message_chunk", at = 2_100, "content" to JsonPrimitive("El meter es real: 55.337 tokens.")),
+            nowMs = 2_100,
+        )
+        hub.apply(
+            frame(taskId, "tool_call", at = 2_200, "toolId" to JsonPrimitive("tb"), "toolName" to JsonPrimitive("Read"),
+                "input" to buildJsonObject { put("file_path", "/w/a.kt") }),
+            nowMs = 2_200,
+        )
+        now += 31_000L
+        publisher.tick()
+        val rich = wire.bodies.firstOrNull { it.second == "sendRichMessage" }
+        assertTrue(rich != null, "the prose flew as a RICH message: methods=${wire.bodies.map { it.second }}")
+        assertTrue("El meter es real" in rich.first, "the violet body: ${rich.first.take(400)}")
+        assertTrue("\"pullquote\"" in rich.first, "the violet block type: ${rich.first.take(300)}")
+        // a SECOND segment spends at the NEXT boundary: the ladder keeps order
+        hub.apply(
+            frame(taskId, "tool_call_update", at = now + 100, "status" to JsonPrimitive("completed"), "toolId" to JsonPrimitive("tb")),
+            nowMs = now + 100,
+        )
+        hub.apply(
+            frame(taskId, "agent_message_chunk", at = now + 200, "content" to JsonPrimitive("Segundo tramo.")),
+            nowMs = now + 200,
+        )
+        hub.apply(frame(taskId, "task_complete", at = now + 300, "stopReason" to JsonPrimitive("end_turn")), nowMs = now + 300)
+        now += 31_000L
+        publisher.tick()
+        val richCount = wire.bodies.count { it.second == "sendRichMessage" }
+        assertTrue(richCount >= 2, "each segment its own violet message: $richCount")
+        assertTrue(
+            wire.bodies.any { it.second == "sendRichMessage" && "Segundo tramo." in it.first },
+            "the second segment spoke its own violet message",
+        )
+    }
+
+    @Test
+    fun theSealSpeaksTheFinalAnswerViolet() = runTest {
+        val taskId = "task-9"
+        val hub = LiveHub()
+        hub.apply(frame(taskId, "task_run_started", at = 1_000), nowMs = 1_000)
+        hub.apply(frame(taskId, "agent_thought_chunk", at = 1_050, "content" to JsonPrimitive("p")), nowMs = 1_050)
+        val wire = Wire()
+        val publisher = publisher(wire, hub, finalAnswer = { "La respuesta final con `codigo`." })
+        publisher.tick()
+        hub.apply(frame(taskId, "task_complete", at = 1_200, "stopReason" to JsonPrimitive("end_turn")), nowMs = 1_200)
+        publisher.tick()
+        val answerRich = wire.bodies.lastOrNull { it.second == "sendRichMessage" && "respuesta final" in it.first }
+        assertTrue(answerRich != null, "the final answer is a violet message: ${wire.bodies.map { it.second }}")
+    }
+
+    @Test
+    fun theCoTSealsAsTheNativeExpandableQuote() = runTest {
+        val taskId = "task-9"
+        val hub = LiveHub()
+        hub.apply(frame(taskId, "task_run_started", at = 1_000), nowMs = 1_000)
+        hub.apply(frame(taskId, "agent_thought_chunk", at = 1_050, "content" to JsonPrimitive("arranco")), nowMs = 1_050)
+        val wire = Wire()
+        val spoken = mutableListOf<String>()
+        var now = 2_000L
+        val publisher = publisher(wire, hub, spoken, clock = { now })
+        publisher.tick()
+        hub.apply(
+            frame(taskId, "agent_thought_chunk", at = 2_100, "content" to JsonPrimitive("p".repeat(3400))),
+            nowMs = 2_100,
+        )
+        now += 31_000L
+        publisher.tick()
+        val thinking = wire.bodies.firstOrNull { it.second == "sendRichMessage" && "expandable_blockquote" in it.first }
+        assertTrue(thinking != null, "the CoT is a NATIVE expandable quote: ${wire.bodies.map { it.second }}")
+    }
+
+    @Test
+    fun richVoiceOffKeepsTheOldShapes() = runTest {
+        val taskId = "task-9"
+        val hub = LiveHub()
+        hub.apply(frame(taskId, "task_run_started", at = 1_000), nowMs = 1_000)
+        hub.apply(frame(taskId, "agent_message_chunk", at = 1_100, "content" to JsonPrimitive("hablo")), nowMs = 1_100)
+        hub.apply(
+            frame(taskId, "tool_call", at = 1_200, "toolId" to JsonPrimitive("tb"), "toolName" to JsonPrimitive("Read"),
+                "input" to buildJsonObject { put("file_path", "/w/a.kt") }),
+            nowMs = 1_200,
+        )
+        val wire = Wire()
+        val spoken = mutableListOf<String>()
+        var now = 2_000L
+        val publisher = publisher(wire, hub, spoken, clock = { now }, richVoice = false)
+        publisher.tick()
+        now += 31_000L
+        publisher.tick()
+        assertEquals(0, wire.bodies.count { it.second == "sendRichMessage" }, "the knob OFF: no rich sends")
     }
 
     @Test
