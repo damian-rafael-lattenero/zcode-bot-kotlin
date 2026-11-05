@@ -903,6 +903,7 @@ private fun buildPoller(
         // (`TgConfig.load(remote).ownerUserId`): the destructive taps'
         // second lock reads the config at the tap, one truth, no copy.
         ownerUserId = { TgConfig.load(remote).ownerUserId },
+        pinnedSid = BotSessionKnob.load(File(cfg.homeDir, SendKnob.FILE_NAME)),
     )
     // THE MIRROR'S DRAFT SOURCE (the late bind — the refresher was born
     // before the commands): the commands own the draft and its TTL law

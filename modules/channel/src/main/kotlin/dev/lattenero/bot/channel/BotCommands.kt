@@ -233,6 +233,16 @@ class BotCommands(
      * destructive tap — never «the first tap that arrives».
      */
     private val ownerUserId: () -> Long? = { null },
+    /**
+     * 2026-11-05 — THE DEDICATED CONVERSATION (`bind_task_id` in
+     * daemon.json): free text lands HERE, always — never re-aimed to the
+     * app's open conversation (the follow-the-open router is skipped
+     * entirely). An armed ✍️ order and an explicit /tasks new intent still
+     * outrank the pin (see [routeCore]'s ladder). Null (unpinned) = the
+     * router behaves exactly as before. The daemon's wiring reads the knob
+     * (BotSessionKnob) — tests inject the sid directly.
+     */
+    private val pinnedSid: String? = null,
 ) {
 
     /** /nuclear's single-flight companion: the in-process half (the wiring adds the cross-restart mtime gate). */
@@ -997,6 +1007,24 @@ class BotCommands(
         // nombrada — el fork lo entrega en ESA sesión sin tocar la ocupada,
         // así que ni el busy-park ni los refusals le aplican.
         armedOrder?.let { return fireArmedOrder(it, text, updateId) }
+        // LA CONVERSACIÓN DEDICADA (2026-11-05, después de la orden armada,
+        // antes de la tabla): con `bind_task_id` el texto SIEMPRE va al pin —
+        // la tabla follow-the-open no se consulta. /tasks new (newIntent) es
+        // una intención explícita de conversación NUEVA y la salta.
+        pinnedSid?.takeIf { !newIntent }?.let { pin ->
+            val facts = routeFacts()
+            val plan = planRoutePinned(facts, pin)
+            logger.info {
+                "route: update=$updateId PINNED ${pin.takeLast(SID_LOG_TAIL)} -> " +
+                    "${plan::class.simpleName} ${plan.reasonForLog()}"
+            }
+            return when (plan) {
+                is RoutePlan.Enqueue -> enqueueOrRefuse(text, updateId, plan.sid)
+                is RoutePlan.Fire -> firePlan(plan, text, updateId, facts)
+                is RoutePlan.Refuse -> BotReply(plan.reason)
+                is RoutePlan.BusyRebind -> BotReply(RouteTexts.BUSY_REBIND)
+            }
+        }
         val facts = routeFacts()
         val plan = planRoute(facts, newIntent)
         logger.info {
@@ -3139,6 +3167,7 @@ class BotCommands(
         internal const val SUBAGENT_SESSION_PREFIX = "sess_subagent_"
 
         /** The armed order's log preview cap. */
+        private const val SID_LOG_TAIL = 12
         private const val ORDER_LOG_PREVIEW = 60
 
         /** The ⚡/⏳ question's window: an answer older than this is stale. */
