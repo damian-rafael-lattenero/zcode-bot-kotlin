@@ -73,6 +73,7 @@ class LivePublisherTest {
         cooldown: Cooldown = Cooldown(readFile = { null }),
         finalAnswer: suspend (String) -> String? = { null },
         clock: () -> Long = { TICK_MS },
+        resubscribe: suspend (String) -> Unit = {},
         // NOT last: the existing tests' trailing lambda binds resolveTitle
         onSeal: suspend (SealFacts) -> Unit = {},
         resolveTitle: suspend (String) -> String? = { null },
@@ -90,6 +91,7 @@ class LivePublisherTest {
             finalAnswer = finalAnswer,
             clock = clock,
             verbosity = verbosity,
+            resubscribe = resubscribe,
             resolveTitle = resolveTitle,
             onSeal = onSeal,
         )
@@ -128,6 +130,40 @@ class LivePublisherTest {
         publisher.tick()
         val birth = wire.bodies.first { it.second == "sendMessage" }.first
         assertTrue("644150daf013" in birth) // the sid tail — nothing invented
+    }
+
+    @Test
+    fun anAttachToAnIdleSessionBirthsItsHonestCard() = runTest {
+        // THE 5/11 BLANK CARD (the owner: «silencio de radio total»): the sa:
+        // attach to a STORED child whose turn was over seeded an Idle state
+        // the publisher refused to birth — the phone showed NOTHING. The
+        // await law: the attach births the honest card, the watchdog never
+        // barks at it (there is no bus to revive), and the first real frame
+        // of the awaited turn takes the card over.
+        val child = "sess_subagent_agent_quiet"
+        val hub = LiveHub()
+        var now = TICK_MS
+        val wire = Wire()
+        var resubscribes = 0
+        val publisher = publisher(wire, hub, clock = { now }, resubscribe = { resubscribes += 1 })
+        hub.watchTaskId(child, now)
+        publisher.tick()
+        val birth = wire.bodies.first { it.second == "sendMessage" }.first
+        assertTrue("👁 <b>«_agent_quiet»</b> attachado" in birth, "the honest idle card BORN: $birth")
+        assertTrue("ningún turno corriendo" in birth)
+        // the watchdog stays silent: an awaited idle session has no dead bus
+        now += 120_000L
+        publisher.tick()
+        assertEquals(0, resubscribes, "no resubscribe bark on an awaited idle card")
+        // the awaited turn arrives: the card speaks its REAL phase
+        hub.apply(frame(child, "task_run_started", at = now, "startedAt" to JsonPrimitive(now.toLong())), nowMs = now)
+        hub.apply(frame(child, "agent_thought_chunk", at = now + 100, "content" to JsonPrimitive("p".repeat(2500))), nowMs = now + 100)
+        now += 3_000L
+        publisher.tick()
+        // the card's update may ride the EDIT leg (the 5/11 reclaim window)
+        val live = wire.bodies.last { it.second in setOf("sendMessage", "editMessageText") }.first
+        assertTrue("Procesando" in live, "the real turn took the card over: $live")
+        assertTrue("ningún turno corriendo" !in live)
     }
 
     @Test

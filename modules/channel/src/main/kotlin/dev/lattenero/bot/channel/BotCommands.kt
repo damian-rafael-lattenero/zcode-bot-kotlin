@@ -1785,7 +1785,7 @@ class BotCommands(
         // THE ATTACH'S INSTANT SWITCH (4/11): an idle task never streams, so
         // without this the card AND the 🎯 stayed on the previous turn until
         // its next event — the owner's «no me la deja marcada».
-        hub.watchTaskId(sid)
+        hub.watchTaskId(sid, clock())
         logger.info { "callback 🟢 t: pipe ATTACHED to $sid (running=$live) — bind attempt rides along" }
         val title = row?.title?.takeIf { it.isNotEmpty() } ?: sid.takeLast(SID_TAIL)
         val watchLine = if (live) {
@@ -2310,7 +2310,7 @@ class BotCommands(
                     // THE INSTANT SWITCH (4/11): the fold must BE the child
                     // NOW — a quiet child never streams first, and without
                     // this the card stayed the parent's until its next event.
-                    hub.watchTaskId(sess)
+                    hub.watchTaskId(sess, clock())
                     logger.info { "callback 🔵 sa: STORED session ATTACHED $sess — pinned" }
                     return BotReply("👁 Subagente attachado — su turno completo fluye acá; se sella cuando cierra.")
                 }
