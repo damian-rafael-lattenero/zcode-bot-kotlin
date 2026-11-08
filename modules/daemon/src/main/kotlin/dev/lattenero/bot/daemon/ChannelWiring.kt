@@ -384,6 +384,8 @@ internal fun wireChannel(
     // captured the holder): the same snapshot read the /mode card uses, the
     // guard set dies with the process so the fork's truth is re-checked after
     // every restart (an owner-chosen mode is never stomped: it IS in meta.mode).
+    // The guard's invariant (the audit's pin): PUMP-OWNED, PROCESS-LIFETIME —
+    // the pump's stream callback is its only writer and nothing clears it.
     val yoloGuard = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
     enforceDefaultMode = { taskId ->
         enforceDefaultModeOnRunStart(

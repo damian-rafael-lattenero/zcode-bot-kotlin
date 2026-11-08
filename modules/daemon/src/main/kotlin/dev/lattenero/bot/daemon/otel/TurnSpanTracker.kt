@@ -34,6 +34,17 @@ import kotlinx.serialization.json.JsonPrimitive
  * Zero I/O: the taps are in-memory calls (the recorder, or the OTel SDK's
  * span start/end — the export rides the SDK's own batch thread). The
  * clock is read only where a real stamp is missing.
+ *
+ * THE TAP INVARIANT (pinned by the concurrency audit): the taps fire UNDER
+ * the tracker's monitor (each `on*` leg's `synchronized` section — state
+ * and event are one linearized step). That is only safe while the taps
+ * stay pump-owned, exception-guarded and IO-free — compute under lock,
+ * emit after, or the lock becomes a latency stall. Concretely: (a)
+ * PUMP-OWNED — [onFrame] runs on the channel pump's single
+ * `onStreamEvent` coroutine, never fanned out to a pool; (b)
+ * EXCEPTION-GUARDED — [GuardedSpanTaps] wraps the edge, so no tap failure
+ * escapes the monitor; (c) IO-FREE — no tap ever waits on network or disk
+ * (the export is the SDK's batch thread's business, see [OtelSpanTaps]).
  */
 // one private reader per frame kind + the small helpers — the class IS the
 // lifecycle's dispatch (the bus producer's own shape)

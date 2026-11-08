@@ -34,6 +34,14 @@ import java.util.concurrent.TimeUnit
  *
  * The timestamps are the events' own stamps (the fork's or the
  * reception's): the span's duration IS the real thing's duration.
+ *
+ * THE TAP INVARIANT ([TurnSpanTracker]'s law, mirrored at the edge): these
+ * handlers fire UNDER the tracker's monitor — they must stay pump-owned,
+ * exception-guarded ([GuardedSpanTaps] below is the edge's guard) and
+ * IO-free — compute under lock, emit after, or the lock becomes a latency
+ * stall. Span start/end are in-memory SDK calls; the EXPORT is async, it
+ * rides the OTel SDK's own batch thread — the reason this class may sit
+ * inside a lock at all: nothing here ever waits on network or disk.
  */
 // one private handler per event kind — the class IS the edge's mapping
 @Suppress("TooManyFunctions")
