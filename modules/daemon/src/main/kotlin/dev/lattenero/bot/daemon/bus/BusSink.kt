@@ -1,5 +1,7 @@
 package dev.lattenero.bot.daemon.bus
 
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.io.File
 import java.io.FileOutputStream
 import java.io.RandomAccessFile
@@ -19,13 +21,18 @@ import java.io.RandomAccessFile
  * - nothing here THROWS at the caller (the bus never breaks a turn): the
  *   failure is counted and logged as one line in daemon.jsonl.
  *
- * The lock serializes the daemon's two writers (the stream callback and the
- * poller's prompt tap). Only this JVM writes the file — the Python
- * publisher that used to share it was retired with the cutover.
+ * THE LOCK IS A kap/[Mutex] — suspending, single-writer (the audit's BUS
+ * finding): the daemon's two writers (the pump's stream callback and the
+ * poller's prompt tap) are COROUTINES, and the old `synchronized` block
+ * pinned a thread across the file syscalls (exists-check, write+flush, the
+ * rollback's `setLength`). A suspending mutex serializes them exactly the
+ * same while the second writer waits WITHOUT holding a thread. Only this
+ * JVM writes the file — the Python publisher that used to share it was
+ * retired with the cutover.
  */
 class BusSink(private val file: File, private val log: (String) -> Unit = {}) {
 
-    private val lock = Any()
+    private val lock = Mutex()
 
     /** Appends that failed — the in-process counter Python kept (`bus.failures`). */
     @Volatile
@@ -37,13 +44,17 @@ class BusSink(private val file: File, private val log: (String) -> Unit = {}) {
     var written: Long = 0
         private set
 
-    /** Appends ONE event line. True when written; false when the knob is off (caller-gated) or the write failed. */
+    /**
+     * Appends ONE event line. True when written; false when the knob is off
+     * (caller-gated) or the write failed. Suspend: both callers (the
+     * producer's emit legs) already are — the append never pins a thread.
+     */
     @Suppress("TooGenericExceptionCaught") // the bus never breaks a turn: every write failure is the same answer
-    fun append(line: String): Boolean {
+    suspend fun append(line: String): Boolean {
         val payload = (if (line.endsWith("\n")) line else "$line\n").toByteArray(Charsets.UTF_8)
-        synchronized(lock) {
+        return lock.withLock {
             val before = if (file.exists()) file.length() else 0L
-            return try {
+            try {
                 file.parentFile?.mkdirs()
                 FileOutputStream(file, true).use { out ->
                     out.write(payload) // ONE write per line — O_APPEND
