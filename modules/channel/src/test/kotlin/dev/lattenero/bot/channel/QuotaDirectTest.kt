@@ -2,6 +2,7 @@ package dev.lattenero.bot.channel
 
 import kotlinx.coroutines.runBlocking
 import java.io.IOException
+import java.time.ZoneId
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -193,6 +194,36 @@ class QuotaDirectTest {
         assertTrue(
             "🔒 Limit: 9,999/10,000 credits (99.96%) ⚠️" in text,
             "🔒 for any other number — the owner's separator law, the unit never moves",
+        )
+    }
+
+    @Test
+    fun renderResetIsAFixedFunctionOfTheInjectedNowAcrossTheDayBoundary() {
+        // The documented byte-exact render must not hide a wall-clock read
+        // (OpencodeQuota.render's pattern): fixed nowMs + fixed zone → fixed
+        // bytes across the day AND month boundary, whatever the real clock says.
+        val utc = ZoneId.of("UTC")
+        fun resetsText(resetMs: Long, nowMs: Long): String = QuotaDirect.renderQuota(
+            QuotaDirect.QuotaSnapshot(
+                level = null,
+                windows = listOf(QuotaDirect.QuotaWindow(5, 31.0, 120.0, 26.0, resetMs)),
+            ),
+            nowMs = nowMs,
+            zone = utc,
+        ).substringAfter("credits (26%) · ")
+
+        // HH:MM branch: the reset is still the same UTC day as the injected now.
+        assertEquals(
+            "resets 23:30",
+            resetsText(1_700_004_600_000L, 1_699_996_320_000L), // 2023-11-14T23:30Z vs 12:00Z
+            "same-day reset (injected now) → HH:MM",
+        )
+
+        // dd/MM HH:MM branch: the reset lands the next day, across Nov→Dec.
+        assertEquals(
+            "resets 01/12 12:00",
+            resetsText(1_701_432_000_000L, 1_701_345_600_000L), // 2023-12-01T12:00Z vs 11-30T12:00Z
+            "next-day reset (injected now) → dd/MM HH:MM",
         )
     }
 
