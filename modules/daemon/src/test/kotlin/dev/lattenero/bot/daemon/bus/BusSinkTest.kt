@@ -3,6 +3,8 @@ package dev.lattenero.bot.daemon.bus
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.joinAll
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
@@ -26,7 +28,7 @@ class BusSinkTest {
     }
 
     @Test
-    fun everyAppendIsOneCompleteLineEndedByNewline() {
+    fun everyAppendIsOneCompleteLineEndedByNewline() = runBlocking {
         val file = tempFile()
         val sink = BusSink(file)
         assertTrue(sink.append("""{"id":"a","n":1}"""))
@@ -41,7 +43,7 @@ class BusSinkTest {
     }
 
     @Test
-    fun aMissingNewlineIsAddedNeverDuplicated() {
+    fun aMissingNewlineIsAddedNeverDuplicated() = runBlocking {
         val file = tempFile()
         val sink = BusSink(file)
         sink.append("{\"id\":\"a\"}\n")
@@ -49,7 +51,7 @@ class BusSinkTest {
     }
 
     @Test
-    fun parentDirectoriesAreCreated() {
+    fun parentDirectoriesAreCreated() = runBlocking {
         val file = File(tempFile().parentFile, "deep/er/bus-events.jsonl")
         val sink = BusSink(file)
         assertTrue(sink.append("""{"id":"a"}"""))
@@ -57,7 +59,7 @@ class BusSinkTest {
     }
 
     @Test
-    fun aFailedWriteIsCountedLoggedAndNeverThrown() {
+    fun aFailedWriteIsCountedLoggedAndNeverThrown() = runBlocking {
         val dir = Files.createTempDirectory("bus-sink-dir").toFile() // a DIRECTORY is not appendable
         val logged = mutableListOf<String>()
         val sink = BusSink(dir, log = { logged += it })
@@ -80,5 +82,32 @@ class BusSinkTest {
         val lines = file.readText().split("\n").filter { it.isNotEmpty() }
         assertEquals(60, lines.size)
         lines.forEach { line -> Json.parseToJsonElement(line).jsonObject }
+    }
+
+    /**
+     * THE SINGLE-WRITER LAW under the suspending mutex (the audit's BUS
+     * finding): two continuous appenders on real worker threads, 100 lines
+     * each — 200 intact lines, no torn tail, counters exact. The mutex makes
+     * the interleaving serial at the line's granularity; the O_APPEND one-
+     * write law keeps each landed line whole.
+     */
+    @Test
+    fun twoConcurrentAppendersWriteTwoHundredIntactLinesWithExactCounters() = runBlocking {
+        val file = tempFile()
+        val sink = BusSink(file)
+        val jobs = listOf(
+            launch(Dispatchers.Default) {
+                repeat(100) { n -> sink.append("""{"w":"a","n":$n,"pad":"${"x".repeat(n * 3)}"}""") }
+            },
+            launch(Dispatchers.Default) {
+                repeat(100) { n -> sink.append("""{"w":"b","n":$n,"pad":"${"y".repeat(n * 5)}"}""") }
+            },
+        )
+        jobs.joinAll()
+        assertEquals(200, sink.written, "every append landed — the mutex loses none")
+        assertEquals(0, sink.failures)
+        val lines = file.readText().split("\n").filter { it.isNotEmpty() }
+        assertEquals(200, lines.size)
+        lines.forEach { line -> Json.parseToJsonElement(line).jsonObject } // no torn tail anywhere
     }
 }

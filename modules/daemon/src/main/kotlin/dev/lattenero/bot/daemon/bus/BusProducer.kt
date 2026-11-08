@@ -336,7 +336,7 @@ class BusProducer(
     private fun sealAt(frame: ServerFrame.StreamEvent): Long =
         frame.at.takeIf { it > 0 } ?: clockMs()
 
-    private fun emit(kind: String, sid: String, turn: String, payload: JsonObject) {
+    private suspend fun emit(kind: String, sid: String, turn: String, payload: JsonObject) {
         val now = clockMs()
         val event = BusWire.event(kind, sid, turn, payload, Instant.ofEpochMilli(now), newId())
         sink.append(BusWire.line(event))
