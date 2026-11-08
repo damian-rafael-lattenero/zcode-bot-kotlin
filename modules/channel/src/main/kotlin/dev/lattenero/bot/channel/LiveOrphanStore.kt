@@ -1,5 +1,6 @@
 package dev.lattenero.bot.channel
 
+import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
@@ -17,10 +18,17 @@ import java.io.File
  * later). At boot the wiring reads this file, edits the orphan ONCE with
  * the honest terminal text, and clears it. Seals clear it too.
  */
+
+private val logger = KotlinLogging.logger {}
+
 class LiveOrphanStore(private val file: File) {
 
     data class Live(val messageId: Long, val taskId: String)
 
+    // best-effort by design (the degrade is lawful), but never SILENT: a
+    // save failure means the next restart leaves a frozen thinking-box lie
+    // with no trace — the debug line keeps it diagnosable.
+    @Suppress("TooGenericExceptionCaught")
     fun save(messageId: Long, taskId: String) {
         val body: JsonObject = buildJsonObject {
             put("message_id", messageId)
@@ -31,8 +39,8 @@ class LiveOrphanStore(private val file: File) {
             val tmp = File("${file.path}.tmp")
             tmp.writeText(body.toString())
             tmp.renameTo(file)
-        } catch (_: Exception) {
-            // best-effort by design: the worst case is one orphaned message
+        } catch (e: Exception) {
+            logger.debug(e) { "orphan seal never persisted (file=${file.path})" }
         }
     }
 
