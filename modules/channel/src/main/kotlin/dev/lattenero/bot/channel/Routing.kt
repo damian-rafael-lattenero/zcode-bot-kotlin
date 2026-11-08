@@ -99,19 +99,20 @@ internal fun planRoute(facts: RouteFacts, newIntent: Boolean): RoutePlan = when 
 
     // THE OWNER'S SELECTION (5/11): the tap IS the law — the text flies AT
     // the chosen sid (the atomic bindTaskId rides the wire every time, so
-    // no heuristic can re-aim it); mid-turn it parks on the CHOSEN one
-    facts.selectedSid != null -> selectedRoute(facts)
+    // no heuristic can re-aim it); mid-turn it parks on the CHOSEN one.
+    // Each arm's null check smart-casts the fact into the helper's non-null
+    // parameter — the typed flow replaces the !! assertions.
+    facts.selectedSid != null -> selectedRoute(facts, facts.selectedSid)
 
-    facts.activeTaskId != null && !facts.activeAlive -> tombstoneRoute(facts)
+    facts.activeTaskId != null && !facts.activeAlive -> tombstoneRoute(facts, facts.activeTaskId)
 
-    facts.activeTaskId != null -> activeRoute(facts)
+    facts.activeTaskId != null -> activeRoute(facts, facts.activeTaskId)
 
     else -> freshBindRoute(facts)
 }
 
-/** An explicit /tasks tap holds the aim: the freshest-row heuristic is mute. */
-private fun selectedRoute(facts: RouteFacts): RoutePlan {
-    val selected = facts.selectedSid!!
+/** An explicit /tasks tap holds the aim: the freshest-row heuristic is mute. [selected]: the arm's smart-cast fact. */
+private fun selectedRoute(facts: RouteFacts, selected: String): RoutePlan {
     return if (selected in facts.running) {
         RoutePlan.Enqueue(
             selected,
@@ -126,10 +127,9 @@ private fun selectedRoute(facts: RouteFacts): RoutePlan {
     }
 }
 
-/** The bound task is deleted/archived: naked inbound would CREATE — re-aim or refuse. */
+/** The bound task is deleted/archived: naked inbound would CREATE — re-aim or refuse. [active]: the smart-cast fact. */
 @Suppress("ReturnCount") // the ladder: running wins, then the open row, then the honest refusal
-private fun tombstoneRoute(facts: RouteFacts): RoutePlan {
-    val active = facts.activeTaskId!!
+private fun tombstoneRoute(facts: RouteFacts, active: String): RoutePlan {
     // running AND deleted in the index: the index lags (a mid-turn task is
     // never deleted) — trust the sessions-index, park the text
     if (active in facts.running) return RoutePlan.Enqueue(active, "active deleted in index but running (index lag)")
@@ -137,9 +137,8 @@ private fun tombstoneRoute(facts: RouteFacts): RoutePlan {
     return RoutePlan.Fire(open, bind = true, reason = "tombstone: bound $active is deleted — rebind to open")
 }
 
-/** A live bound task: the open conversation decides stay-vs-re-aim. */
-private fun activeRoute(facts: RouteFacts): RoutePlan {
-    val active = facts.activeTaskId!!
+/** A live bound task: the open conversation decides stay-vs-re-aim. [active] is the arm's smart-cast fact. */
+private fun activeRoute(facts: RouteFacts, active: String): RoutePlan {
     val open = facts.openSid
     return when {
         open == null || open == active ->
