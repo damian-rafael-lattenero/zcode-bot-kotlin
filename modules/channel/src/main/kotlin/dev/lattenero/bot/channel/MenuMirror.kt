@@ -14,8 +14,9 @@ import kotlinx.serialization.json.JsonPrimitive
  *
  * PURE: a value state ([State]), one decision ([shouldEdit]) — the
  * effects (the live re-read, the Telegram edit) live in
- * [MenuMirrorRefresher], which holds the state in one volatile cell and
- * folds it exactly like the render spine folds [RenderState].
+ * [MenuMirrorRefresher], which holds the state in one mutex-backed kap
+ * `Ref` and folds it atomically, exactly like the render spine folds
+ * [RenderState].
  *
  * The degrade is honest by construction: the fork's event does not exist
  * on the wire today (it ships with a future fork deploy), so until then
