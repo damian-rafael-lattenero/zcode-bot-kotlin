@@ -6,7 +6,6 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import java.math.BigDecimal
 import java.time.Instant
-import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
@@ -109,9 +108,15 @@ object QuotaDirect {
      * HH:MM` (dd/MM HH:MM when the reset is not today) and ⚠️ from 75%.
      * Python's trailing «Per-session detail: /usage» is left out on
      * purpose: this bot has no /usage — pointing at a dead command would
-     * be a lie, and honesty beats parity.
+     * be a lie, and honesty beats parity. The clock rides in ([nowMs],
+     * OpencodeQuota.render's pattern): the bytes are a function of the
+     * inputs, the wall clock never leaks into the render.
      */
-    fun renderQuota(snapshot: QuotaSnapshot): String {
+    fun renderQuota(
+        snapshot: QuotaSnapshot,
+        nowMs: Long = System.currentTimeMillis(),
+        zone: ZoneId = ZoneId.systemDefault(),
+    ): String {
         val lines = mutableListOf("📊 <b>Coding plan</b>")
         snapshot.windows.forEach { w ->
             val name = when (w.hours) {
@@ -122,7 +127,7 @@ object QuotaDirect {
             val pctText = w.pct?.let { " (${fmtPct(it)}%)" } ?: ""
             val alert = if ((w.pct ?: 0.0) >= ALERT_PCT) " ⚠️" else ""
             val reset = w.resetMs?.takeIf { it != 0L } // Python: falsy reset_ms → no text
-                ?.let { " · resets ${fmtReset(it)}" } ?: ""
+                ?.let { " · resets ${fmtReset(it, nowMs, zone)}" } ?: ""
             lines.add("$name: ${fmtNum(w.used)}/${fmtNum(w.limit)} credits$pctText$reset$alert")
         }
         return lines.joinToString("\n")
@@ -143,6 +148,7 @@ object QuotaDirect {
     suspend fun report(
         providerJson: () -> String?,
         fetch: suspend (url: String, token: String) -> String,
+        nowMs: Long = System.currentTimeMillis(),
     ): String? {
         val key = providerJson()?.let { providerKey(it) } ?: return null
         val raw = try {
@@ -150,7 +156,7 @@ object QuotaDirect {
         } catch (e: Exception) {
             return null // the fallback ladder owns the recovery — nothing flies to the user
         }
-        return parseQuotaResponse(raw)?.let { renderQuota(it) }
+        return parseQuotaResponse(raw)?.let { renderQuota(it, nowMs) }
     }
 
     // ── Formatting helpers — Python's reset/percent shapes + the owner's number law (2/11) ──
@@ -176,11 +182,13 @@ object QuotaDirect {
     private fun fmtPct(pct: Double): String =
         if (pct == pct.toLong().toDouble()) pct.toLong().toString() else pct.toString()
 
-    /** Python's datetime_dt: HH:MM today, dd/MM HH:MM otherwise (local zone). */
-    private fun fmtReset(epochMs: Long): String {
-        val zone = ZoneId.systemDefault()
+    /** Python's datetime_dt: HH:MM when the reset lands on the INJECTED
+     *  today's local date, dd/MM HH:MM otherwise — the same shape
+     *  OpencodeQuota.fmtReset speaks; the wall clock never leaks in. */
+    private fun fmtReset(epochMs: Long, nowMs: Long, zone: ZoneId): String {
         val dt = Instant.ofEpochMilli(epochMs).atZone(zone)
-        return if (dt.toLocalDate() == LocalDate.now(zone)) dt.format(TIME_FMT)
+        val today = Instant.ofEpochMilli(nowMs).atZone(zone).toLocalDate()
+        return if (dt.toLocalDate() == today) dt.format(TIME_FMT)
         else dt.format(DATE_TIME_FMT)
     }
 
