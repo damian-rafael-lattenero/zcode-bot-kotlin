@@ -480,7 +480,7 @@ internal fun wireChannel(
             api = lanes.api,
             cooldown = Cooldown(readFile = { File(pythonState, LaneFiles.COOLDOWN).takeIf { it.exists() } }),
         )
-        mirrorRefresh = MenuMirrorRefresher(
+        mirrorRefresh = MenuMirrorRefresher.create(
             readMode = { taskId, ws ->
                 (client.query(ChannelQuery.TaskSnapshot(taskId, ws, messageLimit = 1)) as? QueryAnswer.Ok)
                     ?.let { ModeMenu.currentFrom(it.resultJson) }

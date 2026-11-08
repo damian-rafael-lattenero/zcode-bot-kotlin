@@ -40,7 +40,7 @@ class MenuMirrorRefresherTest {
         val edit: EditSpy = EditSpy(),
         clock: () -> Long,
     ) {
-        val refresher = MenuMirrorRefresher(
+        val refresher = MenuMirrorRefresher.create(
             readMode = { _, _ -> modeNow },
             readPlan = { _ -> planNow },
             draftOf = { draft },
@@ -50,7 +50,7 @@ class MenuMirrorRefresherTest {
         )
     }
 
-    private fun modeRegistered(
+    private suspend fun modeRegistered(
         text: String = "🎯 «arreglá el login»\n🎛 Modo: <b>yolo</b>\nTocá para cambiar (aplica al próximo turno):",
         atMs: Long = 1_000_000L,
     ): RefresherHarness = RefresherHarness(clock = { now }).apply {
@@ -171,7 +171,7 @@ class MenuMirrorRefresherTest {
     }
     """.trimIndent()
 
-    private fun planRegistered(text: String): RefresherHarness = RefresherHarness(
+    private suspend fun planRegistered(text: String): RefresherHarness = RefresherHarness(
         planNow = PlanMenu.parse(planViewsJson()),
         clock = { now },
     ).apply {
