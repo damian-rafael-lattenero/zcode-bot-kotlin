@@ -698,6 +698,7 @@ and retired code:
 | `bin/install-fork-f81b.sh` | installs a freshly built fork the moment the app quits — an older deploy path, superseded by `~/Projects/ZCode/scripts/build-install.nu` and the `deploy-fork` job (§2.5) | no |
 | `capture.sh`, `nodock.sb` | payload-capture debug hook and its sandbox profile | no |
 | `backups/` (10 dirs) | deploy backups from 27–28/10 | no |
+| `session-brain.nu`, `prompt-laws.nu`, `rag-guard.nu`, `english-law.nu`, `nushell-law.nu`, `nushell-typing.nu`, `session-learn.nu` | the **session hooks** registered in `~/.zcode/cli/config.json` (`hooks.events`): brain memory at SessionStart, per-prompt laws, RAG/typing/English guards on Bash/Edit/Write, and since 2026-11-08 **`session-learn.nu` on Stop** — publishes every session's final reply to `~/.zcode/agent-brain/bus-events.jsonl` (`source=hook`, `kind=turn.completed`, `payload.reply`) so the brain learns from ALL sessions, not only the bot-bound one; per-turn log at `logs/session-learn.jsonl` | **YES — fires in new sessions** |
 
 `bin/bot-revive` deserves its own line in the incident book: an emergency
 script that would fail *and say so* (`✗ the poller agent would not
