@@ -11,6 +11,7 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.isSuccess
 import java.io.IOException
 import kotlin.time.Duration.Companion.seconds
+import kotlinx.coroutines.CancellationException
 
 /** /quota's direct leg budget: ONE attempt, short — the channel fallback is the retry. */
 private val QUOTA_HTTP_TIMEOUT = 5.seconds
@@ -27,7 +28,8 @@ private val QUOTA_HTTP_TIMEOUT = 5.seconds
  * outlives the call (no daemon-lifecycle plumbing for a command typed by
  * hand). Failures THROW — the caller's honest-null boundary owns them.
  */
-@Suppress("TooGenericExceptionCaught") // every transport failure must pass the redaction law — none flies raw
+// the redaction law + the cancellation rethrow — each refusal its own honest failure
+@Suppress("TooGenericExceptionCaught", "ThrowsCount")
 internal suspend fun quotaBearerGet(
     url: String,
     token: String,
@@ -46,6 +48,8 @@ internal suspend fun quotaBearerGet(
                 header(HttpHeaders.Accept, "application/json")
                 headers.forEach { (name, value) -> header(name, value) }
             }
+        } catch (e: CancellationException) {
+            throw e // structured concurrency: cancellation is never laundered into an IOException
         } catch (e: Exception) {
             // the exception's own text may embed anything — the class name
             // is the only witness the log gets (TgApi's law, header-flavored)

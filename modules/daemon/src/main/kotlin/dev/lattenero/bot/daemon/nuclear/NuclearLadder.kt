@@ -1,6 +1,7 @@
 package dev.lattenero.bot.daemon.nuclear
 
 import io.github.oshai.kotlinlogging.KotlinLogging
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
@@ -193,6 +194,8 @@ class NuclearLadder(
     private suspend fun stopAllStep(outcomes: MutableList<StepOutcome>): Int {
         val stopped = try {
             stopAll()
+        } catch (e: CancellationException) {
+            throw e // shutdown cancelling is not a failed step — the ladder never outruns its own cancellation
         } catch (e: Exception) {
             logger.warn { "nuclear stopAll failed (the ladder continues): ${e.message}" }
             0

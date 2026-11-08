@@ -1,6 +1,7 @@
 package dev.lattenero.bot.channel
 
 import dev.lattenero.bot.contracts.PyText
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -189,6 +190,8 @@ object OpencodeQuota {
         val target = resolve(json, providerId) ?: return null
         val raw = try {
             fetch(target.url, target.key)
+        } catch (e: CancellationException) {
+            throw e // cancellation is not a quota failure: the cancelled job must see it
         } catch (e: Exception) {
             return null // the ladder speaks the degrade — nothing raw flies to the user
         }

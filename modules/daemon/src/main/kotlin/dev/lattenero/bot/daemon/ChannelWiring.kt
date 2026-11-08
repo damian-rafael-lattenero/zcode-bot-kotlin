@@ -72,6 +72,7 @@ import dev.lattenero.bot.transport.LastPh
 import dev.lattenero.bot.transport.TgApi
 import dev.lattenero.bot.transport.TgConfig
 import io.github.oshai.kotlinlogging.KotlinLogging
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -1071,6 +1072,8 @@ private suspend fun dispatchAttachment(
                 null,
             )
         }
+    } catch (e: CancellationException) {
+        throw e // cancellation is not an attachment failure — shutdown must not speak lies
     } catch (e: Exception) {
         logger.warn(e) { "attachment ${update.updateId} failed: ${e.message}" }
         speak("⚠️ No pude bajar «${update.filename}» (${e.message}) — mandalo de nuevo.", false, null)
@@ -1158,6 +1161,8 @@ private suspend fun filesOut(api: TgApi, cfg: TgConfig, rest: String): String {
         )
         logger.info { "file OUT: ${file.absolutePath} (${file.length()} bytes) → sendDocument" }
         "📎 <code>${file.name}</code> (${file.length() / BYTES_K}K) salió como documento."
+    } catch (e: CancellationException) {
+        throw e // cancellation is not a send failure — no «No pude mandar» lie on shutdown
     } catch (e: Exception) {
         logger.warn(e) { "file OUT failed: ${file.absolutePath}: ${e.message}" }
         "⚠️ No pude mandar «${file.name}»: ${e.message}"
@@ -1216,6 +1221,8 @@ private suspend fun answerCallback(api: TgApi, callbackId: String, text: String?
                 if (text != null) put("text", text)
             },
         )
+    } catch (e: CancellationException) {
+        throw e // cancellation is not a toast failure — the cancelled job keeps cancelling
     } catch (e: Exception) {
         logger.warn(e) { "answerCallbackQuery failed (the tap's action still ran): ${e.message}" }
     }
