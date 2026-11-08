@@ -10,7 +10,6 @@ import kotlinx.serialization.json.JsonPrimitive
 import java.math.BigDecimal
 import java.math.RoundingMode
 import java.time.Instant
-import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -3694,8 +3693,8 @@ class BotCommands(
                 ?: return "⚠️ Quota answer unparseable"
             val reason = root.str("unavailableReason")
             if (reason != null) return "📊 Quota unavailable: ${PyText.esc(reason)}"
-            renderQuotaWindows(root)?.let { return it }
-            renderStartPlanBuckets(root)?.let { return it }
+            renderQuotaWindows(root, nowMs)?.let { return it }
+            renderStartPlanBuckets(root, nowMs)?.let { return it }
             val remaining = root.obj("remaining")
                 ?: return "📊 Quota: no pool info (the app is not authenticated?)"
             val pct = remaining.int("percentage")
@@ -3728,7 +3727,7 @@ class BotCommands(
          * numbers raw (usage/unit/remaining), never a bot-invented window.
          */
         @Suppress("CyclomaticComplexMethod") // one guard per bucket-line field
-        private fun renderStartPlanBuckets(root: JsonObject): String? {
+        private fun renderStartPlanBuckets(root: JsonObject, nowMs: Long): String? {
             val limits = (root.obj("quota")?.get("limits") as? JsonArray)
                 ?.mapNotNull { it as? JsonObject }
                 ?.filter { it.num("unit") != null || it.num("usage") != null }
@@ -3746,7 +3745,7 @@ class BotCommands(
 
                     else -> "${tokenRaw(used)} usados"
                 }
-                val reset = lim.long("nextResetTime")?.let { " · resets ${fmtReset(it)}" } ?: ""
+                val reset = lim.long("nextResetTime")?.let { " · resets ${fmtReset(it, nowMs)}" } ?: ""
                 val pctAlert = if (total != null && total > 0 && (used / total) >= 0.75) " ⚠️" else ""
                 lines.add("• $label: $body$reset$pctAlert")
             }
@@ -3754,7 +3753,7 @@ class BotCommands(
         }
 
         /** Python's windows: only CREDIT_LIMIT rows, 5h first, the weekly after. */
-        private fun renderQuotaWindows(root: JsonObject): String? {
+        private fun renderQuotaWindows(root: JsonObject, nowMs: Long): String? {
             val limits = (root.obj("quota")?.get("limits") as? JsonArray)
                 ?.mapNotNull { it as? JsonObject }
                 ?.filter { it.str("type") == "CREDIT_LIMIT" }
@@ -3770,7 +3769,7 @@ class BotCommands(
                 val pct = lim.int("percentage")
                 val pctText = pct?.let { " ($it%)" } ?: ""
                 val alert = if ((pct ?: 0) >= 75) " ⚠️" else ""
-                val reset = lim.long("nextResetTime")?.let { " · resets ${fmtReset(it)}" } ?: ""
+                val reset = lim.long("nextResetTime")?.let { " · resets ${fmtReset(it, nowMs)}" } ?: ""
                 lines.add(
                     "$name: ${fmtNum(lim.num("currentValue"))}/${fmtNum(lim.num("usage"))}" +
                         " credits$pctText$reset$alert",
@@ -3876,11 +3875,18 @@ class BotCommands(
         private const val RAW_PER_K = 1_000.0
         private const val M_DECIMALS = 2
 
-        /** Python's datetime_dt: HH:MM today, dd/MM HH:MM otherwise (local zone). */
-        private fun fmtReset(epochMs: Long): String {
+        /**
+         * Python's datetime_dt: HH:MM when the reset lands on the INJECTED
+         * today's local date, dd/MM HH:MM otherwise (local zone). The branch
+         * is a function of the inputs — [nowMs] rides in from the caller
+         * (renderQuota → the windows/buckets renders → here), the wall
+         * clock never leaks into the render.
+         */
+        private fun fmtReset(epochMs: Long, nowMs: Long): String {
             val zone = ZoneId.systemDefault()
             val dt = Instant.ofEpochMilli(epochMs).atZone(zone)
-            return if (dt.toLocalDate() == LocalDate.now(zone)) {
+            val today = Instant.ofEpochMilli(nowMs).atZone(zone).toLocalDate()
+            return if (dt.toLocalDate() == today) {
                 dt.format(TIME_FMT)
             } else {
                 dt.format(DATE_TIME_FMT)

@@ -2,6 +2,9 @@ package dev.lattenero.bot.channel
 
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.put
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -623,6 +626,45 @@ class BotCommandsTest {
         assertTrue("⏱ 5 hours: 31/120 credits (26%)" in text) // 5h first, weekly after
         assertTrue("📅 Weekly: 88,000/88,000 credits (90%)" in text) // the owner's law: separator, unit never moves
         assertTrue("⚠️" in text) // ≥75% carries the alert
+    }
+
+    @Test
+    fun quotaResetRenderIsAFixedFunctionOfTheInjectedNow() {
+        // The purity law (OpencodeQuota.render's pattern): WHICH branch the
+        // reset text takes — HH:mm or dd/MM — must be a function of the
+        // INPUTS (the reset instant + the injected nowMs), never of the
+        // wall clock. Fixed today + fixed resets → fixed bytes, forever;
+        // both epoch pairs sit mid-day so the branch is stable in every zone.
+        fun resetsText(resetMs: Long, nowMs: Long): String = BotCommands.renderQuota(
+            """
+            {"authenticated":true,"quota":{"limits":[
+              {"type":"CREDIT_LIMIT","number":5,"currentValue":31,"usage":120,
+               "percentage":26,"nextResetTime":$resetMs}]}}
+            """.trimIndent(),
+            nowMs = nowMs,
+        ).substringAfter("credits (26%) · ")
+
+        val zone = ZoneId.systemDefault() // fmtReset's own (defaulted) zone
+
+        // HH:mm branch: the reset lands on the INJECTED today's local date.
+        val midday = 1_699_963_200_000L // 2023-11-14T12:00Z — mid-day in every zone
+        val oneHourLater = 1_699_966_800_000L // 2023-11-14T13:00Z
+        assertEquals(
+            "resets " + Instant.ofEpochMilli(oneHourLater).atZone(zone)
+                .format(DateTimeFormatter.ofPattern("HH:mm")),
+            resetsText(oneHourLater, midday),
+            "same local day as the injected now → HH:mm",
+        )
+
+        // dd/MM branch: the reset lands across the Nov→Dec month boundary.
+        val novThirtieth = 1_701_345_600_000L // 2023-11-30T12:00Z
+        val decFirst = 1_701_432_000_000L // 2023-12-01T12:00Z
+        assertEquals(
+            "resets " + Instant.ofEpochMilli(decFirst).atZone(zone)
+                .format(DateTimeFormatter.ofPattern("dd/MM HH:mm")),
+            resetsText(decFirst, novThirtieth),
+            "a later local day (month boundary crossed) → dd/MM HH:mm",
+        )
     }
 
     @Test
