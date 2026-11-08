@@ -376,12 +376,9 @@ class QuestionBoard(
     }
 
     /** The next short id — collision-free even against the LOADED entries (a restart never re-issues q1). */
-    private fun nextShortId(): String {
-        while (true) {
-            val sid = "$SHORT_ID_PREFIX${counter.incrementAndGet()}"
-            if (sid !in byShortId) return sid
-        }
-    }
+    private fun nextShortId(): String =
+        generateSequence { "$SHORT_ID_PREFIX${counter.incrementAndGet()}" }
+            .first { it !in byShortId }
 
     /** The disk shadow of every mutation — the write is the store's own (it degrades, never throws). */
     private fun persist() {
