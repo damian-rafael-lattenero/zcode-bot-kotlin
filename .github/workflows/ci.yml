@@ -18,7 +18,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@v6
       - name: Tests + detekt
         run: ./gradlew test detekt
-      - name: No manual concurrency in main sources (while(true)/do{} sweep)
+      - name: No manual concurrency in main sources (audit U3 sweep)
         run: |
           # U0's binding rule: no hand-rolled loops/sleeps in production code —
           # cadence and waiting are kap operators. The DEFINITIVE gate will be
@@ -27,7 +27,13 @@ jobs:
           # Main.kt's do{} CLI loop converted to Kap.repeat(Schedule.spaced(...))
           # in the kap-first sweep 2 (3/11) — the deployed agent runs one-shot
           # (launchd owns the cadence) and the dev loop is the schedule's.
-          ! grep -rnE 'while[[:space:]]*\([[:space:]]*true|do[[:space:]]*\{' modules/*/src/main
+          # Audit 8/11 additions: raw sleeps and orphaned async are banned
+          # outright (zero hits at audit time); entry-point runBlocking and
+          # creation-only bridges stay lawful. The rules grep cannot carry
+          # live in docs/audit/concurrency-findings.md: @Volatile never for
+          # state=f(state), rethrow CancellationException before every
+          # catch-all, no IO under a monitor, renders take an injected clock.
+          ! grep -rnE 'while[[:space:]]*\([[:space:]]*true|do[[:space:]]*\{|Thread\.sleep|GlobalScope' modules/*/src/main
       - name: Transport jar smoke
         run: ./gradlew :modules:transport:jar
       - name: Recorder installDist smoke
