@@ -16,6 +16,7 @@ import io.ktor.client.request.forms.submitFormWithBinaryData
 import io.ktor.http.Headers
 import io.ktor.http.HttpHeaders
 import io.ktor.http.isSuccess
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -44,7 +45,7 @@ class TgApi(
         install(HttpTimeout) { requestTimeoutMillis = timeout.inWholeMilliseconds }
     }
 
-    @Suppress("TooGenericExceptionCaught") // every failure must pass the redactor — none flies raw
+    @Suppress("TooGenericExceptionCaught", "ThrowsCount") // every failure must pass the redactor — none flies raw
     suspend fun call(method: String, params: JsonObject = JsonObject(emptyMap())): JsonElement {
         val cfg = configProvider()
         val url = "${cfg.apiBase}/bot${cfg.token}/$method"
@@ -53,6 +54,8 @@ class TgApi(
                 contentType(ContentType.Application.Json)
                 setBody(params.toString())
             }
+        } catch (e: CancellationException) {
+            throw e // structured concurrency: cancellation is never laundered into an IOException
         } catch (e: Exception) { // Python lets urllib's errors fly raw; ours must ALL pass the redactor
             // transport failures carry the URL in their message — the
             // redaction happens HERE, once, before anything can log it
@@ -81,6 +84,8 @@ class TgApi(
         val url = "${cfg.apiBase}/file/bot${cfg.token}/$filePath"
         val resp = try {
             client.get(url)
+        } catch (e: CancellationException) {
+            throw e // structured concurrency: cancellation is never laundered into an IOException
         } catch (e: Exception) {
             throw IOException(cfg.redact(e.message ?: e::class.simpleName.orEmpty()), e)
         }
@@ -97,7 +102,7 @@ class TgApi(
      * caption); `fileField` + `file` is the binary part. The same redactor
      * law: the URL carries the token, no exception flies raw.
      */
-    @Suppress("TooGenericExceptionCaught") // the same redactor law as call()
+    @Suppress("TooGenericExceptionCaught", "ThrowsCount") // the same redactor law as call()
     suspend fun upload(
         method: String,
         fields: Map<String, String>,
@@ -125,6 +130,8 @@ class TgApi(
                     )
                 },
             )
+        } catch (e: CancellationException) {
+            throw e // structured concurrency: cancellation is never laundered into an IOException
         } catch (e: Exception) {
             throw IOException(cfg.redact(e.message ?: e::class.simpleName.orEmpty()), e)
         }
