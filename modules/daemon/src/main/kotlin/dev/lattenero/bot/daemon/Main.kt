@@ -29,6 +29,7 @@ import kap.RestartPolicy
 import kap.Schedule
 import kap.process
 import kap.repeat
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
@@ -405,6 +406,8 @@ private suspend fun firehoseProbe(
             kotlinx.serialization.json.buildJsonObject { put("chat_id", cfg.chatId) },
         )
         logger.info { "firehose lane probe OK — the firehose bot talks to the chat" }
+    } catch (e: CancellationException) {
+        throw e // cancellation is not a probe failure — the cancelled job keeps cancelling
     } catch (e: dev.lattenero.bot.transport.TgHttpException) {
         if (e.code == NOT_STARTED_403) {
             logger.warn {

@@ -1,9 +1,11 @@
 package dev.lattenero.bot.channel
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
 import java.io.IOException
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -237,6 +239,18 @@ class QuotaDirectTest {
             QuotaDirect.report(providerJson = { providerJson }, fetch = { _, _ -> "<html>500</html>" }),
             "a non-JSON body falls through",
         )
+    }
+
+    @Test
+    fun reportNeverSwallowsCancellation() = runBlocking {
+        // cancellation is not a quota failure: the honest null is for
+        // transport/shape trouble, never for a cancelled caller
+        assertFailsWith<CancellationException> {
+            QuotaDirect.report(
+                providerJson = { providerJson },
+                fetch = { _, _ -> throw CancellationException("caller cancelled") },
+            )
+        }
     }
 
     // ── the /quota ladder: direct → channel → honest degradation ──

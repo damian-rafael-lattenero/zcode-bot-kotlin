@@ -5,6 +5,7 @@ import dev.lattenero.bot.channel.DeployCommand.Target
 import dev.lattenero.bot.channel.DeployCommand.Verdict
 import dev.lattenero.bot.channel.Keyboards
 import io.github.oshai.kotlinlogging.KotlinLogging
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.JsonObject
 
 private val logger = KotlinLogging.logger {}
@@ -148,6 +149,8 @@ class DeployFlow(
                     "this daemon may die mid-build"
             }
             say(spawnedNote(target), false, null)
+        } catch (e: CancellationException) {
+            throw e // shutdown must stay honest: cancellation never announces SPAWN_FAILED
         } catch (e: Exception) {
             logger.error(e) { "deploy($target): the spawn FAILED — this daemon stays up, the shot stays free" }
             say(SPAWN_FAILED + (e.message ?: e::class.simpleName.orEmpty()), true, null)

@@ -4,6 +4,7 @@ import dev.lattenero.bot.contracts.PyText
 import dev.lattenero.bot.transport.TgApi
 import dev.lattenero.bot.transport.TgConfig
 import io.github.oshai.kotlinlogging.KotlinLogging
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
@@ -28,6 +29,8 @@ object BotMenu {
     suspend fun register(api: TgApi, cfg: TgConfig): Boolean = try {
         api.call("setMyCommands", body(cfg))
         true
+    } catch (e: CancellationException) {
+        throw e // cancellation is not a registration failure — the cancelled boot keeps cancelling
     } catch (e: Exception) {
         logger.warn { "setMyCommands failed: ${e.message}" }
         false

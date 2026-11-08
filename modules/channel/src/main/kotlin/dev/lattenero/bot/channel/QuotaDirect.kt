@@ -1,5 +1,6 @@
 package dev.lattenero.bot.channel
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -147,6 +148,8 @@ object QuotaDirect {
         val key = providerJson()?.let { providerKey(it) } ?: return null
         val raw = try {
             fetch(ENDPOINT, key)
+        } catch (e: CancellationException) {
+            throw e // cancellation is not a quota failure: the cancelled job must see it
         } catch (e: Exception) {
             return null // the fallback ladder owns the recovery — nothing flies to the user
         }

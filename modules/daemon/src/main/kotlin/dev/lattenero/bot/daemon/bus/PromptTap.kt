@@ -5,6 +5,7 @@ import dev.lattenero.bot.channel.ChannelQuery
 import dev.lattenero.bot.channel.ChannelQuery.BotStatus
 import dev.lattenero.bot.channel.QueryAnswer
 import dev.lattenero.bot.daemon.brain.MemoryInjector
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -80,6 +81,10 @@ internal suspend fun activePromptContext(client: ChannelClient): PromptContext? 
 
                 else -> null
             }
+        } catch (e: CancellationException) {
+            // cancellation is not "not at hand": a timeout still resolves
+            // to null via withTimeoutOrNull, a cancelled caller rethrows
+            throw e
         } catch (e: Exception) {
             null
         }
