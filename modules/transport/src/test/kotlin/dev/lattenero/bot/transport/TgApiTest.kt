@@ -6,6 +6,7 @@ import io.ktor.client.request.HttpResponseData
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.content.TextContent
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -125,6 +126,16 @@ class TgApiTest {
         val e = assertFailsWith<IOException> { api.call("sendMessage") }
         assertContains(e.message ?: "", "***")
         assertFalse((e.message ?: "").contains("TOKEN123"), "the token NEVER reaches an exception message")
+    }
+
+    @Test
+    fun cancellationSurfacesAsCancellationExceptionNeverAsAnIOException() = runTest {
+        // structured concurrency: a cancelled caller must see the
+        // cancellation, not a redacted IOException that reads as a
+        // transport failure and invites a retry of a dead job
+        val api = api { throw CancellationException("caller cancelled") }
+        val e = assertFailsWith<CancellationException> { api.call("sendMessage") }
+        assertEquals("caller cancelled", e.message)
     }
 
     @Test
