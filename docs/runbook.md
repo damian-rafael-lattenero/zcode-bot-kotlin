@@ -1439,3 +1439,162 @@ $ du -sh ~/.zcode/bot-kotlin/logs ~/.zcode/bot-recordings ~/.zcode/hooks/logs
 (§2.4), every `launchctl kickstart|bootout|bootstrap` (§2.2, §8.1), the
 deploy scripts (§2.3, §2.5), `make up|down|nuke` (§4.6, §8.5), and the
 app's own restart (§8.2). Each is marked **ACTION** where it appears.
+
+## 11. The brain as memory — verification, evals, and the mem0/Letta question (2026-11-09)
+
+§4 answers "is the brain **up**". This section answers "is it **right**",
+how its memory loop actually runs, why we did not adopt mem0/Letta/Zep,
+how the evals are composed, and where the fork harness landed. Sources:
+the agent-brain source inventory (file refs inline), the 2026-08 web
+comparison of open-source memory layers, and live probes run on
+2026-11-09 against `http://127.0.0.1:8765`.
+
+### 11.1 The proof ladder — from "up" to "right"
+
+| Layer | What proves it | Where |
+|---|---|---|
+| 0. process | launchd `state = running` + fresh heartbeat | §2.2 pattern, `com.zcode.agent-brain` |
+| 1. dependencies | `/ready`: migrations applied/pending, stored vs expected `embed_dim`, a **live embed probe** (503 body is the answer) | §4.1 |
+| 2. ingestion | `/bus/status` three numbers: lag small, heartbeat <2 s, `duplicates == 0` | §4.3 |
+| 3. inventory | `/rag/stats` + `/memory/status`: chunks/memories counts, pending 0, quarantine (kept failures, never silent) | §4.1 |
+| 4. equivalence | the ranking the Kotlin code reasons about IS the ranking SQL runs — pinned by `RagStoreRrfEquivalenceIT` / `MemorySearchEquivalenceIT` (pure-core twins `Rrf.kt`, `Salience.kt` with law tests) | agent-brain `rag/`, `memory/` |
+| 5. quality gates | the eval suites (§11.4): recall 0.9 / extraction 0.6 / grounded 0.8, run in CI on every push | `evals/suites/*.json` |
+| 6. live recall | the two read-only probes below — the machine answers a real question correctly, today | `POST /rag/query`, `POST /memory/search` |
+
+Live on 2026-11-09 (all read-only): `/ready` ok (applied 4, embedDim 768,
+probe "embedded 1 probe(s)"); bus lag 236 B, heartbeat 1.4 s, seen ==
+inserted == 1117, duplicates 0, malformed 0; 18,733 documents / 63,711
+chunks; 1,160 memories (693 facts / 200 decisions / 153 preferences),
+pendingTurns 0, processedTurns 285, breaker Closed; eval ledger
+`recall-core` 20/20 at gate 0.9 (p50 18 ms). A live `POST /rag/query`
+for "nushell single quoted strings escapes" returned the exact 0.113
+release-notes chunk on escape handling; a live `/memory/search` for the
+whatsdigest mix-law returned the ranked decision memory (id 1111) as
+the top hit.
+
+The MCP layer is deliberately thin and is not a second brain: 4
+read-only tools (`rag_query`, `memory_search`, `memory_recent`,
+`bus_status`), one response envelope with trace ids, loopback + bearer
+fail-closed (the V10 red-team drill: 10 PASS / 0 FAIL), and the plugin
+(`dev-agent-brain`) is a facade over the same HTTP API §4 curls.
+
+### 11.2 The memory loop, end to end
+
+Every ZCode session (fork or CLI) participates automatically:
+
+```
+UserPromptSubmit → prompt-learn.nu ─┐        user.prompt
+Stop             → session-learn.nu ┴→ ~/.zcode/agent-brain/bus-events.jsonl
+                                          │ tailer (file bus, offset persisted)
+                                          ▼
+                                    bus_events (PG, dedup by producer id)
+                                          │ memory worker (pending, attempts < 5)
+                                          ▼
+                          extractor (qwen2.5:1.5b, local) → schema
+                          {facts, decisions, preferences, summary}
+                                          │ invalid shape → memory_quarantine (never silent)
+                                          ▼
+                          embed nomic-embed-text 768 → memories
+                          dedup 0.90 cosine (measured gap: true dupes
+                          0.9123–0.9845 vs strongest merely-related 0.8789;
+                          survivor's salience reinforced)
+                                          ▼
+recall: memory-recall.nu injects top-3 per prompt (k=3, ≤1500 chars,
+2 s deadline, silent-fail) — same fusion as /memory/search
+```
+
+**Ranking law (the 8/11 fix):** `RankKey = (rrf DESC, weight DESC, id)`
+— fused relevance is the DOMINANT key; `weight = salience × 2^(-age/halfLife)`
+only breaks exact relevance ties. Until 8/11, reinforced veterans could
+outrank fresh relevant matches (measured defect, fixed in `Salience.kt`,
+laws in `SalienceLawsTest`).
+
+### 11.3 Why not mem0 / Letta / Zep
+
+The three open-source leaders bet on three incompatible ideas of memory
+(Aug-2026 comparison, digitalapplied.com; vendor papers):
+
+- **Mem0** — passive extraction: an LLM pulls candidate facts per message
+  pair, then a second pass reconciles each against the store
+  (ADD/UPDATE/DELETE/NOOP). The nearest cousin of our extractor+dedup;
+  graph memory sits on its top hosted tier.
+- **Letta (MemGPT)** — an agent RUNTIME with memory tiers the agent edits
+  itself (+ "sleep-time compute": a second async agent). Adopting it means
+  handing over the agent loop — ours already belongs to the fork and the
+  sessions.
+- **Zep / Graphiti** — a temporal knowledge graph: facts carry
+  `valid_at`/`invalid_at` and are invalidated, not deleted. Strongest when
+  facts mutate with auditable history; self-hosting means Graphiti **plus**
+  a graph DB (Neo4j/FalkorDB) — three systems to operate.
+
+**Benchmark honesty:** every headline number in that space is
+self-reported (Mem0 claims 94.4 on LongMemEval; the one independent
+measurement found 49.0 — a 45.4-point gap under the same benchmark
+name). The comparison's own conclusion — the only trustworthy eval is
+the one you run on your own data — is exactly what our suites (§11.4)
+do, with gates pinned in-repo.
+
+**Why ours won (and stays):**
+
+1. the data already lives in **our** Postgres — pgvector + FTS + RRF is
+   the industry-standard hybrid pattern, not a niche bet;
+2. laws as code: property tests + SQL-equivalence ITs pin the ranking —
+   a vendor SDK's reconcile ops are a black box by comparison;
+3. honest failures: quarantine keeps what extraction failed on, nothing
+   is invented away or silently dropped;
+4. zero new runtime: mem0 is a Python/TS SDK, Letta a Python server,
+   Zep a graph DB — none of that exists in this Kotlin/kap stack; the
+   loopback HTTP facade stays;
+5. write-path cost is a local 1.5B model (qwen2.5:1.5b), not a per-pair
+   hosted-LLM bill that grows with conversation volume.
+
+**When we WOULD adopt:** entity graphs + temporal validity at scale, or
+cross-machine shared memory — evaluate Zep/Graphiti then. The memory
+layer sits behind `MemoryStore`; the swap is one module, not a rewrite.
+
+### 11.4 The evals — how they are composed
+
+Suites are versioned JSON in `evals/suites/`, copied into the jar.
+Gate math: `ok = cases.isNotEmpty() && passed/total >= gate`
+(`EvalRunner.kt`). Persisted per (suite, model) in `eval_runs`, ledger
+at `GET /eval/latest` (`?matrix=true` for the matrix run).
+
+| Suite | Kind | Gate | Cases | A pass means |
+|---|---|---|---|---|
+| `recall-core` | recall | 0.9 | 20 (10 literal + 10 paraphrase) | the expected doc is in the top-5 hybrid hits; `needles` verify the top hit actually supports the answer |
+| `extraction-core` | extraction | 0.6 | 6 turns | the schema-valid extraction carries the expected durable items and invents nothing on trivial turns |
+| `grounded-citation` | grounded | 0.8 | 5 questions | the answer parses as `{answer, citations}`, cites a chunk of the expected doc AND states the fact |
+
+How they run: `make eval` is the CI gate (≈1.5 s, one model — runs on
+every push and nightly); `make eval-matrix` runs ≥2 embedding models
+into `evals/artifacts/latest-matrix.{md,json}` and **reports** instead
+of gating unless `--strict`; `promptfoo` re-asks the recall questions as
+an external cross-check in the nightly workflow. Metrics per run: p50/p95
+latency and real token counts priced via `evals/prices.json`. Tier 5
+(`e2e-real`, the real Telegram bot over MTProto) is wired into a nightly
+workflow, informational, waiting the owner's one-time login.
+
+Test-count correction for future readers: agent-brain carries **352
+`@Test` methods** across its five-tier pyramid (ADR-006; property/law
+tests plus SQL-equivalence ITs; a meta-test fails the build if any
+`@Test` returns non-Unit). The "888 tests" figure quoted in older notes
+belongs to zcode-bot-kotlin's parity batch — do not misattribute it.
+
+### 11.5 The fork harness — where it landed (2026-11-09)
+
+- Branch `damian` @ `fcf32671`, clean tree; installed app **v3.17.2**
+  (the authority is the running host: `channel UP … app=3.17.2`, §8.4);
+  upstream merges landed through v3.17.2 and the FORK.md ledger is
+  closed (tag `30338eaf`).
+- What the harness IS (the phone-facing surface the daemon consumes):
+  channel protocol v1 (`caps=22`) on `~/.zcode/daemon-local.sock`; the
+  one-tap `/deploy` (the `com.zcode.bot-deploy` sibling job, §2.3); the
+  live card (edit-in-place, 5 s pings, in_progress fold); tasks taps
+  confirmed by read-back; the plan draft triple written whole on ✅;
+  `/mode` 4 rows; rich Telegram messages (pullquote / expandable
+  blockquote); the destructive-tap owner gate; `/steer` into a running
+  turn.
+- Fork-side discipline: tests via `vitest.fork.config.ts`
+  (`forkTestFiles`); deploy = `build-install --when-quit` through
+  `com.zcode.deploy-fork` — owner-run, never from a session (§2.5);
+  ONE deploy per change (the 4/11 lesson).
