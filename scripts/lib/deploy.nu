@@ -20,14 +20,29 @@ export def step [msg: string]: nothing -> nothing {
 # read silence for minutes). NOT hooked into `step`: the recorder's and the
 # comparator's deploys use step too and must not speak.
 export def announce [text: string]: nothing -> nothing {
-    let cfg_path = ($nu.home-dir | path join ".zcode/telegram-remote.json")
+    send-telegram $text null
+}
+
+# THE LOUD VOICE (the owner's order, 10/11: «al finalizar cada script un
+# aviso bien llamativo»): HTML bold so the END of a deploy (and every
+# failure) cannot be skimmed past in the chat. Same never-breaks contract.
+export def announce-loud [html: string]: nothing -> nothing {
+    send-telegram $html "HTML"
+}
+
+def send-telegram [text: string, parse_mode: string]: nothing -> nothing {
+    let cfg_path: string = ($nu.home-dir | path join ".zcode/telegram-remote.json")
     if not ($cfg_path | path exists) { return }
     try {
-        let cfg = (open $cfg_path)
-        let token = ($cfg.token? | default "")
-        let chat = ($cfg.chat_id? | default "")
+        let cfg: any = (open $cfg_path)
+        let token: string = ($cfg.token? | default "")
+        let chat: string = ($cfg.chat_id? | default "")
         if ($token | is-empty) or ($chat | is-empty) { return }
-        let body = ({chat_id: $chat, text: $text} | to json)
+        let body: string = if $parse_mode == null {
+            ({chat_id: $chat, text: $text} | to json)
+        } else {
+            ({chat_id: $chat, text: $text, parse_mode: $parse_mode} | to json)
+        }
         do -i {
             http post -m 10sec -t application/json $"https://api.telegram.org/bot($token)/sendMessage" $body -r | ignore
         }

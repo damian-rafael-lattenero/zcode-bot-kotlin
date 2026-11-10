@@ -26,7 +26,16 @@ def main []: nothing -> nothing {
     step "building (Gradle daemon on 25)"
     announce "🚀 deploy bot 1/4 — building (Gradle + detekt + tests; el build es el tramo largo)"
     cd $repo
-    ^./gradlew -q :modules:daemon:installDist detekt test
+    # the build is the first thing that can kill the deploy: capture it (a
+    # bare external failing would just stop the script — the phone would sit
+    # blind) and speak the failure LOUD
+    let build: record = (do { ^./gradlew -q :modules:daemon:installDist detekt test } | complete)
+    print $build.stdout
+    if $build.exit_code != 0 {
+        print -e $build.stderr
+        announce-loud "❌ <b>DEPLOY BOT FALLÓ</b> — el build (Gradle/detekt/tests) se cayó; el daemon sigue con lo anterior"
+        die $"the build failed: exit ($build.exit_code)"
+    }
 
     step $"installing to ($dest)"
     announce "🚀 deploy bot 2/4 — installing"
@@ -71,12 +80,13 @@ def main []: nothing -> nothing {
     }
     if not $ok {
         print -e "✗ daemon did not arm — last words:"
-        let state = (do { ^launchctl print $"gui/(user-id)/($LABEL)" } | complete)
-        print $state.stdout
-        let err = ($data | path join "logs/launchd.err.log")
+        let state: string = (do { ^launchctl print $"gui/(user-id)/($LABEL)" } | complete | get stdout)
+        print $state
+        let err: string = ($data | path join "logs/launchd.err.log")
         for line in (tail-lines $err 5) {
             print -e $line
         }
+        announce-loud "❌ <b>DEPLOY BOT FALLÓ</b> — el daemon NO armó en 45 s (heartbeat ausente); mirá el deploy log"
         exit 1
     }
     log $"heartbeat: (^stat -f '%Sm' $hb | str trim)"
@@ -88,6 +98,7 @@ def main []: nothing -> nothing {
     }
     # the deploy is over: the healer owns the daemon again
     rm -f ($data | path join "state/deploying")
+    announce-loud "🔥 <b>DEPLOY BOT COMPLETO</b> — daemon armado y verificado (heartbeat + zconn); canal, poller y send vivos"
     print 'done. Live daemon armed: channel + getUpdates poller + send (daemon.json is the knob).'
     print 'Health: ~/.zcode/bot-kotlin/state/hb-channel · hb-poller · hb-zconn-shadow; log: logs/daemon.jsonl.'
 }
