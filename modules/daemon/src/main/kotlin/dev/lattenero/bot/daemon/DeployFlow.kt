@@ -161,18 +161,21 @@ class DeployFlow(
     private fun flownCard(target: Target): String = "🚀 <b>Deploy</b>\n" + when (target) {
         Target.BOT -> FLOWN_BOT
         Target.FORK -> FLOWN_FORK
+        Target.WHATSAPP -> FLOWN_WHATSAPP
         Target.BOTH -> FLOWN_BOTH
     }
 
     private fun announceOf(target: Target): String = when (target) {
         Target.BOT -> THE_ANNOUNCE
         Target.FORK -> THE_ANNOUNCE_FORK
+        Target.WHATSAPP -> THE_ANNOUNCE_WHATSAPP
         Target.BOTH -> THE_ANNOUNCE_BOTH
     }
 
     private fun spawnedNote(target: Target): String = when (target) {
         Target.BOT -> SPAWNED
         Target.FORK -> SPAWNED_FORK
+        Target.WHATSAPP -> SPAWNED_WHATSAPP
         Target.BOTH -> SPAWNED_BOTH
     }
 
@@ -180,11 +183,13 @@ class DeployFlow(
         /** The target words — taps arrive as `dep:<word>`, texts as the bare rest. */
         const val TARGET_WORD_BOT = "bot"
         const val TARGET_WORD_FORK = "fork"
+        const val TARGET_WORD_WHATSAPP = "whatsapp"
         const val TARGET_WORD_BOTH = "both"
 
         fun targetOf(action: String): Target? = when (action) {
             TARGET_WORD_BOT -> Target.BOT
             TARGET_WORD_FORK -> Target.FORK
+            TARGET_WORD_WHATSAPP -> Target.WHATSAPP
             TARGET_WORD_BOTH -> Target.BOTH
             else -> null
         }
@@ -199,12 +204,15 @@ class DeployFlow(
                 "🤖 <b>Bot Kotlin</b> — build (tests incluidos) → install → el LaunchAgent reinicia el daemon\n" +
                 "🍴 <b>ZCode Fork</b> — build AHORA (~15 min, avisos por fases, la app sigue viva) → " +
                 "cierra ZCode solo → swap → reabre (unos segundos de canal 📡 al final)\n" +
+                "📱 <b>WhatsApp (whatsdigest)</b> — build con tests → install → el LaunchAgent del bot " +
+                "de los grupos se reinicia y se verifica solo (nunca toca ESTE daemon)\n" +
                 "🚀 <b>Ambos</b> — fork PRIMERO, después el daemon (jobs hermanos de launchd)"
             )
 
         /** The card's flown rows — the edit's text: keyboard stripped, the choice marked. */
         const val FLOWN_BOT = "🤖 Bot Kotlin — ▶️ en vuelo"
         const val FLOWN_FORK = "🍴 ZCode Fork — ▶️ en vuelo"
+        const val FLOWN_WHATSAPP = "📱 WhatsApp (whatsdigest) — ▶️ en vuelo"
         const val FLOWN_BOTH = "🚀 Ambos — ▶️ en vuelo (fork primero)"
 
         /** The in-flight refusal — one deploy at a time, until this process dies. */
@@ -215,6 +223,17 @@ class DeployFlow(
 
         /** The door's exact sentences — the phone hears them BEFORE any script can kill anything. */
         const val THE_ANNOUNCE = "🚀 Deployando el daemon — vuelvo en un momento"
+
+        const val THE_ANNOUNCE_WHATSAPP = (
+            "📱 Deployando el bot de WhatsApp (whatsdigest) — build con tests, " +
+                "install y verificación propia; ESTE daemon no se toca, sigo vivo"
+            )
+
+        const val SPAWNED_WHATSAPP = (
+            "🛠 Script de whatsdigest lanzado detached — build con tests, install " +
+                "y el LaunchAgent del bot de los grupos se re-verifica solo. " +
+                "Log: <code>~/.zcode/bot-kotlin/logs/deploy-whatsapp.log</code> — /file lo trae."
+            )
 
         const val THE_ANNOUNCE_FORK = (
             "🍴 Deploy del fork armado — construyo el fork (~15 min, te aviso por fases, " +

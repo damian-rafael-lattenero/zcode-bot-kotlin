@@ -66,7 +66,7 @@ class DeployFlowTest {
         )
 
     @Test
-    fun theBareCardOffersThreeTargetsAndFiresNothing() = runTest {
+    fun theBareCardOffersFourTargetsAndFiresNothing() = runTest {
         val rig = Rig()
         val f = flow(rig)
         f.onText("", OWNER)
@@ -76,15 +76,40 @@ class DeployFlowTest {
         assertTrue(text.contains("Tocar ES lanzar"), "the one-tap law is ON the card")
         assertEquals(false, loud)
         val row = markup!!.jsonObject["inline_keyboard"]!!.jsonArray[0].jsonArray
-        assertEquals(3, row.size)
+        assertEquals(4, row.size)
         assertEquals("dep:bot", row[0].jsonObject["callback_data"]!!.jsonPrimitive.content)
         assertEquals("dep:fork", row[1].jsonObject["callback_data"]!!.jsonPrimitive.content)
-        assertEquals("dep:both", row[2].jsonObject["callback_data"]!!.jsonPrimitive.content)
+        assertEquals("dep:whatsapp", row[2].jsonObject["callback_data"]!!.jsonPrimitive.content)
+        assertEquals("dep:both", row[3].jsonObject["callback_data"]!!.jsonPrimitive.content)
         // the retired go/no NEVER fires: a stale button just re-shows the card
         f.onTap("go", OWNER)
         f.onTap("no", OWNER)
         assertEquals(0, rig.spawnedTargets.size)
         assertEquals(DeployFlow.TARGETS_CARD, rig.spoken.last().first)
+    }
+
+    @Test
+    fun aWhatsappTapFiresExactlyThatTarget() = runTest {
+        val rig = Rig()
+        val f = flow(rig)
+        f.onTap("whatsapp", OWNER) // the tap IS the confirmation — no second step exists
+        // the 📱 target's honesty: THIS daemon is never at stake, and the
+        // card + the announce say so (the sibling ecosystem deploys alone)
+        assertTrue(
+            DeployFlow.TARGETS_CARD.contains("nunca toca ESTE daemon"),
+            "the card says the whatsdigest deploy never touches this daemon",
+        )
+        assertTrue(
+            DeployFlow.THE_ANNOUNCE_WHATSAPP.contains("ESTE daemon no se toca"),
+            "the announce says this daemon stays alive",
+        )
+        assertEquals(listOf(Target.WHATSAPP), rig.spawnedTargets)
+        assertEquals(2, rig.spoken.size) // announce, spawned-note — no confirm card anywhere
+        assertEquals(DeployFlow.THE_ANNOUNCE_WHATSAPP, rig.spoken[0].first)
+        assertEquals(true, rig.spoken[0].second) // the door is LOUD
+        // THE ORDER: the announce is in the record BEFORE the spawn ran
+        assertEquals("say", rig.events[0].substringBefore(':'))
+        assertEquals("spawn:WHATSAPP", rig.events[1])
     }
 
     @Test
