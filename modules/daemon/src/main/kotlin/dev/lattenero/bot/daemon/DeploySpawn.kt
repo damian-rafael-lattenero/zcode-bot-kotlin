@@ -79,14 +79,39 @@ class DeploySpawn(
         logFile.exists() && (nowMs() - logFile.lastModified()) < JOB_LOG_ALIVE_MS
 
     /**
+     * THE BUSY VERDICT from one `launchctl print` reading. The ladder, in
+     * order:
+     *
+     * 1. `state = running` — BUSY, the real mid-flight case.
+     * 2. `last exit code` present — the job RAN AND EXITED: launchd's own
+     *    receipt beats the log's freshness. THE OWNER'S LIVE FALSE POSITIVE,
+     *    10/11: the second fork deploy finished at 17:19 and the third tap
+     *    at ~17:2x was refused «ya está CORRIENDO» because the log was
+     *    still fresh — a just-finished deploy is NOT a running one, and a
+     *    finished one-shot re-bootouts cleanly.
+     * 3. no exit receipt + a log written within [JOB_LOG_ALIVE_MS] — BUSY:
+     *    launchd's state string lied once (measured 4/11 16:39, the guard
+     *    passed while the job was mid-build), so the fresh log is the
+     *    mid-build detector — but ONLY while launchd cannot show a receipt.
+     * 4. otherwise — not busy (wedged/never-run; the caller's self-heal
+     *    takes it from here).
+     */
+    private fun refuseIfBusy(printText: String) {
+        when {
+            printText.contains(JOB_RUNNING_MARK) ->
+                throw IllegalStateException(busyMessage())
+            printText.contains(LAST_EXIT_MARK) -> return
+            jobLogAlive() -> throw IllegalStateException(busyMessage())
+        }
+    }
+
+    /**
      * The ladder's honest exit: refuse a RUNNING job (busy — never
      * bootstrap it), let a dead wedge fall through to the enable self-heal.
      */
     private fun refuseIfRunning() {
         val probe = launchctl.run(listOf("print", "${domain()}/$label"))
-        if (probe.text.contains(JOB_RUNNING_MARK) || jobLogAlive()) {
-            throw IllegalStateException(busyMessage())
-        }
+        refuseIfBusy(probe.text)
         logger.warn { "deploy job $label wedged (error 5) but not running — the enable self-heal proceeds" }
     }
 
@@ -159,11 +184,11 @@ class DeploySpawn(
         // 16:39: the guard passed while the job was mid-build): the print's
         // state/pid AND the job's own log being alive (a build writes to it
         // every few seconds; a log silent 5 minutes is a dead — or hung,
-        // equally un-double-run-able — job).
+        // equally un-double-run-able — job). THE EXIT RECEIPT outranks the
+        // log (the owner's 10/11 false positive: a just-finished deploy is
+        // not a running one) — see [refuseIfBusy]'s ladder.
         val precheck = launchctl.run(listOf("print", "${domain()}/$label"))
-        if (precheck.text.contains(JOB_RUNNING_MARK) || jobLogAlive()) {
-            throw IllegalStateException(busyMessage())
-        }
+        refuseIfBusy(precheck.text)
         plistFile.parentFile?.mkdirs()
         plistFile.writeText(plist())
         logFile.parentFile?.mkdirs()
@@ -285,6 +310,14 @@ class DeploySpawn(
 
         /** `launchctl print`'s marker for an ACTIVE deploy job — the busy guard's trigger. */
         const val JOB_RUNNING_MARK = "state = running"
+
+        /**
+         * `launchctl print`'s exit receipt — the job RAN AND EXITED. Its
+         * presence outranks the log-alive detector: a finished one-shot's
+         * log stays fresh for [JOB_LOG_ALIVE_MS] after completion, and a
+         * finished job is exactly the one a new spawn may clear.
+         */
+        const val LAST_EXIT_MARK = "last exit code"
 
         /** A job log written this recently means the deploy is mid-run (the second busy detector). */
         const val JOB_LOG_ALIVE_MS = 5 * 60_000L

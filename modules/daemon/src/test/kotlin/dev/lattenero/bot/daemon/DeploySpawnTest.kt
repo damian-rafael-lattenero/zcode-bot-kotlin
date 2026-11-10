@@ -136,6 +136,71 @@ class DeploySpawnTest {
         assertEquals(0, calls.count { it.first() == "bootstrap" })
     }
 
+    // 2026-11-10 — THE OWNER'S FALSE POSITIVE: the second fork deploy
+    // finished at 17:19 and the next tap was refused «ya está CORRIENDO»
+    // because the log was still fresh. The EXIT RECEIPT outranks the log.
+
+    @Test
+    fun aFinishedJobWithAFreshLogSpawns() = runTest {
+        // launchd's own receipt: the job ran AND exited (last exit code = 0).
+        // The log is brand new — a just-finished deploy — and that is NOT busy.
+        val calls = mutableListOf<List<String>>()
+        log.parentFile?.mkdirs()
+        log.writeText("==> deploy job armed at 2026-11-10T17:19:53Z\n[fork] done\n") // seconds old
+        val fake = Launchctl { args ->
+            calls += args
+            when (args.first()) {
+                "print" -> LaunchctlResult(0, "gui/501/com.zcode.bot-fork-deploy = {\n\tstate = not running\n\tlast exit code = 0\n}")
+                else -> LaunchctlResult(0, "")
+            }
+        }
+        val out = DeploySpawn(
+            script,
+            log,
+            plist,
+            uid = "501",
+            javaHome = "/jdk-25",
+            home = "/Users/fake",
+            launchctl = fake,
+            beat = {},
+        ).spawn()
+        assertEquals(0, out.exit)
+        assertEquals("print", calls[0].first())
+        assertEquals(1, calls.count { it.first() == "bootout" }, "the finished one-shot re-bootouts cleanly")
+        assertEquals(1, calls.count { it.first() == "bootstrap" })
+    }
+
+    @Test
+    fun aMidBuildLieWithNoExitReceiptIsStillRefused() = runTest {
+        // the 4/11 launchd lie: state claims not-running while the build is
+        // mid-run. NO exit receipt + a fresh log = busy — the log detector
+        // only loses to the receipt, never to a bare not-running claim.
+        val calls = mutableListOf<List<String>>()
+        log.parentFile?.mkdirs()
+        log.writeText("[fork] building... 42%\n") // seconds old
+        val fake = Launchctl { args ->
+            calls += args
+            when (args.first()) {
+                "print" -> LaunchctlResult(0, "gui/501/com.zcode.bot-fork-deploy = {\n\tstate = not running\n}")
+                else -> LaunchctlResult(0, "")
+            }
+        }
+        val spawn = DeploySpawn(
+            script,
+            log,
+            plist,
+            uid = "501",
+            javaHome = "/jdk-25",
+            home = "/Users/fake",
+            launchctl = fake,
+            beat = {},
+        )
+        val e = assertFailsWith<IllegalStateException> { spawn.spawn() }
+        assertContains(e.message.orEmpty(), "ya está CORRIENDO")
+        assertEquals(0, calls.count { it.first() == "bootout" })
+        assertEquals(0, calls.count { it.first() == "bootstrap" })
+    }
+
     // 2026-11-04 hardening v3 — the BOOTOUT has its own ladder: a wedged
     // label (error 5) clears itself seconds later; two taps in a row wedged
     // each other and the single bootout poisoned every bootstrap after it.
