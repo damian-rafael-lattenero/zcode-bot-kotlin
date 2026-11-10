@@ -1,3 +1,5 @@
+@file:Suppress("TooManyFunctions") // the fold's reducers + the two boundary flushes — one cohesive switch
+
 package dev.lattenero.bot.channel
 
 import dev.lattenero.bot.contracts.PyText
@@ -175,9 +177,9 @@ private fun reduceFrame(state: RenderState?, event: RenderEvent.FromFrame, diffe
 
         is RenderEvent.Thought -> reduceThought(refreshed, event)
 
-        is RenderEvent.Answering -> reduceAnswer(refreshed, event)
+        is RenderEvent.Answering -> reduceAnswer(flushCot(refreshed), event)
 
-        is RenderEvent.ToolOpen -> reduceToolArrival(flushProse(refreshed), event, differ)
+        is RenderEvent.ToolOpen -> reduceToolArrival(flushProse(flushCot(refreshed)), event, differ)
 
         is RenderEvent.ToolRunning -> reduceToolRunning(refreshed, event, differ)
 
@@ -310,6 +312,25 @@ internal fun flushProse(state: RenderState): RenderState {
 
 /** The spent segments' ceiling — the feed's diff only needs the newest. */
 private const val PROSE_SPENT_CAP = 24
+
+/**
+ * THE THINKING'S BOUNDARY (the owner, 10/11 — either the 3K cap or the
+ * segment's end, never silence): a tool's arrival or the answer's first
+ * word ends the current thinking segment — the pending tail (the block
+ * UNDER the 3K seal) seals as a REAL block, the feed's diff speaks it
+ * like any other sealed one (the «generado 2.7K» verdict, rich path
+ * included). Blank pending = nothing to seal (a tool after a tool).
+ * The seal's own [TranscriptFeed.pendingFlush] stays as the honest
+ * safety net for a turn that dies mid-thought.
+ */
+internal fun flushCot(state: RenderState): RenderState {
+    val pending = state.cotPending
+    if (pending.isBlank()) return state
+    return state.copy(
+        cotBlocks = state.cotBlocks + pending,
+        cotPending = "",
+    )
+}
 
 /**
  * tool_call (final, input complete) opens-or-fills the lane with the

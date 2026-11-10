@@ -563,15 +563,17 @@ class LivePublisherTest {
         )
         hub.apply(frame(taskId, "task_complete", at = 9_999, "stopReason" to JsonPrimitive("end_turn")), nowMs = 9_999)
         publisher.tick() // the seal tick
-        // the remainder first (the unseen close + the unsealed thought tail
-        // COLLAPSED — the tap opens it), then the record, then the answer LAST
+        // the remainder first (the unseen close + the thought tail — sealed
+        // AT the tool's arrival by the thinking's boundary law, traveling
+        // COLLAPSED), then the record, then the answer LAST
         assertTrue(
             spoken.any { "⚡ <b>Bash</b>" in it && "tocar para ver" in it },
             "the unseen close speaks (collapsed) at the seal",
         )
-        val tail = spoken.firstOrNull { "sin sellar" in it }
-        assertTrue(tail != null, "the unsealed tail loses nothing — it travels collapsed")
-        assertTrue("tocar para leer" in tail!!)
+        val tail = spoken.firstOrNull { "CoT 1" in it }
+        assertTrue(tail != null, "the tail sealed at the tool's arrival — it travels collapsed")
+        assertTrue("generado" in tail!!, "a boundary-sealed tail earns the SEALED verdict")
+        assertTrue("tocar para leer" in tail)
         assertTrue("pensando" !in tail, "the tail's text hides behind the tap too")
         assertTrue("end_turn" in spoken[spoken.size - 2], "the record is second-to-last")
         assertEquals("LA RESPUESTA", spoken.last(), "the answer is the last word")
