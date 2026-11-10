@@ -31,6 +31,14 @@ class DeployCommand {
         /** The ZCode fork: quit → build-install → reopen → socket/canal verification. */
         FORK,
 
+        /**
+         * The whatsdigest daemon (the family's WhatsApp-groups bot): build
+         * with tests → install → its own LaunchAgent restarts. A sibling
+         * ecosystem deploy — it never touches THIS daemon, so the
+         * anti-suicide door is uniform but never actually at stake here.
+         */
+        WHATSAPP,
+
         /** Both, fork FIRST (a sibling job survives the daemon deploy's own bootout). */
         BOTH,
     }

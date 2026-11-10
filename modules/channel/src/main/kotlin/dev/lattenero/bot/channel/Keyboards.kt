@@ -303,6 +303,7 @@ object Keyboards {
                 buildJsonArray {
                     add(button("🤖 Bot Kotlin", "dep:bot"))
                     add(button("🍴 ZCode Fork", "dep:fork"))
+                    add(button("📱 WhatsApp", "dep:whatsapp"))
                     add(button("🚀 Ambos", "dep:both"))
                 },
             )

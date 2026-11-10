@@ -255,11 +255,23 @@ class DeploySpawn(
         /** The fork deploy's log — the fork's words never mix with the daemon's. */
         const val FORK_LOG_FILE_NAME = "deploy-fork.log"
 
+        /**
+         * The whatsdigest deploy's log (the 📱 target, 10/11): the sibling
+         * ecosystem's build words, never mixed with the daemon's.
+         */
+        const val WHATSAPP_LOG_FILE_NAME = "deploy-whatsapp.log"
+
         /** The rendered plist's file name inside the daemon's state dir. */
         const val JOB_PLIST_NAME = "deploy-job.plist"
 
         /** The fork job's rendered plist name — its own file, its own bootout. */
         const val FORK_JOB_PLIST_NAME = "deploy-fork-job.plist"
+
+        /** The whatsdigest job's rendered plist name — its own file, its own bootout. */
+        const val WHATSAPP_JOB_PLIST_NAME = "deploy-wd-job.plist"
+
+        /** The whatsdigest deploy's own label — a sibling of everything. */
+        const val WHATSAPP_JOB_LABEL = "com.zcode.wd-deploy"
 
         /** The beat between a failed bootstrap and its one retry (lib/deploy.nu's measured fix). */
         const val BOOTOUT_BEAT_MS = 2_000L
@@ -317,6 +329,7 @@ object DeployScriptKnob {
 
     private const val KEY = "deploy_script"
     private const val FORK_KEY = "deploy_fork_script"
+    private const val WHATSAPP_KEY = "deploy_whatsapp_script"
 
     val DEFAULT: File =
         File(System.getProperty("user.home"), "Projects/zcode-bot-kotlin/scripts/deploy-daemon.nu")
@@ -329,6 +342,15 @@ object DeployScriptKnob {
     val FORK_DEFAULT: File =
         File(System.getProperty("user.home"), "Projects/ZCode/scripts/build-install.nu")
 
+    /**
+     * The whatsdigest deploy's script (the 📱 target, 10/11): the sibling
+     * repo's own canonical deploy (build + tests + install + its LaunchAgent
+     * restart + its own 45s verification). The knob `deploy_whatsapp_script`
+     * still overrides.
+     */
+    val WHATSAPP_DEFAULT: File =
+        File(System.getProperty("user.home"), "Projects/whatsdigest-kt/scripts/deploy-daemon.nu")
+
     // any reading failure is the same answer: the default (SendKnob's degrade law)
     @Suppress("TooGenericExceptionCaught")
     fun load(daemonJson: File): File = load(daemonJson, KEY, DEFAULT, "deploy_script")
@@ -336,6 +358,10 @@ object DeployScriptKnob {
     /** The fork's knob — its own key (`deploy_fork_script`), the same degrade law. */
     @Suppress("TooGenericExceptionCaught")
     fun loadFork(daemonJson: File): File = load(daemonJson, FORK_KEY, FORK_DEFAULT, FORK_KEY)
+
+    /** The whatsdigest knob — its own key (`deploy_whatsapp_script`), the same degrade law. */
+    @Suppress("TooGenericExceptionCaught")
+    fun loadWhatsapp(daemonJson: File): File = load(daemonJson, WHATSAPP_KEY, WHATSAPP_DEFAULT, WHATSAPP_KEY)
 
     // any reading failure is the same answer: the default (SendKnob's degrade law)
     @Suppress("TooGenericExceptionCaught")

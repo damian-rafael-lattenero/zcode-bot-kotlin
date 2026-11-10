@@ -91,9 +91,9 @@ class DeployCommandTest {
     }
 
     @Test
-    fun theTargetVocabularyIsExactlyThree() {
+    fun theTargetVocabularyIsExactlyFour() {
         // the card offers exactly what the machine can fire — nothing else exists
-        assertEquals(3, DeployCommand.Target.entries.size)
+        assertEquals(4, DeployCommand.Target.entries.size)
     }
 
     private companion object {

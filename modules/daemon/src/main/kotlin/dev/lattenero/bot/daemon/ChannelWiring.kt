@@ -535,6 +535,17 @@ internal fun wireChannel(
         args = listOf("--quit"),
         label = DeploySpawn.FORK_JOB_LABEL,
     )
+    // THE WHATSDIGEST EDGE (10/11, the 📱 target): the sibling ecosystem's
+    // own canonical deploy script — build with tests, install, its LaunchAgent
+    // restarts the whatsdigest daemon and the script verifies itself. A
+    // sibling job of everything: THIS daemon is never at stake.
+    val whatsappDeployLog = File(File(cfg.homeDir, "logs"), DeploySpawn.WHATSAPP_LOG_FILE_NAME)
+    val whatsappDeployEdge = DeploySpawn(
+        script = DeployScriptKnob.loadWhatsapp(File(cfg.homeDir, SendKnob.FILE_NAME)),
+        logFile = whatsappDeployLog,
+        plistFile = File(File(cfg.homeDir, "state"), DeploySpawn.WHATSAPP_JOB_PLIST_NAME),
+        label = DeploySpawn.WHATSAPP_JOB_LABEL,
+    )
     // THE ROW-DIE EDIT (4/11, the one-tap law): when a target fires, the
     // targets card's button row dies IN PLACE — the mirror's exact edit
     // throat (LiveTelegram.edit over the shared cooldown file, the bot's
@@ -583,6 +594,13 @@ internal fun wireChannel(
                     logger.warn {
                         "deploy(fork): ${DeploySpawn.FORK_JOB_LABEL} bootstrapped as its OWN job " +
                             "(sibling of the daemon; this daemon SURVIVES it) — log: $forkDeployLog"
+                    }
+                }
+                DeployCommand.Target.WHATSAPP -> {
+                    whatsappDeployEdge.spawn()
+                    logger.warn {
+                        "deploy(whatsapp): ${DeploySpawn.WHATSAPP_JOB_LABEL} bootstrapped as its OWN job " +
+                            "(sibling of everything; this daemon is never at stake) — log: $whatsappDeployLog"
                     }
                 }
                 DeployCommand.Target.BOTH -> throw IllegalStateException(
