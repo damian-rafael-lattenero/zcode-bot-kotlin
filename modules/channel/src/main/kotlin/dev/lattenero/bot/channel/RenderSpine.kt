@@ -201,6 +201,17 @@ sealed interface RenderEvent {
     data class Resync(val taskId: String) : RenderEvent
 
     /**
+     * THE WATCHDOG'S RE-ARM (10/11): the stream watchdog re-subscribed a
+     * live turn and the fork's subscribe burst re-states the in-flight
+     * streamed content — the live answer windows die BEFORE the burst
+     * lands, or the re-stated deltas double onto the retained text (the
+     * duplicated seams the owner read: «MiMi edición… La elimino:ino:»).
+     * Everything else stands: the phase is true (a turn IS running), the
+     * lanes and the sealed blocks are real, the spent prose is history.
+     */
+    data class StreamRebase(val taskId: String) : RenderEvent
+
+    /**
      * The stream heartbeat's seq accounting — NOTHING else moves. The
      * keepalive consumes the connection's seq counter (the fork's own law)
      * and proves the BUS, never the model.
