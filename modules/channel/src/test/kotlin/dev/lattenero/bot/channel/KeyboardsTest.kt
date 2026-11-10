@@ -154,7 +154,8 @@ class KeyboardsTest {
     fun deployTargetsIsTheOneTapRow() {
         // the ONE-TAP LAW (4/11): the target row IS the deploy — no go/no
         // confirm half exists anymore (the tap fires the door). 10/11: the
-        // 📱 whatsapp row joins (the sibling ecosystem's own deploy).
+        // 📱 whatsapp row joins (the sibling ecosystem's own deploy), and
+        // the last row is «Todos» — the owner's rename (dep:all).
         val row = Keyboards.deployTargets().jsonObject["inline_keyboard"]!!.jsonArray[0].jsonArray
         assertEquals("🤖 Bot Kotlin", row[0].jsonObject["text"]!!.jsonPrimitive.content)
         assertEquals("dep:bot", row[0].jsonObject["callback_data"]!!.jsonPrimitive.content)
@@ -162,13 +163,13 @@ class KeyboardsTest {
         assertEquals("dep:fork", row[1].jsonObject["callback_data"]!!.jsonPrimitive.content)
         assertEquals("📱 WhatsApp", row[2].jsonObject["text"]!!.jsonPrimitive.content)
         assertEquals("dep:whatsapp", row[2].jsonObject["callback_data"]!!.jsonPrimitive.content)
-        assertEquals("🚀 Ambos", row[3].jsonObject["text"]!!.jsonPrimitive.content)
-        assertEquals("dep:both", row[3].jsonObject["callback_data"]!!.jsonPrimitive.content)
+        assertEquals("🚀 Todos", row[3].jsonObject["text"]!!.jsonPrimitive.content)
+        assertEquals("dep:all", row[3].jsonObject["callback_data"]!!.jsonPrimitive.content)
         // the datas ride the 64-byte law with room to spare
         assertTrue(Keyboards.callbackDataValid("dep:bot"))
         assertTrue(Keyboards.callbackDataValid("dep:fork"))
         assertTrue(Keyboards.callbackDataValid("dep:whatsapp"))
-        assertTrue(Keyboards.callbackDataValid("dep:both"))
+        assertTrue(Keyboards.callbackDataValid("dep:all"))
     }
 
     @Test
