@@ -138,6 +138,55 @@ class RenderFoldTest {
         assertEquals(13, s.subagentThought["lane-A"], "the subagent's own lane still grows")
     }
 
+    // ---- the thinking's boundary: the tail under the cap seals at the segment's end ----
+
+    private fun answer(delta: String): RenderEvent.Answering {
+        seq += 1
+        return RenderEvent.Answering(
+            taskId = "task-9",
+            seq = seq,
+            atMs = 1_000L + seq * 100,
+            nowMs = 1_000L + seq * 100,
+            delta = delta,
+        )
+    }
+
+    @Test
+    fun aThinkingSegmentThatEndsAtAToolSealsItsTailBelowTheCap() {
+        // the owner's law (10/11): the tail that never touched the 3K cap
+        // is NOT lost — the tool's arrival ends the segment, the tail
+        // seals as a REAL block, the feed speaks it like any other
+        var s = reduce(null, thought("a".repeat(2700)))
+        assertEquals(0, s!!.cotBlocks.size, "still pending: the cap never rang")
+        assertEquals(2700, s.cotPending.length)
+        s = reduce(s, toolOpenEvent(toolId = "t1", seq = 5))
+        assertEquals(listOf("a".repeat(2700)), s!!.cotBlocks)
+        assertEquals("", s.cotPending)
+    }
+
+    @Test
+    fun theAnswersFirstWordEndsTheThinkingSegmentToo() {
+        var s = reduce(null, thought("b".repeat(1200)))
+        s = reduce(s, answer("Hola"))!!
+        assertEquals(listOf("b".repeat(1200)), s!!.cotBlocks)
+        assertEquals("", s.cotPending)
+        assertEquals(4, s.answerChars, "the answer's own delta still lands")
+    }
+
+    @Test
+    fun aBlankPendingSealsNothingAndTheFlushIsIdempotent() {
+        var s = reduce(null, toolOpenEvent(toolId = "t0", seq = 1)) // no thoughts yet
+        assertEquals(0, s!!.cotBlocks.size, "a tool after no thought seals nothing")
+        s = reduce(s, thought("x".repeat(3400))) // the cap seals block 1 at 3000, 400 ride pending
+        assertEquals(1, s!!.cotBlocks.size)
+        assertEquals(400, s.cotPending.length)
+        s = reduce(s, toolOpenEvent(toolId = "t1", seq = 6))
+        assertEquals(2, s!!.cotBlocks.size, "the 400-cp tail joins as its own block")
+        assertEquals(400, s.cotBlocks[1].length)
+        s = reduce(s, toolOpenEvent(toolId = "t2", seq = 7))
+        assertEquals(2, s!!.cotBlocks.size, "the second flush is a no-op")
+    }
+
     // ---- the hub's verbs, as events -------------------------------------------
 
     @Test
