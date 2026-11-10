@@ -24,7 +24,7 @@ def main []: nothing -> nothing {
     (date now | format date "%s") | save -f ($data | path join "state/deploying")
 
     step "building (Gradle daemon on 25)"
-    announce "🚀 deploy bot 1/4 — building (Gradle + detekt + tests; el build es el tramo largo)"
+    announce "🚀 deploy Bot Kotlin espejo ZCode 1/4 — building (Gradle + detekt + tests; el build es el tramo largo)"
     cd $repo
     # the build is the first thing that can kill the deploy: capture it (a
     # bare external failing would just stop the script — the phone would sit
@@ -33,12 +33,12 @@ def main []: nothing -> nothing {
     print $build.stdout
     if $build.exit_code != 0 {
         print -e $build.stderr
-        announce-loud "❌ <b>DEPLOY BOT FALLÓ</b> — el build (Gradle/detekt/tests) se cayó; el daemon sigue con lo anterior"
+        announce-loud "❌ <b>DEPLOY BOT KOTLIN (ZCODE) FALLÓ</b> — el build (Gradle/detekt/tests) se cayó; el daemon sigue con lo anterior"
         die $"the build failed: exit ($build.exit_code)"
     }
 
     step $"installing to ($dest)"
-    announce "🚀 deploy bot 2/4 — installing"
+    announce "🚀 deploy Bot Kotlin espejo ZCode 2/4 — installing"
     mkdir $dest
     mkdir ($data | path join "state")
     mkdir ($data | path join "shadow")
@@ -50,7 +50,7 @@ def main []: nothing -> nothing {
     # The healer is installed BEFORE the daemon's own restart: if the
     # bootstrap below ever fails, this is the job that brings it back.
     step "LaunchAgent com.zcode.bot-healer (the bot's own dead-man's switch)"
-    announce "🚀 deploy bot 3/4 — LaunchAgents (healer + daemon)"
+    announce "🚀 deploy Bot Kotlin espejo ZCode 3/4 — LaunchAgents (healer + daemon)"
     bootstrap-agent $repo "com.zcode.bot-healer"
 
     step $"LaunchAgent ($LABEL) \(KeepAlive: launchd is the dumb outer ring\)"
@@ -58,7 +58,7 @@ def main []: nothing -> nothing {
     bootstrap-agent $repo $LABEL
 
     step "verification: first heartbeat + armed state (deadline 45s)"
-    announce "🚀 deploy bot 4/4 — verification (heartbeat + estado armado, deadline 45 s)"
+    announce "🚀 deploy Bot Kotlin espejo ZCode 4/4 — verification (heartbeat + estado armado, deadline 45 s)"
     let hb = ($data | path join "state/hb-zconn-shadow")
     let zconn = ($data | path join "state/zconn.json")
     mut ok = false
@@ -86,7 +86,7 @@ def main []: nothing -> nothing {
         for line in (tail-lines $err 5) {
             print -e $line
         }
-        announce-loud "❌ <b>DEPLOY BOT FALLÓ</b> — el daemon NO armó en 45 s (heartbeat ausente); mirá el deploy log"
+        announce-loud "❌ <b>DEPLOY BOT KOTLIN (ZCODE) FALLÓ</b> — el daemon NO armó en 45 s (heartbeat ausente); mirá el deploy log"
         exit 1
     }
     log $"heartbeat: (^stat -f '%Sm' $hb | str trim)"
@@ -98,7 +98,7 @@ def main []: nothing -> nothing {
     }
     # the deploy is over: the healer owns the daemon again
     rm -f ($data | path join "state/deploying")
-    announce-loud "🔥 <b>DEPLOY BOT COMPLETO</b> — daemon armado y verificado (heartbeat + zconn); canal, poller y send vivos"
+    announce-loud "🔥 <b>DEPLOY BOT KOTLIN (ZCODE) COMPLETO</b> — daemon armado y verificado (heartbeat + zconn); canal, poller y send vivos"
     print 'done. Live daemon armed: channel + getUpdates poller + send (daemon.json is the knob).'
     print 'Health: ~/.zcode/bot-kotlin/state/hb-channel · hb-poller · hb-zconn-shadow; log: logs/daemon.jsonl.'
 }
