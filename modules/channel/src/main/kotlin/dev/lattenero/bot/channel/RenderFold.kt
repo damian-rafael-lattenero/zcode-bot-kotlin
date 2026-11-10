@@ -51,13 +51,32 @@ fun reduce(
     }
 
     is RenderEvent.Resync -> when {
-        // the resync re-baselines the LIVE windows (the tail dies) but the
+        // the resync re-baselines the LIVE windows (the CoT's AND the
+        // answer's: the reconnect's catch-up burst re-states the in-flight
+        // content, and windows that survived would double it) but the
         // sealed blocks are complete real text — a gap cuts the seam, never
         // a sealed box (and the feed already spoke them)
         state?.taskId == event.taskId -> state.copy(
             cotTail = "",
             cotPending = "",
+            answerTail = "",
+            prosePending = "",
             phase = TurnPhase.Idle,
+        )
+
+        else -> state
+    }
+
+    is RenderEvent.StreamRebase -> when {
+        // THE WATCHDOG'S RE-ARM: the resubscribe's catch-up burst re-states
+        // the in-flight streamed content — the live answer windows die
+        // BEFORE it lands (the duplication law, see the event's doc). The
+        // CoT tail rides the same cut: its pending seals at boundaries and
+        // its blocks survive; a re-stated thought tail would double too.
+        state?.taskId == event.taskId -> state.copy(
+            answerTail = "",
+            prosePending = "",
+            cotTail = "",
         )
 
         else -> state

@@ -200,14 +200,43 @@ class RenderFoldTest {
     @Test
     fun resyncRebaselinesTheLiveWindowsAndTheBlocksSurvive() {
         var state = reduce(null, thought("x".repeat(3000))) // block 1 sealed
+        state = reduce(state, answer("Hola mundo"))!! // the answer's windows hold text
+        assertEquals("Hola mundo", state!!.answerTail)
+        assertEquals("Hola mundo", state.prosePending)
         state = reduce(state, RenderEvent.Resync("task-9"))
         assertEquals(listOf("x".repeat(3000)), state!!.cotBlocks)
         assertEquals("", state.cotTail)
         assertEquals("", state.cotPending)
+        assertEquals("", state.answerTail, "the answer's live window dies with the baseline")
+        assertEquals("", state.prosePending, "the unspoken prose dies with the baseline")
         assertEquals(TurnPhase.Idle, state.phase)
         // a foreign task's resync is ignored
         val untouched = reduce(state, RenderEvent.Resync("other"))
         assertEquals(state, untouched)
+    }
+
+    @Test
+    fun theWatchdogsRebaseKillsTheAnswerWindowsAndKeepsTheTurn() {
+        // a turn mid-answer: a sealed CoT block, one spent prose segment,
+        // and the answer's live windows holding unspoken text
+        var state = reduce(null, thought("a".repeat(3000))) // block 1 sealed
+        state = reduce(state, answer("Mi edición partió"))!!
+        state = reduce(state, toolOpenEvent(toolId = "t1", seq = 5)) // the boundary spends the prose
+        val before = state!!
+        assertEquals(listOf("Mi edición partió"), before.proseSpent)
+        assertEquals("Mi edición partió", before.proseSpent.single())
+        assertEquals("", before.prosePending, "the boundary flushed the pending")
+        // THE REBASE: the windows die, the turn's truth stands
+        val rebased = reduce(before, RenderEvent.StreamRebase("task-9"))!!
+        assertEquals("", rebased.answerTail, "the answer tail dies — the burst rebuilds it")
+        assertEquals("", rebased.prosePending, "the pending prose dies — never re-spoken twice")
+        assertEquals(listOf("Mi edición partió"), rebased.proseSpent, "the spent prose is history — untouched")
+        assertEquals(before.cotBlocks, rebased.cotBlocks, "the sealed blocks are real text — untouched")
+        assertEquals(before.phase, rebased.phase, "the turn IS running — the phase stands")
+        assertEquals(before.tools, rebased.tools, "the lanes stand")
+        assertEquals(before.taskId, rebased.taskId)
+        // a foreign task's rebase moves nothing
+        assertEquals(before, reduce(before, RenderEvent.StreamRebase("other")))
     }
 
     @Test
