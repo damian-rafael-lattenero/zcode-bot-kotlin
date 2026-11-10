@@ -603,8 +603,8 @@ internal fun wireChannel(
                             "(sibling of everything; this daemon is never at stake) — log: $whatsappDeployLog"
                     }
                 }
-                DeployCommand.Target.BOTH -> throw IllegalStateException(
-                    "deploy(BOTH) must be split by the flow (fork first) — the wiring only spawns atomic targets",
+                DeployCommand.Target.ALL -> throw IllegalStateException(
+                    "deploy(ALL) must be split by the flow (fork first) — the wiring only spawns atomic targets",
                 )
             }
         },

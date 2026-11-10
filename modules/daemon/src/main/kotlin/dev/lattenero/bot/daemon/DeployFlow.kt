@@ -35,16 +35,18 @@ private val logger = KotlinLogging.logger {}
  * 2026-11-04 — THE ONE-TAP LAW (the owner: «elegir que deployar y esa
  * eleccion ya empieza el deploy… una única vez… no se puede volver a
  * apretar esa botonera»): the bare /deploy offers 🤖 bot / 🍴 fork /
- * 🚀 both and REMEMBERS the card's born message id; the tap (or the typed
- * word) IS the confirmation — the owner gate passes and the door fires
- * immediately, and the card's BUTTON ROW DIES (the edit strips the
- * keyboard, marking the chosen row «▶️ en vuelo»). The confirm cards, the
- * go/no row, the expiry and the arm are all retired. After a launch that
- * lands, every further target is refused («ya hay un deploy en vuelo»)
- * until process death — the spawn edge's busy-guard is the durable one.
- * The fork deploy does NOT touch this daemon; BOTH is fork FIRST, because
- * a sibling job survives the bootout (the spawn order is the survival
- * law, not a style choice).
+ * 📱 whatsapp / 🚀 todos and REMEMBERS the card's born message id; the tap
+ * (or the typed word) IS the confirmation — the owner gate passes and the
+ * door fires immediately, and the card's BUTTON ROW DIES (the edit strips
+ * the keyboard, marking the chosen row «▶️ en vuelo»). The confirm cards,
+ * the go/no row, the expiry and the arm are all retired. After a launch
+ * that lands, THAT target is refused («ya hay un deploy en vuelo») until
+ * the rearm window — per-target and time-bounded (the owner's 10/11 fix:
+ * the old global process-lifetime flag let ONE WhatsApp deploy lock every
+ * target for 30+ minutes) — and the spawn edge's busy-guard is the durable
+ * one. The fork deploy does NOT touch this daemon; ALL is fork FIRST,
+ * because a sibling job survives the bootout (the spawn order is the
+ * survival law, not a style choice).
  */
 class DeployFlow(
     private val machine: DeployCommand,
@@ -128,22 +130,23 @@ class DeployFlow(
             return
         }
         try {
-            // BOTH splits HERE, in the door: fork FIRST — its job must be armed
+            // ALL splits HERE, in the door: fork FIRST — its job must be armed
             // before the daemon's deploy boots out this daemon. The order is
             // the survival law, so it lives where the tests can pin it.
             when (target) {
-                Target.BOTH -> {
+                Target.ALL -> {
                     spawn(Target.FORK)
                     spawn(Target.BOT)
+                    spawn(Target.WHATSAPP)
                 }
 
                 else -> spawn(target)
             }
-            // THE ONE-SHOT: the launch landed — every further target is
-            // refused until process death (honest, best-effort: the
-            // script-side guard is the durable one). A failed spawn never
+            // THE ONE-SHOT: the launch landed — THIS target is refused until
+            // the rearm window (per-target, time-bounded; honest, best-effort:
+            // the script-side guard is the durable one). A failed spawn never
             // lands here: the shot stays free for the honest retry.
-            machine.spent()
+            machine.spent(target)
             logger.warn {
                 "deploy($target): script(s) spawned detached (announce message_id=$receipt) — " +
                     "this daemon may die mid-build"
@@ -162,21 +165,21 @@ class DeployFlow(
         Target.BOT -> FLOWN_BOT
         Target.FORK -> FLOWN_FORK
         Target.WHATSAPP -> FLOWN_WHATSAPP
-        Target.BOTH -> FLOWN_BOTH
+        Target.ALL -> FLOWN_ALL
     }
 
     private fun announceOf(target: Target): String = when (target) {
         Target.BOT -> THE_ANNOUNCE
         Target.FORK -> THE_ANNOUNCE_FORK
         Target.WHATSAPP -> THE_ANNOUNCE_WHATSAPP
-        Target.BOTH -> THE_ANNOUNCE_BOTH
+        Target.ALL -> THE_ANNOUNCE_ALL
     }
 
     private fun spawnedNote(target: Target): String = when (target) {
         Target.BOT -> SPAWNED
         Target.FORK -> SPAWNED_FORK
         Target.WHATSAPP -> SPAWNED_WHATSAPP
-        Target.BOTH -> SPAWNED_BOTH
+        Target.ALL -> SPAWNED_ALL
     }
 
     companion object {
@@ -184,13 +187,19 @@ class DeployFlow(
         const val TARGET_WORD_BOT = "bot"
         const val TARGET_WORD_FORK = "fork"
         const val TARGET_WORD_WHATSAPP = "whatsapp"
-        const val TARGET_WORD_BOTH = "both"
+        const val TARGET_WORD_ALL = "all"
+
+        /** The pre-rename word («Ambos» era) — stale cards on the phone still carry it. */
+        const val TARGET_WORD_BOTH_ALIAS = "both"
 
         fun targetOf(action: String): Target? = when (action) {
             TARGET_WORD_BOT -> Target.BOT
             TARGET_WORD_FORK -> Target.FORK
             TARGET_WORD_WHATSAPP -> Target.WHATSAPP
-            TARGET_WORD_BOTH -> Target.BOTH
+            TARGET_WORD_ALL -> Target.ALL
+            // THE STALE-CARD ALIAS (the owner's rename, 10/11): cards still
+            // living on the phone carry dep:both — they must keep answering.
+            TARGET_WORD_BOTH_ALIAS -> Target.ALL
             else -> null
         }
 
@@ -200,25 +209,27 @@ class DeployFlow(
          * old confirm cards' content collapsed (the real cost of each).
          */
         const val TARGETS_CARD = (
-            "🚀 <b>Deploy</b>\n¿Qué deployo? Tocar ES lanzar — una única vez, la botonera muere al toque:\n" +
+            "🚀 <b>Deploy</b>\n¿Qué deployo? Tocar ES lanzar — una única vez por target, " +
+                "la botonera muere al toque:\n" +
                 "🤖 <b>Bot Kotlin</b> — build (tests incluidos) → install → el LaunchAgent reinicia el daemon\n" +
                 "🍴 <b>ZCode Fork</b> — build AHORA (~15 min, avisos por fases, la app sigue viva) → " +
                 "cierra ZCode solo → swap → reabre (unos segundos de canal 📡 al final)\n" +
                 "📱 <b>WhatsApp (whatsdigest)</b> — build con tests → install → el LaunchAgent del bot " +
                 "de los grupos se reinicia y se verifica solo (nunca toca ESTE daemon)\n" +
-                "🚀 <b>Ambos</b> — fork PRIMERO, después el daemon (jobs hermanos de launchd)"
+                "🚀 <b>Todos</b> — fork PRIMERO, después el daemon y el bot de WhatsApp (jobs hermanos de launchd)"
             )
 
         /** The card's flown rows — the edit's text: keyboard stripped, the choice marked. */
         const val FLOWN_BOT = "🤖 Bot Kotlin — ▶️ en vuelo"
         const val FLOWN_FORK = "🍴 ZCode Fork — ▶️ en vuelo"
         const val FLOWN_WHATSAPP = "📱 WhatsApp (whatsdigest) — ▶️ en vuelo"
-        const val FLOWN_BOTH = "🚀 Ambos — ▶️ en vuelo (fork primero)"
+        const val FLOWN_ALL = "🚀 Todos — ▶️ en vuelo (fork primero)"
 
-        /** The in-flight refusal — one deploy at a time, until this process dies. */
+        /** The in-flight refusal — THIS target flew; its own slot rearms itself. */
         const val IN_FLIGHT = (
-            "🚀 Ya hay un deploy en vuelo — no lanzo otro. " +
-                "Si el job sigue corriendo, el script mismo se niega; esperá a que termine."
+            "🚀 Ya hay un deploy de ESE target en vuelo — no lanzo otro del mismo. " +
+                "Si el job sigue corriendo, el script mismo se niega; esperá a que termine " +
+                "(los ~20 min rearmar el slot)."
             )
 
         /** The door's exact sentences — the phone hears them BEFORE any script can kill anything. */
@@ -240,8 +251,8 @@ class DeployFlow(
                 "la app sigue viva); al final CIERRA ZCode solo, hace el swap y la reabre"
             )
 
-        const val THE_ANNOUNCE_BOTH = (
-            "🚀 Deployando AMBOS — primero el fork, después el daemon; vuelvo en un momento"
+        const val THE_ANNOUNCE_ALL = (
+            "🚀 Deployando TODOS — primero el fork, después el daemon y el bot de WhatsApp; vuelvo en un momento"
             )
 
         const val SPAWNED = (
@@ -257,11 +268,11 @@ class DeployFlow(
                 "Log: <code>~/.zcode/bot-kotlin/logs/deploy-fork.log</code> — /file lo trae."
             )
 
-        const val SPAWNED_BOTH = (
-            "🛠 Ambos scripts lanzados detached — fork y daemon compilan en paralelo " +
+        const val SPAWNED_ALL = (
+            "🛠 Los tres scripts lanzados detached — fork, daemon y WhatsApp compilan en paralelo " +
                 "y cada verificación saluda al volver. " +
-                "Logs: <code>~/.zcode/bot-kotlin/logs/deploy-fork.log</code> y " +
-                "<code>deploy-daemon.log</code> — /file los trae."
+                "Logs: <code>~/.zcode/bot-kotlin/logs/deploy-fork.log</code>, " +
+                "<code>deploy-daemon.log</code> y <code>deploy-whatsapp.log</code> — /file los trae."
             )
 
         const val ANNOUNCE_FAILED = (

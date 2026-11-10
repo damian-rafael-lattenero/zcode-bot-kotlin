@@ -49,7 +49,8 @@ class DeploySpawn(
      * The one-shot job's OWN label — the survival law's whole point. The
      * daemon deploy keeps [Companion.JOB_LABEL]; the fork deploy runs as
      * [FORK_JOB_LABEL], a sibling of BOTH the daemon and the daemon's
-     * deploy job (in a BOTH deploy each script outlives the other's bootout).
+     * deploy job (in an ALL deploy each script outlives the other's
+     * bootout — the owner renamed the combined target to ALL, 10/11).
      */
     private val label: String = JOB_LABEL,
     private val uid: String = currentUid(),
