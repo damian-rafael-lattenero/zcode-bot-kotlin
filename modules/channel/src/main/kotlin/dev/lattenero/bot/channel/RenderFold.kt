@@ -69,14 +69,18 @@ fun reduce(
 
     is RenderEvent.StreamRebase -> when {
         // THE WATCHDOG'S RE-ARM: the resubscribe's catch-up burst re-states
-        // the in-flight streamed content — the live answer windows die
-        // BEFORE it lands (the duplication law, see the event's doc). The
-        // CoT tail rides the same cut: its pending seals at boundaries and
-        // its blocks survive; a re-stated thought tail would double too.
+        // the in-flight streamed content — the live windows die BEFORE it
+        // lands (the duplication law, see the event's doc). THE PENDING
+        // THOUGHT RIDES THE SAME CUT: one Thought delta writes BOTH the
+        // tail and the pending accumulator (reduceThought), so a re-stated
+        // delta doubles whichever survives — the tail and the pending go
+        // together or not at all. The sealed blocks are complete real text
+        // (spoken already); the counters and the lanes stand.
         state?.taskId == event.taskId -> state.copy(
             answerTail = "",
             prosePending = "",
             cotTail = "",
+            cotPending = "",
         )
 
         else -> state
