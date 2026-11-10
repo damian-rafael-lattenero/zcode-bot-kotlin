@@ -203,9 +203,12 @@ sealed interface RenderEvent {
     /**
      * THE WATCHDOG'S RE-ARM (10/11): the stream watchdog re-subscribed a
      * live turn and the fork's subscribe burst re-states the in-flight
-     * streamed content — the live answer windows die BEFORE the burst
-     * lands, or the re-stated deltas double onto the retained text (the
-     * duplicated seams the owner read: «MiMi edición… La elimino:ino:»).
+     * streamed content — the live windows die BEFORE the burst lands, or
+     * the re-stated deltas double onto the retained text (the duplicated
+     * seams the owner read: «MiMi edición… La elimino:ino:»). The windows
+     * are the answer's tail, the pending prose AND the thinking's tail +
+     * pending accumulator: one Thought delta writes BOTH of the thinking's
+     * (reduceThought), so a re-stated delta doubles whichever survives.
      * Everything else stands: the phase is true (a turn IS running), the
      * lanes and the sealed blocks are real, the spent prose is history.
      */
