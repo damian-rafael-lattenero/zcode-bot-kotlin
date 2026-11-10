@@ -164,10 +164,13 @@ class LiveHub {
 
     /**
      * THE WATCHDOG'S RE-ARM (10/11): a resubscribe on a LIVE turn re-baselines
-     * the answer's live windows — the fork's subscribe burst re-states the
-     * in-flight streamed content, and windows that survived it would double
-     * (the duplicated violet segments the owner read). Fold BEFORE the
-     * resubscribe fires: the windows are empty when the burst lands.
+     * the live windows — the answer's tail + pending prose AND the thinking's
+     * tail + pending accumulator (one Thought delta writes both of the
+     * thinking's: a re-stated delta doubles whichever survives). The fork's
+     * subscribe burst re-states the in-flight streamed content, and windows
+     * that survived it would double (the duplicated violet segments the owner
+     * read). Fold BEFORE the resubscribe fires: the windows are empty when
+     * the burst lands.
      */
     suspend fun rebase(taskId: String) {
         mutex.withLock { fold(RenderEvent.StreamRebase(taskId), SimpleLineDiffer) }

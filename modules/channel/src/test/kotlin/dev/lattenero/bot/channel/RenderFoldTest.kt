@@ -217,19 +217,24 @@ class RenderFoldTest {
 
     @Test
     fun theWatchdogsRebaseKillsTheAnswerWindowsAndKeepsTheTurn() {
-        // a turn mid-answer: a sealed CoT block, one spent prose segment,
-        // and the answer's live windows holding unspoken text
+        // a turn mid-answer AND mid-thought: a sealed CoT block, one spent
+        // prose segment, the answer's live windows holding unspoken text, and
+        // the thinking's pending accumulator holding the under-cap tail
         var state = reduce(null, thought("a".repeat(3000))) // block 1 sealed
         state = reduce(state, answer("Mi edición partió"))!!
         state = reduce(state, toolOpenEvent(toolId = "t1", seq = 5)) // the boundary spends the prose
+        state = reduce(state, thought("b".repeat(700)))!! // the next segment's tail rides the pending
         val before = state!!
         assertEquals(listOf("Mi edición partió"), before.proseSpent)
         assertEquals("Mi edición partió", before.proseSpent.single())
         assertEquals("", before.prosePending, "the boundary flushed the pending")
+        assertEquals("b".repeat(700), before.cotPending, "the thinking's accumulator holds the under-cap tail")
         // THE REBASE: the windows die, the turn's truth stands
         val rebased = reduce(before, RenderEvent.StreamRebase("task-9"))!!
         assertEquals("", rebased.answerTail, "the answer tail dies — the burst rebuilds it")
         assertEquals("", rebased.prosePending, "the pending prose dies — never re-spoken twice")
+        assertEquals("", rebased.cotTail, "the thinking's tail dies with the baseline")
+        assertEquals("", rebased.cotPending, "the pending thought dies too — one delta writes tail AND pending")
         assertEquals(listOf("Mi edición partió"), rebased.proseSpent, "the spent prose is history — untouched")
         assertEquals(before.cotBlocks, rebased.cotBlocks, "the sealed blocks are real text — untouched")
         assertEquals(before.phase, rebased.phase, "the turn IS running — the phase stands")
@@ -237,6 +242,20 @@ class RenderFoldTest {
         assertEquals(before.taskId, rebased.taskId)
         // a foreign task's rebase moves nothing
         assertEquals(before, reduce(before, RenderEvent.StreamRebase("other")))
+    }
+
+    @Test
+    fun theRestatedThoughtDeltaRebuildsThePendingFromZero() {
+        // the rebase's own premise: the burst re-states the in-flight content
+        // — a re-stated delta lands on the EMPTY accumulator and rebuilds it,
+        // never doubles onto the surviving text
+        var state = reduce(null, thought("a".repeat(3000))) // block 1 sealed
+        state = reduce(state, thought("b".repeat(700)))!! // the pending holds 700 cp
+        state = reduce(state, RenderEvent.StreamRebase("task-9"))!!
+        assertEquals("", state!!.cotPending, "the accumulator dies with the baseline")
+        state = reduce(state, thought("re-stated tail"))!!
+        assertEquals("re-stated tail", state!!.cotPending, "the re-stated delta rebuilds from zero")
+        assertEquals(listOf("a".repeat(3000)), state.cotBlocks, "the sealed block never doubles")
     }
 
     @Test
