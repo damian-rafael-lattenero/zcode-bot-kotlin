@@ -10,11 +10,13 @@ import kotlin.test.assertTrue
  * B6 — /deploy's pure core pinned, THE ONE-TAP LAW (the owner's order,
  * 4/11: «elegir que deployar y esa eleccion ya empieza el deploy… una
  * única vez»): the owner gate (a non-owner tap is refused, a config that
- * cannot say who owns it fails CLOSED) and the ONE-SHOT consumption (the
- * first landed launch spends the machine; every further target is
- * InFlight until process death; a launch that never landed leaves the
- * shot free). No clock anywhere: the arm/window/expiry machinery is
- * retired, not re-tuned.
+ * cannot say who owns it fails CLOSED) and the ONE-SHOT consumption —
+ * per-target and time-bounded (the owner's 10/11 fix: ONE WhatsApp deploy
+ * used to lock every target until process death, because the 📱 deploy
+ * never restarts this daemon). A landed launch spends ITS OWN target;
+ * other targets answer on their own slots; the slot rearms after
+ * [DeployCommand.REARM_AFTER_MS]; a launch that never landed leaves the
+ * shot free.
  */
 class DeployCommandTest {
 
@@ -22,7 +24,7 @@ class DeployCommandTest {
     fun theOwnersTargetConfirms() {
         val m = DeployCommand()
         assertEquals(DeployCommand.Verdict.Confirmed(DeployCommand.Target.FORK), m.confirm(DeployCommand.Target.FORK, OWNER, OWNER))
-        assertEquals(DeployCommand.Verdict.Confirmed(DeployCommand.Target.BOTH), m.confirm(DeployCommand.Target.BOTH, OWNER, OWNER))
+        assertEquals(DeployCommand.Verdict.Confirmed(DeployCommand.Target.ALL), m.confirm(DeployCommand.Target.ALL, OWNER, OWNER))
     }
 
     @Test
@@ -60,21 +62,53 @@ class DeployCommandTest {
     }
 
     @Test
-    fun theSpentMachineRefusesEveryTargetUntilProcessDeath() {
-        val m = DeployCommand()
-        m.spent()
-        assertEquals(DeployCommand.Verdict.InFlight, m.confirm(DeployCommand.Target.FORK, OWNER, OWNER))
-        assertEquals(DeployCommand.Verdict.InFlight, m.confirm(DeployCommand.Target.BOTH, OWNER, OWNER))
-        assertEquals(DeployCommand.Verdict.InFlight, m.confirm(DeployCommand.Target.BOT, OWNER, OWNER))
-        // there is no un-spend: the latch dies with the process (the
-        // durable backstop is the spawn edge's own busy-guard)
+    fun theSpentTargetRefusesItsOwnRetap() {
+        val clock = MutableClock()
+        val m = DeployCommand(nowMs = { clock.nowMs })
+        m.spent(DeployCommand.Target.WHATSAPP)
+        assertEquals(
+            DeployCommand.Verdict.InFlight,
+            m.confirm(DeployCommand.Target.WHATSAPP, OWNER, OWNER),
+            "the just-flown target is in flight",
+        )
+        // the OTHER targets answer on their own slots — the owner's 10/11
+        // complaint was ONE WhatsApp deploy locking the fork and the bot
+        assertEquals(
+            DeployCommand.Verdict.Confirmed(DeployCommand.Target.FORK),
+            m.confirm(DeployCommand.Target.FORK, OWNER, OWNER),
+            "a spent WhatsApp never blocks the fork",
+        )
+        assertEquals(
+            DeployCommand.Verdict.Confirmed(DeployCommand.Target.BOT),
+            m.confirm(DeployCommand.Target.BOT, OWNER, OWNER),
+            "a spent WhatsApp never blocks the bot",
+        )
+    }
+
+    @Test
+    fun theSpentTargetRearmsAfterTheTtl() {
+        val clock = MutableClock()
+        val m = DeployCommand(nowMs = { clock.nowMs })
+        m.spent(DeployCommand.Target.FORK)
+        clock.nowMs += DeployCommand.REARM_AFTER_MS - 1
+        assertEquals(
+            DeployCommand.Verdict.InFlight,
+            m.confirm(DeployCommand.Target.FORK, OWNER, OWNER),
+            "one millisecond before the window closes, the target is still spent",
+        )
+        clock.nowMs += 1
+        assertEquals(
+            DeployCommand.Verdict.Confirmed(DeployCommand.Target.FORK),
+            m.confirm(DeployCommand.Target.FORK, OWNER, OWNER),
+            "at the boundary the slot rearms — the flight is over",
+        )
     }
 
     @Test
     fun aNonOwnerTapAfterTheSpentMachineIsStillNotOwner() {
         // the owner gate outranks the latch: the refusal names the truth
         val m = DeployCommand()
-        m.spent()
+        m.spent(DeployCommand.Target.BOT)
         assertEquals(DeployCommand.Verdict.NotOwner, m.confirm(DeployCommand.Target.BOT, INTRUDER, OWNER))
     }
 
@@ -94,6 +128,11 @@ class DeployCommandTest {
     fun theTargetVocabularyIsExactlyFour() {
         // the card offers exactly what the machine can fire — nothing else exists
         assertEquals(4, DeployCommand.Target.entries.size)
+    }
+
+    /** A bendable clock — the TTL law is pinned against real time arithmetic. */
+    private class MutableClock {
+        var nowMs: Long = 1_000_000L
     }
 
     private companion object {

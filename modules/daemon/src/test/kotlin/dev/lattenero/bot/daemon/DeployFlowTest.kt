@@ -19,10 +19,11 @@ import kotlin.test.assertTrue
  * refuses the spawn — no blind restarts), the LOUD failure when the spawn
  * edge throws, the owner gate with ZERO spawns on refusal, the button row
  * dying on the card (the edit called with the card's own born id), the
- * in-flight refusal after a launch that landed, and BOTH spawning fork
- * FIRST (a sibling job survives the daemon deploy's own bootout). The
- * `say`, `edit` and `spawn` effects are recorders — no Telegram, no
- * process, no clock sleep.
+ * in-flight refusal of a SPENT TARGET (per-target, the owner's 10/11 fix)
+ * while other targets still fly, ALL spawning fork FIRST then daemon then
+ * WhatsApp (siblings survive each other's bootouts), and the stale
+ * dep:both card answering as ALL. The `say`, `edit` and `spawn` effects
+ * are recorders — no Telegram, no process, no clock sleep.
  */
 class DeployFlowTest {
 
@@ -80,7 +81,7 @@ class DeployFlowTest {
         assertEquals("dep:bot", row[0].jsonObject["callback_data"]!!.jsonPrimitive.content)
         assertEquals("dep:fork", row[1].jsonObject["callback_data"]!!.jsonPrimitive.content)
         assertEquals("dep:whatsapp", row[2].jsonObject["callback_data"]!!.jsonPrimitive.content)
-        assertEquals("dep:both", row[3].jsonObject["callback_data"]!!.jsonPrimitive.content)
+        assertEquals("dep:all", row[3].jsonObject["callback_data"]!!.jsonPrimitive.content)
         // the retired go/no NEVER fires: a stale button just re-shows the card
         f.onTap("go", OWNER)
         f.onTap("no", OWNER)
@@ -141,16 +142,30 @@ class DeployFlowTest {
     }
 
     @Test
-    fun bothSpawnsTheForkFirstThenTheDaemon() = runTest {
+    fun allSpawnsTheForkFirstThenTheDaemonThenWhatsapp() = runTest {
+        val rig = Rig()
+        val f = flow(rig)
+        f.onTap("all", OWNER)
+        // the spawn ORDER is the survival law: fork's job is armed before
+        // the daemon's deploy boots out this daemon; WhatsApp is a sibling
+        // of everything and joins last
+        assertEquals(listOf(Target.FORK, Target.BOT, Target.WHATSAPP), rig.spawnedTargets)
+        assertEquals(DeployFlow.THE_ANNOUNCE_ALL, rig.spoken[0].first)
+        assertEquals("spawn:FORK", rig.events[1])
+        assertEquals("spawn:BOT", rig.events[2])
+        assertEquals("spawn:WHATSAPP", rig.events[3])
+    }
+
+    @Test
+    fun theStaleBothCardStillAnswersAsAll() = runTest {
+        // THE OWNER'S RENAME (10/11): cards still living on the phone carry
+        // dep:both — the alias keeps them honest (they fire ALL, silently
+        // upgraded, never dead).
         val rig = Rig()
         val f = flow(rig)
         f.onTap("both", OWNER)
-        // the spawn ORDER is the survival law: fork's job is armed before
-        // the daemon's deploy boots out this daemon
-        assertEquals(listOf(Target.FORK, Target.BOT), rig.spawnedTargets)
-        assertEquals(DeployFlow.THE_ANNOUNCE_BOTH, rig.spoken[0].first)
-        assertEquals("spawn:FORK", rig.events[1])
-        assertEquals("spawn:BOT", rig.events[2])
+        assertEquals(listOf(Target.FORK, Target.BOT, Target.WHATSAPP), rig.spawnedTargets)
+        assertEquals(DeployFlow.THE_ANNOUNCE_ALL, rig.spoken[0].first)
     }
 
     @Test
@@ -217,16 +232,21 @@ class DeployFlowTest {
     }
 
     @Test
-    fun aLandedLaunchRefusesEveryFurtherTarget() = runTest {
+    fun aLandedLaunchRefusesItsOwnTargetButOthersFly() = runTest {
+        // THE PER-TARGET LAW (the owner's 10/11 fix): ONE WhatsApp deploy
+        // used to lock every target until process death — now the landed
+        // launch spends only ITS OWN slot; the others answer on theirs.
         val rig = Rig()
         val f = flow(rig)
         f.onTap("bot", OWNER)
         assertEquals(1, rig.spawnedTargets.size)
-        f.onTap("fork", OWNER) // impatience
-        f.onTap("both", OWNER)
-        assertEquals(1, rig.spawnedTargets.size, "STILL one — the one-shot never fires twice")
+        f.onTap("bot", OWNER) // the SAME target again — impatience
+        assertEquals(1, rig.spawnedTargets.size, "STILL one — the spent target never fires twice")
         assertEquals(DeployFlow.IN_FLIGHT, rig.spoken.last().first)
-        assertTrue(rig.spoken.last().first.contains("deploy en vuelo"), "the honest refusal")
+        assertTrue(rig.spoken.last().first.contains("en vuelo"), "the honest refusal")
+        // a DIFFERENT target flies freely — the WhatsApp deploy never blocks the fork
+        f.onTap("fork", OWNER)
+        assertEquals(listOf(Target.BOT, Target.FORK), rig.spawnedTargets)
     }
 
     @Test
