@@ -41,7 +41,7 @@ def send-telegram [text: string, --html]: nothing -> nothing {
     try {
         let cfg: any = (open $cfg_path)
         let token: string = ($cfg.token? | default "")
-        let chat: string = ($cfg.chat_id? | default "")
+        let chat: any = ($cfg.chat_id? | default "")
         if ($token | is-empty) or ($chat | is-empty) { return }
         let body: string = if $html {
             ({chat_id: $chat, text: $text, parse_mode: "HTML"} | to json)
