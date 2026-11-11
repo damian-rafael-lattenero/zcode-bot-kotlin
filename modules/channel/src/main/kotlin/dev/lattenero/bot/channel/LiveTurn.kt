@@ -282,6 +282,26 @@ data class TurnLive(
      */
     val prosePending: String = "",
     val proseSpent: List<String> = emptyList(),
+    /**
+     * THE SPENT PROSE'S CONTENT KEYS (11/11): a SHA-256 per spent segment —
+     * the replay gate of [RenderFold.flushProse]. A re-stated burst (the
+     * fork's subscribe reburst after a [RenderEvent.Resync] or
+     * [RenderEvent.StreamRebase] re-flushes the same streamed prose)
+     * computes a key the state already holds: the flush is a no-op, the
+     * feed's positional diff never sees a new segment, the voice never
+     * re-speaks. The keys survive the window re-baselines ON PURPOSE — they
+     * are the memory the windows lack.
+     */
+    val proseKeys: Set<String> = emptySet(),
+    /**
+     * THE SEAL'S OWN COPY (11/11): the pending prose rides the [Sealed]
+     * frame HERE instead of the spent list — the seal OWNS the answer (one
+     * violet message, the snapshot's full text) and this copy is the
+     * never-lost fallback for the seal moment the snapshot cannot answer.
+     * It never touches [proseSpent]: the feed's diff never sees it, the
+     * conclusion reaches the owner exactly once.
+     */
+    val answerAtSeal: String? = null,
 ) {
     companion object {
         /**

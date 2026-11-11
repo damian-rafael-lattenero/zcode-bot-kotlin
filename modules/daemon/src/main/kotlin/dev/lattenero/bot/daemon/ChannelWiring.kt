@@ -934,8 +934,18 @@ private fun buildPoller(
                 override suspend fun queueTake(messageId: String): QueuedText? =
                     queue.take(messageId)?.let { QueuedText(it.text, it.messageId, it.receivedAt) }
 
-                override suspend fun subscribe(taskId: String, workspacePath: String) =
+                override suspend fun subscribe(taskId: String, workspacePath: String) {
+                    // THE REBURST'S LAW (11/11): subscribing a task whose turn
+                    // is ALREADY live re-states its in-flight content (the
+                    // fork's subscribe burst) — the live windows die FIRST,
+                    // the same arc the stream watchdog uses before its own
+                    // resubscribe (measured: without the cut the re-stated
+                    // first deltas doubled the answer's first word). A fresh
+                    // task's subscribe rebases nothing (an unborn turn's
+                    // windows do not exist).
+                    hub.rebase(taskId)
                     client.subscribe(taskId, workspacePath)
+                }
             },
         hub = hub,
         daemonReset = {

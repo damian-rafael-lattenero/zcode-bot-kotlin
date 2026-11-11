@@ -18,6 +18,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 /**
@@ -1148,5 +1149,102 @@ class LivePublisherTest {
             "the card promised «va en el feed» — NORMAL speaks the data too: $spoken",
         )
         assertTrue(spoken.none { "▶️" in it }, "but the open one-liner stays quiet under NORMAL")
+    }
+
+    // ---- 11/11: the univocal answer ---------------------------------------------
+
+    @Test
+    fun theSealSpeaksTheConclusionExactlyOnce() = runTest {
+        // THE 11/11 BUG (the owner: the conclusion arrived three times): the
+        // seal feed's truncated copy + the full finalAnswer spoke the answer
+        // TWICE back to back on every completion. The seal owns the answer:
+        // ONE violet copy, the snapshot's full text.
+        val taskId = "task-9"
+        val hub = LiveHub()
+        hub.apply(frame(taskId, "task_run_started", at = 1_000), nowMs = 1_000)
+        hub.apply(
+            frame(taskId, "agent_message_chunk", at = 1_100, "content" to JsonPrimitive("La respuesta completa y final.")),
+            nowMs = 1_100,
+        )
+        hub.apply(frame(taskId, "task_complete", at = 1_200, "stopReason" to JsonPrimitive("end_turn")), nowMs = 1_200)
+        val wire = Wire()
+        val publisher = publisher(wire, hub, finalAnswer = { "La respuesta completa y final." })
+        publisher.tick() // birth
+        publisher.tick() // the seal tick — the prose rides answerAtSeal, never the feed
+        val copies = wire.bodies.count { it.second == "sendRichMessage" && "La respuesta completa" in it.first }
+        assertEquals(1, copies, "the conclusion is ONE violet message: ${wire.bodies.map { it.second }}")
+    }
+
+    @Test
+    fun theSnapshotMissFallsBackToTheSealsOwnCopy() = runTest {
+        // NEVER LOST (11/11): when the snapshot cannot answer at seal time,
+        // the fold's own answerAtSeal copy speaks — one violet message, the
+        // prose that streamed. The fallback is the degradation, not a second
+        // copy: the feed never spoke it.
+        val taskId = "task-9"
+        val hub = LiveHub()
+        hub.apply(frame(taskId, "task_run_started", at = 1_000), nowMs = 1_000)
+        hub.apply(
+            frame(taskId, "agent_message_chunk", at = 1_100, "content" to JsonPrimitive("La conclusión del fallback.")),
+            nowMs = 1_100,
+        )
+        hub.apply(frame(taskId, "task_complete", at = 2_000, "stopReason" to JsonPrimitive("end_turn")), nowMs = 2_000)
+        val wire = Wire()
+        val publisher = publisher(wire, hub, finalAnswer = { null })
+        publisher.tick()
+        publisher.tick()
+        val violet = wire.bodies.lastOrNull { it.second == "sendRichMessage" }
+        assertNotNull(violet, "the fallback spoke violet: ${wire.bodies.map { it.second }}")
+        assertTrue("La conclusión del fallback" in violet.first, "the never-lost copy: ${violet.first.take(300)}")
+        assertEquals(1, wire.bodies.count { it.second == "sendRichMessage" }, "one violet copy only")
+    }
+
+    @Test
+    fun theGhostReburstNeverResealsNorReSpeaks() = runTest {
+        // THE GHOST RE-SEAL (measured: the same taskId sealed twice 9s apart):
+        // the fork's subscribe burst re-delivered the whole turn — head,
+        // deltas, complete — a fresh fold re-seeded and the conclusion spoke
+        // again. THE SEALED MEMORY: the turn that sealed gates its own
+        // frames; only a task_run_started with a STRICTLY NEWER startedAt
+        // stamp (a genuinely new turn — a reburst carries the same stamp)
+        // lifts it.
+        val taskId = "task-9"
+        val hub = LiveHub()
+        hub.apply(frame(taskId, "task_run_started", at = 1_000, "startedAt" to JsonPrimitive(5_000L)), nowMs = 1_000)
+        hub.apply(
+            frame(taskId, "agent_message_chunk", at = 1_100, "content" to JsonPrimitive("La conclusión única.")),
+            nowMs = 1_100,
+        )
+        val wire = Wire()
+        val spoken = mutableListOf<String>()
+        var now = TICK_MS
+        var seals = 0
+        val publisher = publisher(wire, hub, spoken, finalAnswer = { "La conclusión única." }, onSeal = { seals += 1 }, clock = { now })
+        publisher.tick()
+        hub.apply(frame(taskId, "task_complete", at = 2_000, "stopReason" to JsonPrimitive("end_turn")), nowMs = 2_000)
+        publisher.tick()
+        assertEquals(1, seals, "one seal")
+        assertEquals(1, wire.bodies.count { it.second == "sendRichMessage" && "La conclusión" in it.first }, "the conclusion speaks exactly once")
+        // THE REBURST: head + deltas + complete, the same startedAt stamp —
+        // every frame drops at the sealed memory
+        hub.apply(frame(taskId, "task_run_started", at = 2_100, "startedAt" to JsonPrimitive(5_000L)), nowMs = 2_100)
+        hub.apply(
+            frame(taskId, "agent_message_chunk", at = 2_200, "content" to JsonPrimitive("La conclusión única.")),
+            nowMs = 2_200,
+        )
+        hub.apply(frame(taskId, "task_complete", at = 2_300, "stopReason" to JsonPrimitive("end_turn")), nowMs = 2_300)
+        publisher.tick()
+        assertEquals(1, seals, "the reburst never re-seals")
+        assertEquals(1, wire.bodies.count { it.second == "sendRichMessage" && "La conclusión" in it.first }, "the conclusion never re-speaks")
+        // A REAL new turn (a strictly newer startedAt stamp) lifts the memory
+        // — and like every turn it carries traffic before the seal (the birth
+        // law: an Idle state never births the card). The clock moves past the
+        // birth spacing: the same task's new card is a legitimate re-birth.
+        now += 60_000L
+        hub.apply(frame(taskId, "task_run_started", at = 3_000, "startedAt" to JsonPrimitive(9_000L)), nowMs = 3_000)
+        hub.apply(frame(taskId, "agent_thought_chunk", at = 3_100, "content" to JsonPrimitive("nueva ronda")), nowMs = 3_100)
+        hub.apply(frame(taskId, "task_complete", at = 4_000, "stopReason" to JsonPrimitive("end_turn")), nowMs = 4_000)
+        publisher.tick()
+        assertEquals(2, seals, "the genuinely new turn seals normally")
     }
 }
