@@ -388,6 +388,7 @@ internal object StreamEvents {
     const val ELICITATION_RESPONSE = "elicitation_response"
     const val SESSION_INFO = "session_info_update"
     const val NETWORK_DEBUG = "task_network_debug_status"
+    const val STATE_UPDATED = "state.updated"
 
     fun type(event: JsonObject): String? = event.str("type")
 
@@ -415,6 +416,22 @@ internal object StreamEvents {
      * absent (the delivery clock keeps its fallback).
      */
     fun startedAt(event: JsonObject): Long = event.long("startedAt") ?: 0L
+
+    /**
+     * THE RECOVERY'S HERALD (11/11): a `state.updated` carrying the apiRetry
+     * pill whose reason is `stream_recovery` — the core's stream recovery
+     * just RE-OPENED the request, and the fork re-states the whole streamed
+     * content from its start (the doubled first word, the doubled CoT
+     * sentence the owner read). The windows must die BEFORE the re-generated
+     * stream lands. Defensive reads: the patch may ride `patch.control` or
+     * bare `control` depending on the delta's shape.
+     */
+    fun isStreamRecoveryReopen(event: JsonObject): Boolean {
+        val apiRetry = event.obj("patch")?.obj("control")?.obj("apiRetry")
+            ?: event.obj("control")?.obj("apiRetry")
+            ?: return false
+        return apiRetry.str("reason") == "stream_recovery"
+    }
 
     fun input(event: JsonObject): JsonObject? = event.obj("input")
 
