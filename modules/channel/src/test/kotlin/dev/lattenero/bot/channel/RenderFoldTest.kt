@@ -652,4 +652,83 @@ class RenderFoldTest {
         assertEquals(1_200L, last.lastEventAtMs)
         assertTrue(last.phase is TurnPhase.Done)
     }
+
+    // ---- 11/11: the univocal answer ---------------------------------------------
+
+    @Test
+    fun theSealOwnsTheAnswerAndTheFeedNeverSeesIt() {
+        // the pending prose rides answerAtSeal at the Sealed frame — the spent
+        // list stays empty (the seal feed's diff never sees the answer) and
+        // the seal's violet FULL text is the only copy the owner gets
+        var s = reduce(null, RenderEvent.Answering("task-9", seq = 1, atMs = 1_000, nowMs = 1_000, delta = "La conclusión."))
+        s = reduce(s, RenderEvent.Sealed("task-9", seq = 2, atMs = 1_100, nowMs = 1_100, stopReason = "end_turn", usageTokens = null, error = null))
+        s = assertNotNull(s)
+        assertTrue(s.proseSpent.isEmpty(), "the seal feed speaks no prose — the answer is not spent")
+        assertEquals("La conclusión.", s.answerAtSeal, "the seal's own copy holds the pending answer")
+        assertEquals("", s.prosePending)
+    }
+
+    @Test
+    fun theMidTurnSegmentsStillSpendAtBoundaries() {
+        // the fix moves only the SEAL's copy: the mid-turn boundaries keep
+        // the old law (segment spent, spoken violet at the drain)
+        var s = reduce(null, RenderEvent.Answering("task-9", seq = 1, atMs = 1_000, nowMs = 1_000, delta = "hablo"))
+        s = reduce(s, toolOpenEvent(toolId = "t1", seq = 2))
+        s = assertNotNull(s)
+        assertEquals(1, s.proseSpent.size, "the tool boundary spent the segment as always")
+        assertEquals("", s.prosePending)
+        assertEquals(1, s.proseKeys.size, "the spent segment carries its content key")
+    }
+
+    @Test
+    fun theRestatedProseNeverReSpendsAfterAWindowRebaseline() {
+        // the subscribe reburst re-states the streamed prose: the windows die
+        // (StreamRebase) but the content key SURVIVES — the re-flush is a
+        // no-op and the feed's positional diff never sees a second segment
+        var s = reduce(null, RenderEvent.Answering("task-9", seq = 1, atMs = 1_000, nowMs = 1_000, delta = "tramo uno"))
+        s = reduce(s, toolOpenEvent(toolId = "t1", seq = 2)) // the boundary spends it (key recorded)
+        s = reduce(s, RenderEvent.StreamRebase("task-9")) // the watchdog re-arms: the windows die
+        s = reduce(s, RenderEvent.Answering("task-9", seq = 3, atMs = 3_000, nowMs = 3_000, delta = "tramo uno"))
+        s = reduce(s, toolOpenEvent(toolId = "t2", seq = 4)) // the re-stated prose flushes again
+        s = assertNotNull(s)
+        assertEquals(1, s.proseSpent.size, "the re-stated segment never re-spends")
+        assertEquals("", s.prosePending)
+    }
+
+    @Test
+    fun theReburstsFirstChunkNeverDuplicates() {
+        // THE 11/11 DUPLICATED FIRST WORD: the subscribe burst re-states the
+        // answer's first chunk — the whole streamed answer IS that delta
+        // (chars equal, tail equal) — and it appended again. One copy stays
+        // (the bookkeeping's clock may move: a replay proves the bus); a
+        // genuine continuation (more content) never matches.
+        val first = reduce(null, RenderEvent.Answering("task-9", seq = 1, atMs = 1_000, nowMs = 1_000, delta = "Hola"))
+        val reburst = assertNotNull(
+            reduce(first, RenderEvent.Answering("task-9", seq = 2, atMs = 1_000, nowMs = 1_100, delta = "Hola")),
+        )
+        assertEquals(4, reburst.answerChars, "the re-stated first chunk appends nothing")
+        assertEquals("Hola", reburst.answerTail)
+        assertEquals("Hola", reburst.prosePending)
+        val live = assertNotNull(
+            reduce(reburst, RenderEvent.Answering("task-9", seq = 3, atMs = 1_200, nowMs = 1_200, delta = " mundo")),
+        )
+        assertEquals("Hola mundo", live.answerTail, "the genuine continuation folds whole")
+        assertEquals(10, live.answerChars)
+    }
+
+    @Test
+    fun theReburstsFirstThinkingChunkNeverDuplicates() {
+        // the answer's twin guard: the re-stated very first thinking chunk
+        // appends nothing; the real next delta grows the counter
+        val first = reduce(null, RenderEvent.Thought("task-9", seq = 1, atMs = 1_000, nowMs = 1_000, delta = "Pienso", parentToolUseId = null))
+        val reburst = assertNotNull(
+            reduce(first, RenderEvent.Thought("task-9", seq = 2, atMs = 1_000, nowMs = 1_100, delta = "Pienso", parentToolUseId = null)),
+        )
+        assertEquals(6, reburst.thoughtChars, "the re-stated first thought appends nothing")
+        assertEquals("Pienso", reburst.cotPending)
+        val live = assertNotNull(
+            reduce(reburst, RenderEvent.Thought("task-9", seq = 3, atMs = 1_200, nowMs = 1_200, delta = " más", parentToolUseId = null)),
+        )
+        assertEquals(10, live.thoughtChars, "the genuine continuation grows the counter")
+    }
 }

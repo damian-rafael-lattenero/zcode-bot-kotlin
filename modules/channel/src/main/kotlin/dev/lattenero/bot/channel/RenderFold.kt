@@ -3,6 +3,7 @@
 package dev.lattenero.bot.channel
 
 import dev.lattenero.bot.contracts.PyText
+import java.security.MessageDigest
 import kotlinx.serialization.json.JsonObject
 
 // ---- the pure fold ----------------------------------------------------------
@@ -55,7 +56,10 @@ fun reduce(
         // answer's: the reconnect's catch-up burst re-states the in-flight
         // content, and windows that survived would double it) but the
         // sealed blocks are complete real text — a gap cuts the seam, never
-        // a sealed box (and the feed already spoke them)
+        // a sealed box (and the feed already spoke them). THE SEQ FLOOR
+        // RE-ARMS (11/11): the new connection's counter restarts — the
+        // first post-resync frame arms the floor, and a re-delivery below
+        // it folds nothing (the spent prose keys ride on regardless).
         state?.taskId == event.taskId -> state.copy(
             cotTail = "",
             cotPending = "",
@@ -75,7 +79,9 @@ fun reduce(
         // tail and the pending accumulator (reduceThought), so a re-stated
         // delta doubles whichever survives — the tail and the pending go
         // together or not at all. The sealed blocks are complete real text
-        // (spoken already); the counters and the lanes stand.
+        // (spoken already); the counters and the lanes stand. THE SEQ FLOOR
+        // RE-ARMS with the windows (11/11): the burst must FOLD (it rebuilds
+        // them), so the floor waits for the burst's first frame.
         state?.taskId == event.taskId -> state.copy(
             answerTail = "",
             prosePending = "",
@@ -168,6 +174,11 @@ fun reduce(
 // one branch per frame event — the union IS the shape (the reducer's own table)
 @Suppress("CyclomaticComplexMethod")
 private fun reduceFrame(state: RenderState?, event: RenderEvent.FromFrame, differ: LineDiffer): RenderState {
+    // THE PRE-REFRESH STAMP (11/11): the re-stated first emission's guard
+    // compares the event's stamp against the state's clock BEFORE this frame
+    // refreshes it — inside the reducer the field already holds THIS frame's
+    // stamp, and a comparison against itself is always true.
+    val prevAtMs = state?.takeIf { it.taskId == event.taskId }?.lastEventAtMs
     val base = when {
         state == null || state.taskId != event.taskId -> RenderState.empty.copy(
             taskId = event.taskId,
@@ -198,9 +209,9 @@ private fun reduceFrame(state: RenderState?, event: RenderEvent.FromFrame, diffe
             )
         }
 
-        is RenderEvent.Thought -> reduceThought(refreshed, event)
+        is RenderEvent.Thought -> reduceThought(refreshed, event, prevAtMs)
 
-        is RenderEvent.Answering -> reduceAnswer(flushCot(refreshed), event)
+        is RenderEvent.Answering -> reduceAnswer(flushCot(refreshed), event, prevAtMs)
 
         is RenderEvent.ToolOpen -> reduceToolArrival(flushProse(flushCot(refreshed)), event, differ)
 
@@ -208,15 +219,25 @@ private fun reduceFrame(state: RenderState?, event: RenderEvent.FromFrame, diffe
 
         is RenderEvent.ToolClose -> reduceToolClose(flushProse(refreshed), event, differ)
 
-        is RenderEvent.Sealed -> flushProse(
+        is RenderEvent.Sealed -> {
+            // THE SEAL OWNS THE ANSWER (11/11): the pending prose rides
+            // [TurnLive.answerAtSeal] — the seal speaks the answer ONCE (the
+            // snapshot's full violet text). It is NOT spent: the feed's
+            // positional diff never sees it, so the double-speak (the seal
+            // feed's truncated copy + the full finalAnswer, back to back)
+            // dies. [answerAtSeal] is the never-lost fallback for the seal
+            // moment the snapshot cannot answer.
+            val pending = refreshed.prosePending.trim('\n')
             refreshed.copy(
                 phase = TurnPhase.Done(stopReason = event.stopReason, atMs = event.nowMs),
                 usageTokens = event.usageTokens ?: refreshed.usageTokens,
                 interaction = null,
                 // a clean complete keeps an earlier pill untouched; the error's own seal sets it
                 typedError = event.error ?: refreshed.typedError,
-            ),
-        )
+                prosePending = "",
+                answerAtSeal = pending.takeIf { it.isNotBlank() },
+            )
+        }
 
         is RenderEvent.InteractionAsked -> refreshed.copy(
             interaction = InteractionPending(kind = event.kind, title = event.title),
@@ -239,7 +260,9 @@ private fun reduceFrame(state: RenderState?, event: RenderEvent.FromFrame, diffe
 /** agent_thought_chunk: main agent grows the tail; subagents grow their own lane —
  *  EXCEPT on a lane-scoped card, where the watched lane's thoughts ARE the
  *  main narration (subagent implements task: the identical UI). */
-private fun reduceThought(state: RenderState, event: RenderEvent.Thought): RenderState {
+// one guard per early exit: the two replay gates answer before the fold
+@Suppress("ReturnCount")
+private fun reduceThought(state: RenderState, event: RenderEvent.Thought, prevAtMs: Long?): RenderState {
     val delta = event.delta
     val parent = event.parentToolUseId
     val isMain = parent == null || parent == state.watchedLane
@@ -250,6 +273,11 @@ private fun reduceThought(state: RenderState, event: RenderEvent.Thought): Rende
         // Length-gated: tiny legitimate repeats (separators, short tokens)
         // must pass — only sentence-sized re-emissions are replays.
         if (delta.length >= REPLAY_GUARD_MIN_CP && state.cotTail.endsWith(delta)) return state
+        // THE REBURST'S FIRST THOUGHT (11/11): the answer's twin guard — the
+        // re-delivered first thinking emission (chars equal, tail equal, the
+        // SAME fork stamp, compared against the PRE-refresh clock) appends
+        // nothing; a genuine chunk stamps later and grows the counter.
+        if (state.thoughtChars == delta.length && state.cotTail == delta && prevAtMs == event.atMs) return state
         val chars = state.thoughtChars + delta.length
         // THE BLOCKS (Python's CotSealer.feed, reasoning.py): the pending
         // block seals EXACTLY at COT_BLOCK_CP code points — a delta may
@@ -294,9 +322,19 @@ private fun reduceThought(state: RenderState, event: RenderEvent.Thought): Rende
  * already ends with (measured 30/10), and short legitimate repeats
  * (separators, tokens) must pass.
  */
-private fun reduceAnswer(state: RenderState, event: RenderEvent.Answering): RenderState {
+// one guard per early exit: the two replay gates answer before the fold
+@Suppress("ReturnCount")
+private fun reduceAnswer(state: RenderState, event: RenderEvent.Answering, prevAtMs: Long?): RenderState {
     val delta = event.delta
     if (delta.length >= REPLAY_GUARD_MIN_CP && state.answerTail.endsWith(delta)) return state
+    // THE REBURST'S FIRST WORD (11/11): the subscribe burst re-delivers the
+    // answer's first emission — the SAME event, the SAME fork stamp (`at`,
+    // compared against the PRE-refresh clock) — and the whole streamed
+    // answer IS that delta (chars equal, tail equal), so appending it again
+    // doubled the first word while the owner watched. One copy stays. A
+    // genuine chunk stamps LATER and grows the counter, so neither the clock
+    // nor the chars match; the thought's twin guard mirrors this one.
+    if (state.answerChars == delta.length && state.answerTail == delta && prevAtMs == event.atMs) return state
     val chars = state.answerChars + delta.length
     return state.copy(
         answerChars = chars,
@@ -324,14 +362,39 @@ private fun reduceAnswer(state: RenderState, event: RenderEvent.Answering): Rend
  * the feed speaks it as one violet message, in order. Blank pending =
  * nothing to spend (a tool after a tool).
  */
+// one guard per early exit: the blank pending and the already-spent key
+@Suppress("ReturnCount")
 internal fun flushProse(state: RenderState): RenderState {
     val pending = state.prosePending.trim('\n')
     if (pending.isBlank()) return state
+    // THE REPLAYED SEGMENT (11/11): a re-stated burst (the fork's subscribe
+    // reburst after a Resync/StreamRebase) re-flushes prose the voice
+    // already spoke — the content key says it. Nothing is spent, the feed's
+    // positional diff never sees a new segment; the pending dies either way
+    // (the boundary ended it).
+    val key = proseKey(pending)
+    if (key in state.proseKeys) return state.copy(prosePending = "")
+    val keys: Set<String> = (state.proseKeys + key)
+        .let { if (it.size > PROSE_KEY_CAP) it.drop(it.size - PROSE_KEY_CAP).toSet() else it }
     return state.copy(
         proseSpent = (state.proseSpent + pending).takeLast(PROSE_SPENT_CAP),
+        proseKeys = keys,
         prosePending = "",
     )
 }
+
+/**
+ * The spent segment's content key: SHA-256 hex — deterministic and pure
+ * (no I/O, no clock; the digest of the text IS the identity), short enough
+ * for the state to hold hundreds without a second thought.
+ */
+private fun proseKey(text: String): String =
+    MessageDigest.getInstance("SHA-256")
+        .digest(text.toByteArray(Charsets.UTF_8))
+        .joinToString("") { "%02x".format(it) }
+
+/** The content keys' ceiling — a turn spends far fewer segments than this. */
+private const val PROSE_KEY_CAP = 128
 
 /** The spent segments' ceiling — the feed's diff only needs the newest. */
 private const val PROSE_SPENT_CAP = 24

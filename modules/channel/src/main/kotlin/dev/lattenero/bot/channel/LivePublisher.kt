@@ -40,6 +40,18 @@ class LiveHub {
     private val states = MutableStateFlow<TurnLive?>(null)
 
     /**
+     * THE SEALED MEMORY (11/11): the turns that sealed recently — a sealed
+     * turn's late frames are the BUS's reburst, never new output. The ghost
+     * re-seal re-spoke the conclusion (measured: the same taskId sealed twice
+     * 9s apart; the re-delivered task_complete re-seeded a fresh fold and
+     * sealed again). Each entry carries the turn's own start stamp: a
+     * task_run_started with a STRICTLY NEWER stamp (a genuinely new turn —
+     * a reburst carries the same stamp it always had) lifts the memory;
+     * everything else for a sealed task stays dropped. Bounded, newest first.
+     */
+    private var recentlySealed: List<Pair<String, Long>> = emptyList()
+
+    /**
      * A pinned card (a sa: attach's full form — the subagent's OWN session):
      * other tasks' events — the parent's among them — are DROPPED until the
      * pin lifts, or the single-task hub would flip the card back at the
@@ -84,6 +96,18 @@ class LiveHub {
         // returned at the next traffic). The implicit pre-attach world holds
         // nothing and keeps the traffic-following law.
         if (heldTaskId != null && frame.taskId != heldTaskId) return@withLock states.value
+        // THE SEALED MEMORY'S GATE (11/11): a sealed turn's late frames are
+        // the reburst, never new output — dropped whole. Only a task_run_started
+        // carrying a STRICTLY NEWER start stamp (a genuinely new turn; the
+        // reburst carries the stamp it always had) lifts the memory, and it
+        // leaves the memory on the way in.
+        val sealedStamp = recentlySealed.firstOrNull { it.first == frame.taskId }?.second
+        if (sealedStamp != null) {
+            val isNewTurn = StreamEvents.type(frame.event) == StreamEvents.RUN_STARTED &&
+                (sealedStamp == 0L || StreamEvents.startedAt(frame.event) > sealedStamp)
+            if (!isNewTurn) return@withLock states.value
+            recentlySealed = recentlySealed.filterNot { it.first == frame.taskId }
+        }
         // THE LANE SCOPE IS THE FOLD'S (U5c): the card's own watchedLane —
         // a task switch is also a lane-switch (a foreign task's state
         // carries no scope), so the scope dies with the task by
@@ -257,14 +281,30 @@ class LiveHub {
             // newest seal first; the archive is bounded like the live list
             (states.value?.boxes.orEmpty() + sealedBoxes).distinctBy { it.boxId }.take(SEALED_BOX_CAP)
         }
+        if (sealedTaskId != null) {
+            // THE SEALED MEMORY WRITES ITSELF (11/11): the turn that sealed
+            // enters the reburst gate carrying its own start stamp — the
+            // discriminator between the reburst's head and a genuinely new
+            // turn's head. Bounded, newest first.
+            val stamp = states.value?.startedAtMs ?: 0L
+            recentlySealed = (listOf(sealedTaskId to stamp) + recentlySealed).take(SEALED_MEMORY_CAP)
+        }
         fold(RenderEvent.Clear, SimpleLineDiffer)
         if (sealedTaskId == null || pinnedTaskId == sealedTaskId) pinnedTaskId = null
         if (sealedTaskId == null) heldTaskId = null // ☢️ nuclear: everything dies
+        if (sealedTaskId == null) recentlySealed = emptyList() // ☢️ nuclear: every gate dies with it
     }
 
     private companion object {
         /** The sealed archive's ceiling — the chat's own scrollback is the real limit. */
         const val SEALED_BOX_CAP = 120
+
+        /**
+         * The sealed memory's ceiling (11/11): the last sealed task ids the
+         * reburst gate remembers. A session's next REAL turn lifts its own
+         * entry long before eviction would matter.
+         */
+        const val SEALED_MEMORY_CAP = 32
     }
 }
 
@@ -793,9 +833,13 @@ class LivePublisher(
             speak(LiveTurn.sealText(state, now), null)
         }
         val answer = finalAnswer(state.taskId)?.takeIf { it.isNotBlank() }
+            ?: state.answerAtSeal?.takeIf { it.isNotBlank() }
         // THE VOICE'S LAST WORD (5/11): the final answer IS the LLM talking —
         // it seals as a violet rich message (pullquote prose + pre code).
-        // NEVER LOST: a violet send that could not fly (a cooldown window
+        // NEVER LOST twice over (11/11): the snapshot's full text first; when
+        // the snapshot cannot answer NOW, the fold's own [answerAtSeal] copy
+        // speaks (the prose no longer travels the feed — the seal owns the
+        // answer). A violet send that could not fly (a cooldown window
         // opened mid-seal) falls back to the parked speak lane — the answer
         // arrives, even degraded. richVoice=false keeps the escaped plain
         // text (the HTML law comment below still governs that leg).
