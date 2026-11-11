@@ -272,13 +272,15 @@ class RenderSpineTest {
     }
 
     @Test
-    fun theRecoveryHeraldClassifiesAsTheRebaseAndTheRestStaysAdditive() {
-        // THE 11/11 SCREENSHOT («NoNo …»): the core's stream recovery
-        // re-opened the request — its herald is the state.updated carrying
-        // the stream_recovery pill. THAT one is the rebase (the windows die
-        // before the re-generated stream lands); every other state.updated
-        // stays the additive freshness frame.
-        val herald = frameOf(
+    fun theRetryHeraldClassifiesAsTheRebaseAndTheClearStaysAdditive() {
+        // THE 11/11 SCREENSHOTS («NoNo …», «JarJar …»): an apiRetry pill SET
+        // — ANY reason (the adapter's 2^n schedule, the core's stream
+        // recovery, the usage-limit wait) — means the request is being
+        // RETRIED and the re-opened request re-generates the streamed
+        // content from its start. THAT state.updated is the rebase (the
+        // windows die before the re-generated stream lands). The pill's
+        // CLEAR and the pill-less state.updated stay additive.
+        val streamRecovery = frameOf(
             "state.updated",
             "patch" to buildJsonObject {
                 put("control", buildJsonObject {
@@ -289,17 +291,29 @@ class RenderSpineTest {
                 })
             },
         )
-        assertTrue(classify(herald, nowMs = 1_000L) is RenderEvent.StreamRebase, "the herald IS the rebase")
-        val other = frameOf(
+        assertTrue(classify(streamRecovery, nowMs = 1_000L) is RenderEvent.StreamRebase, "the core recovery's pill IS the rebase")
+        val adapterRetry = frameOf(
             "state.updated",
             "patch" to buildJsonObject {
                 put("control", buildJsonObject {
                     put("apiRetry", buildJsonObject {
-                        put("reason", JsonPrimitive("rate_limited"))
+                        put("reason", JsonPrimitive("server_error"))
+                        put("attempt", JsonPrimitive(2))
                     })
                 })
             },
         )
-        assertTrue(classify(other, nowMs = 1_000L) is RenderEvent.Frame, "a plain pill patch stays additive")
+        assertTrue(classify(adapterRetry, nowMs = 1_000L) is RenderEvent.StreamRebase, "the adapter retry's pill IS the rebase too")
+        val clear = frameOf(
+            "state.updated",
+            "patch" to buildJsonObject {
+                put("control", buildJsonObject {
+                    put("apiRetry", JsonNull)
+                })
+            },
+        )
+        assertTrue(classify(clear, nowMs = 1_000L) is RenderEvent.Frame, "the pill's CLEAR stays additive — the windows hold live content")
+        val pillLess = frameOf("state.updated")
+        assertTrue(classify(pillLess, nowMs = 1_000L) is RenderEvent.Frame, "a pill-less state.updated stays additive")
     }
 }

@@ -418,19 +418,24 @@ internal object StreamEvents {
     fun startedAt(event: JsonObject): Long = event.long("startedAt") ?: 0L
 
     /**
-     * THE RECOVERY'S HERALD (11/11): a `state.updated` carrying the apiRetry
-     * pill whose reason is `stream_recovery` — the core's stream recovery
-     * just RE-OPENED the request, and the fork re-states the whole streamed
-     * content from its start (the doubled first word, the doubled CoT
-     * sentence the owner read). The windows must die BEFORE the re-generated
-     * stream lands. Defensive reads: the patch may ride `patch.control` or
-     * bare `control` depending on the delta's shape.
+     * THE RETRY'S HERALD (11/11): a `state.updated` carrying the apiRetry
+     * pill SET — ANY reason — means the request is being RETRIED: the
+     * adapter's 2^n schedule, the core's stream recovery, the usage-limit
+     * wait. The re-opened request RE-GENERATES the streamed content from
+     * its start, and the re-generated deltas doubled the answer's first
+     * word and the CoT's first sentence (the owner read both, twice — the
+     * screenshots «NoNo …» and «JarJar …»). The windows must die at the
+     * herald — the re-generated stream rebuilds them. The pill's CLEAR
+     * (apiRetry null: the first valid progress after recovery) folds as the
+     * additive frame — the windows hold live content then. Defensive reads:
+     * the patch may ride `patch.control` or bare `control` depending on the
+     * delta's shape.
      */
-    fun isStreamRecoveryReopen(event: JsonObject): Boolean {
+    fun hasRetryScheduled(event: JsonObject): Boolean {
         val apiRetry = event.obj("patch")?.obj("control")?.obj("apiRetry")
             ?: event.obj("control")?.obj("apiRetry")
             ?: return false
-        return apiRetry.str("reason") == "stream_recovery"
+        return true
     }
 
     fun input(event: JsonObject): JsonObject? = event.obj("input")
