@@ -731,4 +731,25 @@ class RenderFoldTest {
         )
         assertEquals(10, live.thoughtChars, "the genuine continuation grows the counter")
     }
+
+    @Test
+    fun theRestatedThoughtNeverReSealsItsBlocks() {
+        // THE 11/11 COT DOUBLE (the owner: the CoTs carried the first
+        // sentence twice): the subscribe reburst re-states the whole thought
+        // — the windows die (StreamRebase) and the re-stated deltas re-fill
+        // the pending; at 3K they would seal a TWIN block and the feed would
+        // speak it again. The block's content key says spoken: skipped, the
+        // pending drains without a second voice.
+        val big = "0123456789".repeat(300) // 3000 cp — exactly one block
+        var s = reduce(null, RenderEvent.Thought("task-9", seq = 1, atMs = 1_000, nowMs = 1_000, delta = big, parentToolUseId = null))
+        s = assertNotNull(s)
+        assertEquals(1, s.cotBlocks.size, "the first pass seals its block")
+        s = reduce(s, RenderEvent.StreamRebase("task-9")) // the watchdog re-arms: the windows die
+        s = assertNotNull(s)
+        assertEquals("", s.cotPending, "the pending died with the windows")
+        s = reduce(s, RenderEvent.Thought("task-9", seq = 2, atMs = 2_000, nowMs = 2_000, delta = big, parentToolUseId = null))
+        s = assertNotNull(s)
+        assertEquals(1, s.cotBlocks.size, "the re-stated thought never seals a twin block")
+        assertEquals("", s.cotPending, "the re-stated content drains without speaking")
+    }
 }

@@ -283,6 +283,16 @@ data class TurnLive(
     val prosePending: String = "",
     val proseSpent: List<String> = emptyList(),
     /**
+     * THE COT BLOCKS' CONTENT KEYS (11/11): a SHA-256 per sealed block (the
+     * 3K seals AND the boundary-sealed tails) — the twin of [proseKeys]. A
+     * re-stated burst re-fills the pending with already-spoken thought; at
+     * 3K it would seal a TWIN block and the feed would speak it again (the
+     * owner read the first sentence twice). The key says spoken: the block
+     * is skipped, the pending drains either way. The keys survive the
+     * window re-baselines ON PURPOSE — they are the memory the windows lack.
+     */
+    val cotKeys: Set<String> = emptySet(),
+    /**
      * THE SPENT PROSE'S CONTENT KEYS (11/11): a SHA-256 per spent segment —
      * the replay gate of [RenderFold.flushProse]. A re-stated burst (the
      * fork's subscribe reburst after a [RenderEvent.Resync] or
