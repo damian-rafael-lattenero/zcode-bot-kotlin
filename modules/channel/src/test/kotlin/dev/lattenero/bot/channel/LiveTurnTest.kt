@@ -48,6 +48,18 @@ class LiveTurnTest {
             ev("agent_thought_chunk", "content" to str(content), "parentToolUseId" to str(parent))
         }
 
+    /**
+     * A UNIQUE variant of the given content, per call (the GLOBAL seq, zero
+     * padded — never repeats within a test): the reburst guards key on
+     * CONTENT (a repeated identical chunk IS a re-delivery to them), so the
+     * volume-building loops must stream DISTINCT chunks — same length, the
+     * counter rides the tail.
+     */
+    private fun numberedThought(content: String): ServerFrame.StreamEvent {
+        val tail: String = seq.toString().padStart(4, '0')
+        return thought(content.dropLast(4) + tail)
+    }
+
     private fun reduce(state: TurnLive?, frame: ServerFrame.StreamEvent): TurnLive =
         LiveTurn.reduce(state, frame, frame.at)
 
@@ -65,9 +77,9 @@ class LiveTurnTest {
     @Test
     fun theTailCapsAt2500CodePoints() {
         var s: TurnLive? = null
-        repeat(300) { s = reduce(s, thought("0123456789")) } // 3000 chars
+        repeat(300) { s = reduce(s, numberedThought("0123456789")) } // 3000 chars, 300 distinct chunks
         assertEquals(LiveTurn.COT_TAIL_CP, s!!.cotTail.length)
-        assertTrue(s!!.cotTail.endsWith("0123456789"))
+        assertTrue(s!!.cotTail.endsWith("0123450299"), "the tail carries the NEWEST words")
         assertEquals(3000, s.thoughtChars) // the TOTAL never truncates
     }
 
@@ -429,10 +441,11 @@ class LiveTurnTest {
         // Python's CotSealer.feed (reasoning.py): at the cap the box is
         // full and its number travels; the CoT continues and brakes there
         var s: TurnLive? = null
-        repeat(300) { s = reduce(s, thought("0123456789")) } // exactly 3000 cp
+        repeat(300) { s = reduce(s, numberedThought("0123456789")) } // exactly 3000 cp
         assertEquals(1, s!!.cotBlocks.size)
         assertEquals(3000, s!!.cotBlocks[0].length) // EXACTLY at the boundary
-        assertEquals("0123456789".repeat(300), s!!.cotBlocks[0])
+        val expectedBlock = (0 until 300).joinToString("") { "012345" + it.toString().padStart(4, '0') }
+        assertEquals(expectedBlock, s!!.cotBlocks[0])
         assertEquals("", s!!.cotPending)
         // the next delta opens block 2 — block 1 never grows again
         s = reduce(s, thought("nuevo"))
@@ -471,7 +484,7 @@ class LiveTurnTest {
         // live as their own messages below, the tap opens them), never a
         // preview, never a button
         var s: TurnLive? = null
-        repeat(300) { s = reduce(s, thought("0123456789")) } // block 1 sealed
+        repeat(300) { s = reduce(s, numberedThought("0123456789")) } // block 1 sealed
         s = reduce(s, thought("y sigue la segunda parte del pensamiento"))
         val text = LiveTurn.render(s!!, nowMs = 1L, channelAlive = true)
         assertTrue("<blockquote>" !in text, "the tail never spills")
@@ -484,7 +497,7 @@ class LiveTurnTest {
     fun theCoTRowCountsBlocksAndThePendingFill() {
         // two blocks sealed, the third filling: the row speaks both counts
         var s: TurnLive? = null
-        repeat(650) { s = reduce(s, thought("0123456789")) } // 6500 cp: 2 blocks + 500
+        repeat(650) { s = reduce(s, numberedThought("0123456789")) } // 6500 cp: 2 blocks + 500
         assertEquals(2, s!!.cotBlocks.size)
         assertEquals(500, s!!.cotPending.length)
         val text = LiveTurn.render(s!!, nowMs = 1L, channelAlive = true)
@@ -512,7 +525,7 @@ class LiveTurnTest {
     fun sealTextCarriesTheBlockCount() {
         var s: TurnLive? = null
         s = reduce(null, ServerFrame.StreamEvent("task-9", 1, 1000L, buildJsonObject { put("type", "task_run_started") }))
-        repeat(300) { s = reduce(s, thought("0123456789")) }
+        repeat(300) { s = reduce(s, numberedThought("0123456789")) }
         s = reduce(s, ev("task_complete", "stopReason" to str("end_turn")))
         val seal = LiveTurn.sealText(s!!, nowMs = 61_000)
         assertTrue("1 bloque CoT" in seal)
@@ -540,7 +553,7 @@ class LiveTurnTest {
     @Test
     fun theCardStaysUnderTheMessageLawWithLongThinking() {
         var s: TurnLive? = null
-        repeat(200) { s = reduce(s, thought("0123456789")) } // 2000 chars of tail
+        repeat(200) { s = reduce(s, numberedThought("0123456789")) } // 2000 chars of tail
         val text = LiveTurn.render(s!!, nowMs = 100_000, channelAlive = true)
         assertTrue(text.length < 4096) // the whole message fits Telegram
         assertTrue(s!!.cotTail.length == 2000) // the tail below the cap keeps everything (the replay guard)

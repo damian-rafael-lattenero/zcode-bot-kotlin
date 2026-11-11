@@ -174,11 +174,6 @@ fun reduce(
 // one branch per frame event — the union IS the shape (the reducer's own table)
 @Suppress("CyclomaticComplexMethod")
 private fun reduceFrame(state: RenderState?, event: RenderEvent.FromFrame, differ: LineDiffer): RenderState {
-    // THE PRE-REFRESH STAMP (11/11): the re-stated first emission's guard
-    // compares the event's stamp against the state's clock BEFORE this frame
-    // refreshes it — inside the reducer the field already holds THIS frame's
-    // stamp, and a comparison against itself is always true.
-    val prevAtMs = state?.takeIf { it.taskId == event.taskId }?.lastEventAtMs
     val base = when {
         state == null || state.taskId != event.taskId -> RenderState.empty.copy(
             taskId = event.taskId,
@@ -209,9 +204,9 @@ private fun reduceFrame(state: RenderState?, event: RenderEvent.FromFrame, diffe
             )
         }
 
-        is RenderEvent.Thought -> reduceThought(refreshed, event, prevAtMs)
+        is RenderEvent.Thought -> reduceThought(refreshed, event)
 
-        is RenderEvent.Answering -> reduceAnswer(flushCot(refreshed), event, prevAtMs)
+        is RenderEvent.Answering -> reduceAnswer(flushCot(refreshed), event)
 
         is RenderEvent.ToolOpen -> reduceToolArrival(flushProse(flushCot(refreshed)), event, differ)
 
@@ -262,7 +257,7 @@ private fun reduceFrame(state: RenderState?, event: RenderEvent.FromFrame, diffe
  *  main narration (subagent implements task: the identical UI). */
 // one guard per early exit: the two replay gates answer before the fold
 @Suppress("ReturnCount")
-private fun reduceThought(state: RenderState, event: RenderEvent.Thought, prevAtMs: Long?): RenderState {
+private fun reduceThought(state: RenderState, event: RenderEvent.Thought): RenderState {
     val delta = event.delta
     val parent = event.parentToolUseId
     val isMain = parent == null || parent == state.watchedLane
@@ -273,28 +268,22 @@ private fun reduceThought(state: RenderState, event: RenderEvent.Thought, prevAt
         // Length-gated: tiny legitimate repeats (separators, short tokens)
         // must pass — only sentence-sized re-emissions are replays.
         if (delta.length >= REPLAY_GUARD_MIN_CP && state.cotTail.endsWith(delta)) return state
-        // THE REBURST'S FIRST THOUGHT (11/11): the answer's twin guard — the
-        // re-delivered first thinking emission (chars equal, tail equal, the
-        // SAME fork stamp, compared against the PRE-refresh clock) appends
-        // nothing; a genuine chunk stamps later and grows the counter.
-        if (state.thoughtChars == delta.length && state.cotTail == delta && prevAtMs == event.atMs) return state
+        // THE REBURST'S FIRST THOUGHT (11/11): the re-stated first thinking
+        // emission (chars equal, tail equal) appends nothing — the fork
+        // re-stamps `at` on a re-delivery, so the stamp proves nothing; a
+        // genuine chunk carries MORE content and grows the counter. The
+        // answer's twin guard is the same shape.
+        if (state.thoughtChars == delta.length && state.cotTail == delta) return state
         val chars = state.thoughtChars + delta.length
         // THE BLOCKS (Python's CotSealer.feed, reasoning.py): the pending
-        // block seals EXACTLY at COT_BLOCK_CP code points — a delta may
-        // straddle the boundary, so the block closes AT it and the
-        // remainder opens the next one. CODE POINTS, not chars
-        // (PyText.cpLength is the house ruler); offsetByCodePoints never
-        // splits a surrogate pair.
-        var blocks = state.cotBlocks
-        var pending = state.cotPending + delta
-        while (PyText.cpLength(pending) >= LiveTurn.COT_BLOCK_CP) {
-            val cut = pending.offsetByCodePoints(0, LiveTurn.COT_BLOCK_CP)
-            blocks = blocks + pending.substring(0, cut)
-            pending = pending.substring(cut)
-        }
+        // block seals EXACTLY at COT_BLOCK_CP code points — the sealer owns
+        // the boundary law AND the block content keys (a re-stated burst's
+        // twin block is skipped, already spoken).
+        val (blocks, keys, pending) = sealCotBlocks(state.cotBlocks, state.cotKeys, state.cotPending + delta)
         state.copy(
             thoughtChars = chars,
             cotBlocks = blocks,
+            cotKeys = keys,
             cotPending = pending,
             cotTail = LiveTurn.takeLastCodePoints(state.cotTail + delta, LiveTurn.COT_TAIL_CP),
             // THE CoT'S FRESHNESS ANCHOR (v2 §2): only the main agent's real
@@ -314,6 +303,39 @@ private fun reduceThought(state: RenderState, event: RenderEvent.Thought, prevAt
 }
 
 /**
+ * THE 3K SEALER (Python's CotSealer.feed, reasoning.py): the pending seals
+ * EXACTLY at [LiveTurn.COT_BLOCK_CP] code points — a delta may straddle the
+ * boundary, so the block closes AT it and the remainder opens the next one.
+ * CODE POINTS, not chars (PyText.cpLength is the house ruler);
+ * offsetByCodePoints never splits a surrogate pair.
+ *
+ * THE BLOCK'S CONTENT KEY (11/11): a re-stated burst re-fills the pending
+ * with ALREADY-SPOKEN thought — at 3K it would seal a twin block and the
+ * feed would speak it again (the owner read the first sentence twice). The
+ * key says spoken: the block is skipped and the pending drains either way.
+ */
+private fun sealCotBlocks(
+    blocks: List<String>,
+    keys: Set<String>,
+    pending: String,
+): Triple<List<String>, Set<String>, String> {
+    var out = blocks
+    var outKeys = keys
+    var rest = pending
+    while (PyText.cpLength(rest) >= LiveTurn.COT_BLOCK_CP) {
+        val cut = rest.offsetByCodePoints(0, LiveTurn.COT_BLOCK_CP)
+        val block = rest.substring(0, cut)
+        val key = proseKey(block)
+        if (key !in outKeys) {
+            out = out + block
+            outKeys = (outKeys + key).let { if (it.size > COT_KEY_CAP) it.drop(it.size - COT_KEY_CAP).toSet() else it }
+        }
+        rest = rest.substring(cut)
+    }
+    return Triple(out, outKeys, rest)
+}
+
+/**
  * agent_message_chunk: the answer's chars grow AND its tail keeps the
  * words — the card renders the tail (Python's `text[-3200:]`), so the
  * owner reads the answer as it streams instead of a bare counter. Real
@@ -324,17 +346,17 @@ private fun reduceThought(state: RenderState, event: RenderEvent.Thought, prevAt
  */
 // one guard per early exit: the two replay gates answer before the fold
 @Suppress("ReturnCount")
-private fun reduceAnswer(state: RenderState, event: RenderEvent.Answering, prevAtMs: Long?): RenderState {
+private fun reduceAnswer(state: RenderState, event: RenderEvent.Answering): RenderState {
     val delta = event.delta
     if (delta.length >= REPLAY_GUARD_MIN_CP && state.answerTail.endsWith(delta)) return state
     // THE REBURST'S FIRST WORD (11/11): the subscribe burst re-delivers the
-    // answer's first emission — the SAME event, the SAME fork stamp (`at`,
-    // compared against the PRE-refresh clock) — and the whole streamed
-    // answer IS that delta (chars equal, tail equal), so appending it again
-    // doubled the first word while the owner watched. One copy stays. A
-    // genuine chunk stamps LATER and grows the counter, so neither the clock
-    // nor the chars match; the thought's twin guard mirrors this one.
-    if (state.answerChars == delta.length && state.answerTail == delta && prevAtMs == event.atMs) return state
+    // answer's first emission — the whole streamed answer IS that delta
+    // (chars equal, tail equal) — so appending it again doubled the first
+    // word while the owner watched. One copy stays. A genuine chunk carries
+    // MORE content and grows the counter, so it never matches; the thought's
+    // twin guard is the same shape. (The fork re-stamps `at` on a
+    // re-delivery — the stamp proved nothing in production; content only.)
+    if (state.answerChars == delta.length && state.answerTail == delta) return state
     val chars = state.answerChars + delta.length
     return state.copy(
         answerChars = chars,
@@ -409,14 +431,26 @@ private const val PROSE_SPENT_CAP = 24
  * The seal's own [TranscriptFeed.pendingFlush] stays as the honest
  * safety net for a turn that dies mid-thought.
  */
+// one guard per early exit: the blank pending and the already-spoken key
+@Suppress("ReturnCount")
 internal fun flushCot(state: RenderState): RenderState {
     val pending = state.cotPending
     if (pending.isBlank()) return state
+    // THE BLOCK'S CONTENT KEY (11/11): the boundary-sealed tail carries the
+    // same key law as the 3K blocks — a re-stated burst's tail was already
+    // spoken (its twin block exists) and never speaks twice.
+    val key = proseKey(pending)
+    if (key in state.cotKeys) return state.copy(cotPending = "")
+    val keys = (state.cotKeys + key).let { if (it.size > COT_KEY_CAP) it.drop(it.size - COT_KEY_CAP).toSet() else it }
     return state.copy(
         cotBlocks = state.cotBlocks + pending,
+        cotKeys = keys,
         cotPending = "",
     )
 }
+
+/** The CoT blocks' content keys' ceiling — a turn seals far fewer than this. */
+private const val COT_KEY_CAP = 128
 
 /**
  * tool_call (final, input complete) opens-or-fills the lane with the
