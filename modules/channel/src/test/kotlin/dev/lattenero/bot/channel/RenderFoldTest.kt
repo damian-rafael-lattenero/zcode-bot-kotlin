@@ -752,4 +752,29 @@ class RenderFoldTest {
         assertEquals(1, s.cotBlocks.size, "the re-stated thought never seals a twin block")
         assertEquals("", s.cotPending, "the re-stated content drains without speaking")
     }
+
+    @Test
+    fun theRecoveryHeraldRebasesBeforeTheRegeneratedStreamLands() {
+        // THE 11/11 SCREENSHOT («NoNo …»): the core's stream recovery
+        // re-opened the request and the fork re-stated the reasoning FROM
+        // ITS START — the re-stated first deltas appended onto the
+        // surviving windows and the CoT carried the first sentence twice.
+        // The herald (the stream_recovery pill) folds the cut FIRST: the
+        // re-generated stream rebuilds the windows from zero, never doubles.
+        var s = reduce(null, RenderEvent.Thought("task-9", seq = 1, atMs = 1_000, nowMs = 1_000, delta = "Primera frase.", parentToolUseId = null))
+        s = reduce(s, RenderEvent.Thought("task-9", seq = 2, atMs = 1_100, nowMs = 1_100, delta = " Sigo pensando.", parentToolUseId = null))
+        s = assertNotNull(s)
+        assertEquals("Primera frase. Sigo pensando.", s.cotPending)
+        s = reduce(s, RenderEvent.StreamRebase("task-9")) // the herald's cut
+        s = assertNotNull(s)
+        assertEquals("", s.cotPending, "the windows died at the herald")
+        s = reduce(s, RenderEvent.Thought("task-9", seq = 3, atMs = 1_300, nowMs = 1_300, delta = "Primera frase.", parentToolUseId = null))
+        s = reduce(s, RenderEvent.Thought("task-9", seq = 4, atMs = 1_400, nowMs = 1_400, delta = " Sigo pensando de nuevo.", parentToolUseId = null))
+        s = assertNotNull(s)
+        assertEquals(
+            "Primera frase. Sigo pensando de nuevo.",
+            s.cotPending,
+            "the regenerated stream rebuilds the pending, never doubles it",
+        )
+    }
 }

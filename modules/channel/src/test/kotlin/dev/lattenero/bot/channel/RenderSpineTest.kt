@@ -270,4 +270,36 @@ class RenderSpineTest {
         assertEquals("hola", thought.delta)
         assertEquals(7L, thought.nowMs, "the injected receive clock rides")
     }
+
+    @Test
+    fun theRecoveryHeraldClassifiesAsTheRebaseAndTheRestStaysAdditive() {
+        // THE 11/11 SCREENSHOT («NoNo …»): the core's stream recovery
+        // re-opened the request — its herald is the state.updated carrying
+        // the stream_recovery pill. THAT one is the rebase (the windows die
+        // before the re-generated stream lands); every other state.updated
+        // stays the additive freshness frame.
+        val herald = frameOf(
+            "state.updated",
+            "patch" to buildJsonObject {
+                put("control", buildJsonObject {
+                    put("apiRetry", buildJsonObject {
+                        put("reason", JsonPrimitive("stream_recovery"))
+                        put("attempt", JsonPrimitive(1))
+                    })
+                })
+            },
+        )
+        assertTrue(classify(herald, nowMs = 1_000L) is RenderEvent.StreamRebase, "the herald IS the rebase")
+        val other = frameOf(
+            "state.updated",
+            "patch" to buildJsonObject {
+                put("control", buildJsonObject {
+                    put("apiRetry", buildJsonObject {
+                        put("reason", JsonPrimitive("rate_limited"))
+                    })
+                })
+            },
+        )
+        assertTrue(classify(other, nowMs = 1_000L) is RenderEvent.Frame, "a plain pill patch stays additive")
+    }
 }

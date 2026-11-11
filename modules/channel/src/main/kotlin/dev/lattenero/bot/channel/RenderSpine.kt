@@ -382,6 +382,19 @@ private fun classifyStream(frame: ServerFrame.StreamEvent, nowMs: Long): RenderE
             retry = ApiRetryText.fromNetworkDebug(event, atMs.takeIf { it > 0 } ?: nowMs),
         )
 
+        StreamEvents.STATE_UPDATED -> if (StreamEvents.isStreamRecoveryReopen(event)) {
+            // THE RECOVERY'S HERALD (11/11): the core's stream recovery just
+            // re-opened the request — the fork re-states the whole streamed
+            // content from its start, and the re-stated first deltas doubled
+            // the answer's first word and the CoT's first sentence (the
+            // owner read both). The windows die HERE, before the
+            // re-generated stream lands: the watchdog's own StreamRebase
+            // cut, fired by the recovery's own herald.
+            RenderEvent.StreamRebase(taskId)
+        } else {
+            RenderEvent.Frame(taskId, seq, atMs, nowMs, StreamEvents.type(event))
+        }
+
         else -> RenderEvent.Frame(taskId, seq, atMs, nowMs, StreamEvents.type(event))
     }
 }
