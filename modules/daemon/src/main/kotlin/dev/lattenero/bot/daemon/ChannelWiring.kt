@@ -27,7 +27,7 @@ import dev.lattenero.bot.channel.LivePublisher
 import dev.lattenero.bot.channel.LiveTelegram
 import dev.lattenero.bot.channel.MenuMirrorRefresher
 import dev.lattenero.bot.channel.ModeMenu
-import dev.lattenero.bot.channel.PlanMenu
+import dev.lattenero.bot.channel.PlanQuota
 import dev.lattenero.bot.channel.Poller
 import dev.lattenero.bot.channel.OpencodeQuota
 import dev.lattenero.bot.channel.QuotaDirect
@@ -96,6 +96,14 @@ internal class ChannelStack(
     val bus: BusProducer? = null,
     /** 🔔 the subagent watcher — null with the `notifications` knob off (zero I/O). */
     val notifs: SubagentNotifs? = null,
+    /**
+     * THE BOOT DEFAULT LADDER (the owner's 11/11): ONE run at boot — the
+     * first plan WITH tokens in HIS order applies itself to the
+     * conversation; only changes and failures speak. Launched by Main as
+     * its own coroutine (the firehoseProbe pattern), never a daemon's
+     * lifecycle process.
+     */
+    val bootLadder: suspend () -> Unit = {},
 )
 
 /**
@@ -148,6 +156,32 @@ private fun quotaDirectRung(cfg: DaemonConfig): suspend (String?) -> String? = {
             providerJson = providerConfigText(cfg, ZAI_CONFIG_FILES),
             fetch = { url, token -> zaiQuotaGet(url, token) },
         )
+    }
+}
+
+/**
+ * THE /plan ROWS' STRUCTURED RUNG (the owner's 11/11: the quota BESIDE
+ * each plan name): the argument is a plan's providerId, the answer its
+ * normalized [PlanQuota.Mark] — ONLY the OpenCode family (the fork frame
+ * cannot answer it: no planKind hint exists), the z.ai plans ride the
+ * cap-gated frame. Every failure — no file, no key, dead network, bad
+ * shape — is the rung's honest null (the caller's ❔), ONE attempt.
+ */
+// any failure IS the null verdict (the ❔ is the honest read) — QuotaDirect.report's own law
+@Suppress("TooGenericExceptionCaught", "SwallowedException")
+private fun directQuotaMarkRung(cfg: DaemonConfig): suspend (String?) -> PlanQuota.Mark? = { providerId ->
+    val pid = providerId?.takeIf { it.isNotEmpty() }
+    val json = pid?.let { providerConfigText(cfg, OPENCODE_CONFIG_FILES)() }
+    val target = if (json != null) OpencodeQuota.resolve(json, pid) else null
+    when {
+        target == null -> null
+        else -> try {
+            quotaBearerGet(target.url, target.key, headers = OPENCODE_HEADERS, service = "opencode")
+        } catch (e: CancellationException) {
+            throw e // cancellation is not a quota failure: the cancelled job keeps cancelling
+        } catch (e: Exception) {
+            null // the ❔ is the honest verdict — nothing raw flies to the owner
+        }?.let { raw -> OpencodeQuota.parse(raw)?.let(PlanQuota::fromOpencode) }
     }
 }
 
@@ -487,10 +521,6 @@ internal fun wireChannel(
                 (client.query(ChannelQuery.TaskSnapshot(taskId, ws, messageLimit = 1)) as? QueryAnswer.Ok)
                     ?.let { ModeMenu.currentFrom(it.resultJson) }
             },
-            readPlan = { ws ->
-                (client.query(ChannelQuery.ModelSelection(ws)) as? QueryAnswer.Ok)
-                    ?.let { PlanMenu.parse(it.resultJson) }
-            },
             titleOf = { taskId ->
                 runCatching {
                     history.ctxTasks(BotCommands.SCOPE_FOR_PICK).firstOrNull { r -> r.sid == taskId }?.title
@@ -668,7 +698,7 @@ internal fun wireChannel(
         fileMenu = fileMenu,
         richVoice = richVoice,
     )
-    val poller = buildPoller(
+    val wired = buildPoller(
         cfg,
         lanes.api,
         pythonState,
@@ -696,12 +726,16 @@ internal fun wireChannel(
         mirror = mirrorRefresh,
         fileTaps = fileMenu,
     )
-    return ChannelStack(client, liveView, poller, hub, busTaps, notifs?.watcher)
+    return ChannelStack(client, liveView, wired?.poller, hub, busTaps, notifs?.watcher, wired?.bootLadder ?: {})
 }
 
 private const val QUEUE_FILE = "inbound-queue.json"
 private const val ATTACHMENTS_DIR = "attachments"
 private const val LIVE_ORPHAN_FILE = "live-view-active.json"
+
+/** The boot default ladder's bounded channel wait: a spaced poll, never a busy wait. */
+internal const val BOOT_LADDER_WAIT_MS = 30_000L
+internal const val BOOT_LADDER_POLL_MS = 2_000L
 
 /** ADR-019's append-only file (agent-brain's FileTailer owns the read side). */
 private const val BUS_FILE = "bus-events.jsonl"
@@ -851,7 +885,7 @@ private fun buildPoller(
     // THE FILE VIEWER's taps (5/11) — fvm:/fvp: ride the same menu the
     // publisher attaches its doors with
     fileTaps: FileTaps? = null,
-): Poller? {
+): PollerWiring? {
     if (!pollOn) return null
     val liveApi = api ?: TgApi({ TgConfig.load(remote) })
     // ☢️ the nuclear ladder — the daemon-side restart of EVERYTHING (the
@@ -925,6 +959,12 @@ private fun buildPoller(
                 // texto caería en la conversación equivocada
                 override fun supportsBind(): Boolean = client.speaks("bind")
 
+                // THE /plan ROWS' PER-PLAN QUOTA (the fork's cap
+                // queries:quotaProvider): an old host ignores the providerId
+                // field and answers the ACTIVE plan — the gate keeps that
+                // misleading answer off another plan's row
+                override fun speaksQuotaProvider(): Boolean = client.speaks("queries:quotaProvider")
+
                 override suspend fun enqueueInbound(text: String, messageId: String, receivedAt: Long) =
                     queue.add(text, messageId, receivedAt)
 
@@ -972,6 +1012,7 @@ private fun buildPoller(
         verbosity = verbosity,
         board = board,
         quotaDirect = quotaDirectRung(cfg),
+        directQuotaMark = directQuotaMarkRung(cfg),
         blockTaps = liveView,
         // the collapsed outputs' pager (the same publisher owns both
         // registries: the tap edits the message it spoke)
@@ -984,10 +1025,39 @@ private fun buildPoller(
         // second lock reads the config at the tap, one truth, no copy.
         ownerUserId = { TgConfig.load(remote).ownerUserId },
     )
-    // THE MIRROR'S DRAFT SOURCE (the late bind — the refresher was born
-    // before the commands): the commands own the draft and its TTL law
-    mirror?.bindDraft { commands.openDraft() }
-    return Poller(
+    // THE MIRROR'S RENDERERS (the late bind — the refresher was born
+    // before the commands): the commands own the ONE render path per menu,
+    // so a mirrored refresh is byte-identical to the command's own reply.
+    mirror?.bindRenderers(
+        plan = { ws, title -> commands.planMenuRender(ws, title) },
+        model = { ws, title -> commands.modelMenuRender(ws, title) },
+        effort = { ws, title -> commands.effortMenuRender(ws, title) },
+    )
+    // THE BOOT DEFAULT LADDER (the owner's 11/11: «cuando inicializa el
+    // bot, o cuando se recarga… se debe elegir en ese orden»): ONE run at
+    // boot — the first plan WITH tokens applies itself, only changes and
+    // failures speak. The channel waits bounded (a spaced poll, never a
+    // busy wait); a channel that never comes up skips the ladder honestly.
+    val bootLadder: suspend () -> Unit = {
+        var waitedMs = 0L
+        while (!client.connected && waitedMs < BOOT_LADDER_WAIT_MS) {
+            delay(BOOT_LADDER_POLL_MS)
+            waitedMs += BOOT_LADDER_POLL_MS
+        }
+        when {
+            !client.connected -> logger.info {
+                "boot default ladder skipped — the channel never came up in ${BOOT_LADDER_WAIT_MS}ms"
+            }
+
+            else -> {
+                val outcome = commands.applyDefaultLadder()
+                logger.info { "boot default ladder: speak=${outcome.speak} — ${outcome.text.take(140)}" }
+                if (outcome.speak) speak(outcome.text, true, null)
+            }
+        }
+    }
+    return PollerWiring(
+        poller = Poller(
         api = liveApi,
         offsetFile = File(pythonState, "tg-offset"), // Python's own cursor — the torch passes at retirement
         // the bot explains its own silences: a long mute window ends with the
@@ -1040,8 +1110,13 @@ private fun buildPoller(
                 }
             }
         },
+        ),
+        bootLadder = bootLadder,
     )
 }
+
+/** What [buildPoller] answers: the poller AND the boot default ladder (the commands live inside). */
+internal data class PollerWiring(val poller: Poller, val bootLadder: suspend () -> Unit)
 
 /**
  * ATTACHMENTS IN (30/10): the owner's photo/document — downloaded with the

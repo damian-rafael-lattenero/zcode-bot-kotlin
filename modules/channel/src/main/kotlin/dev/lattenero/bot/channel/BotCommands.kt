@@ -82,6 +82,7 @@ internal fun isDestructiveTap(data: String): Boolean = when {
 }
 
 /** The dispatcher's data source — the client's queries behind one interface (tests fake it). */
+@Suppress("TooManyFunctions") // the channel's operations, one interface (the defaults degrade honestly)
 interface ChannelOps {
     suspend fun query(query: ChannelQuery): QueryAnswer
 
@@ -139,6 +140,15 @@ interface ChannelOps {
      * conversation (the two-step bind below stays the honest path).
      */
     fun supportsBind(): Boolean = false
+
+    /**
+     * Whether the live server advertised the quota frame's per-plan
+     * override (`queries:quotaProvider` — the /plan rows' per-plan quota).
+     * Default false: an old host IGNORES the providerId field and answers
+     * the ACTIVE plan's quota — showing that under another plan's name
+     * would be a lie with real numbers.
+     */
+    fun speaksQuotaProvider(): Boolean = false
 
     /** Python's F17: park a text while its conversation is mid-turn — the queue size after, or -1. */
     suspend fun enqueueInbound(text: String, messageId: String, receivedAt: Long): Int
@@ -199,6 +209,15 @@ class BotCommands(
      * the user. Tests inject fakes.
      */
     private val quotaDirect: (suspend (String?) -> String?)? = null,
+    /**
+     * THE /plan ROWS' DIRECT RUNG (the owner's 11/11: the quota BESIDE
+     * each plan name): the argument is a plan's providerId, the answer its
+     * normalized quota mark ([PlanQuota]) — the wiring serves OpenCode Go's
+     * own /usage windows (the family the fork frame cannot answer) and
+     * null for anything else (z.ai's plans ride the cap-gated frame). A
+     * null/failed answer = the honest ❔, never an invented number.
+     */
+    private val directQuotaMark: (suspend (String?) -> PlanQuota.Mark?)? = null,
     /**
      * The collapsed CoT blocks' taps (the cb: buttons): the publisher's
      * registry — expand/fold IN PLACE on the block's own message. Null
@@ -262,14 +281,6 @@ class BotCommands(
     /** The question's free-text arm: the shortId whose question eats the NEXT line (the qf: tap). */
     private var pendingAnswerFor: String? = null
 
-    /**
-     * /plan_model_effort's DRAFT (owner, 3/11): the three choices live
-     * LOCALLY until ✅ Aceptar — a partial tap never writes, and a draft
-     * dies with [PLAN_DRAFT_TTL_MS] so a catalog change can never be
-     * applied blind.
-     */
-    private var planDraft: PlanMenu.Draft? = null
-
     /** One incoming line. Null = not a command (the router sends it as inbound). */
     @Suppress("CyclomaticComplexMethod") // one branch per command — the dispatcher's own shape
     suspend fun handle(text: String, updateId: Long): BotReply? {
@@ -285,7 +296,9 @@ class BotCommands(
             "ctx" -> ctxList()
             "help", "start" -> BotReply(help())
             "subagents", "agents" -> subagents(rest)
-            "plan", "plan_model_effort" -> plan() // the old name keeps muscle memory alive
+            "plan", "plan_model_effort" -> plan() // the old mega-menu's name keeps muscle memory alive
+            "model" -> modelPicker() // the plan in force's models (the split's second step)
+            "effort" -> effortPicker() // the plan+model in force's tiers (the split's third step)
             "mode" -> mode(rest)
             "plan_mode" -> planMode(rest)
             "last" -> BotReply(lastAnswer())
@@ -392,7 +405,7 @@ class BotCommands(
         data == "saa:" -> subagents("activos")
 
         data.startsWith("pl:") || data.startsWith("pm:") || data.startsWith("pe:") || data == "pd:" ||
-            data == "pac:" || data == "pcl:" -> planTap(data)
+            data == "pdef:" || data == "pac:" || data == "pcl:" -> planTap(data)
 
         // /mode's picker tap (mo:<mode>): the SAME write the typed command
         // runs — one path, one vocabulary, one honest answer
@@ -486,158 +499,300 @@ class BotCommands(
     }
 
     /**
-     * /plan_model_effort's taps — the DRAFT flow (owner, 3/11).
+     * THE PLAN PICKER'S TAPS (the owner's 11/11 split) — every tap WRITES
+     * its one field and the fork resolves the siblings against the catalog
+     * (resolveModelPair, damian): pl: applies the plan, pm: the model,
+     * pe: the effort, pdef: runs the DEFAULT LADDER ([PlanLadder]), pd:
+     * copies the selection in force to the app default. pac:/pcl: are the
+     * RETIRED mega-menu's verbs — the honest old-menu note, nothing else.
      *
-     * pl:/pm:/pe: only move a LOCAL draft, one step at a time; each step
-     * re-resolves its siblings against the catalog (a cross-plan pair can
-     * never exist). Nothing is written until ✅ Aceptar (pac:) sends the
-     * WHOLE valid triple in one frame. pcl: discards; pd: writes the draft
-     * (or the selection in force) as the app's default.
-     *
-     * Why: the old flow wrote one field per tap and the fork merged it with
-     * the stale sibling — plan opencode-go-chat × GLM-5.3-Flash was refused
-     * («not selectable»), and every intermediate state was already a write.
+     * Why no draft: the 3/11 law existed because one-field-per-tap produced
+     * pairs that do not exist; the fork's resolveModelPair (live since
+     * v3.18.0) resolves the missing sibling at the SOURCE now, so every
+     * intermediate tap is already a valid state.
      */
-    private suspend fun planTap(data: String): BotReply {
-        val ctx = (contextAnswer() as? ContextAnswer.Ctx)?.value
-        val ws = ctx?.workspacePath
-        val v = planViews(ws) ?: return BotReply(DEGRADED)
-        val title = ctx?.activeTaskId?.let { id ->
-            history.ctxTasks(SCOPE_FOR_PICK).firstOrNull { r -> r.sid == id }?.title
+    private suspend fun planTap(data: String): BotReply = when {
+        data == "pac:" || data == "pcl:" -> BotReply(PLAN_OLD_MENU)
+        data == "pdef:" -> ladderReply()
+        data == "pd:" -> defaultSelection()
+        data.startsWith("pl:") -> applyPlan(data.removePrefix("pl:"))
+        data.startsWith("pm:") -> applyModel(data.removePrefix("pm:"))
+        data.startsWith("pe:") -> applyEffort(data.removePrefix("pe:"))
+        else -> BotReply(PLAN_OLD_MENU)
+    }
+
+    /** The conversation's title for the plan cards (the history's resolution, the mirror's same source). */
+    private suspend fun titleOf(ctx: Context): String? =
+        ctx.activeTaskId?.let { id -> history.ctxTasks(SCOPE_FOR_PICK).firstOrNull { r -> r.sid == id }?.title }
+
+    /** The server confirmed a write but its snapshot was unrenderable — honest, minimal, pointing at /plan. */
+    private fun appliedBlind(): BotReply = BotReply(PLAN_APPLIED_BLIND)
+
+    /** pl: — ONE write (plan only): the fork keeps the model the target plan exposes, else its first. */
+    private suspend fun applyPlan(providerId: String): BotReply {
+        val ctx = contextAnswer() as? ContextAnswer.Ctx
+        return when (
+            val set = ops.query(
+                ChannelQuery.SetModelSelection(
+                    scope = "conversation",
+                    plan = providerId,
+                    workspacePath = ctx?.value?.workspacePath,
+                ),
+            )
+        ) {
+            is QueryAnswer.Ok -> PlanMenu.parse(set.resultJson)
+                ?.let { planCardReply(it, ctx!!.value, "✅ Plan aplicado") }
+                ?: appliedBlind()
+
+            is QueryAnswer.Unavailable -> BotReply(DEGRADED)
+            is QueryAnswer.Failed -> BotReply(writeFailure(set))
         }
-        return when (data) {
-            "pcl:" -> {
-                planDraft = null
-                BotReply(
-                    "✖️ Borrador descartado — la selección vigente quedó intacta.",
-                    markup = PlanMenu.keyboard(v),
-                )
+    }
+
+    /** pm: — ONE write (model only): the fork places it under the plan that OWNS it, the current first. */
+    private suspend fun applyModel(modelId: String): BotReply {
+        val ctx = contextAnswer() as? ContextAnswer.Ctx
+        return when (
+            val set = ops.query(
+                ChannelQuery.SetModelSelection(
+                    scope = "conversation",
+                    model = modelId,
+                    workspacePath = ctx?.value?.workspacePath,
+                ),
+            )
+        ) {
+            is QueryAnswer.Ok -> when {
+                ctx == null -> appliedBlind()
+                else -> {
+                    val title = titleOf(ctx.value)
+                    val v = PlanMenu.parse(set.resultJson)
+                    val card = v?.let { PlanMenu.modelCard(it, title) }
+                    when {
+                        card != null -> BotReply(
+                            "✅ Modelo aplicado\n${card.text}",
+                            markup = card.markup,
+                            mirror = ctx.value.activeTaskId
+                                ?.let { MenuMirror.Mark(it, ctx.value.workspacePath, MenuMirror.Kind.MODEL) },
+                        )
+
+                        v != null -> BotReply("✅ Modelo aplicado\n${PlanMenu.statusLine(v, title)}")
+                        else -> appliedBlind()
+                    }
+                }
             }
 
-            "pac:" -> acceptDraft(v, ws)
-            "pd:" -> defaultFromDraft(v, ws)
-            else -> draftTap(v, title, data)
+            is QueryAnswer.Unavailable -> BotReply(DEGRADED)
+            is QueryAnswer.Failed -> BotReply(writeFailure(set))
         }
     }
 
-    /** The three draft steps — each one re-resolves its siblings against the catalog. */
-    @Suppress("ReturnCount") // the base draft + each step's honest refusal
-    private fun draftTap(v: PlanMenu.Views, title: String?, data: String): BotReply {
-        val base = liveDraft() ?: v.startDraft(clock()) ?: return BotReply(PLAN_UNKNOWN)
-        return if (data.startsWith("pl:")) {
-            draftStep(v, title, v.draftWithPlan(base, data.removePrefix("pl:")), PLAN_UNKNOWN)
-        } else if (data.startsWith("pm:")) {
-            draftStep(v, title, v.draftWithModel(base, data.removePrefix("pm:")), MODEL_UNKNOWN)
-        } else {
-            draftStep(
-                v,
-                title,
-                v.draftWithEffort(base, data.removePrefix("pe:")),
-                planEffortUnknown(v.effortVocabulary(base.plan, base.model).joinToString(" · ").ifEmpty { "—" }),
+    /** pe: — ONE write (effort only): the fork validates against the task's own configOptions. */
+    private suspend fun applyEffort(level: String): BotReply {
+        val ctx = contextAnswer() as? ContextAnswer.Ctx
+        return when (
+            val set = ops.query(
+                ChannelQuery.SetModelSelection(
+                    scope = "conversation",
+                    effort = level,
+                    workspacePath = ctx?.value?.workspacePath,
+                ),
             )
+        ) {
+            is QueryAnswer.Ok -> when {
+                ctx == null -> appliedBlind()
+                else -> {
+                    val title = titleOf(ctx.value)
+                    val v = PlanMenu.parse(set.resultJson)
+                    val card = v?.let { PlanMenu.effortCard(it, title) }
+                    when {
+                        card != null -> BotReply(
+                            "✅ Effort aplicado\n${card.text}",
+                            markup = card.markup,
+                            mirror = ctx.value.activeTaskId
+                                ?.let { MenuMirror.Mark(it, ctx.value.workspacePath, MenuMirror.Kind.EFFORT) },
+                        )
+
+                        v != null -> BotReply("✅ Effort aplicado\n${PlanMenu.statusLine(v, title)}")
+                        else -> appliedBlind()
+                    }
+                }
+            }
+
+            is QueryAnswer.Unavailable -> BotReply(DEGRADED)
+            is QueryAnswer.Failed -> BotReply(writeFailure(set))
         }
     }
 
-    /** The draft's current value, dropping one built longer than the TTL (a catalog may have changed). */
-    private fun liveDraft(): PlanMenu.Draft? =
-        planDraft?.takeIf { clock() - it.atMs <= PLAN_DRAFT_TTL_MS }
-
-    /**
-     * The mirror's read of the OPEN PLAN DRAFT (the refresher's 🟡 lines):
-     * the live draft inside its TTL, or null — validity against the fresh
-     * catalog is the REFRESHER's check (it owns the fresh read).
-     */
-    fun openDraft(): PlanMenu.Draft? = liveDraft()
-
-    /** One draft step's render — the status line ALWAYS says what would be applied. */
-    private fun draftStep(
+    /** The /plan card's reply — the ONE render path, the mirror mark riding when a task is active. */
+    private suspend fun planCardReply(
         v: PlanMenu.Views,
-        title: String?,
-        next: PlanMenu.Draft?,
-        refusal: String,
+        ctx: Context,
+        note: String,
+        notes: List<String> = emptyList(),
     ): BotReply {
-        if (next == null) return BotReply(refusal)
-        planDraft = next
-        return BotReply(PlanMenu.statusLine(v, title, next), markup = PlanMenu.keyboard(v, next))
-    }
-
-    /** ✅ Aceptar: the ONE write — the whole triple, only when the catalog still validates it. */
-    @Suppress("ReturnCount") // no draft / not-applicable / the channel's three answers
-    private suspend fun acceptDraft(v: PlanMenu.Views, ws: String?): BotReply {
-        val d = liveDraft() ?: return BotReply(PLAN_NOTHING_TO_ACCEPT, markup = PlanMenu.keyboard(v))
-        if (!v.draftValid(d)) {
-            planDraft = null
-            return BotReply(PLAN_DRAFT_STALE, markup = PlanMenu.keyboard(v))
-        }
-        val set = ops.query(
-            ChannelQuery.SetModelSelection(
-                scope = "conversation",
-                plan = d.plan,
-                model = d.model,
-                effort = d.effort,
-                workspacePath = ws,
-            ),
-        )
-        return when (set) {
-            is QueryAnswer.Ok -> {
-                planDraft = null
-                planReplyFrom(set.resultJson, "✅ aplicado")
-            }
-
-            // THE HONEST FAILURE (the owner's 4/11 timeout drill): the draft
-            // SURVIVES every failure — the tap can always be retried — and
-            // the copy says it, instead of the fork's opaque words.
-            is QueryAnswer.Unavailable -> BotReply(
-                "$DEGRADED\nEl draft sigue armado — tocá ✅ Aceptar cuando el canal vuelva.",
-                markup = PlanMenu.keyboard(v, d),
-            )
-
-            is QueryAnswer.Failed -> applyFailure(set, v, d)
-        }
-    }
-
-    /**
-     * The apply's honest failure (4/11: the Aceptar tap landed while the
-     * fork host was mid-hiccup — «(timeout): no answer in 15s» said
-     * nothing the owner could ACT on). A timeout names the real suspect
-     * (the channel dropped or the host is saturated) and the retry; any
-     * other typed refusal keeps the fork's words AND the same promise:
-     * the draft is still armed, Aceptar retries, Descartar discards.
-     */
-    private fun applyFailure(set: QueryAnswer.Failed, v: PlanMenu.Views, d: PlanMenu.Draft): BotReply {
-        val head = when (set.code) {
-            "timeout" -> "📡 El canal no respondió a tiempo (se cayó justo en ese momento o el host está saturado)."
-            else -> "⚠️ No pude aplicar (${set.code}): ${PyText.esc(set.message ?: "?")}"
+        val card = PlanMenu.planCard(v, titleOf(ctx), quotaMarks(v), clock())
+        val head = when {
+            notes.isEmpty() -> note
+            else -> "$note\n${notes.joinToString("\n")}"
         }
         return BotReply(
-            "$head\nEl draft sigue ARMADO — tocá ✅ Aceptar para reintentar, o ❌ Descartar para tirarlo.",
-            markup = PlanMenu.keyboard(v, d),
+            "$head\n${card.text}",
+            markup = card.markup,
+            mirror = ctx.activeTaskId?.let { MenuMirror.Mark(it, ctx.workspacePath, MenuMirror.Kind.PLAN) },
         )
     }
 
-    /** 📌 the app's default: the draft when there is one, else the selection in force. */
+    /** 📌 the app's default: the selection in force, WHOLE (the draft era's pd:, draftless). */
     @Suppress("ReturnCount") // the missing identity + the channel's three answers
-    private suspend fun defaultFromDraft(v: PlanMenu.Views, ws: String?): BotReply {
-        val draft = liveDraft()?.takeIf { v.draftValid(it) }
-        val plan = draft?.plan ?: v.plan ?: return BotReply(PLAN_UNKNOWN)
-        val model = draft?.model ?: v.model ?: return BotReply(MODEL_UNKNOWN)
-        val set = ops.query(
-            ChannelQuery.SetModelSelection(
-                scope = "default",
-                plan = plan,
-                model = model,
-                effort = draft?.effort ?: v.effort,
-                workspacePath = ws,
-            ),
-        )
-        return when (set) {
-            is QueryAnswer.Ok -> planReplyFrom(set.resultJson, "📌 default de la app actualizado")
-            is QueryAnswer.Unavailable -> BotReply(DEGRADED)
-            is QueryAnswer.Failed -> BotReply(
-                "⚠️ No pude aplicar (${set.code}): ${PyText.esc(set.message ?: "?")}",
+    private suspend fun defaultSelection(): BotReply {
+        val ctx = contextAnswer() as? ContextAnswer.Ctx ?: return BotReply(DEGRADED)
+        val ws = ctx.value.workspacePath
+        val v = planViews(ws) ?: return BotReply(PLAN_OLD_FORK)
+        val plan = v.plan ?: return BotReply(MODEL_NO_PLAN)
+        val model = v.model ?: return BotReply(NO_MODEL_IN_FORCE)
+        return when (
+            val set = ops.query(
+                ChannelQuery.SetModelSelection(
+                    scope = "default",
+                    plan = plan,
+                    model = model,
+                    effort = v.effort,
+                    workspacePath = ws,
+                ),
             )
+        ) {
+            is QueryAnswer.Ok ->
+                planCardReply(
+                    PlanMenu.parse(set.resultJson) ?: v,
+                    ctx.value,
+                    "📌 default de la app actualizado",
+                )
+            is QueryAnswer.Unavailable -> BotReply(DEGRADED)
+            is QueryAnswer.Failed -> BotReply(writeFailure(set))
         }
     }
+
+    /**
+     * THE DEFAULT LADDER (the owner's 11/11): the ⭐ tap and the boot-time
+     * apply share ONE path — [PlanLadder.pick] against the live catalog +
+     * the per-plan quota, the write SKIPPED when the pick IS the selection
+     * in force, the whole triple in one frame when it is not.
+     */
+    data class LadderOutcome(val speak: Boolean, val text: String)
+
+    @Suppress("ReturnCount") // one guard per honest state (no context, degraded, exhausted, no-op, the write)
+    private suspend fun ladderOutcome(): LadderOutcome {
+        val ctx = contextAnswer()
+        if (ctx is ContextAnswer.None) return LadderOutcome(false, LADDER_NO_CONTEXT)
+        val value = (ctx as? ContextAnswer.Ctx)?.value ?: return LadderOutcome(true, DEGRADED)
+        val v = planViews(value.workspacePath) ?: return LadderOutcome(true, PLAN_OLD_FORK)
+        val verdict = PlanLadder.pick(v, quotaMarks(v))
+        val pick = verdict.pick ?: return LadderOutcome(
+            speak = true,
+            text = "$LADDER_EXHAUSTED\n${verdict.notes.joinToString("\n")}",
+        )
+        val summary = "${pick.plan.label} · ${pick.model.label}${pick.effort?.let { " · $it" } ?: ""}"
+        if (pick.plan.providerId == v.plan && pick.model.id == v.model && pick.effort == v.effort) {
+            return LadderOutcome(speak = false, text = "⭐ Default ya vigente: $summary")
+        }
+        return when (
+            val set = ops.query(
+                ChannelQuery.SetModelSelection(
+                    scope = "conversation",
+                    plan = pick.plan.providerId,
+                    model = pick.model.id,
+                    effort = pick.effort,
+                    workspacePath = value.workspacePath,
+                ),
+            )
+        ) {
+            is QueryAnswer.Ok -> LadderOutcome(
+                speak = true,
+                text = "⭐ Default aplicado: $summary${notesBlock(verdict.notes)}",
+            )
+
+            is QueryAnswer.Unavailable -> LadderOutcome(
+                speak = true,
+                text = "$DEGRADED\nEl default automático no pudo aplicar: $summary",
+            )
+
+            is QueryAnswer.Failed -> LadderOutcome(speak = true, text = writeFailure(set))
+        }
+    }
+
+    /** The ⭐ tap: the ladder's outcome with the fresh /plan card underneath. */
+    @Suppress("ReturnCount") // the outcome's text rides every path; the card only when it renders
+    private suspend fun ladderReply(): BotReply {
+        val outcome = ladderOutcome()
+        val ctx = contextAnswer() as? ContextAnswer.Ctx ?: return BotReply(outcome.text)
+        val v = planViews(ctx.value.workspacePath) ?: return BotReply(outcome.text)
+        return planCardReply(v, ctx.value, outcome.text)
+    }
+
+    /**
+     * THE BOOT LADDER (the owner's «cuando inicializa el bot… se debe
+     * elegir en ese orden»): the wiring awaits the channel and speaks the
+     * [LadderOutcome.speak] outcomes.
+     */
+    suspend fun applyDefaultLadder(): LadderOutcome = ladderOutcome()
+
+    /** The notes' block when the ladder had something to say. */
+    private fun notesBlock(notes: List<String>): String =
+        if (notes.isEmpty()) "" else "\n${notes.joinToString("\n")}"
+
+    /** The per-plan quota marks — the /plan card's data and the ladder's decision data. */
+    private suspend fun quotaMarks(v: PlanMenu.Views): Map<String, PlanQuota.Mark> =
+        v.plans.associate { p ->
+            p.providerId to when {
+                p.providerId.contains("opencode", ignoreCase = true) ->
+                    directQuotaMark?.invoke(p.providerId)
+                        ?: PlanQuota.Mark.Missing("el medidor directo de OpenCode no respondió")
+
+                ops.speaksQuotaProvider() -> planQuotaFromChannel(p.providerId)
+
+                else -> PlanQuota.Mark.Missing("el fork no habla quota por plan — falta deploy del fork")
+            }
+        }
+
+    /** One plan's quota through the fork frame's per-plan override (the cap-gated read). */
+    private suspend fun planQuotaFromChannel(providerId: String): PlanQuota.Mark =
+        when (val answer = ops.query(ChannelQuery.Quota(providerId = providerId))) {
+            is QueryAnswer.Ok -> PlanQuota.fromChannel(answer.resultJson)
+                ?: PlanQuota.Mark.Missing("respuesta ilegible")
+
+            is QueryAnswer.Unavailable -> PlanQuota.Mark.Missing("el canal no respondió")
+            is QueryAnswer.Failed -> PlanQuota.Mark.Missing("(${answer.code})")
+        }
+
+    /**
+     * The write's honest failure (the 4/11 timeout drill's law): a timeout
+     * names the real suspect, any other refusal keeps the fork's words —
+     * and both promise the selection in force is intact and the tap can
+     * retry.
+     */
+    private fun writeFailure(set: QueryAnswer.Failed): String = when (set.code) {
+        "timeout" ->
+            "📡 El canal no respondió a tiempo (se cayó justo en ese momento o el host está saturado) — " +
+                "la selección vigente quedó intacta; reintentá el tap."
+
+        else ->
+            "⚠️ No pude aplicar (${set.code}): ${PyText.esc(set.message ?: "?")}" +
+                " — la selección vigente quedó intacta."
+    }
+
+    // ── THE MIRROR'S ONE RENDER PATH (the byte-identical law) ─────────────
+
+    /** /plan's fresh render for the mirror — the SAME bytes the command speaks. */
+    suspend fun planMenuRender(ws: String?, title: String?): MenuRender? =
+        planViews(ws)?.let { v -> PlanMenu.planCard(v, title, quotaMarks(v), clock()) }
+
+    /** /model's fresh render for the mirror. */
+    suspend fun modelMenuRender(ws: String?, title: String?): MenuRender? =
+        planViews(ws)?.let { v -> PlanMenu.modelCard(v, title) }
+
+    /** /effort's fresh render for the mirror. */
+    suspend fun effortMenuRender(ws: String?, title: String?): MenuRender? =
+        planViews(ws)?.let { v -> PlanMenu.effortCard(v, title) }
 
     /** The channel's modelSelection answer, parsed — null when degraded/unparseable. */
     private suspend fun planViews(ws: String?): PlanMenu.Views? {
@@ -645,41 +800,47 @@ class BotCommands(
         return (answer as? QueryAnswer.Ok)?.let { PlanMenu.parse(it.resultJson) }
     }
 
-    /** /plan_model_effort — «elegir el plan, el modelo y el effort, y recién ahí aplicar». */
-    @Suppress("ReturnCount") // one guard per honest state (no context, degraded, unreadable, menu)
+    /** /plan — el plan y CADA uno con su quota restante al lado (the owner's 11/11 order). */
+    @Suppress("ReturnCount") // one guard per honest state (no context, degraded, unreadable, card)
     private suspend fun plan(): BotReply {
         val ctx = contextAnswer()
         // No conversation yet: the fork's modelSelection needs a bot context,
         // so querying it would fail with an internal error. Say the real
         // reason instead of blaming the deploy (the old fallback did).
-        if (ctx is ContextAnswer.None) {
-            return BotReply(
-                "📭 No hay conversación activa — abrí una en ZCode o usá /tasks n. " +
-                    "/plan_model_effort lee el plan, el modelo y el effort de la conversación activa.",
-            )
-        }
+        if (ctx is ContextAnswer.None) return BotReply(PLAN_NO_CONTEXT)
         val value = (ctx as? ContextAnswer.Ctx)?.value ?: return BotReply(DEGRADED)
-        val title = value.activeTaskId?.let {
-            history.ctxTasks(SCOPE_FOR_PICK).firstOrNull { r -> r.sid == it }?.title
-        }
-        val v = planViews(value.workspacePath) ?: return BotReply(
-            "📡 No pude leer la selección — ¿el fork está deployado con los frames de /plan? " +
-                "(commits 3d07cace+, falta el deploy del fork).",
-        )
-        val draft = liveDraft()?.takeIf { v.draftValid(it) }
+        val v = planViews(value.workspacePath) ?: return BotReply(PLAN_OLD_FORK)
+        return planCardReply(v, value, "📊 La selección vigente y la quota de cada plan:")
+    }
+
+    /** /model — los modelos DEL PLAN VIGENTE (the owner's split, second step). */
+    @Suppress("ReturnCount") // one guard per honest state
+    private suspend fun modelPicker(): BotReply {
+        val ctx = contextAnswer()
+        if (ctx is ContextAnswer.None) return BotReply(PLAN_NO_CONTEXT)
+        val value = (ctx as? ContextAnswer.Ctx)?.value ?: return BotReply(DEGRADED)
+        val v = planViews(value.workspacePath) ?: return BotReply(PLAN_OLD_FORK)
+        val card = PlanMenu.modelCard(v, titleOf(value)) ?: return BotReply(MODEL_NO_PLAN)
         return BotReply(
-            PlanMenu.statusLine(v, title, draft),
-            markup = PlanMenu.keyboard(v, draft),
-            // THE MIRROR MARK: the open menu self-refreshes on the fork's
-            // config_option_update — keyed by the active task (no active
-            // task = no stream events for it = no mirror, the honest nothing)
-            mirror = value.activeTaskId?.let { MenuMirror.Mark(it, value.workspacePath, MenuMirror.Kind.PLAN) },
+            card.text,
+            markup = card.markup,
+            mirror = value.activeTaskId?.let { MenuMirror.Mark(it, value.workspacePath, MenuMirror.Kind.MODEL) },
         )
     }
 
-    private fun planReplyFrom(resultJson: String, note: String): BotReply {
-        val v = PlanMenu.parse(resultJson) ?: return BotReply("⚠️ Respuesta de selección ilegible")
-        return BotReply("$note\n${PlanMenu.statusLine(v, null)}", markup = PlanMenu.keyboard(v))
+    /** /effort — los niveles DEL PLAN Y MODELO VIGENTES (the owner's split, third step). */
+    @Suppress("ReturnCount") // one guard per honest state
+    private suspend fun effortPicker(): BotReply {
+        val ctx = contextAnswer()
+        if (ctx is ContextAnswer.None) return BotReply(PLAN_NO_CONTEXT)
+        val value = (ctx as? ContextAnswer.Ctx)?.value ?: return BotReply(DEGRADED)
+        val v = planViews(value.workspacePath) ?: return BotReply(PLAN_OLD_FORK)
+        val card = PlanMenu.effortCard(v, titleOf(value)) ?: return BotReply(EFFORT_NO_LEVELS)
+        return BotReply(
+            card.text,
+            markup = card.markup,
+            mirror = value.activeTaskId?.let { MenuMirror.Mark(it, value.workspacePath, MenuMirror.Kind.EFFORT) },
+        )
     }
 
     /**
@@ -3382,7 +3543,9 @@ class BotCommands(
             "tasks" to "conversations by project · /tasks n picks the active one",
             "all_tasks" to "all conversations, loose ones included",
             "status" to "what is running + the active conversation",
-            "plan_model_effort" to "plan, model and effort — choose the three, then ✅ Aceptar",
+            "plan" to "elige el plan — cada uno con su quota restante al lado",
+            "model" to "los modelos del plan vigente",
+            "effort" to "los niveles de effort del plan y modelo vigentes",
             "mode" to "the conversation's mode — yolo · build · edit · guarded",
             "plan_mode" to "Plan mode ON/OFF — the separate toggle (/mode no longer offers plan)",
             "last" to "re-sends the active conversation's last answer",
@@ -3512,30 +3675,45 @@ class BotCommands(
             "📭 No hay conversación activa — /tasks n elige una: el modo es POR conversación."
 
         /**
-         * A /plan tap whose plan (or model) the CURRENT catalog no longer
-         * exposes — a keyboard from before the app changed providers. The
-         * draft is NOT moved: an invented pair is exactly the bug being
-         * fixed.
+         * A tap from a menu born BEFORE the 11/11 split — nothing rides,
+         * the fresh commands are one /plan away.
          */
-        internal const val PLAN_UNKNOWN =
-            "⚠️ Ese plan ya no está en el catálogo de la app — abrí /plan_model_effort de nuevo."
-        internal const val MODEL_UNKNOWN =
-            "⚠️ Ese modelo ya no está en el catálogo de la app — abrí /plan_model_effort de nuevo."
+        internal const val PLAN_OLD_MENU =
+            "ℹ️ Este menú es de una versión anterior — abrí /plan (el plan y su quota), /model o /effort."
 
-        /** An effort outside the shown model's vocabulary — the real list rides along. */
-        internal fun planEffortUnknown(levels: String): String =
-            "⚠️ Ese effort no existe para el modelo mostrado — válidos: $levels"
+        /** /plan's degrade: the fork predates the modelSelection frame. */
+        internal const val PLAN_OLD_FORK =
+            "📡 No pude leer la selección — ¿el fork está deployado con los frames de /plan? " +
+                "(commits 3d07cace+, falta el deploy del fork)."
 
-        /** ✅ with no draft open: nothing to apply, said plainly. */
-        internal const val PLAN_NOTHING_TO_ACCEPT =
-            "🤔 No hay ningún borrador abierto — tocá un plan, un modelo y un effort, y después ✅ Aceptar."
+        /** No conversation: /plan, /model and /effort read the ACTIVE conversation's selection. */
+        internal const val PLAN_NO_CONTEXT =
+            "📭 No hay conversación activa — abrí una en ZCode o usá /tasks n. " +
+                "/plan lee el plan, el modelo y el effort de la conversación activa."
 
-        /** The draft outlived its TTL (the catalog may have moved) — dropped, never applied blind. */
-        internal const val PLAN_DRAFT_STALE =
-            "⚠️ El borrador quedó viejo (el catálogo pudo cambiar) — lo descarté; armá la combinación de nuevo."
+        /** /model with no plan to list against. */
+        internal const val MODEL_NO_PLAN =
+            "📭 No hay plan vigente — tocá uno en /plan primero: los modelos se listan SEGÚN el plan."
 
-        /** A draft older than this is not trustworthy: the catalog can change under it. */
-        internal const val PLAN_DRAFT_TTL_MS = 30L * 60L * 1000L
+        /** /effort with no tiers to offer. */
+        internal const val EFFORT_NO_LEVELS =
+            "🤷 El modelo vigente no publica niveles de effort — el fork lo selecciona por identidad."
+
+        /** The ladder found every rung tokenless. */
+        internal const val LADDER_EXHAUSTED =
+            "⛔ Quota limit reached for all — ningún plan tiene tokens (en el orden del dueño):"
+
+        /** The ladder with no conversation to apply to. */
+        internal const val LADDER_NO_CONTEXT =
+            "📭 No hay conversación activa — el default automático no tiene dónde aplicarse."
+
+        /** The server confirmed the write but its snapshot was unrenderable. */
+        internal const val PLAN_APPLIED_BLIND =
+            "✅ Aplicado (el servidor lo confirmó) — la respuesta no se pudo renderizar; abrí /plan."
+
+        /** A 📌 default write with no model in force. */
+        internal const val NO_MODEL_IN_FORCE =
+            "⚠️ No hay modelo vigente — abrí /model primero."
 
         /** No armed 🎁 (or its 5-minute window closed) — the honest nudge, not a silent no-op. */
         internal const val GIFT_NOTHING_ARMED =
