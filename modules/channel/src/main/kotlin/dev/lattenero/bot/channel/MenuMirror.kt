@@ -5,8 +5,8 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
 /**
- * THE OPEN MENU MIRROR (pure core): the registry of the /mode and
- * /plan_model_effort menus STILL ON SCREEN, so a config write that
+ * THE OPEN MENU MIRROR (pure core): the registry of the /mode, /plan,
+ * /model and /effort menus STILL ON SCREEN, so a config write that
  * happens OUTSIDE the bot — from the Mac's app, from another tap — can
  * re-edit the open message with the fresh state (the fork's
  * `config_option_update` stream event is the trigger; see
@@ -26,8 +26,8 @@ import kotlinx.serialization.json.JsonPrimitive
  */
 object MenuMirror {
 
-    /** Which menu the message is: the two this mirror serves. */
-    enum class Kind { MODE, PLAN }
+    /** Which menu the message is: the FOUR this mirror serves. */
+    enum class Kind { MODE, PLAN, MODEL, EFFORT }
 
     /** ~10 minutes: a menu older than this is off screen — the edit would be a ghost's. */
     const val TTL_MS = 10L * 60L * 1000L

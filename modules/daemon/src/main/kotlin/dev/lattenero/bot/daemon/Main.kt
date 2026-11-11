@@ -273,6 +273,12 @@ fun main(args: Array<String>) {
             launch { firehoseProbe(lanes.live!!, logger) }
         }
 
+        // THE BOOT DEFAULT LADDER (the owner's 11/11: at daemon boot/reload
+        // the first plan WITH tokens in HIS order applies itself — only
+        // changes and failures speak). One coroutine, the firehoseProbe
+        // pattern: a crash is one log line, never a boot's death.
+        stack.bootLadder.let { run -> launch { bootDefaultLadder(run, logger) } }
+
         val root = coroutineContext[Job]
         Runtime.getRuntime().addShutdownHook(
             Thread {
@@ -385,6 +391,21 @@ private fun touch(file: File) {
         file.writeText(".")
     } catch (_: IOException) {
         // silent-by-design: a missed beat is the healer's signal, not ours
+    }
+}
+
+// the ladder's crash is one log line, never a boot's death (the firehoseProbe pattern)
+@Suppress("TooGenericExceptionCaught")
+private suspend fun bootDefaultLadder(
+    run: suspend () -> Unit,
+    logger: io.github.oshai.kotlinlogging.KLogger,
+) {
+    try {
+        run()
+    } catch (e: kotlinx.coroutines.CancellationException) {
+        throw e // cancellation is not a ladder failure — the cancelled job keeps cancelling
+    } catch (e: Exception) {
+        logger.warn(e) { "boot default ladder crashed — one line, never a boot's death" }
     }
 }
 

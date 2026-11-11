@@ -77,7 +77,18 @@ sealed interface ChannelQuery {
      * classifies it into the accountAccess hint that makes the Start Plan
      * path answer with REAL buckets instead of the lying not_configured.
      */
-    data class Quota(val invalidateBalanceCache: Boolean = false, val taskId: String? = null) : ChannelQuery
+    data class Quota(
+        val invalidateBalanceCache: Boolean = false,
+        val taskId: String? = null,
+        /**
+         * The per-plan override (`queries:quotaProvider`, additive 11/11):
+         * the quota of THIS plan instead of the active selection's — the
+         * /plan rows ask per plan. Omitted → the historical behavior. The
+         * capability gate keeps an old host's active-plan answer from
+         * being shown under another plan's name.
+         */
+        val providerId: String? = null,
+    ) : ChannelQuery
 
     data object BotStatus : ChannelQuery
 
@@ -357,6 +368,7 @@ private fun encodeQuery(query: ChannelQuery): JsonObject = when (query) {
         put("kind", "quota")
         if (query.invalidateBalanceCache) put("invalidateBalanceCache", true)
         query.taskId?.let { put("taskId", it) }
+        query.providerId?.let { put("providerId", it) }
     }
 
     is ChannelQuery.ModelSelection -> buildJsonObject {

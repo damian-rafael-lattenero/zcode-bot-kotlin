@@ -37,7 +37,6 @@ class MenuMirrorRefresherConcurrencyTest {
         val edits = mutableListOf<Long>()
         val refresher = MenuMirrorRefresher.create(
             readMode = { _, _ -> "changed" }, // differs from the registered text → an edit whenever open
-            readPlan = { null },
             titleOf = { null },
             edit = { _, messageId, _, _ ->
                 edits.add(messageId)

@@ -11,8 +11,8 @@ import kotlin.test.assertTrue
  * called ONCE with the fresh text; an unchanged menu is never re-edited;
  * a failed/throttled edit does not advance the baseline (the next event
  * re-attempts once — one attempt per event, never a loop); the TTL and
- * the seal are the two deaths; the plan render carries the commands' own
- * draft when the fresh catalog still validates it.
+ * the seal are the two deaths; the three plan-picker menus render through
+ * the SAME renderers the commands speak (the byte-identical law).
  */
 class MenuMirrorRefresherTest {
 
@@ -34,30 +34,37 @@ class MenuMirrorRefresherTest {
 
     private class RefresherHarness(
         var modeNow: String? = "yolo",
-        var planNow: PlanMenu.Views? = null,
+        var planRender: MenuRender? = null,
+        var modelRender: MenuRender? = null,
+        var effortRender: MenuRender? = null,
         var title: String? = "arreglá el login",
-        var draft: PlanMenu.Draft? = null,
         val edit: EditSpy = EditSpy(),
         clock: () -> Long,
     ) {
         val refresher = MenuMirrorRefresher.create(
             readMode = { _, _ -> modeNow },
-            readPlan = { _ -> planNow },
-            draftOf = { draft },
             titleOf = { _ -> title },
             edit = { _, messageId, text, _ -> edit.apply(messageId, text) },
             clock = clock,
-        )
+        ).apply {
+            bindRenderers(
+                plan = { _, _ -> planRender },
+                model = { _, _ -> modelRender },
+                effort = { _, _ -> effortRender },
+            )
+        }
     }
 
-    private suspend fun modeRegistered(
-        text: String = "🎯 «arreglá el login»\n🎛 Modo: <b>yolo</b>\nTocá para cambiar (aplica al próximo turno):",
+    private suspend fun registered(
+        kind: MenuMirror.Kind,
+        text: String,
+        messageId: Long = 42L,
         atMs: Long = 1_000_000L,
     ): RefresherHarness = RefresherHarness(clock = { now }).apply {
         refresher.noteMenu(
             "task-77",
-            MenuMirror.Mark("task-77", "/ws", MenuMirror.Kind.MODE),
-            messageId = 42L,
+            MenuMirror.Mark("task-77", "/ws", kind),
+            messageId = messageId,
             chatId = chat,
             text = text,
         )
@@ -69,7 +76,7 @@ class MenuMirrorRefresherTest {
 
     @Test
     fun theOpenMenuEditsItselfWithTheFreshState() = runBlocking {
-        val h = modeRegistered()
+        val h = registered(MenuMirror.Kind.MODE, "🎯 «arreglá el login»\n🎛 Modo: <b>yolo</b>")
         h.modeNow = "plan"
         h.refresher.onConfigUpdate("task-77", options)
         assertEquals(1, h.edit.calls.size)
@@ -81,7 +88,7 @@ class MenuMirrorRefresherTest {
 
     @Test
     fun aSecondUnchangedEventNeverReEdits() = runBlocking {
-        val h = modeRegistered()
+        val h = registered(MenuMirror.Kind.MODE, "🎯 «arreglá el login»\n🎛 Modo: <b>yolo</b>")
         h.modeNow = "plan" // the fork already wrote it; the FIRST edit renders it
         h.refresher.onConfigUpdate("task-77", options)
         // the fork re-announces the SAME state (a duplicate write, a second option row…)
@@ -91,7 +98,7 @@ class MenuMirrorRefresherTest {
 
     @Test
     fun aFailedEditKeepsTheOldBaselineAndTheNextEventRetriesOnce() = runBlocking {
-        val h = modeRegistered()
+        val h = registered(MenuMirror.Kind.MODE, "🎯 «arreglá el login»\n🎛 Modo: <b>yolo</b>")
         h.modeNow = "plan"
         h.edit.land = false // throttled (the cooldown's own skip) or a Telegram refusal
         h.refresher.onConfigUpdate("task-77", options)
@@ -108,7 +115,7 @@ class MenuMirrorRefresherTest {
 
     @Test
     fun theTtlKillsTheMirrorQuietly() = runBlocking {
-        val h = modeRegistered()
+        val h = registered(MenuMirror.Kind.MODE, "🎯 «arreglá el login»\n🎛 Modo: <b>yolo</b>")
         h.modeNow = "plan"
         now += MenuMirror.TTL_MS + 1
         h.refresher.onConfigUpdate("task-77", options)
@@ -117,7 +124,7 @@ class MenuMirrorRefresherTest {
 
     @Test
     fun theTurnSealKillsTheMirror() = runBlocking {
-        val h = modeRegistered()
+        val h = registered(MenuMirror.Kind.MODE, "🎯 «arreglá el login»\n🎛 Modo: <b>yolo</b>")
         h.modeNow = "plan"
         h.refresher.seal("task-77")
         h.refresher.onConfigUpdate("task-77", options)
@@ -126,7 +133,7 @@ class MenuMirrorRefresherTest {
 
     @Test
     fun anotherTasksEventTouchesNothing() = runBlocking {
-        val h = modeRegistered()
+        val h = registered(MenuMirror.Kind.MODE, "🎯 «arreglá el login»\n🎛 Modo: <b>yolo</b>")
         h.modeNow = "plan"
         h.refresher.onConfigUpdate("task-88", options)
         assertEquals(0, h.edit.calls.size, "the mirror is keyed by task — another task's write is not ours")
@@ -136,7 +143,7 @@ class MenuMirrorRefresherTest {
 
     @Test
     fun anUnreadableLiveStateEditsNothing() = runBlocking {
-        val h = modeRegistered()
+        val h = registered(MenuMirror.Kind.MODE, "🎯 «arreglá el login»\n🎛 Modo: <b>yolo</b>")
         h.modeNow = null // channel down / old fork / foreign snapshot — the read says nothing
         h.refresher.onConfigUpdate("task-77", options)
         assertEquals(0, h.edit.calls.size, "no data → no edit: the message keeps what it shows")
@@ -157,84 +164,51 @@ class MenuMirrorRefresherTest {
         assertEquals(0, h.edit.calls.size)
     }
 
-    // ── the plan menu: the fresh catalog + the commands' own draft ──
-
-    private fun planViewsJson(plan: String = "account:zai-start-plan", model: String = "GLM-5.3-Flash") = """
-    {
-      "scope": "conversation",
-      "selection": {"providerId": "$plan", "modelId": "$model", "reasoningLevel": "high"},
-      "default": null,
-      "plans": [
-        {"providerId": "account:zai-start-plan", "label": "Start Plan",
-         "models": [{"id": "GLM-5.3-Flash", "label": "GLM-5.3-Flash", "reasoningLevels": ["low", "high", "max"]}]}
-      ]
-    }
-    """.trimIndent()
-
-    private suspend fun planRegistered(text: String): RefresherHarness = RefresherHarness(
-        planNow = PlanMenu.parse(planViewsJson()),
-        clock = { now },
-    ).apply {
-        refresher.noteMenu(
-            "task-77",
-            MenuMirror.Mark("task-77", "/ws", MenuMirror.Kind.PLAN),
-            messageId = 43L,
-            chatId = chat,
-            text = text,
-        )
-    }
+    // ── the plan picker's three menus: the commands' OWN render path ──
 
     @Test
-    fun thePlanMenuRefreshesWithTheFreshSelectionAndTheLiveDraft() = runBlocking {
-        val before = PlanMenu.parse(planViewsJson())!!
-        val h = planRegistered(PlanMenu.statusLine(before, "arreglá el login", null))
-        // the Mac moved the conversation to the OTHER plan/model — the fresh read carries it
-        h.planNow = PlanMenu.parse(
-            """
-            {"scope": "conversation",
-             "selection": {"providerId": "opencode-go-chat", "modelId": "kimi-k2", "reasoningLevel": "high"},
-             "default": null,
-             "plans": [
-               {"providerId": "opencode-go-chat", "label": "OpenCode Go",
-                "models": [{"id": "kimi-k2", "label": "Kimi K2", "reasoningLevels": ["low", "high"]}]},
-               {"providerId": "account:zai-start-plan", "label": "Start Plan",
-                "models": [{"id": "GLM-5.3-Flash", "label": "GLM-5.3-Flash", "reasoningLevels": ["low", "high", "max"]}]}
-             ]}
-            """.trimIndent(),
+    fun thePlanMenuRefreshesThroughTheBoundRenderer() = runBlocking {
+        val h = registered(MenuMirror.Kind.PLAN, "🎯 «arreglá el login»\nPlan: <b>Start Plan</b>")
+        h.planRender = MenuRender(
+            "🎯 «arreglá el login»\nPlan: <b>OpenCode Go</b> · Modelo: <b>kimi-k2</b> · Effort: <b>high</b>",
+            null,
         )
-        h.draft = PlanMenu.Draft("account:zai-start-plan", "GLM-5.3-Flash", "high", atMs = now - 1000)
         h.refresher.onConfigUpdate(
             "task-77",
             listOf(ConfigOptionsUpdate.Option("model", "opencode-go-chat/kimi-k2")),
         )
         assertEquals(1, h.edit.calls.size)
         val text = h.edit.calls.single().second
-        assertTrue("Kimi K2" in text, "the fresh selection renders: $text")
-        assertTrue("A aplicar" in text, "the draft the fresh catalog still validates renders as 🟡: $text")
+        assertTrue("OpenCode Go" in text, "the fresh selection renders: $text")
     }
 
     @Test
-    fun theDraftSurvivesOnlyWhenTheFreshCatalogStillValidatesIt() = runBlocking {
-        val before = PlanMenu.parse(planViewsJson())!!
-        val h = planRegistered(PlanMenu.statusLine(before, "arreglá el login", null))
-        // the draft points at the OLD model; the fresh catalog no longer exposes it → dropped
-        h.draft = PlanMenu.Draft("account:zai-start-plan", "GLM-5.3-Flash", "high", atMs = now - 1000)
-        h.planNow = PlanMenu.parse(
-            """
-            {"scope": "conversation",
-             "selection": {"providerId": "account:zai-start-plan", "modelId": "glm-next", "reasoningLevel": "high"},
-             "default": null,
-             "plans": [{"providerId": "account:zai-start-plan", "label": "Start Plan",
-                        "models": [{"id": "glm-next", "label": "GLM Next", "reasoningLevels": ["low", "high"]}]}]}
-            """.trimIndent(),
-        )
-        h.refresher.onConfigUpdate("task-77", listOf(ConfigOptionsUpdate.Option("model", "glm-next")))
-        val text = h.edit.calls.single().second
-        assertTrue("GLM Next" in text, "the fresh catalog renders: $text")
-        assertTrue("A aplicar" !in text, "an invalid draft is dropped, never rendered")
+    fun theModelMenuRefreshesThroughItsOwnRenderer() = runBlocking {
+        val h = registered(MenuMirror.Kind.MODEL, "🎯 «arreglá el login»\nModelos de <b>Start Plan</b>")
+        h.modelRender = MenuRender("🎯 «arreglá el login»\nModelos de <b>OpenCode Go</b>", null)
+        h.refresher.onConfigUpdate("task-77", listOf(ConfigOptionsUpdate.Option("model", "opencode-go-chat/kimi-k2")))
+        assertEquals(1, h.edit.calls.size)
+        assertTrue("Modelos de <b>OpenCode Go</b>" in h.edit.calls.single().second)
     }
 
-    // ── the mark: the two commands' replies carry it (the wiring's register leg) ──
+    @Test
+    fun theEffortMenuRefreshesThroughItsOwnRenderer() = runBlocking {
+        val h = registered(MenuMirror.Kind.EFFORT, "🎯 «arreglá el login»\nEffort de <b>GLM-5.3-Flash</b>")
+        h.effortRender = MenuRender("🎯 «arreglá el login»\nEffort de <b>kimi-k2</b>", null)
+        h.refresher.onConfigUpdate("task-77", listOf(ConfigOptionsUpdate.Option("model", "opencode-go-chat/kimi-k2")))
+        assertEquals(1, h.edit.calls.size)
+        assertTrue("Effort de <b>kimi-k2</b>" in h.edit.calls.single().second)
+    }
+
+    @Test
+    fun anUnboundRendererKeepsTheMenuText() = runBlocking {
+        val h = registered(MenuMirror.Kind.PLAN, "🎯 «arreglá el login»\nPlan: <b>Start Plan</b>")
+        // no bindRenderers call — the wiring's boot order speaks: keep the text, never a ghost edit
+        h.refresher.onConfigUpdate("task-77", options)
+        assertEquals(0, h.edit.calls.size)
+    }
+
+    // ── the mark: the commands' replies carry it (the wiring's register leg) ──
 
     private class FakeOps : ChannelOps {
         val answers = mutableMapOf<String, String>()
@@ -296,10 +270,23 @@ class MenuMirrorRefresherTest {
             answers["modelSelection"] = planViewsJson()
         }
         val commands = BotCommands(ops = ops, hub = LiveHub(), daemonReset = { "" }, history = FakeHistory())
-        val reply = commands.handle("/plan_model_effort", updateId = 2L)!!
+        val reply = commands.handle("/plan", updateId = 2L)!!
         val mark = reply.mirror
         assertEquals(MenuMirror.Kind.PLAN, mark?.kind)
         assertEquals("task-77", mark?.taskId)
+    }
+
+    @Test
+    fun theModelAndEffortMenuRepliesCarryTheirOwnMarks() = runBlocking {
+        val ops = FakeOps().apply {
+            answers["botStatus"] = boundStatus
+            answers["modelSelection"] = planViewsJson()
+        }
+        val commands = BotCommands(ops = ops, hub = LiveHub(), daemonReset = { "" }, history = FakeHistory())
+        val modelMark = commands.handle("/model", updateId = 3L)!!.mirror
+        assertEquals(MenuMirror.Kind.MODEL, modelMark?.kind)
+        val effortMark = commands.handle("/effort", updateId = 4L)!!.mirror
+        assertEquals(MenuMirror.Kind.EFFORT, effortMark?.kind)
     }
 
     @Test
@@ -308,4 +295,17 @@ class MenuMirrorRefresherTest {
         val commands = BotCommands(ops = ops, hub = LiveHub(), daemonReset = { "" }, history = FakeHistory())
         assertNull(commands.handle("/help", updateId = 3L)?.mirror, "an ordinary reply is never mirrored")
     }
+
+    /** The fork's modelSelection answer the mark tests read. */
+    private fun planViewsJson(plan: String = "account:zai-start-plan", model: String = "GLM-5.3-Flash") = """
+    {
+      "scope": "conversation",
+      "selection": {"providerId": "$plan", "modelId": "$model", "reasoningLevel": "high"},
+      "default": null,
+      "plans": [
+        {"providerId": "account:zai-start-plan", "label": "Start Plan",
+         "models": [{"id": "GLM-5.3-Flash", "label": "GLM-5.3-Flash", "reasoningLevels": ["low", "high", "max"]}]}
+      ]
+    }
+    """.trimIndent()
 }

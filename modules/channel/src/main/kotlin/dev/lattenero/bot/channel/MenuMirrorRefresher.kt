@@ -28,27 +28,26 @@ data class MenuRender(val text: String, val markup: JsonObject?)
  * re-attempts once, and the message never shows a text it does not have.
  * Every failure is one log line; nothing here ever throws at a caller.
  *
- * The reads and the edit are INJECTED (the wiring owns the client and the
- * Telegram throat) — this class is the fold + the decision, testable with
- * plain lambdas.
- *
  * THE REGISTRY IS A kap [Ref] (the audit's M finding): the poller's
  * speakReply path ([noteMenu]) and the channel's pump ([seal],
  * [onConfigUpdate]) are two DIFFERENT coroutines folding the same state.
  * The old `@Volatile var` + `state = state.register(...)` answered
- * visibility without atomicity — a concurrent seal could be clobbered by a
- * stale re-write (a lost update). Every mutation is now one atomic
+ * visibility without atomicity — a concurrent seal could be clobbered by
+ * a stale re-write (a lost update). Every mutation is one atomic
  * read-modify-write under the Ref's mutex ([update]/[modify]); the pure
  * [MenuMirror.State] folds exactly like the render spine folds
  * [RenderState], only the CELL changed.
+ *
+ * THE FOUR RENDERERS (the owner's 11/11 split): /mode keeps its own read
+ * (a taskSnapshot), the three plan-picker menus render through the
+ * commands' ONE path ([BotCommands.planMenuRender] etc., late-bound by
+ * the wiring — the refresher is born before the commands), so a mirrored
+ * refresh is byte-identical to the command's own reply and the
+ * [MenuMirror.shouldEdit] baseline never fights itself.
  */
 class MenuMirrorRefresher private constructor(
     /** The conversation's mode in force (the snapshot's meta.mode, projected) — null when unreadable. */
     private val readMode: suspend (taskId: String, ws: String?) -> String?,
-    /** The plan/model/effort selection + catalog (the modelSelection query's parse) — null when unreadable. */
-    private val readPlan: suspend (ws: String?) -> PlanMenu.Views?,
-    /** The commands' OPEN PLAN DRAFT (the 🟡 lines' source) — bound by the wiring ([bindDraft]). */
-    private val draftOf: () -> PlanMenu.Draft? = { null },
     /** The title the fresh render speaks — the history's resolution, the commands' own source. */
     private val titleOf: suspend (taskId: String) -> String?,
     /** The edit: true when it LANDED. Throttled → false (the cooldown's own skip). */
@@ -69,16 +68,12 @@ class MenuMirrorRefresher private constructor(
          */
         fun create(
             readMode: suspend (taskId: String, ws: String?) -> String?,
-            readPlan: suspend (ws: String?) -> PlanMenu.Views?,
-            draftOf: () -> PlanMenu.Draft? = { null },
             titleOf: suspend (taskId: String) -> String?,
             edit: suspend (chatId: JsonElement, messageId: Long, text: String, markup: JsonObject?) -> Boolean,
             clock: () -> Long = System::currentTimeMillis,
         ): MenuMirrorRefresher = runBlocking {
             MenuMirrorRefresher(
                 readMode = readMode,
-                readPlan = readPlan,
-                draftOf = draftOf,
                 titleOf = titleOf,
                 edit = edit,
                 clock = clock,
@@ -87,13 +82,31 @@ class MenuMirrorRefresher private constructor(
         }
     }
 
-    /** The PLAN draft's source — unbound until the wiring introduces the commands. */
+    /**
+     * The three plan-picker renderers (PLAN/MODEL/EFFORT) — unbound until
+     * the wiring introduces the commands (the same late bind the draft
+     * source had): each answers the menu's FRESH render, byte-identical to
+     * the command's own reply for the same data. Until bound, a mirrored
+     * plan-family menu keeps its text (the honest nothing).
+     */
     @Volatile
-    private var draftSource: () -> PlanMenu.Draft? = draftOf
+    private var renderPlan: suspend (ws: String?, title: String?) -> MenuRender? = { _, _ -> null }
 
-    /** The wiring's late bind: the commands own the draft (their TTL law), the refresher only reads it. */
-    fun bindDraft(source: () -> PlanMenu.Draft?) {
-        draftSource = source
+    @Volatile
+    private var renderModel: suspend (ws: String?, title: String?) -> MenuRender? = { _, _ -> null }
+
+    @Volatile
+    private var renderEffort: suspend (ws: String?, title: String?) -> MenuRender? = { _, _ -> null }
+
+    /** The wiring's late bind: the commands own the ONE render path per menu. */
+    fun bindRenderers(
+        plan: suspend (ws: String?, title: String?) -> MenuRender?,
+        model: suspend (ws: String?, title: String?) -> MenuRender?,
+        effort: suspend (ws: String?, title: String?) -> MenuRender?,
+    ) {
+        renderPlan = plan
+        renderModel = model
+        renderEffort = effort
     }
 
     /**
@@ -158,7 +171,9 @@ class MenuMirrorRefresher private constructor(
     ) {
         val fresh = when (entry.kind) {
             MenuMirror.Kind.MODE -> freshModeRender(entry, taskId)
-            MenuMirror.Kind.PLAN -> freshPlanRender(entry, taskId)
+            MenuMirror.Kind.PLAN -> renderPlan(entry.ws, titleOf(taskId))
+            MenuMirror.Kind.MODEL -> renderModel(entry.ws, titleOf(taskId))
+            MenuMirror.Kind.EFFORT -> renderEffort(entry.ws, titleOf(taskId))
         } ?: return // the live read answered nothing — the message keeps what it shows (honest)
         if (!MenuMirror.shouldEdit(entry.lastRenderedText, fresh.text)) return // unchanged: never re-edited
         val landed = runCatching {
@@ -195,16 +210,5 @@ class MenuMirrorRefresher private constructor(
         val current = readMode(taskId, entry.ws) ?: return null
         val title = titleOf(taskId) ?: taskId.takeLast(BotCommands.SID_TAIL)
         return MenuRender(ModeMenu.statusLine(title, current), ModeMenu.keyboard(current))
-    }
-
-    /** The PLAN menu's fresh render — the same renders `/plan_model_effort` speaks, draft included. */
-    private suspend fun freshPlanRender(entry: MenuMirror.Entry, taskId: String): MenuRender? {
-        val v = readPlan(entry.ws) ?: return null
-        return planRender(v, titleOf(taskId))
-    }
-
-    private fun planRender(v: PlanMenu.Views, title: String?): MenuRender {
-        val draft = draftSource()?.takeIf(v::draftValid)
-        return MenuRender(PlanMenu.statusLine(v, title, draft), PlanMenu.keyboard(v, draft))
     }
 }

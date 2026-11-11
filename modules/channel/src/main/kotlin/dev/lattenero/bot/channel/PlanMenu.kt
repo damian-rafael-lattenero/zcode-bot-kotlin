@@ -7,15 +7,26 @@ import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.putJsonArray
+import java.time.ZoneId
 
 /**
- * The /plan_model_effort command's pure half: parse the channel's
- * modelSelection result (the fork's 3d07cace shapes + the additive
- * reasoningLevels per model), assemble a LOCAL draft one step at a time,
- * and render the menu. Callback vocabulary (≤64B): pl:<providerId> plan,
- * pm:<modelId> model, pe:<effort> reasoning, pac: accept the draft,
- * pcl: discard it, pd: copy it (or the selection) to the app default.
+ * THE PLAN PICKER'S PURE HALF (the owner's 11/11 split): three focused
+ * commands — /plan (each plan WITH its remaining quota, so he never picks
+ * a plan with no tokens), /model (the plan in force's models) and /effort
+ * (the plan+model in force's tiers). Every tap WRITES its one field and
+ * the fork resolves the siblings against the catalog (resolveModelPair,
+ * damian) — the local draft + ✅ Aceptar died with the bug they existed
+ * for (the 3/11 cross-plan refusal), replaced by one-validator-at-the-
+ * source. Callback vocabulary (≤64B): pl:<providerId> plan, pm:<modelId>
+ * model, pe:<effort> reasoning, pdef: the DEFAULT LADDER ([PlanLadder]),
+ * pd: copy the selection in force to the app default, pac:/pcl: the
+ * retired mega-menu's verbs (answered with the honest old-menu note).
+ *
+ * ONE RENDER PER MENU (the mirror's byte-identical law): the commands and
+ * [MenuMirrorRefresher] call the SAME card builders, so a mirrored menu's
+ * refresh never fights its own text.
  */
+@Suppress("TooManyFunctions") // parse + three cards + their keyboards — the picker's whole pure half
 object PlanMenu {
 
     /** The pre-reasoningLevels trio — DISPLAY fallback only, descending on purpose. */
@@ -27,21 +38,9 @@ object PlanMenu {
     /** One selectable plan with its models (the fork's plans[] rows). */
     data class Plan(val providerId: String, val label: String, val models: List<Model>)
 
-    /** A COHERENT (plan, model) pair — the two fields that always travel together. */
-    data class Target(val plan: String, val model: String)
-
     /**
-     * THE DRAFT (owner, 3/11): the three choices assembled LOCALLY, one tap
-     * at a time, and only ✅ Aceptar writes them. Every step re-resolves the
-     * sibling fields from the catalog, so a draft can never hold a cross-plan
-     * pair (the bug that broke the old one-field-per-tap flow). `atMs` is the
-     * birth stamp (the caller's TTL drops drafts built on a stale catalog).
-     */
-    data class Draft(val plan: String, val model: String, val effort: String?, val atMs: Long)
-
-    /**
-     * The parsed answer — a pure projection (the draft steps are top-level
-     * extensions so this class keeps a single responsibility).
+     * The parsed answer — a pure projection (the card builders are top-level
+     * so this class keeps a single responsibility).
      */
     data class Views(
         val scope: String,
@@ -68,7 +67,8 @@ object PlanMenu {
         /**
          * The rows/validation vocabulary: the catalog's real levels, or the
          * legacy trio when an older fork publishes none (the same fallback
-         * the menu has always rendered).
+         * the menu has always rendered). The fork is the WRITE validator —
+         * this vocabulary only shapes what the menus SHOW.
          */
         fun effortVocabulary(providerId: String?, modelId: String?): List<String> =
             levels(providerId, modelId).takeIf { it.isNotEmpty() } ?: LEGACY_EFFORTS
@@ -76,41 +76,14 @@ object PlanMenu {
         /**
          * The completion the fork itself applies — the catalog's HIGHEST
          * tier (its own `at(-1)`). The legacy trio is descending, so its
-         * safe default is the first («high»), never the last.
+         * safe default is the first («high») — but the fork completes a
+         * NEW selection with its own rule, so the ladder never needs this.
          */
         fun defaultEffort(providerId: String?, modelId: String?): String =
             levels(providerId, modelId).lastOrNull() ?: LEGACY_EFFORTS.first()
 
-        /** The effort rows of the CURRENT model (see [effortVocabulary]). */
-        fun effortLevels(): List<String> = effortVocabulary(plan, model)
-
-        /**
-         * A plan tap's coherent pair: keep the current model when the target
-         * plan exposes it (a plan migration that shares the model must not
-         * silently move it), otherwise the plan's FIRST model — the catalog
-         * order is the host's own. null = unknown/empty plan.
-         */
-        @Suppress("ReturnCount") // unknown plan / plan without models / the pair
-        fun planTarget(providerId: String): Target? {
-            val target = plans.firstOrNull { it.providerId == providerId } ?: return null
-            val picked = target.models.firstOrNull { it.id == model } ?: target.models.firstOrNull()
-                ?: return null
-            return Target(target.providerId, picked.id)
-        }
-
-        /**
-         * A model tap's coherent pair: the plan that OWNS the model, the
-         * current plan first (a model id lives under many plans — the
-         * chosen row must never ride the wrong provider). null = a model
-         * the catalog no longer exposes (a stale keyboard, said honestly).
-         */
-        fun modelTarget(modelId: String): Target? {
-            val current = plans.firstOrNull { it.providerId == plan }
-            val owner = current?.takeIf { p -> p.models.any { it.id == modelId } }
-                ?: plans.firstOrNull { p -> p.models.any { it.id == modelId } }
-                ?: return null
-            return Target(owner.providerId, modelId)
-        }
+        /** The plan the /model and /effort menus LIST against: the plan in force, else the app default's. */
+        val shownPlan: String? get() = plan ?: defaultPlan
     }
 
     @Suppress("ReturnCount") // one guard per shape: unparseable, nothing-usable, the parsed views
@@ -166,15 +139,72 @@ object PlanMenu {
         )
     }
 
+    // ── the three cards — ONE render per menu, the command and the mirror share them ──
+
     /**
-     * The status line: what IS, the app default, and — when a draft is open —
-     * EXACTLY what would be applied. Nothing changes until ✅ Aceptar.
+     * /plan's card: the status, ONE line per plan with its quota (the
+     * owner's decision data), the sibling-commands hint, and the plan
+     * buttons — each with its compact quota suffix beside the name.
      */
-    fun statusLine(v: Views, title: String?, draft: Draft? = null): String = buildString {
+    fun planCard(
+        v: Views,
+        title: String?,
+        quota: Map<String, PlanQuota.Mark>,
+        nowMs: Long,
+        zone: ZoneId = ZoneId.systemDefault(),
+    ): MenuRender = MenuRender(
+        text = buildString {
+            append(statusLine(v, title))
+            append("\n\n<b>Quota por plan</b> — «tiene tokens o no», al lado de cada nombre:")
+            v.plans.forEach { p -> append("\n").append(PlanQuota.line(p.label, quota[p.providerId], nowMs, zone)) }
+            append("\n\nModelo: /model · Effort: /effort")
+        },
+        markup = planKeyboard(v, quota),
+    )
+
+    /**
+     * /model's card: the models of the plan in force (the app default's
+     * when none), the hint, the model buttons. Null = no plan to list
+     * against (the command speaks the honest refusal).
+     */
+    @Suppress("ReturnCount") // one guard per honest state (no plan, unknown plan, no models, the card)
+    fun modelCard(v: Views, title: String?): MenuRender? {
+        val shown = v.shownPlan ?: return null
+        val plan = v.plans.firstOrNull { it.providerId == shown } ?: return null
+        if (plan.models.isEmpty()) return null
+        val body = buildString {
+            append(statusLine(v, title))
+            append("\n\nModelos de <b>${PyText.esc(v.planLabel(shown) ?: shown)}</b> — el plan vigente es el dueño:")
+            append("\n\nPlan: /plan · Effort: /effort")
+        }
+        return MenuRender(body, modelKeyboard(plan, v.model))
+    }
+
+    /**
+     * /effort's card: the tiers of the plan+model in force, the hint, the
+     * effort buttons. Null = no plan, no model, or a model that publishes
+     * no tiers (the fork would refuse the write — the menu says so first).
+     */
+    @Suppress("ReturnCount") // one guard per honest state (no plan, no model, no tiers, the card)
+    fun effortCard(v: Views, title: String?): MenuRender? {
+        val shownPlan = v.shownPlan ?: return null
+        val shownModel = v.model ?: v.defaultModel ?: return null
+        val levels = v.levels(shownPlan, shownModel)
+        if (levels.isEmpty()) return null
+        val body = buildString {
+            append(statusLine(v, title))
+            append("\n\nEffort de <b>${PyText.esc(v.modelLabel(shownModel) ?: shownModel)}</b>" +
+                " (plan ${PyText.esc(v.planLabel(shownPlan) ?: shownPlan)}):")
+            append("\n\nPlan: /plan · Modelo: /model")
+        }
+        return MenuRender(body, effortKeyboard(levels, v.effort))
+    }
+
+    /** The status line: what IS, and the app default — no draft, nothing staged. */
+    fun statusLine(v: Views, title: String?): String = buildString {
         append("🎯 <b>«${PyText.esc(title ?: "conversación")}»</b>\n")
         append(currentLine(v))
         defaultLine(v)?.let { append("\n").append(it) }
-        if (draft != null) append("\n\n").append(draftLine(v, draft))
     }
 
     private fun currentLine(v: Views): String =
@@ -189,131 +219,49 @@ object PlanMenu {
             (v.defaultEffort?.let { " · ${PyText.esc(it)}" } ?: "")
     }
 
-    private fun draftLine(v: Views, d: Draft): String =
-        "🟡 <b>A aplicar:</b> ${PyText.esc(v.planLabel(d.plan) ?: d.plan)}" +
-            " · <b>${PyText.esc(v.modelLabel(d.model) ?: d.model)}</b>" +
-            (d.effort?.let { " · effort <b>${PyText.esc(it)}</b>" } ?: "") +
-            "\nNada cambia hasta tocar ✅ Aceptar."
+    // ── the keyboards ─────────────────────────────────────────────────────
 
-    /**
-     * The tap-to-change rows: plans, the DRAFT plan's models, the draft
-     * model's effort vocabulary, then ✅ Aceptar / ✖️ Descartar (only while a
-     * draft exists) and the default copy. 🟡 = the draft, 🎯 = in force.
-     */
-    fun keyboard(v: Views, draft: Draft? = null): JsonObject {
-        val rows = planRows(v, draft) + modelRows(v, draft) + effortRows(v, draft) +
-            verbRows(draft) + defaultRow(v)
-        return buildJsonObject {
-            putJsonArray("inline_keyboard") {
-                rows.forEach { row ->
-                    add(buildJsonArray { row.forEach { (label, data) -> add(Keyboards.button(label, data)) } })
-                }
-            }
-        }
+    /** /plan's buttons: one per plan (quota beside the name), the ⭐ ladder row, the 📌 default. */
+    fun planKeyboard(v: Views, quota: Map<String, PlanQuota.Mark>): JsonObject {
+        val rows = v.plans.map { plan ->
+            val mark = if (plan.providerId == v.plan) "🎯" else "🟢"
+            listOf("$mark ${plan.label}${PlanQuota.compact(quota[plan.providerId])}" to "pl:${plan.providerId}")
+        } + listOf(
+            listOf("⭐ Default — el primer plan con tokens" to "pdef:"),
+        ) + defaultRow(v)
+        return keyboard(rows)
     }
 
-    private fun planRows(v: Views, draft: Draft?): List<List<Pair<String, String>>> =
-        v.plans.map { plan ->
-            val mark = when {
-                draft != null && plan.providerId == draft.plan -> "🟡"
-                plan.providerId == v.plan -> "🎯"
-                else -> "🟢"
-            }
-            listOf("$mark ${plan.label}" to "pl:${plan.providerId}")
-        }
+    /** /model's buttons: the shown plan's models, 🎯 on the one in force. */
+    private fun modelKeyboard(plan: Plan, current: String?): JsonObject =
+        keyboard(
+            plan.models.map { model ->
+                val mark = if (model.id == current) "🎯" else "▪️"
+                listOf("$mark ${model.label}" to "pm:${model.id}")
+            },
+        )
 
-    private fun modelRows(v: Views, draft: Draft?): List<List<Pair<String, String>>> {
-        val shownPlan = draft?.plan ?: v.plan
-        val plan = v.plans.firstOrNull { it.providerId == shownPlan } ?: return emptyList()
-        return plan.models.map { model ->
-            val mark = when {
-                draft != null && model.id == draft.model -> "🟡"
-                model.id == v.model && shownPlan == v.plan -> "🎯"
-                else -> "▪️"
-            }
-            listOf("$mark ${model.label}" to "pm:${model.id}")
-        }
-    }
-
-    private fun effortRows(v: Views, draft: Draft?): List<List<Pair<String, String>>> {
-        val shownPlan = draft?.plan ?: v.plan
-        val shownModel = draft?.model ?: v.model
-        return v.effortVocabulary(shownPlan, shownModel).map { level ->
-            val mark = when {
-                draft?.effort == level -> "🟡"
-                level == v.effort && shownPlan == v.plan && shownModel == v.model -> "🎯"
-                else -> "▪️"
-            }
-            listOf("$mark effort $level" to "pe:$level")
-        }
-    }
-
-    private fun verbRows(draft: Draft?): List<List<Pair<String, String>>> = if (draft == null) {
-        emptyList()
-    } else {
-        listOf(listOf("✅ Aceptar" to "pac:"), listOf("✖️ Descartar" to "pcl:"))
-    }
+    /** /effort's buttons: the shown model's tiers, 🎯 on the one in force. */
+    private fun effortKeyboard(levels: List<String>, current: String?): JsonObject =
+        keyboard(
+            levels.map { level ->
+                val mark = if (level == current) "🎯" else "▪️"
+                listOf("$mark effort $level" to "pe:$level")
+            },
+        )
 
     private fun defaultRow(v: Views): List<List<Pair<String, String>>> =
         if (v.plan == null) emptyList() else listOf(listOf("📌 dejar como default de la app" to "pd:"))
+
+    private fun keyboard(rows: List<List<Pair<String, String>>>): JsonObject = buildJsonObject {
+        putJsonArray("inline_keyboard") {
+            rows.forEach { row ->
+                add(buildJsonArray { row.forEach { (label, data) -> add(Keyboards.button(label, data)) } })
+            }
+        }
+    }
 }
 
 /** A JSON string field, or null (shared by the parse only — top level keeps PlanMenu's budget). */
 private fun JsonObject.field(key: String): String? =
     (this[key] as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { it.isString }?.content
-
-/**
- * The draft's steps — top-level extensions so [PlanMenu.Views] stays a
- * projection. Every step re-resolves its siblings from the SAME catalog the
- * host validates against, so a draft is a valid combination at all times.
- */
-
-/** Step 0 — the selection in force (or the first plan), with its own effort. */
-@Suppress("ReturnCount") // no plans / plan without models / the draft
-fun PlanMenu.Views.startDraft(atMs: Long): PlanMenu.Draft? {
-    val startPlan = plan?.let { p -> plans.firstOrNull { it.providerId == p } } ?: plans.firstOrNull()
-        ?: return null
-    val startModel = startPlan.models.firstOrNull { it.id == model } ?: startPlan.models.firstOrNull()
-        ?: return null
-    val kept = effort?.takeIf { it in effortVocabulary(startPlan.providerId, startModel.id) }
-    return PlanMenu.Draft(
-        plan = startPlan.providerId,
-        model = startModel.id,
-        effort = kept ?: defaultEffort(startPlan.providerId, startModel.id),
-        atMs = atMs,
-    )
-}
-
-/** Step 1 — the plan tap: land IN the target plan (its own model when the draft's is gone). */
-@Suppress("ReturnCount") // unknown plan / plan without models / the draft
-fun PlanMenu.Views.draftWithPlan(draft: PlanMenu.Draft, providerId: String): PlanMenu.Draft? {
-    val target = plans.firstOrNull { it.providerId == providerId } ?: return null
-    val picked = target.models.firstOrNull { it.id == draft.model } ?: target.models.firstOrNull()
-        ?: return null
-    val kept = draft.effort?.takeIf { it in effortVocabulary(target.providerId, picked.id) }
-    return PlanMenu.Draft(
-        target.providerId,
-        picked.id,
-        kept ?: defaultEffort(target.providerId, picked.id),
-        draft.atMs,
-    )
-}
-
-/** Step 2 — the model tap: the plan that OWNS it, effort re-completed. */
-@Suppress("ReturnCount") // a model no plan owns / its own plan's draft
-fun PlanMenu.Views.draftWithModel(draft: PlanMenu.Draft, modelId: String): PlanMenu.Draft? {
-    val target = modelTarget(modelId) ?: return null
-    val picked = model(target.plan, target.model) ?: return null
-    val kept = draft.effort?.takeIf { it in effortVocabulary(target.plan, picked.id) }
-    return PlanMenu.Draft(target.plan, picked.id, kept ?: defaultEffort(target.plan, picked.id), draft.atMs)
-}
-
-/** Step 3 — the effort tap: only a level the shown model publishes. */
-fun PlanMenu.Views.draftWithEffort(draft: PlanMenu.Draft, level: String): PlanMenu.Draft? =
-    if (level in effortVocabulary(draft.plan, draft.model)) draft.copy(effort = level) else null
-
-/** Applicable = every field resolves in the catalog AND the effort is the model's own. */
-fun PlanMenu.Views.draftValid(draft: PlanMenu.Draft): Boolean {
-    model(draft.plan, draft.model) ?: return false
-    return draft.effort == null || draft.effort in effortVocabulary(draft.plan, draft.model)
-}
