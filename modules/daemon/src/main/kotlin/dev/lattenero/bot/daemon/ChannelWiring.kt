@@ -34,6 +34,7 @@ import dev.lattenero.bot.channel.QuotaDirect
 import dev.lattenero.bot.channel.QueryAnswer
 import dev.lattenero.bot.channel.SealFacts
 import dev.lattenero.bot.channel.ServerFrame
+import dev.lattenero.bot.channel.subagentSessionId
 import dev.lattenero.bot.channel.TasksHistory
 import dev.lattenero.bot.channel.ToolLive
 import dev.lattenero.bot.channel.UnixSocketTransport
@@ -324,6 +325,12 @@ internal fun wireChannel(
     // after the client exists. Fires SetMode(yolo) once per task whose
     // snapshot carries NO meta.mode (the default IS Full access).
     var enforceDefaultMode: suspend (String) -> Unit = {}
+    // THE CHILD'S OWN STREAM (12/11): the same holder pattern. A Task/Agent
+    // launch ACK (the `subagentAgentId` additive field) is the fork
+    // contract's own invite to subscribe the child's session topic — the
+    // frames route into the parent card's child windows at the hub. The
+    // body binds right after the client exists.
+    var childSubscribe: suspend (parentTaskId: String, agentId: String) -> Unit = { _, _ -> }
     // U1b: the producer is assigned right after the client exists (its
     // final-answer read is a channel query) — the callback reads the holder.
     var busTaps: BusProducer? = null
@@ -349,6 +356,18 @@ internal fun wireChannel(
             // tap, the app's own answer, or the turn's own end).
             board.onStreamEvent(frame)
             when ((frame.event["type"] as? JsonPrimitive)?.content) {
+                // THE CHILD'S OWN STREAM (12/11): a dispatch lane's launch
+                // ACK carries `subagentAgentId` — the fork contract's own
+                // invite (the child session topic `sess_subagent_<id>`).
+                // Subscribe it ONCE per (parent, child); the client's map
+                // replays it on every reconnect, and the hub's routing
+                // drops the late frames of a closed lane, so a stale replay
+                // is silence. There is no unsubscribe on the wire; the
+                // /nuclear reset clears the map whole.
+                "tool_call", "tool_call_update" -> {
+                    val agentId = (frame.event["subagentAgentId"] as? JsonPrimitive)?.content
+                    if (!agentId.isNullOrBlank()) childSubscribe(frame.taskId, agentId)
+                }
                 // LA LEY DEL SELLO (medida en vivo 31/10): task_complete NO mata
                 // preguntas — un turno cancelado/moved-on deja la interacción
                 // VIVA en el broker del CLI (la pregunta del dueño se respondió
@@ -429,6 +448,24 @@ internal fun wireChannel(
             workspaceOf = { sid -> workspacePathOf(cfg.baseDir, sid) },
             log = { message -> logger.info { message } },
         )
+    }
+
+    // THE CHILD'S SUBSCRIPTIONS' body (12/11 — the holder's late bind):
+    // once per (parent, child); the child rides the PARENT's remembered
+    // workspace (the same map the reconnect replays), the default
+    // workspace is the honest fallback. `client.subscribe` dedupes the
+    // map, the seen-set dedupes the frames.
+    val childSubsSeen = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    val defaultWs = File(File(cfg.baseDir, "workspace"), "default").absolutePath
+    childSubscribe = { parent, agentId ->
+        if (childSubsSeen.add("$parent/$agentId")) {
+            val ws = client.subscriptionWs(parent) ?: defaultWs
+            client.subscribe(subagentSessionId(agentId), ws)
+            logger.info {
+                "child stream subscribed: ${subagentSessionId(agentId).takeLast(SID_TAIL)} " +
+                    "(parent ...${parent.takeLast(SID_TAIL)})"
+            }
+        }
     }
 
     // U1b — the bus producer (ADR-019): OFF by default (the knob is read at

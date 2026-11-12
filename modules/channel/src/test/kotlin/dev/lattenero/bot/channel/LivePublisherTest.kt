@@ -706,6 +706,61 @@ class LivePublisherTest {
         assertEquals(79L, hub.peek()!!.lastSeq)
     }
 
+    // ---- the child's own stream: the routing (12/11) ---------------------------
+
+    @Test
+    fun theChildsOwnStreamRoutesIntoItsDispatchLane() = runTest {
+        val parent = "task-9"
+        val child = subagentSessionId("agent_1")
+        val hub = LiveHub()
+        // the parent turn with an OPEN dispatch lane whose ACK named the child
+        hub.apply(
+            frame(
+                parent, "tool_call", at = 1_000,
+                "toolId" to JsonPrimitive("d1"), "toolName" to JsonPrimitive("Agent"),
+                "subagentAgentId" to JsonPrimitive("agent_1"),
+            ),
+            nowMs = 1_000,
+        )
+        // the child's thought and answer grow the lane's window — never a task switch
+        hub.apply(frame(child, "agent_thought_chunk", at = 1_100, "content" to JsonPrimitive("child thinks")), nowMs = 1_100)
+        var s = hub.peek()!!
+        assertEquals(parent, s.taskId, "the card stays the parent's")
+        assertEquals(12, s.subagentLanes["d1"]?.cotChars)
+        hub.apply(frame(child, "agent_message_chunk", at = 1_200, "content" to JsonPrimitive("child writes")), nowMs = 1_200)
+        s = hub.peek()!!
+        assertEquals(12, s.subagentLanes["d1"]?.answerChars)
+        assertEquals("child writes", s.subagentLanes["d1"]?.answerTail)
+        // the child's own seal: dropped whole — the parent's Task close tells that story
+        hub.apply(frame(child, "task_complete", at = 1_300, "stopReason" to JsonPrimitive("end_turn")), nowMs = 1_300)
+        s = hub.peek()!!
+        assertEquals(parent, s.taskId, "the child's seal never switches the card")
+        assertTrue(s.phase !is TurnPhase.Done)
+        // an unknown child's frames: no open lane owns them — silence
+        hub.apply(frame(subagentSessionId("agent_2"), "agent_thought_chunk", at = 1_400, "content" to JsonPrimitive("x")), nowMs = 1_400)
+        assertTrue(hub.peek()!!.subagentLanes.keys.none { it == "agent_2" })
+        // THE WATCH'S HOLD: the routing precedes it — a held parent still grows its child windows
+        hub.watchTaskId(parent, 1_500)
+        hub.apply(frame(child, "agent_thought_chunk", at = 1_600, "content" to JsonPrimitive(" more")), nowMs = 1_600)
+        assertEquals(17, hub.peek()!!.subagentLanes["d1"]?.cotChars)
+    }
+
+    @Test
+    fun aPinnedChildStreamsAsItsOwnCard() = runTest {
+        val child = subagentSessionId("agent_1")
+        val hub = LiveHub()
+        hub.pin(child)
+        hub.apply(frame(child, "task_run_started", at = 1_000), nowMs = 1_000)
+        hub.apply(frame(child, "agent_message_chunk", at = 1_100, "content" to JsonPrimitive("the child's answer")), nowMs = 1_100)
+        val s = hub.peek()!!
+        assertEquals(child, s.taskId, "the pinned card IS the child's turn")
+        assertEquals(18, s.answerChars, "the child's deltas fold as the main narration")
+        assertEquals(subagentSessionId("agent_1").takeLast(LiveTurn.TITLE_TAIL), s.title)
+        // the parent's traffic cannot steal the pinned card back
+        hub.apply(frame("task-9", "agent_thought_chunk", at = 1_200, "content" to JsonPrimitive("parent noise")), nowMs = 1_200)
+        assertEquals(child, hub.peek()!!.taskId)
+    }
+
     // ---- the 5s progress pings (v2 §4) ----------------------------------------
 
     @Test
@@ -1087,6 +1142,64 @@ class LivePublisherTest {
         assertTrue("language-bash" in opened, "the shell's page rides the bash fence: $opened")
         assertTrue("<pre><code" in opened && "code></pre>" in opened, opened)
         assertTrue("1│ out one" in opened, "the numbering law unchanged: $opened")
+    }
+
+    @Test
+    fun theChildsReportIsBornOpenAndShellsStayFolded() = runTest {
+        val taskId = "task-9"
+        val hub = LiveHub()
+        hub.apply(frame(taskId, "task_run_started", at = 1_000), nowMs = 1_000)
+        hub.apply(frame(taskId, "agent_thought_chunk", at = 1_050, "content" to JsonPrimitive("arranco")), nowMs = 1_050)
+        val wire = Wire()
+        val spoken = mutableListOf<String>()
+        var now = TICK_MS
+        val publisher = publisher(wire, hub, spoken, toolBox = { "BOX(${it.name})" }, clock = { now })
+        publisher.tick() // birth (a Working card — an Idle one never births)
+        // a shell closes: the 3/11 verbosity cure — FOLDED, one button
+        hub.apply(
+            frame(
+                taskId, "tool_call", at = 1_500,
+                "toolId" to JsonPrimitive("ts"), "toolName" to JsonPrimitive("Bash"),
+                "input" to buildJsonObject { put("command", "ls") },
+            ),
+            nowMs = 1_500,
+        )
+        hub.apply(
+            frame(
+                taskId, "tool_call_update", at = 1_600, "status" to JsonPrimitive("completed"),
+                "toolId" to JsonPrimitive("ts"), "content" to JsonPrimitive("out one\nout two"),
+            ),
+            nowMs = 1_600,
+        )
+        now += 31_000L
+        publisher.tick()
+        val shellBox = hub.peek()?.boxes?.single()
+        assertEquals(BoxLive.FOLDED, shellBox?.page, "a shell's box is born folded, as always")
+        // THE CHILD'S REPORT (12/11): an Agent dispatch closes with its report —
+        // born OPEN on page 1, the pager's buttons intact for the flips
+        hub.apply(
+            frame(
+                taskId, "tool_call", at = 2_000,
+                "toolId" to JsonPrimitive("d1"), "toolName" to JsonPrimitive("Agent"),
+                "input" to buildJsonObject { put("description", "the fixer") },
+            ),
+            nowMs = 2_000,
+        )
+        hub.apply(
+            frame(
+                taskId, "tool_call_update", at = 2_100, "status" to JsonPrimitive("completed"),
+                "toolId" to JsonPrimitive("d1"), "content" to JsonPrimitive("the child's report line"),
+            ),
+            nowMs = 2_100,
+        )
+        now += 31_000L
+        publisher.tick()
+        val born = hub.peek()?.boxes?.last()
+        assertEquals(0, born?.page, "the report's box is born SHOWING page 1 (the fold's own proof)")
+        // the speak lane is in-memory in tests: the born body IS the page render
+        val bornBody = spoken.lastOrNull { "1│ the child's report line" in it }
+        assertNotNull(bornBody, "the report's page rides the birth body: $spoken")
+        assertTrue("the fixer" in bornBody, "the header names the spawn: $bornBody")
     }
 
     @Test
