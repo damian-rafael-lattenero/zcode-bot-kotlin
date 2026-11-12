@@ -762,6 +762,12 @@ internal fun wireChannel(
         metrics = metrics,
         mirror = mirrorRefresh,
         fileTaps = fileMenu,
+        // THE AUTH SENTINEL's marker (12/11): the owner's «already attended»
+        // on a Mac password dialog — one file in the daemon's OWN state dir
+        // (the queue's exact pattern), pid keyed, consumed by the sentinel
+        authDismiss = { pid ->
+            File(File(cfg.homeDir, "state"), AUTH_DISMISSED_FILE).writeText(pid)
+        },
     )
     return ChannelStack(client, liveView, wired?.poller, hub, busTaps, notifs?.watcher, wired?.bootLadder ?: {})
 }
@@ -769,6 +775,9 @@ internal fun wireChannel(
 private const val QUEUE_FILE = "inbound-queue.json"
 private const val ATTACHMENTS_DIR = "attachments"
 private const val LIVE_ORPHAN_FILE = "live-view-active.json"
+
+/** The auth sentinel's dismissal marker (state dir, pid keyed — the sentinel consumes it). */
+private const val AUTH_DISMISSED_FILE = "auth-dismissed"
 
 /** The boot default ladder's bounded channel wait: a spaced poll, never a busy wait. */
 internal const val BOOT_LADDER_WAIT_MS = 30_000L
@@ -922,6 +931,9 @@ private fun buildPoller(
     // THE FILE VIEWER's taps (5/11) — fvm:/fvp: ride the same menu the
     // publisher attaches its doors with
     fileTaps: FileTaps? = null,
+    // THE AUTH SENTINEL's marker (12/11): the auth: tap's verdict, written
+    // to the state dir the sentinel polls — default no-op for unwired tests
+    authDismiss: (String) -> Unit = {},
 ): PollerWiring? {
     if (!pollOn) return null
     val liveApi = api ?: TgApi({ TgConfig.load(remote) })
@@ -1055,6 +1067,7 @@ private fun buildPoller(
         // registries: the tap edits the message it spoke)
         boxTaps = liveView,
         fileTaps = fileTaps,
+        authDismiss = authDismiss,
         lastPrompt = lastPrompt,
         brain = brain,
         // THE OWNER'S ID — the SAME config read /deploy's door makes
