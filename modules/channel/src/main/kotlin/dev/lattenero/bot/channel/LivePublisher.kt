@@ -79,7 +79,13 @@ class LiveHub {
         return states.value
     }
 
-    /** One stream event folded in; answers the state after the fold. */
+    /**
+     * One stream event folded in; answers the state after the fold.
+     * The gates ARE the hub: pin → child-routing → hold → sealed memory →
+     * lane scope → the fold, one guard each — the ladder's order is the law.
+     */
+    // one guard per gate — the ladder IS the shape
+    @Suppress("CyclomaticComplexMethod")
     suspend fun apply(
         frame: ServerFrame.StreamEvent,
         nowMs: Long,
@@ -87,6 +93,17 @@ class LiveHub {
     ): TurnLive? = mutex.withLock {
         // the pinned view owns the hub: drop everyone else's frames whole
         if (pinnedTaskId != null && frame.taskId != pinnedTaskId) return@withLock states.value
+        // THE CHILD'S OWN STREAM (12/11): an auto-subscribed child session's
+        // frames fold into the watched parent's child windows — NEVER a task
+        // switch. A pinned or held child's own frames passed the gates above
+        // (its card IS the child's turn; the attach skips this routing), and
+        // every other child frame routes here: a thought/message chunk grows
+        // the open dispatch lane's window, anything else (the child's own
+        // tools, its seal, its errors) drops whole — the parent's Task close
+        // tells that story, its report born open beneath the card.
+        if (frame.taskId != pinnedTaskId && frame.taskId != heldTaskId && isSubagentSession(frame.taskId)) {
+            return@withLock routeChild(frame, nowMs, differ)
+        }
         // THE WATCH'S HOLD (5/11): an explicit attach is the owner's choice —
         // a previous task's still-subscribed running traffic never steals the
         // card back (the live flip-flop 15:13-16:10: born/REPLACED every few
@@ -127,6 +144,33 @@ class LiveHub {
     /** The sa: attach's full form: the card IS the subagent's own turn stream. */
     suspend fun pin(taskId: String) {
         mutex.withLock { pinnedTaskId = taskId }
+    }
+
+    /**
+     * THE CHILD'S ROUTING (12/11), extracted from [apply]'s gate ladder:
+     * the frame's child topic names its agentId; the CURRENT state's open
+     * dispatch lane that owns the child receives the delta as a
+     * [RenderEvent.ChildStream] — or the frame drops whole (the child's
+     * own tools/seal/errors are the parent's Task close's business).
+     * Caller holds [mutex].
+     */
+    private fun routeChild(frame: ServerFrame.StreamEvent, nowMs: Long, differ: LineDiffer): TurnLive? {
+        val agentId = subagentAgentIdOf(frame.taskId)
+        val lane = states.value?.tools
+            ?.firstOrNull { it.status == null && it.subagentAgentId == agentId }
+        val type = StreamEvents.type(frame.event)
+        if (lane != null && (type == StreamEvents.THOUGHT || type == StreamEvents.MESSAGE)) {
+            fold(
+                RenderEvent.ChildStream(
+                    laneId = lane.toolId,
+                    thought = type == StreamEvents.THOUGHT,
+                    delta = StreamEvents.content(frame.event),
+                    nowMs = nowMs,
+                ),
+                differ,
+            )
+        }
+        return states.value
     }
 
     /** Back to the whole-task world — a t: attach lifts any pin. */
@@ -224,8 +268,8 @@ class LiveHub {
 
     /**
      * A collapsed output box was born (U5b): the feed spoke it, the send
-     * flew — the born fact (id, header, pages, message id, fence language)
-     * folds.
+     * flew — the born fact (id, header, pages, message id, fence language,
+     * and the page the message SHOWS — a born-open report's 0) folds.
      */
     suspend fun boxBorn(
         taskId: String,
@@ -234,9 +278,13 @@ class LiveHub {
         pages: List<String>,
         messageId: Long,
         language: String? = null,
+        page: Int = BoxLive.FOLDED,
     ) {
         mutex.withLock {
-            fold(RenderEvent.BoxBorn(taskId, boxId, header, pages, messageId, language), SimpleLineDiffer)
+            fold(
+                RenderEvent.BoxBorn(taskId, boxId, header, pages, messageId, language, page),
+                SimpleLineDiffer,
+            )
         }
     }
 
@@ -690,9 +738,13 @@ class LivePublisher(
                 return@forEach
             }
             // a COLLAPSED tool output: the header speaks with its one
-            // button; the fold keeps the numbered pages for the taps
+            // button; the fold keeps the numbered pages for the taps. THE
+            // CHILD'S REPORT (12/11) is the exception: born OPEN on page 1
+            // — the words arrive read, not behind one more tap — with the
+            // pager's buttons intact for the flips.
             msg.pages?.let { pages ->
-                speakBox(state, pages) { markup -> speak(msg.text, markup) }
+                val text = boxBody(msg, pages)
+                speakBox(state, pages, msg.bornOpen) { markup -> speak(text, markup) }
                 return@forEach
             }
             // A WRITE/EDIT CLOSE: the diff speaks WITH the file door —
@@ -724,23 +776,53 @@ class LivePublisher(
     }
 
     /**
+     * A box message's birth body — the born-open report SHOWS page 1 (the
+     * words arrive read); every other box speaks its folded header.
+     */
+    private fun boxBody(msg: FeedMessage, pages: ToolOutputPages.Pages): String =
+        if (msg.bornOpen) {
+            ToolOutputPages.renderPage(pages.header, pages.pages, 0, pages.language)
+        } else {
+            msg.text
+        }
+
+    /**
      * Speaks ONE collapsed output box and folds its birth (U5b): the fold
      * names the wire id — turn-unique by construction (the task's hash
      * base + the birth order, so an old turn's button can never alias a
      * new turn's box) — the send flies, and the born fact (the message id
      * included) folds. A send that never flew folds NOTHING: there is no
-     * message to edit, the tap on it is an honest miss.
+     * message to edit, the tap on it is an honest miss. [bornOpen] births
+     * the box SHOWING page 1 (the child's report's own law): the fold
+     * carries the page so a tap on the born-open message flips from truth.
      */
     private suspend fun speakBox(
         state: TurnLive,
         pages: ToolOutputPages.Pages,
+        bornOpen: Boolean,
         send: suspend (markup: JsonObject?) -> Long?,
     ) {
         val base = state.taskId.hashCode() and BOX_ID_MASK
         val boxId = (hub.peek()?.boxes?.maxOfOrNull { it.boxId } ?: base) + 1
-        val mid = send(Keyboards.boxOpen(boxId)) ?: return
-        hub.boxBorn(state.taskId, boxId, pages.header, pages.pages, mid, pages.language)
-        logger.info { "box born: id=$boxId message_id=$mid pages=${pages.pages.size} language=${pages.language}" }
+        val markup = if (bornOpen) {
+            Keyboards.boxPages(boxId, 0, pages.pages.size)
+        } else {
+            Keyboards.boxOpen(boxId)
+        }
+        val mid = send(markup) ?: return
+        hub.boxBorn(
+            state.taskId,
+            boxId,
+            pages.header,
+            pages.pages,
+            mid,
+            pages.language,
+            if (bornOpen) 0 else BoxLive.FOLDED,
+        )
+        logger.info {
+            "box born: id=$boxId message_id=$mid pages=${pages.pages.size} " +
+                "language=${pages.language}${if (bornOpen) " BORN OPEN" else ""}"
+        }
     }
 
     /**

@@ -34,6 +34,15 @@ data class FeedMessage(
      * message.
      */
     val prose: String? = null,
+    /**
+     * BORN OPEN (12/11 — «no muestra expandido por defecto el texto»): the
+     * message is a collapsed output box whose page 1 SHOWS at birth — the
+     * child's report must arrive read, not behind one more tap — with the
+     * pager's buttons intact for the flips. Shells keep the folded birth
+     * (the 3/11 verbosity cure is untouched); only the dispatch closes
+     * earn this.
+     */
+    val bornOpen: Boolean = false,
 ) {
     companion object {
         /** A plain data message (a tool close, an open one-liner). */
@@ -119,7 +128,11 @@ object TranscriptFeed {
             if (lane.status != null && (before == null || before.status == null)) {
                 val collapsed = collapseOf(lane)
                 if (collapsed != null) {
-                    out += FeedMessage(text = collapsed.header, pages = collapsed)
+                    out += FeedMessage(
+                        text = collapsed.header,
+                        pages = collapsed,
+                        bornOpen = lane.name in DISPATCH_TOOLS,
+                    )
                     return@forEach
                 }
                 val box = if (lane.input == null) "" else toolBox(lane)
@@ -239,18 +252,42 @@ object TranscriptFeed {
      * file read only when it is long enough to bury the chat. Null = the
      * box speaks. Every page's lines carry their REAL numbers (the read's
      * offset included), so a snippet is never anonymous.
+     *
+     * THE CHILD'S REPORT (12/11): a dispatch (Task/Agent) close ALWAYS
+     * becomes its pager box, born OPEN — the input-only ToolBox render
+     * would drop the child's report entirely (the box ladder reads the
+     * INPUT, and the report rides the close's content). The words arrive
+     * read on page 1, the pager's buttons carry the flips.
      */
+    // one branch per family (shell / dispatch / read+other) — the box carries
+    // the 3/11 collapse law, the 12/11 born-open report and the fence law together
+    @Suppress("CyclomaticComplexMethod")
     private fun collapseOf(lane: ToolLive): ToolOutputPages.Pages? {
-        val out = lane.output?.takeIf { it.isNotBlank() }
+        val out = lane.output?.takeIf { it.isNotBlank() } ?: return null
         val shell = lane.name in SHELL_TOOLS
         val read = lane.name in READ_TOOLS
-        val tiny = out != null && !shell && (!read || PyText.cpLength(out) <= ToolOutputPages.INLINE_READ_CP)
-        return if (out == null || tiny) {
+        val dispatch = lane.name in DISPATCH_TOOLS
+        val tiny = !dispatch && !shell && (!read || PyText.cpLength(out) <= ToolOutputPages.INLINE_READ_CP)
+        return if (tiny) {
             null
         } else {
-            val detail = if (shell) "" else fileOf(lane.input).orEmpty()
+            val detail = when {
+                // THE FENCE LAW (v2 §7): a shell's command never rides
+                // inline — it IS the fenced bash block under the header
+                shell -> ""
+                // a dispatch's detail is the spawn's own words (description, then prompt)
+                dispatch -> listOf("description", "prompt").firstNotNullOfOrNull { k ->
+                    (lane.input?.get(k) as? JsonPrimitive)?.takeIf { it.isString }?.content
+                }
+
+                else -> fileOf(lane.input)
+            }.orEmpty()
             val start = if (read) offsetOf(lane.input) + 1 else 1
-            val kind = if (shell) "⚡ <b>${PyText.esc(lane.name)}</b>" else "📖 <b>${PyText.esc(lane.name)}</b>"
+            val kind = when {
+                shell -> "⚡ <b>${PyText.esc(lane.name)}</b>"
+                dispatch -> "🤖 <b>${PyText.esc(lane.name)}</b>"
+                else -> "📖 <b>${PyText.esc(lane.name)}</b>"
+            }
             ToolOutputPages.Pages(
                 header = ToolOutputPages.headerOf(
                     kind,

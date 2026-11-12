@@ -192,6 +192,26 @@ data class BoxLive(
     }
 }
 
+/**
+ * ONE CHILD'S LIVE WINDOWS (12/11): what the routed child stream has said
+ * SO FAR — the thinking tail and the answer tail, each capped at
+ * [LiveTurn.CHILD_TAIL_CP] code points (a card-sized glance, never the
+ * whole narration — the child's report travels at its dispatch close, born
+ * open). The counters are REAL emitted chars; the stamps feed the row's
+ * freshness. Pure values, like everything the fold holds.
+ */
+data class ChildLive(
+    val cotChars: Int = 0,
+    val cotTail: String = "",
+    val answerChars: Int = 0,
+    val answerTail: String = "",
+    /** The last routed delta's REAL moment — the row's freshness anchor. */
+    val lastDeltaAtMs: Long = 0,
+) {
+    /** The words the owner reads first: the answer once it started, the thinking before. */
+    val liveTail: String get() = if (answerChars > 0) answerTail else cotTail
+}
+
 /** The whole visible turn, one immutable value per event. */
 data class TurnLive(
     val taskId: String,
@@ -230,8 +250,17 @@ data class TurnLive(
      * U5a); the numbered pages and the open page ride HERE.
      */
     val boxes: List<BoxLive> = emptyList(),
-    /** Subagent lanes: parentToolUseId → thought chars (the stream is ONE stream). */
-    val subagentThought: Map<String, Int> = emptyMap(),
+    /**
+     * THE CHILD WINDOWS (12/11): a routed child-session delta — the
+     * AUTO-SUBSCRIBED child's own stream, keyed by the dispatch lane's
+     * toolId. The fork never mirrors child text deltas onto the parent
+     * (the mirror whitelist is tools + permissions only), so the words
+     * ride the separate topic the launch ACK invites the bot to subscribe
+     * ([ChannelFrames.subagentSessionId]); the hub's routing anchors each
+     * frame to the open lane that owns the child. The old char counter
+     * (`subagentThought`) folded events that never existed on the wire.
+     */
+    val subagentLanes: Map<String, ChildLive> = emptyMap(),
     /**
      * The lane this card is SCOPED to (a sa: attach — subagent implements
      * task: the identical card, fed only that lane's stream plus its root
@@ -537,6 +566,22 @@ object LiveTurn {
      */
     const val COT_BLOCK_CP = 3000
 
+    /**
+     * THE CHILD'S TAIL CAP (12/11): a routed child's live tail rides the
+     * parent card card-sized — a glance at the child's words, never the
+     * whole narration (the child's full report travels at its dispatch
+     * close, born open beneath the card).
+     */
+    const val CHILD_TAIL_CP = 400
+
+    /**
+     * The child tail's freshness window: past this since the child's last
+     * routed word the tail hides (silence is data — a finished child's
+     * words don't linger on the card; the dispatch close carries the
+     * report). Same sense as [STALE_HARD_MS], scoped to the child rows.
+     */
+    const val CHILD_FRESH_MS = 90_000L
+
     /** Thinking degrades honestly after this silence — «(30s sin eventos)». */
     const val STALE_SOFT_MS = 20_000L
 
@@ -694,8 +739,24 @@ object LiveTurn {
         state.tools.filter { it.status != null && (it.added != null || it.removed != null || it.outputLines != null) }
             .takeLast(LANE_STAMP_CAP)
             .forEach { lines.add(stampLine(it, verbs)) }
-        state.subagentThought.forEach { (parent, chars) ->
-            lines.add("🤖 subagente ${parent.takeLast(SUBAGENT_ID_TAIL)} · $chars caracteres pensando")
+        state.subagentLanes.forEach { (laneId, child) ->
+            val lane = state.tools.firstOrNull { it.toolId == laneId }
+            lines.add(
+                "🤖 <b>${PyText.esc(childName(lane, laneId))}</b> · 🧠 ${fmtKDecimal(child.cotChars.toLong())} · " +
+                    "✍️ ${fmtKDecimal(child.answerChars.toLong())} · " +
+                    fmtDur(clockNow - child.lastDeltaAtMs) + " desde su última palabra",
+            )
+        }
+        // THE NEWEST CHILD'S WORDS (12/11): the live tail of the child that
+        // spoke last — the answer once it writes, the thinking before —
+        // capped card-sized. A silent child's tail hides past the freshness
+        // window (silence is data; the dispatch close wipes the window with
+        // the child's report born open beneath the card).
+        state.subagentLanes.maxByOrNull { it.value.lastDeltaAtMs }?.let { (laneId, child) ->
+            val tail = child.liveTail
+            if (tail.isNotBlank() && clockNow - child.lastDeltaAtMs < CHILD_FRESH_MS) {
+                lines.add("<pre>${PyText.esc(PyText.take(tail, CHILD_TAIL_CP))}</pre>")
+            }
         }
         // the fork's own pill — the honest difference between «z.ai down» and «I typed too much»
         state.apiRetry?.let { pill ->
@@ -720,6 +781,20 @@ object LiveTurn {
     /** THE WORKING HEADER — the owner's 5/11 words: «⏳ Procesando... 3m 51s — «título»». */
     private fun workingHead(title: String, elapsed: String): String =
         "⏳ <b>Procesando... $elapsed</b> — «${PyText.esc(title)}»"
+
+    /**
+     * A child row's name — the same ladder as Keyboards.subagentName (the
+     * spawn's `description`, the event's title, the tool name) inlined here:
+     * Keyboards sits above this file in the module's graph (it reads
+     * BotCommands), and the card's render must not pull the menus in.
+     */
+    private fun childName(lane: ToolLive?, laneId: String): String {
+        val named = lane?.input?.str("description")?.takeIf { it.isNotBlank() }
+            ?: lane?.title?.takeIf { it.isNotBlank() && it != lane.name }
+            ?: lane?.name
+            ?: laneId.takeLast(SUBAGENT_ID_TAIL)
+        return named
+    }
 
     /**
      * One open lane's line: the verb + its detail (the shell's command, the

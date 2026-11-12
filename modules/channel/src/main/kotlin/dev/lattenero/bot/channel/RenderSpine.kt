@@ -254,6 +254,12 @@ sealed interface RenderEvent {
         val messageId: Long,
         /** The pages' fence language (v2 §5) — `bash` for a shell's output. */
         val language: String? = null,
+        /**
+         * The page the message SHOWS at birth — [BoxLive.FOLDED] for the
+         * ordinary collapsed birth, 0 for a born-open report (12/11: the
+         * child's words arrive read, not behind one more tap).
+         */
+        val page: Int = BoxLive.FOLDED,
     ) : RenderEvent
 
     /**
@@ -266,8 +272,25 @@ sealed interface RenderEvent {
      */
     data class Page(val boxId: Int, val page: Int) : RenderEvent
 
-    /** The turn is spent (the seal's cleanup, a ☢️ nuclear): the fold's reset. */
+    /** The turn is spent (the seal's live world's reset — the sealed archive survives in the hub). */
     data object Clear : RenderEvent
+
+    /**
+     * A ROUTED CHILD-SESSION DELTA (12/11): the auto-subscribed child's own
+     * stream — a thought or message chunk — folded into the parent card's
+     * child window ([TurnLive.subagentLanes]). Deliberately NOT a
+     * `FromFrame`: the child's taskId must never trip the task switch (the
+     * card stays the parent's), so it carries no taskId/seq — the hub's
+     * routing has already anchored the frame to the open dispatch lane that
+     * owns the CURRENT state's child.
+     */
+    data class ChildStream(
+        val laneId: String,
+        /** true = the child's thinking; false = the child's answer. */
+        val thought: Boolean,
+        val delta: String,
+        val nowMs: Long,
+    ) : RenderEvent
 }
 
 /**
