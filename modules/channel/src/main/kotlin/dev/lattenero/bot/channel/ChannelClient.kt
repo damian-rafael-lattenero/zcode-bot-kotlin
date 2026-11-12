@@ -572,6 +572,14 @@ class ChannelClient(
             .onFailure { logger.warn { "channel subscribe taskId=$taskId failed: ${it.message}" } }
     }
 
+    /**
+     * A subscription's remembered workspace — the CHILD auto-subscribe's
+     * source (12/11): the child rides the parent's workspace, read from
+     * the same map the reconnect replays. Null = the parent was never
+     * subscribed (the wiring falls back to the default workspace).
+     */
+    fun subscriptionWs(taskId: String): String? = synchronized(subscriptions) { subscriptions[taskId] }
+
     /** /nuclear's daemon half: forget everything so the next connect starts clean. */
     fun reset() {
         synchronized(subscriptions) { subscriptions.clear() }

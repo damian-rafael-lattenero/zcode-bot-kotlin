@@ -745,10 +745,11 @@ class BotCommandsTest {
     fun subagentsReadsTheLiveLanes() = runBlocking {
         val o = ops()
         val hub = LiveHub()
-        // a subagent lane: parent tool + a thought chunk under it
-        fun ev(type: String, vararg fields: Pair<String, kotlinx.serialization.json.JsonElement>) =
+        // a subagent lane: the dispatch tool whose ACK named the child, then
+        // the child's OWN stream routed into its window
+        fun ev(type: String, vararg fields: Pair<String, kotlinx.serialization.json.JsonElement>, taskId: String = "task-77") =
             ServerFrame.StreamEvent(
-                taskId = "task-77", seq = 1, at = 1_000L,
+                taskId = taskId, seq = 1, at = 1_000L,
                 event = kotlinx.serialization.json.buildJsonObject {
                     put("type", type)
                     fields.forEach { (k, v) -> put(k, v) }
@@ -760,7 +761,7 @@ class BotCommandsTest {
                     "tool_call",
                     "toolId" to kotlinx.serialization.json.JsonPrimitive("t1"),
                     "toolName" to kotlinx.serialization.json.JsonPrimitive("Task"),
-                    "parentToolUseId" to kotlinx.serialization.json.JsonPrimitive("tooluse-9"),
+                    "subagentAgentId" to kotlinx.serialization.json.JsonPrimitive("agent_9"),
                 ),
                 1_000L,
             )
@@ -768,7 +769,7 @@ class BotCommandsTest {
                 ev(
                     "agent_thought_chunk",
                     "content" to kotlinx.serialization.json.JsonPrimitive("sub piensa"),
-                    "parentToolUseId" to kotlinx.serialization.json.JsonPrimitive("tooluse-9"),
+                    taskId = subagentSessionId("agent_9"),
                 ),
                 1_000L,
             )

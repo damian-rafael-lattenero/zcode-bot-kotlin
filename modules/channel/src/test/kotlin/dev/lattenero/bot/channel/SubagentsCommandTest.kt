@@ -92,10 +92,10 @@ class SubagentsCommandTest {
     )
 
     /** One stream event folded into the hub (the raw wire shape the fork sends). */
-    private fun feed(hub: LiveHub, seq: Long, vararg fields: Pair<String, String>) = runBlocking {
+    private fun feed(hub: LiveHub, seq: Long, vararg fields: Pair<String, String>, taskId: String = "task-77") = runBlocking {
         hub.apply(
             ServerFrame.StreamEvent(
-                taskId = "task-77",
+                taskId = taskId,
                 seq = seq,
                 at = now,
                 event = buildJsonObject {
@@ -168,15 +168,19 @@ class SubagentsCommandTest {
     @Test
     fun nestedTransportLanesGroupUnderTheirParent() {
         val hub = LiveHub()
-        feed(hub, 1, "type" to "tool_call", "toolId" to "inner-1", "toolName" to "Read",
-            "parentToolUseId" to "tooluse-9")
-        feed(hub, 2, "type" to "agent_thought_chunk", "content" to "sub piensa",
-            "parentToolUseId" to "tooluse-9")
+        // the dispatch lane whose launch ACK named the child + its inner lane
+        feed(hub, 1, "type" to "tool_call", "toolId" to "t1", "toolName" to "Task",
+            "subagentAgentId" to "agent_9")
+        feed(hub, 2, "type" to "tool_call", "toolId" to "inner-1", "toolName" to "Read",
+            "parentToolUseId" to "t1")
+        // the child's OWN stream (the routed topic) — the words the fork never mirrors
+        feed(hub, 3, "type" to "agent_thought_chunk", "content" to "sub piensa",
+            taskId = subagentSessionId("agent_9"))
         val reply = runBlocking { bc(hub).handle("/subagents", 1L)!! }
-        assertTrue("tooluse-9".takeLast(8) in reply.text, "the parent tail: ${reply.text}")
+        assertTrue("Task" in reply.text, "the dispatch lane is the group's head: ${reply.text}")
         assertTrue("Read" in reply.text)
         assertTrue("10 chars thought" in reply.text)
-        assertEquals(listOf("sao:"), buttonData(reply))
+        assertEquals(listOf("sn:t1", "so:t1", "sst:t1", "sao:"), buttonData(reply), "the dispatch earns its own row")
     }
 
     @Test

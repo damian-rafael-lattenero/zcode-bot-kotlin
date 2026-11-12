@@ -38,6 +38,8 @@ fun reduce(
 ): RenderState? = when (event) {
     is RenderEvent.FromFrame -> reduceFrame(state, event, differ)
 
+    is RenderEvent.ChildStream -> reduceChildStream(state, event)
+
     is RenderEvent.Tick ->
         // THE STALENESS TICK (law 2): the card's age folds into the state —
         // and moves NOTHING the frames own (the ticker proves nothing about
@@ -118,6 +120,7 @@ fun reduce(
                         pages = event.pages,
                         messageId = event.messageId,
                         language = event.language,
+                        page = event.page, // a born-open report shows page 1 at birth
                     )
                 ).takeLast(BOX_CAP), // the registry's own ceiling — the newest survive
         )
@@ -295,10 +298,11 @@ private fun reduceThought(state: RenderState, event: RenderEvent.Thought): Rende
             apiRetry = if (delta.isNotEmpty()) null else state.apiRetry,
         )
     } else {
-        state.copy(
-            subagentThought = state.subagentThought +
-                (parent to (state.subagentThought[parent] ?: 0) + delta.length),
-        )
+        // A foreign lane's thought: the fork NEVER mirrors child text deltas
+        // onto the parent stream (the mirror whitelist is tools + permissions
+        // only) — nothing to fold. The child's words ride the ROUTED child
+        // stream ([RenderEvent.ChildStream]) instead.
+        state
     }
 }
 
@@ -453,6 +457,34 @@ internal fun flushCot(state: RenderState): RenderState {
 private const val COT_KEY_CAP = 128
 
 /**
+ * A ROUTED CHILD DELTA (12/11): the auto-subscribed child's own stream —
+ * the fork's separate session topic — grows its dispatch lane's window.
+ * The tail rides the replay guard's own shape (a sentence-sized
+ * re-emission the tail already ends with appends nothing — the subscribe
+ * burst's re-stated first chunk doubles no words), and the child's own
+ * delta stream never touches the main narration's windows or anchors.
+ */
+// one guard per early exit: the null state and the replay gate answer first
+@Suppress("ReturnCount")
+private fun reduceChildStream(state: RenderState?, event: RenderEvent.ChildStream): RenderState? {
+    if (state == null) return null
+    if (event.delta.isEmpty()) return state
+    val current = state.subagentLanes[event.laneId] ?: ChildLive()
+    val tail = if (event.thought) current.cotTail else current.answerTail
+    // the replay guard's shape (the reburst law): a sentence-sized
+    // re-emission the tail already ends with appends nothing
+    if (event.delta.length >= REPLAY_GUARD_MIN_CP && tail.endsWith(event.delta)) return state
+    val chars = (if (event.thought) current.cotChars else current.answerChars) + event.delta.length
+    val nextTail = LiveTurn.takeLastCodePoints(tail + event.delta, LiveTurn.CHILD_TAIL_CP)
+    val next = if (event.thought) {
+        current.copy(cotChars = chars, cotTail = nextTail, lastDeltaAtMs = event.nowMs)
+    } else {
+        current.copy(answerChars = chars, answerTail = nextTail, lastDeltaAtMs = event.nowMs)
+    }
+    return state.copy(subagentLanes = state.subagentLanes + (event.laneId to next))
+}
+
+/**
  * tool_call (final, input complete) opens-or-fills the lane with the
  * authority input; tool_call_update/pending streams the partial input
  * (lines from content/new_string, raw chars from raw.streamingRawInputLength).
@@ -592,7 +624,7 @@ private fun reduceToolClose(state: RenderState, event: RenderEvent.ToolClose, di
         tools = tools,
         doneTools = state.doneTools + 1,
         failedTools = state.failedTools + if (failed) 1 else 0,
-        subagentThought = if (dispatch) state.subagentThought - toolId else state.subagentThought,
+        subagentLanes = if (dispatch) state.subagentLanes - toolId else state.subagentLanes,
         phase = when {
             laneOver -> TurnPhase.Done(
                 stopReason = "subagent ${closed.status ?: "ended"}",
@@ -650,6 +682,8 @@ internal const val BOX_CAP = 120
 
 /**
  * The dispatch tool names (the channel-side law — the same set the
- * /tasks keyboard filters by): closing one folds its inner lanes away.
+ * /tasks keyboard filters by): closing one folds its inner lanes away,
+ * and its close's output — THE CHILD'S REPORT — travels born OPEN (the
+ * pager's pages ride behind the buttons for the flips).
  */
-private val DISPATCH_TOOLS = setOf("Task", "Agent")
+internal val DISPATCH_TOOLS = setOf("Task", "Agent")

@@ -136,12 +136,22 @@ class LiveTurnTest {
     }
 
     @Test
-    fun subagentThoughtGrowsItsOwnLane() {
+    fun childDeltasRouteToTheirLaneAndForeignThoughtsFoldNothing() {
         var s: TurnLive? = null
         s = reduce(s, thought("main thinking", parent = null))
+        // a foreign lane's in-band thought: the fork never sends one (the
+        // mirror whitelist is tools + permissions) — the fold invents nothing
         s = reduce(s, thought("sub thinking hard", parent = "tooluse-77"))
         assertEquals(13, s!!.thoughtChars) // the main lane is untouched
-        assertEquals(17, s.subagentThought["tooluse-77"])
+        assertTrue(s.subagentLanes.isEmpty(), "no window was born from a thought that cannot exist")
+        // THE ROUTED CHILD STREAM (12/11): the auto-subscribed child's own
+        // deltas grow the dispatch lane's window
+        s = reduce(s, RenderEvent.ChildStream(laneId = "d1", thought = true, delta = "child CoT", nowMs = 1000))
+        s = reduce(s, RenderEvent.ChildStream(laneId = "d1", thought = false, delta = "child answer", nowMs = 2000))
+        val child = s!!.subagentLanes["d1"]!!
+        assertEquals(9, child.cotChars)
+        assertEquals(12, child.answerChars)
+        assertEquals("child answer", child.liveTail, "the answer speaks first once it started")
         // and the subagent's TOOL calls carry the parent too (/subagents' source)
         s = reduce(
             s,
@@ -192,6 +202,36 @@ class LiveTurnTest {
         assertTrue("<pre>" in text, "the live box carries the words in a pre block: $text")
         assertTrue("Voy a revisar &lt;el&gt; stream &amp; volver." in text, "escaped, verbatim: $text")
         assertTrue("escribiendo la respuesta" in text, text)
+    }
+
+    @Test
+    fun theCardSpeaksTheChildsWordsWhileItStreams() {
+        var s: TurnLive? = null
+        s = reduce(s, ev("task_run_started"))
+        s = reduce(
+            s,
+            ev(
+                "tool_call", "toolId" to str("d1"), "toolName" to str("Agent"),
+                "subagentAgentId" to str("agent_9"),
+                "input" to buildJsonObject { put("description", "the fixer") },
+            ),
+        )
+        s = reduce(
+            s,
+            RenderEvent.ChildStream(
+                laneId = "d1",
+                thought = true,
+                delta = "child thoughts here",
+                nowMs = s!!.lastEventAtMs!! + 100,
+            ),
+        )
+        val text = LiveTurn.render(s!!, nowMs = s.lastEventAtMs!! + 2_000, channelAlive = true)
+        assertTrue("the fixer" in text, "the child row names the spawn: $text")
+        assertTrue("child thoughts here" in text, "the newest child's tail rides the card: $text")
+        // past the freshness window the tail hides (silence is data)
+        val later = LiveTurn.render(s, nowMs = s.lastEventAtMs!! + LiveTurn.CHILD_FRESH_MS + 5_000, channelAlive = true)
+        assertTrue("child thoughts here" !in later, "a stale child's words don't linger: $later")
+        assertTrue("the fixer" in later, "the row stays (chars + clock), only the tail hides")
     }
 
     @Test
@@ -786,17 +826,17 @@ class LiveTurnTest {
                 "input" to buildJsonObject { put("command", str("ls")) },
             ),
         )
-        s = reduce(s, thought("child thinking", parent = "d1"))
-        assertEquals(14, s!!.subagentThought["d1"])
+        s = reduce(s, RenderEvent.ChildStream(laneId = "d1", thought = true, delta = "child thinking", nowMs = 1000))
+        assertEquals(14, s!!.subagentLanes["d1"]?.cotChars)
         // the dispatch closes: the child's world folds away WITH it — no
         // orphan lane ticking forever (the owner's 30/10 corpse card)
         s = reduce(s, ev("tool_call_update", "toolId" to str("d1"), "status" to str("completed")))
         assertTrue(s!!.tools.none { it.toolId == "inner" })
-        assertTrue(s.subagentThought.isEmpty())
+        assertTrue(s.subagentLanes.isEmpty())
         assertEquals("completed", s.tools.first { it.toolId == "d1" }.status)
         val text = LiveTurn.render(s, nowMs = s.lastEventAtMs!! + 1_000, channelAlive = true)
         assertTrue("ls" !in text) // the inner lane left the card
-        assertTrue("subagente" !in text) // its thought counter left with it
+        assertTrue("child thinking" !in text) // its window left with it
     }
 
     @Test
