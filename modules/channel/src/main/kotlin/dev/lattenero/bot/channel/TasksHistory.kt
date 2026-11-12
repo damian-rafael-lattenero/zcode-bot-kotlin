@@ -2,14 +2,18 @@ package dev.lattenero.bot.channel
 
 /**
  * Python's tasks_repo, read-only: ctx_tasks (reporting.py's `_ctx_tasks`)
- * and model_selection (core's `_cur_sel` source). The tasks-index rows
- * that ALSO have real usage in the CLI's db — the sidebar order frozen
- * by Python's SQL. The daemon implements it with the SAME two sqlite
- * files the spectator already reads (xerial, mode=ro); the channel only
- * sees the rows, never the files.
+ * and model_selection (core's `_cur_sel` source). The tasks-index rows,
+ * their usage joined from the CLI's db when it exists — a fresh task
+ * rides empty, never hidden. The daemon implements it with the SAME two
+ * sqlite files the spectator already reads (xerial, mode=ro); the
+ * channel only sees the rows, never the files.
  */
 interface TasksHistory {
-    /** Usage-backed tasks in sidebar order, capped — Python's `ctx_tasks(limit)`. */
+    /**
+     * The index's alive tasks in sidebar order, capped — Python's
+     * `ctx_tasks(limit)`. Usage rides where the CLI db holds it; a
+     * /run-born task with no usage yet rides EMPTY (ctx 0), never hidden.
+     */
     suspend fun ctxTasks(limit: Int): List<TaskRow>
 
     /** The conversation's persisted model selection — Python's model_selection payload. */

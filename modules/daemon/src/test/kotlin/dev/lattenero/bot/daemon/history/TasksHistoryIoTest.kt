@@ -22,7 +22,7 @@ class TasksHistoryIoTest {
         buildDbs()
         val rows = TasksHistoryIo(base).run { kotlinx.coroutines.runBlocking { ctxTasks(10) } }
         assertEquals(
-            listOf("s-pinned", "s-new", "s-plain"),
+            listOf("s-pinned", "s-nouse", "s-new", "s-plain"),
             rows.map { it.sid },
         )
         assertEquals("tarea pinned", rows[0].title)
@@ -30,13 +30,23 @@ class TasksHistoryIoTest {
     }
 
     @Test
-    fun ctxTasksDropsNoUsageLegacyDupesAndCaps() {
+    fun aFreshTaskRidesEmptyNeverHidden() {
+        buildDbs()
+        val rows = TasksHistoryIo(base).run { kotlinx.coroutines.runBlocking { ctxTasks(10) } }
+        val fresh = rows.first { it.sid == "s-nouse" }
+        assertEquals(0L, fresh.ctx, "no usage yet: honestly empty")
+        assertEquals("", fresh.model, "no model yet: honestly empty")
+        assertEquals(5L, fresh.whenMs, "the INDEX's own updated_at, a real timestamp")
+    }
+
+    @Test
+    fun ctxTasksDedupeHoldsAndCapsHold() {
         buildDbs()
         val history = TasksHistoryIo(base)
         val rows = kotlinx.coroutines.runBlocking { history.ctxTasks(2) }
         assertEquals(2, rows.size) // the cap, Python's limit
         val all = kotlinx.coroutines.runBlocking { history.ctxTasks(10) }
-        assertEquals(3, all.size) // s-nouse and the s-new legacy dupe never appear
+        assertEquals(4, all.size) // the s-new legacy dupe never appears twice; s-nouse RIDES
     }
 
     @Test
