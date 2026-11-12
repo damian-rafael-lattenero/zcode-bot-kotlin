@@ -15,19 +15,21 @@ import java.sql.ResultSet
 import java.util.Properties
 
 /**
- * Python's tasks_repo, verbatim: the CLI's usage db JOINed with the
- * app's tasks index — tasks with REAL usage in the sidebar order frozen
- * by Python's SQL (pinned → updated_at desc, the loose default-workspace
- * rows last), plus each conversation's persisted model selection. The
- * same read-only pattern as the spectator: short-lived xerial
- * connections, mode=ro, zero writes.
+ * Python's tasks_repo, verbatim EXCEPT the fresh-task law: the CLI's
+ * usage db JOINed with the app's tasks index — usage where the CLI db
+ * holds it, and every alive index row rides even without usage yet (a
+ * /run-born conversation's first model_usage line has not been written;
+ * the old usage gate hid it from /tasks forever, the owner 12/11). The
+ * sidebar order stays Python's SQL (pinned → updated_at desc, the loose
+ * default-workspace rows last), plus each conversation's persisted model
+ * selection. The same read-only pattern as the spectator: short-lived
+ * xerial connections, mode=ro, zero writes.
  */
 @Suppress("TooManyFunctions") // one read per contract surface — the class IS the repo port
 internal class TasksHistoryIo(private val baseDir: File) : TasksHistory {
 
     override suspend fun ctxTasks(limit: Int): List<TaskRow> {
         val usage = usageBySession(cliDb())
-        if (usage.isEmpty()) return emptyList()
         return indexRows(tasksIndex(), usage, limit)
     }
 
@@ -213,19 +215,26 @@ internal class TasksHistoryIo(private val baseDir: File) : TasksHistory {
         }.getOrDefault(emptyList())
     }
 
-    /** One index row or null — the dedupe/usage guards live here (Python's loop body). */
-    @Suppress("ReturnCount") // one guard per skip, Python's three contiguous ifs
+    /**
+     * One index row or null — the dedupe guard lives here. THE FRESH-TASK
+     * LAW (the owner, 12/11: «/tasks no muestra las tasks nuevas del /run»):
+     * a row without CLI usage still RIDES — its first model_usage line has
+     * not been written yet, and that absence never hides a conversation the
+     * index itself holds (the router's freshestTask already sees it). It
+     * rides honestly EMPTY: ctx 0, no model, the index's own updated_at.
+     */
+    @Suppress("ReturnCount") // one guard per skip, Python's contiguous ifs
     private fun rowOf(rs: ResultSet, usage: Map<String, Usage>, seen: MutableSet<String>): TaskRow? {
         val tid = rs.getString(TID_COL) ?: return null
         if (!seen.add(tid)) return null // legacy row of the same task
-        val u = usage[tid] ?: return null // no usage → no context
+        val u = usage[tid]
         return TaskRow(
             sid = tid,
             title = rs.getString(TITLE_COL).orEmpty(),
             ws = rs.getString(WS_COL).orEmpty(),
-            ctx = u.ctx,
-            model = u.model,
-            whenMs = u.whenMs,
+            ctx = u?.ctx ?: 0,
+            model = u?.model.orEmpty(),
+            whenMs = u?.whenMs ?: rs.getLong(UPD_COL),
         )
     }
 
@@ -268,7 +277,7 @@ internal class TasksHistoryIo(private val baseDir: File) : TasksHistory {
                 "WHERE m.session_id NOT LIKE 'sess_subagent%'"
 
         const val INDEX_QUERY =
-            "SELECT task_id, title, workspace_path FROM tasks WHERE deleted=0 AND archived=0 " +
+            "SELECT task_id, title, workspace_path, updated_at FROM tasks WHERE deleted=0 AND archived=0 " +
                 "ORDER BY (workspace_key = workspace_path) DESC, pinned DESC, updated_at DESC"
 
         /** Python's model_selection: the newest runtime/model_selection row of the session. */
