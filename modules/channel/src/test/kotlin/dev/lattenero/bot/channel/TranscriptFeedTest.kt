@@ -152,7 +152,7 @@ class TranscriptFeedTest {
         val msgs = TranscriptFeed.messages(prev, curr, FeedVerbosity.NORMAL, { "BOX" }, verbs)
         val pages = msgs[0].pages!!
         assertTrue(pages.pages.first().startsWith("  41│ línea 1"), "the read's REAL position")
-        assertTrue("/x/y.txt" in msgs[0].text)
+        assertTrue("y.txt · …/x" in msgs[0].text, "the read's file, NAME-FIRST (v2 §7)")
     }
 
     @Test

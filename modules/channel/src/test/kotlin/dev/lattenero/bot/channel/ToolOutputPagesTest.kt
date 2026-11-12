@@ -71,15 +71,36 @@ class ToolOutputPagesTest {
     }
 
     @Test
-    fun theHeaderElidesAPathButKeepsThePreviewForACommand() {
-        // 162 cp of path against the 120 budget: dirs elide, basename whole
+    fun theHeaderLeadsWithTheBasenameAndPreviewsTheCommand() {
+        // 162 cp of path: the NAME leads, one dir of context behind (v2 §7)
         val deep = "/verylongpath".repeat(10) + "/file-name.kt"
         val header = ToolOutputPages.headerOf("📖 <b>Read</b>", deep, 3)
-        assertTrue("…/" in header, header)
-        assertTrue("file-name.kt</code>" in header, "basename + extension byte-for-byte: $header")
+        assertTrue("<code>file-name.kt · …/verylongpath</code>" in header, header)
         assertTrue(deep !in header, "the dir chain actually elided")
-        // a COMMAND is not a path — it previews as always
+        // a COMMAND is not a path — it previews its first line as always
         val cmd = ToolOutputPages.headerOf("⚡ <b>Bash</b>", "npm run build --verbose", 5)
         assertTrue("<code>npm run build --verbose</code>" in cmd)
+    }
+
+    @Test
+    fun aMultilineInlineDetailNeverCollapsesIntoOneBlob() {
+        val header = ToolOutputPages.headerOf("⚡ <b>Bash</b>", "primera línea\nsegunda línea", 2)
+        assertTrue("<code>primera línea</code>" in header, header)
+        assertTrue("segunda" !in header, "the blob is dead: $header")
+    }
+
+    @Test
+    fun aFencedCommandRidesItsOwnBashBlockNeverInline() {
+        val header = ToolOutputPages.headerOf("⚡ <b>Bash</b>", "", 27, fence = "ls\ndos líneas", language = "bash")
+        assertTrue("27 líneas" in header, header)
+        assertTrue(
+            "<pre><code class=\"language-bash\">ls\ndos líneas</code></pre>" in header,
+            "the command IS the block: $header",
+        )
+        assertTrue("<code>ls" !in header, "the command never rides inline anymore: $header")
+        // beyond the close cap: the head + the scissors, never a cut lie
+        val capped = ToolOutputPages.headerOf("⚡ <b>Bash</b>", "", 1, fence = "y".repeat(1500), language = "bash")
+        assertTrue("✂️ … el comando completo va en el feed" in capped, "the head capped at 1000 cp: $capped")
+        assertTrue("y".repeat(1500) !in capped, "nothing beyond the cap rode: $capped")
     }
 }

@@ -228,7 +228,7 @@ object TranscriptFeed {
     /** The open's one-liner: the verb + its detail (the command, the file) — the action STARTING. */
     private fun openLine(lane: ToolLive, verbs: ToolVerbifier): String {
         val verb = verbs.of(lane.name, lane.input, lane.isMcp)
-        val clipped = PyText.preview(verb.detail, OPEN_DETAIL_CP)
+        val clipped = PathName.shaped(verb.detail, OPEN_DETAIL_CP)
         val detail = if (clipped.isNotEmpty()) " <code>${PyText.esc(clipped)}</code>" else ""
         return "▶️ ${verb.head()}$detail"
     }
@@ -248,11 +248,19 @@ object TranscriptFeed {
         return if (out == null || tiny) {
             null
         } else {
-            val detail = (if (shell) commandOf(lane.input) else fileOf(lane.input)).orEmpty()
+            val detail = if (shell) "" else fileOf(lane.input).orEmpty()
             val start = if (read) offsetOf(lane.input) + 1 else 1
             val kind = if (shell) "⚡ <b>${PyText.esc(lane.name)}</b>" else "📖 <b>${PyText.esc(lane.name)}</b>"
             ToolOutputPages.Pages(
-                header = ToolOutputPages.headerOf(kind, detail, PyText.splitLines(out).size),
+                header = ToolOutputPages.headerOf(
+                    kind,
+                    detail,
+                    PyText.splitLines(out).size,
+                    // THE FENCE LAW (v2 §7): a shell's command never rides
+                    // inline — it IS the fenced bash block under the header
+                    fence = commandOf(lane.input).takeIf { shell },
+                    language = if (shell) "bash" else null,
+                ),
                 pages = ToolOutputPages.pages(out, start),
                 language = if (shell) "bash" else null, // v2 §5: the shell's pages ride the bash fence
             )

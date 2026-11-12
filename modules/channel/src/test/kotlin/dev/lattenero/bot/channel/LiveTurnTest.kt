@@ -388,7 +388,7 @@ class LiveTurnTest {
             ),
         )
         var text = LiveTurn.render(s!!, nowMs = s.lastEventAtMs!!, channelAlive = true, verbs = verbs)
-        assertTrue("📖 <b>reading</b> <code>/w/Main.kt</code>" in text)
+        assertTrue("📖 <b>reading</b> <code>Main.kt · …/w</code>" in text, text)
 
         s = reduce(
             null,
@@ -955,12 +955,12 @@ class LiveTurnTest {
             ),
         )
         val text = LiveTurn.render(s!!, nowMs = s.lastEventAtMs!!, channelAlive = true, verbs = verbs)
-        // the MINIMUM elision wins: the longest head that fits the budget
+        // THE NAME-FIRST LAW (v2 §7): the basename leads, ONE dir behind
         assertTrue(
-            "✏️ <b>Edit</b> · 0s — <code>…/src/main/kotlin/dev/lattenero/bot/channel/LiveTurn.kt</code>" in text,
-            "dir chain elided from the left, basename+extension whole: $text",
+            "✏️ <b>Edit</b> · 0s — <code>LiveTurn.kt · …/channel</code>" in text,
+            "the name first, the long middle gone: $text",
         )
-        assertTrue("LiveTurn.kt</code>" in text)
+        assertTrue("…/src/main/kotlin" !in text, "the long middle never rides: $text")
         assertTrue("🟢 +3 · 🔴 −1" in text, "the LIVE diff rides the NOW line: $text")
     }
 

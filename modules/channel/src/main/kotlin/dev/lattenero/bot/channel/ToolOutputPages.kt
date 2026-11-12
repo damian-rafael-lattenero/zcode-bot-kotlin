@@ -30,6 +30,14 @@ object ToolOutputPages {
     const val INLINE_READ_CP = 800
 
     /**
+     * The close's own command fence cap (code points) — esc-safe under
+     * Telegram's 4096 even in the pathological all-`&` case; a longer
+     * command shows its head and points at the feed (the open law already
+     * spoke it whole — TranscriptFeed's long-command law).
+     */
+    const val COMMAND_CLOSE_CP = 1000
+
+    /**
      * Number every line (1-based; [startLine] for a read begun at an
      * offset) and split into pages of at most [pageCp] code points. A
      * single line longer than a page is HARD-SPLIT — its continuations
@@ -59,18 +67,38 @@ object ToolOutputPages {
 
     /**
      * The collapsed header's honest subtitle — the count always speaks. A
-     * PATH-shaped detail elides per the filename law (v2 §6 — the basename
-     * + extension never cut); anything else (a command) previews as today.
+     * PATH-shaped detail elides per the name-first law (v2 §7 — the file's
+     * name leads, one directory of context behind); anything else (a
+     * command) previews its first line only (v2 §7 — multiline never
+     * collapses into one blob).
+     *
+     * [fence] (a SHELL command) never rides inline: it travels as its own
+     * fenced bash block under the header — the complete command when it
+     * fits [COMMAND_CLOSE_CP], the head + «✂️» when it doesn't (the open
+     * already spoke it whole). [language] is that block's fence language.
      */
-    fun headerOf(kind: String, detail: String, lines: Int): String {
-        val shown = when {
-            detail.isNotEmpty() && detail.none { it.isWhitespace() } && '/' in detail ->
-                PyText.elidePath(detail, HEADER_DETAIL_CP)
-
-            else -> PyText.preview(detail, HEADER_DETAIL_CP)
-        }
-        val suffix = if (shown.isNotEmpty()) " — <code>${PyText.esc(shown)}</code>" else ""
+    fun headerOf(
+        kind: String,
+        detail: String,
+        lines: Int,
+        fence: String? = null,
+        language: String? = null,
+    ): String {
         val noun = if (lines == 1) "1 línea" else "$lines líneas"
+        if (fence != null) {
+            val block = when {
+                PyText.cpLength(fence) <= COMMAND_CLOSE_CP ->
+                    "<pre><code class=\"language-$language\">${PyText.esc(fence)}</code></pre>"
+
+                else ->
+                    "<pre><code class=\"language-$language\">" +
+                        PyText.esc(PyText.take(fence, COMMAND_CLOSE_CP)) +
+                        "</code></pre>\n✂️ … el comando completo va en el feed"
+            }
+            return "$kind · $noun\n<i>📜 tocar para ver</i>\n$block"
+        }
+        val shown = PathName.shaped(detail, HEADER_DETAIL_CP)
+        val suffix = if (shown.isNotEmpty()) " — <code>${PyText.esc(shown)}</code>" else ""
         return "$kind$suffix · $noun\n<i>📜 tocar para ver</i>"
     }
 
