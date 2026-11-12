@@ -189,7 +189,7 @@ class BoxFoldTest {
         assertEquals(1, spoke.size)
         val (spokeText, spokeMarkup) = spoke.single()
         assertEquals(
-            "⚡ <b>Bash</b> — <code>ls</code> · 27 líneas\n<i>📜 tocar para ver</i>",
+            "⚡ <b>Bash</b> · 27 líneas\n<i>📜 tocar para ver</i>\n<pre><code class=\"language-bash\">ls</code></pre>",
             spokeText, "the collapsed header, byte-exact",
         )
         assertEquals(boxOpenMarkup(box.boxId), spokeMarkup, "the one 📜 door carries the fold's own id")
@@ -199,7 +199,7 @@ class BoxFoldTest {
         val opened = lastEdit(wire)
         assertEquals(boxMessageId, opened.messageId, "the edit targets the born message")
         assertEquals(
-            "⚡ <b>Bash</b> — <code>ls</code> · 27 líneas\n<i>📜 tocar para ver</i>\n" +
+            "⚡ <b>Bash</b> · 27 líneas\n<i>📜 tocar para ver</i>\n<pre><code class=\"language-bash\">ls</code></pre>\n" +
                 "<pre><code class=\"language-bash\">" +
                 (1..26).joinToString("\n") { n -> "${n.toString().padStart(4)}│ ${lines[n - 1]}" } +
                 "</code></pre>",
@@ -212,7 +212,7 @@ class BoxFoldTest {
         assertEquals(null, publisher.open(box.boxId, 1))
         val flipped = lastEdit(wire)
         assertEquals(
-            "⚡ <b>Bash</b> — <code>ls</code> · 27 líneas\n<i>📜 tocar para ver</i>\n" +
+            "⚡ <b>Bash</b> · 27 líneas\n<i>📜 tocar para ver</i>\n<pre><code class=\"language-bash\">ls</code></pre>\n" +
                 "<pre><code class=\"language-bash\">  27│ ${lines[26]}</code></pre>",
             flipped.text, "page 2: line 27 with its REAL number, byte-exact",
         )
@@ -229,7 +229,7 @@ class BoxFoldTest {
         assertEquals(null, publisher.fold(box.boxId))
         val folded = lastEdit(wire)
         assertEquals(
-            "⚡ <b>Bash</b> — <code>ls</code> · 27 líneas\n<i>📜 tocar para ver</i>",
+            "⚡ <b>Bash</b> · 27 líneas\n<i>📜 tocar para ver</i>\n<pre><code class=\"language-bash\">ls</code></pre>",
             folded.text, "the fold-back is the exact header, byte-exact",
         )
         assertEquals(boxOpenMarkup(box.boxId), folded.markup)

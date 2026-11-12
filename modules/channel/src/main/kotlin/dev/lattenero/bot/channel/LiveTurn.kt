@@ -730,7 +730,7 @@ object LiveTurn {
      */
     private fun laneLine(lane: ToolLive, verbs: ToolVerbifier, clockNow: Long, nowMs: Long): String {
         val verb = verbs.of(lane.name, lane.input, lane.isMcp)
-        val detail = detailOf(shapedDetail(verb.detail, DETAIL_CP))
+        val detail = detailOf(PathName.shaped(verb.detail, DETAIL_CP))
         // a dispatch lane whose child was ACKed never freezes: the child runs
         // as its OWN session (the sa: attach's card is the honest view) and
         // the parent stream carries nothing until the dispatch result — a
@@ -809,7 +809,7 @@ object LiveTurn {
                 listOf(editNowLine(verb, lane, timer, stale))
 
             else -> {
-                val detail = detailOf(shapedDetail(verb.detail, DETAIL_CP))
+                val detail = detailOf(PathName.shaped(verb.detail, DETAIL_CP))
                 val counts = when {
                     lane != null && (lane.added != null || lane.removed != null) ->
                         " · 🟢 +${lane.added ?: 0} · 🔴 −${lane.removed ?: 0}"
@@ -841,12 +841,12 @@ object LiveTurn {
         )
     }
 
-    /** The edit's NOW line (v2 §3): path through the filename law, the
-     *  LIVE +N/−M from the folding differ (a bare Write has no old side —
+    /** The edit's NOW line (v2 §3): path through the name-first law (v2 §7),
+     *  the LIVE +N/−M from the folding differ (a bare Write has no old side —
      *  its streamed lines are the honest feedback instead). */
     private fun editNowLine(verb: ToolVerb, lane: ToolLive, timer: String, stale: String): String {
         val path = lane.input?.str("file_path") ?: lane.input?.str("path") ?: ""
-        val target = if (path.isEmpty()) "" else " — <code>${PyText.esc(PyText.elidePath(path, DETAIL_CP))}</code>"
+        val target = if (path.isEmpty()) "" else " — <code>${PyText.esc(PathName.detail(path))}</code>"
         val counts = when {
             lane.added != null || lane.removed != null -> " · 🟢 +${lane.added ?: 0} · 🔴 −${lane.removed ?: 0}"
             lane.lines > 0 -> " · ${lane.lines} líneas"
@@ -854,18 +854,6 @@ object LiveTurn {
         }
         return "${verb.emoji} <b>${PyText.esc(lane.name)}</b> · $timer$target$counts$stale"
     }
-
-    /**
-     * The one-line detail: a PATH-SHAPED detail (no whitespace, has
-     * slashes) elides from the left per the filename law (v2 §6 — the
-     * basename + extension never cut); everything else previews as today.
-     */
-    private fun shapedDetail(raw: String, maxCp: Int): String =
-        if (raw.isNotEmpty() && raw.none { it.isWhitespace() } && '/' in raw) {
-            PyText.elidePath(raw, maxCp)
-        } else {
-            PyText.preview(raw, maxCp)
-        }
 
     private fun detailOf(shaped: String): String =
         if (shaped.isNotEmpty()) " <code>${PyText.esc(shaped)}</code>" else ""
