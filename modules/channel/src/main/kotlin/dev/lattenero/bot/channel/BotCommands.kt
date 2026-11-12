@@ -198,6 +198,15 @@ class BotCommands(
     /** The questions' board (the answer round-trip) — null = unwired: the taps answer honestly. */
     private val board: QuestionBoard? = null,
     /**
+     * The auth sentinel's verdict (auth:<pid> taps, 12/11): the owner SAYS
+     * the Mac's password dialog was attended — the marker lands where the
+     * sentinel's loop consumes it (state/auth-dismissed, pid keyed: one
+     * writer here, one reader there). A MARKER, never a password (secrets
+     * do not ride Telegram; recurring prompts are killed at the root
+     * instead). The no-op default keeps unwired builds and tests honest.
+     */
+    private val authDismiss: (String) -> Unit = {},
+    /**
      * /quota's DIRECT rung, PROVIDER-AWARE (owner's 3/11: «estoy usando la
      * api de open code… me gustaría que me muestre los límites disponibles
      * de opencode go» — the old z.ai-hardcoded leg answered the retired
@@ -492,9 +501,37 @@ class BotCommands(
             }
         }
 
+        // THE AUTH SENTINEL's tap (12/11): the owner's «already attended»
+        // verdict on a Mac password dialog — a MARKER the sentinel's loop
+        // consumes, never a password. pid 0 is the sentinel's own channel
+        // probe (answered, nothing written); malformed ids write nothing.
+        // Interceptor, never fallback: the else-branch would ride the raw
+        // data to the agent as the owner's own words.
+        data.startsWith("auth:") -> authTap(data.removePrefix("auth:"))
+
         else -> {
             logger.info { "callback \"$data\" -> \"${Keyboards.callbackText(data)}\"" }
             handle(Keyboards.callbackText(data), updateId)
+        }
+    }
+
+    /** `auth:<pid>` — record the dismissal; the sentinel's next tick consumes it. */
+    private fun authTap(pid: String): BotReply {
+        val id = pid.toIntOrNull()
+        return when {
+            id == null || id < 0 -> {
+                logger.info { "callback auth: malformed pid \"$pid\" — nothing written" }
+                BotReply("🔐 Marca fuera de lugar — no escribí nada.")
+            }
+            id == 0 -> {
+                logger.info { "callback auth: channel test probe answered" }
+                BotReply("✅ Prueba recibida — el canal anda.")
+            }
+            else -> {
+                authDismiss(pid)
+                logger.info { "callback auth: episode $id dismissed by the owner" }
+                BotReply("✅ Anotado — silencio para ese diálogo.")
+            }
         }
     }
 

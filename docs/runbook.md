@@ -644,6 +644,7 @@ done
 |---|---|---|---|---|
 | `com.zcode.bot-daemon` | `KeepAlive` + `RunAtLoad` | `~/.zcode/bot-daemon/bin/daemon --home ~/.zcode/bot-kotlin` | **running**, pid 63495 | `scripts/com.zcode.bot-daemon.plist` |
 | `com.zcode.bot-healer` | every 60 s | `scripts/bot-healer.nu` | loaded, exit 0 | `scripts/com.zcode.bot-healer.plist` |
+| `com.zcode.auth-sentinel` | every 30 s | `scripts/auth-sentinel.nu` (SecurityAgent/UserNotificationCenter → Telegram alert, `auth:<pid>` tap consumes `state/auth-dismissed`) | pending first install (2026-11-12) | `scripts/com.zcode.auth-sentinel.plist` |
 | `com.zcode.bot-deploy` | one-shot, `RunAtLoad` | `scripts/deploy-daemon.nu` (the `/deploy` spawn) | loaded-and-stopped, exit 0 — **created at runtime** by `DeploySpawn` into `~/.zcode/bot-kotlin/state/deploy-job.plist` | rendered by the daemon, not in `scripts/` |
 | `com.zcode.deploy-fork` | manual (`RunAtLoad` **false**) | `deploy-fork-and-retire.nu --real` through a zsh wrapper | loaded, exit 0 | `scripts/com.zcode.deploy-fork.plist` |
 | `com.zcode.bot-recorder` | every 60 s | the recorder binary over `~/.zcode/hooks/state` | loaded, exit 0 | `scripts/com.zcode.bot-recorder.plist` |
