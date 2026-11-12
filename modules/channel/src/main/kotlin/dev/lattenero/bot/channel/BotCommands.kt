@@ -3242,21 +3242,21 @@ class BotCommands(
         else -> false to "\n⚠️ Args: /subagents · /subagents inactivos (today's ended) · /subagents activos"
     }
 
-    /** One ACTIVE subagent: its dispatch lane (when streamed) + open inner lanes + live thought chars. */
+    /** One ACTIVE subagent: its dispatch lane (when streamed) + open inner lanes + live child chars. */
     private data class SubagentGroup(
         val parentId: String,
         val dispatch: ToolLive?,
         val openLanes: List<ToolLive>,
-        val thoughtChars: Int,
+        val cotChars: Int,
+        val answerChars: Int,
     )
 
     /**
      * The ACTIVE groups of the watched turn, pure: an open Agent/Task
      * dispatch lane (parentToolUseId == null — THE live subagent), plus
-     * the nested-transport paths (open inner lanes, live thought chars)
-     * grouped by their parent, for transports that do stream them.
-     * Completed lanes are NOT groups (the default view never mixes the
-     * inactive ones in).
+     * the routed child windows (open inner lanes, live child chars) —
+     * the child's OWN stream folds there. Completed lanes are NOT groups
+     * (the default view never mixes the inactive ones in).
      */
     private fun subagentGroups(turn: TurnLive): List<SubagentGroup> {
         val dispatches = dispatchLanes(turn)
@@ -3264,12 +3264,13 @@ class BotCommands(
         val openInner = turn.tools
             .filter { it.parentToolUseId != null && it.status == null }
             .groupBy { it.parentToolUseId ?: "" }
-        return (dispatches.keys + openInner.keys + turn.subagentThought.keys).distinct().map { id ->
+        return (dispatches.keys + openInner.keys + turn.subagentLanes.keys).distinct().map { id ->
             SubagentGroup(
                 parentId = id,
                 dispatch = dispatches[id],
                 openLanes = openInner[id].orEmpty(),
-                thoughtChars = turn.subagentThought[id] ?: 0,
+                cotChars = turn.subagentLanes[id]?.cotChars ?: 0,
+                answerChars = turn.subagentLanes[id]?.answerChars ?: 0,
             )
         }.sortedByDescending { it.dispatch?.openedAtMs ?: 0L }
     }
@@ -3291,7 +3292,8 @@ class BotCommands(
                 } else {
                     append("• 🔵 parent <code>${PyText.esc(g.parentId.takeLast(SID_TAIL))}</code>")
                 }
-                if (g.thoughtChars > 0) append(" · 🧠 ${LiveTurn.fmtK(g.thoughtChars)} chars thought")
+                if (g.cotChars > 0) append(" · 🧠 ${LiveTurn.fmtK(g.cotChars)} chars thought")
+                if (g.answerChars > 0) append(" · ✍️ ${LiveTurn.fmtK(g.answerChars)} chars written")
                 append('\n')
                 g.openLanes.forEach { lane ->
                     append(
@@ -3504,8 +3506,9 @@ class BotCommands(
         /** The requestId's log tail (the full wire id is noise in the daemon log). */
         private const val REQUEST_ID_LOG = 12
 
-        /** The CLI session store's child-session convention — measured live 30/10 in the db rows. */
-        internal const val SUBAGENT_SESSION_PREFIX = "sess_subagent_"
+        /** The CLI session store's child-session convention — the wire contract's single source. */
+        internal const val SUBAGENT_SESSION_PREFIX =
+            dev.lattenero.bot.channel.SUBAGENT_SESSION_PREFIX
 
         /** The armed order's log preview cap. */
         private const val ORDER_LOG_PREVIEW = 60

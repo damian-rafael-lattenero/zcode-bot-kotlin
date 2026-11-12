@@ -135,7 +135,7 @@ class RenderFoldTest {
         assertEquals(s.lastEventAtMs, mainStamp)
         s = reduce(s, thought("sub narration", parent = "lane-A"))!!
         assertEquals(mainStamp, s!!.lastThoughtAtMs, "a subagent's narration never refreshes the card's CoT")
-        assertEquals(13, s.subagentThought["lane-A"], "the subagent's own lane still grows")
+        assertTrue(s.subagentLanes.isEmpty(), "the fork never sends an in-band child thought — nothing folds")
     }
 
     // ---- the thinking's boundary: the tail under the cap seals at the segment's end ----
@@ -568,8 +568,15 @@ class RenderFoldTest {
         var s = reduce(null, thought("main narration", parent = null))
         s = reduce(s, thought("sub narration", parent = "lane-A"))!!
         assertEquals("main narration".length, s!!.thoughtChars, "the subagent's thought never grows the parent's counter")
-        assertEquals("sub narration".length, s.subagentThought["lane-A"], "the subagent's own lane grows")
-        assertEquals(setOf("lane-A"), s.subagentThought.keys, "the parent's thought never grows a lane")
+        assertTrue(s.subagentLanes.isEmpty(), "an in-band child thought does not exist — nothing folds")
+        // the child's OWN stream (the routed one) grows its window, never the parent's
+        s = reduce(s, RenderEvent.ChildStream(laneId = "lane-A", thought = true, delta = "sub narration", nowMs = 500))!!
+        assertEquals(
+            "sub narration".length,
+            s.subagentLanes["lane-A"]?.cotChars,
+            "the routed child's window grows its own chars",
+        )
+        assertEquals("sub narration", s.subagentLanes["lane-A"]?.cotTail, "the tail keeps the words")
         // the tool lanes: each side keeps its own output and verdict
         s = reduce(s, toolOpenEvent(toolId = "t-main", name = "Edit", parent = null, seq = 10))!!
         s = reduce(s, toolOpenEvent(toolId = "t-sub", name = "Bash", parent = "lane-A", seq = 11))!!
