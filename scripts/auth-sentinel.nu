@@ -259,9 +259,15 @@ def main [--status, --dry-run, --selftest, --test-alert]: nothing -> nothing {
         }
         _ => {}
     }
-    # persist only on change — the 30 s cadence is not a write clock
-    if ($plan.episode | to json -r) != ($effective | to json -r) {
+    # persist what should STAND: the mutating actions carry their own new
+    # episode (alert/reping fields, resolve's closed book), every other
+    # tick stands on the marker-applied one. Compared against what was
+    # LOADED from disk — the 12/11 drill bug: comparing against effective
+    # let a consumed marker's dismissal die with its tick (the on-disk
+    # state stayed dismissed:false and the 15-min reping fired anyway).
+    let final: record = (if $plan.action in ["alert", "reping", "resolve"] { $plan.episode } else { $effective })
+    if ($final | to json -r) != ($episode | to json -r) {
         mkdir ($state | path dirname)
-        $plan.episode | to json -r | save -f $state
+        $final | to json -r | save -f $state
     }
 }
