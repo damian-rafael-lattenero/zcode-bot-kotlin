@@ -10,6 +10,7 @@ import dev.lattenero.bot.channel.ChannelClient
 import dev.lattenero.bot.channel.DeployCommand
 import dev.lattenero.bot.channel.FileMenu
 import dev.lattenero.bot.channel.FileTaps
+import dev.lattenero.bot.channel.VoiceTranscribe
 import dev.lattenero.bot.channel.ChannelOps
 import dev.lattenero.bot.channel.ChannelQuery
 import dev.lattenero.bot.channel.ChannelSpec
@@ -1198,6 +1199,16 @@ private suspend fun dispatchAttachment(
         val dir = File(pythonState, ATTACHMENTS_DIR).apply { mkdirs() }
         val target = File(dir, "${update.updateId}-${attachmentFilename(update.filename)}")
         val bytes = api.downloadFile(update.fileId, target)
+        // THE VOICE LAW (13/11): an audio attachment is HEARD, not just
+        // stored — the local whisper speaks it first and the transcript
+        // rides as the prompt's real text (the audio still travels as the
+        // file). A failed/slow transcription degrades honestly: the caption
+        // alone, the log's word, nothing invented.
+        val transcript = when (update.kind) {
+            "audio" -> VoiceTranscribe.DEFAULT.transcribe(target)
+            else -> null
+        }
+        val promptText = VoiceTranscribe.promptOf(update.caption, transcript)
         val att = InboundAttachment(
             id = "att-${update.updateId}",
             kind = update.kind,
@@ -1206,8 +1217,8 @@ private suspend fun dispatchAttachment(
             sizeBytes = bytes,
             localPath = target.absolutePath,
         )
-        val token = prompts.begin(update.caption)
-        val outbound = prompts.prepare(update.caption)
+        val token = prompts.begin(promptText)
+        val outbound = prompts.prepare(promptText)
         val fired = client.sendInbound(
             outbound,
             "tg-${update.updateId}-att",
@@ -1217,6 +1228,7 @@ private suspend fun dispatchAttachment(
         if (fired == InboundReceipt.FIRED) prompts.fired(token) else prompts.dropped(token)
         logger.info {
             "attachment ${update.updateId}: ${update.filename} ($bytes bytes) " +
+                "transcribed=${transcript != null} " +
                 "${if (fired == InboundReceipt.FIRED) "delivered" else "NOT delivered (channel down)"}"
         }
         if (fired != InboundReceipt.FIRED) {
