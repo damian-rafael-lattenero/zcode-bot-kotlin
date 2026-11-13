@@ -11,6 +11,39 @@ use lib/deploy.nu *
 
 const LABEL = "com.zcode.bot-daemon"
 
+# Event-driven arming wait (the waiting law): `watch` on the state dir wakes
+# us the moment hb-zconn-shadow is born or touched; `job recv --timeout` is
+# the deadline. The heartbeat must be NEWER than this deploy: the files
+# survive restarts, so mere existence false-passed a daemon that never
+# booted (measured 2026-11-02). zconn.json is state, not a clock: it only
+# has to exist. The catch re-checks one last time (covers the pre-watch
+# race and a heartbeat landing just past the deadline). Basename filter in
+# the each — `--glob` matches the resolved absolute path and filters
+# everything out (measured 13/11).
+def wait-armed [hb: path, zconn: path, since: int, deadline: duration]: nothing -> bool {
+    let dir: string = ($hb | path dirname)
+    let base: string = ($hb | path basename)
+    let watcher = (job spawn {
+        watch $dir
+        | each {|ev|
+            if ($ev.path | path basename) == $base {
+                if (($hb | path type) == "file") and ((^stat -f %m $hb | str trim | into int) >= $since) and (($zconn | path type) == "file") {
+                    'armed' | job send 0
+                }
+            }
+        }
+        | ignore
+    })
+    let ok: bool = (try {
+        job recv --timeout $deadline
+        true
+    } catch {
+        (($hb | path type) == "file") and ((^stat -f %m $hb | str trim | into int) >= $since) and (($zconn | path type) == "file")
+    })
+    try { job kill $watcher } catch { }
+    $ok
+}
+
 def main []: nothing -> nothing {
     let repo = ($env.FILE_PWD | path dirname)
     let home = $nu.home-dir
@@ -61,23 +94,7 @@ def main []: nothing -> nothing {
     announce "🚀 deploy Bot Kotlin espejo ZCode 4/4 — verification (heartbeat + estado armado, deadline 45 s)"
     let hb = ($data | path join "state/hb-zconn-shadow")
     let zconn = ($data | path join "state/zconn.json")
-    mut ok = false
-    mut waited = 0
-    while ($waited < 45000) {
-        # The heartbeat must be NEWER than this deploy: the files survive
-        # restarts, so mere existence false-passed a daemon that never
-        # booted (measured 2026-11-02). zconn.json is state, not a clock:
-        # it only has to exist.
-        if (($hb | path type) == "file") and (($zconn | path type) == "file") {
-            let hb_mtime = (^stat -f %m $hb | str trim | into int)
-            if $hb_mtime >= $started {
-                $ok = true
-                break
-            }
-        }
-        sleep 100ms
-        $waited += 100
-    }
+    let ok = (wait-armed $hb $zconn $started 45sec)
     if not $ok {
         print -e "✗ daemon did not arm — last words:"
         let state: string = (do { ^launchctl print $"gui/(user-id)/($LABEL)" } | complete | get stdout)

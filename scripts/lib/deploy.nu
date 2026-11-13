@@ -113,19 +113,36 @@ export def bootstrap-agent [repo: string, label: string]: nothing -> nothing {
     }
 }
 
-# Wait until a path exists (file, socket, anything non-empty from `path type`).
-export def wait-for-path [path: string, timeout_ms: int, step_ms: int]: nothing -> bool {
-    mut waited = 0
-    mut found = false
-    while ($waited < $timeout_ms) {
-        if (($path | path type) != "") {
-            $found = true
-            break
-        }
-        sleep ($step_ms * 1ms)
-        $waited += $step_ms
+# Wait until a path exists — event-driven (the waiting law): `watch` streams
+# the dir's events, a basename filter selects ours, `job send 0` wakes the
+# caller and `job recv --timeout` is the deadline. Two measured traps baked
+# into the shape: the existence check compares against null (`path type`
+# returns null for a missing path and `null != ""` is TRUE — the old polling
+# version tested `!= ""` and returned true instantly, a latent bug with no
+# callers), and `--glob` is NOT used because it matches the resolved absolute
+# path (/private/tmp on macOS), so a basename glob filters every event out.
+# The post-timeout re-check covers the pre-watch race and the
+# just-past-deadline case.
+export def wait-for-path [path: string, timeout_ms: int]: nothing -> bool {
+    if (($path | path type) == null) {
+        let dir: string = ($path | path dirname)
+        let base: string = ($path | path basename)
+        let p: string = $path
+        let watcher = (job spawn {
+            watch $dir
+            | each {|ev|
+                if (($ev.path | path basename) == $base) {
+                    if (($p | path type) != null) { 'found' | job send 0 }
+                }
+            }
+            | ignore
+        })
+        let seen: bool = (try { job recv --timeout ($timeout_ms * 1ms); true } catch { false })
+        try { job kill $watcher } catch { }
+        ($seen or (($path | path type) != null))
+    } else {
+        true
     }
-    $found
 }
 
 export def tail-lines [path: string, count: int]: nothing -> list<string> {
