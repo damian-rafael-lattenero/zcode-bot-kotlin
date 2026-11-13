@@ -1,4 +1,4 @@
-#!/usr/bin/env nu
+#!/opt/homebrew/bin/nu
 #
 # SECONDARY / MANUAL diagnostic. The primary dead man's switch is the
 # hosted heartbeat (healthchecks.io): the Mac's beacon pings it every
@@ -22,11 +22,11 @@ const GIST_RAW = "https://gist.githubusercontent.com/damian-rafael-lattenero/d61
 const STALE_AFTER_S = 150
 const POLL_EVERY_S = 30
 
-def now_epoch [] {
+def now_epoch []: nothing -> int {
     date now | format date "%s" | into int
 }
 
-def send [text: string] {
+def send [text: string]: nothing -> bool {
     # Missing config is a broken setup, not a transient failure: say it
     # clearly and return false so the caller can decide what to do.
     if ($env.WATCHDOG_BOT_TOKEN? | is-empty) {
@@ -90,7 +90,7 @@ def send [text: string] {
     return $delivered
 }
 
-def main [--loop-seconds: int = 0, --simulate-stale-minutes: int = 0] {
+def main [--loop-seconds: int = 0, --simulate-stale-minutes: int = 0]: nothing -> nothing {
     # The forced path proves the whole circuit (runner → gist read →
     # Telegram send) without needing a real outage.
     if $simulate_stale_minutes > 0 {

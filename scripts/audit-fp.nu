@@ -1,4 +1,4 @@
-#!/usr/bin/env nu
+#!/opt/homebrew/bin/nu
 # U0 of the FP/concurrency audit plan (2026-11-08): mechanical inventory over
 # the bot's MAIN sources (tests excluded, matching the CI sweep's scope).
 # rg scans, nu classifies; stdout is a markdown report — the CALLER redirects
