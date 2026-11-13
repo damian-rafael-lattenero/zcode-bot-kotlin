@@ -94,6 +94,68 @@ class AttachmentInTest {
     }
 
     @Test
+    fun theOwnersVoiceNoteRidesAsAudio() = runTest {
+        val dir = tempDir()
+        val seen = mutableListOf<InboundUpdate.Attachment>()
+        val poller = poller(
+            dir,
+            """{"result":[{"update_id":23,"message":{"message_id":57,"from":{"id":7},
+                "voice":{"file_id":"vc-1","duration":14,"mime_type":"audio/ogg","file_size":20480}}}]}""",
+        ) { _, m -> if (m is InboundUpdate.Attachment) seen.add(m) }
+        poller.cycle(cfg)
+        val att = seen.single()
+        assertEquals("vc-1", att.fileId)
+        assertEquals("audio", att.kind, "the fork's audio vocabulary — multimodal, not a bare path")
+        assertEquals("voice-23.oga", att.filename)
+        assertEquals("audio/ogg", att.mimeType)
+        assertEquals(20480L, att.sizeBytes)
+    }
+
+    @Test
+    fun theOwnersAudioFileKeepsItsOwnName() = runTest {
+        val dir = tempDir()
+        val seen = mutableListOf<InboundUpdate.Attachment>()
+        val poller = poller(
+            dir,
+            """{"result":[{"update_id":24,"message":{"message_id":58,"from":{"id":7},
+                "caption":"transcribí esto",
+                "audio":{"file_id":"au-2","file_name":"reunion.mp3",
+                         "mime_type":"audio/mpeg","file_size":999999}}}]}""",
+        ) { _, m -> if (m is InboundUpdate.Attachment) seen.add(m) }
+        poller.cycle(cfg)
+        val att = seen.single()
+        assertEquals("audio", att.kind)
+        assertEquals("reunion.mp3", att.filename)
+        assertEquals("audio/mpeg", att.mimeType)
+        assertEquals("transcribí esto", att.caption, "an audio file CAN carry the caption — the prompt's text")
+    }
+
+    @Test
+    fun theOwnersVideoAndVideoNoteRideAsVideo() = runTest {
+        val dir = tempDir()
+        val seen = mutableListOf<InboundUpdate.Attachment>()
+        val poller = poller(
+            dir,
+            """{"result":[
+                {"update_id":25,"message":{"message_id":59,"from":{"id":7},
+                 "video":{"file_id":"vd-1","file_name":"demo.mp4","mime_type":"video/mp4","file_size":500000}}},
+                {"update_id":26,"message":{"message_id":60,"from":{"id":7},
+                 "video_note":{"file_id":"vn-1","length":480,"duration":9,"file_size":300000}}}
+            ]}""",
+        ) { _, m -> if (m is InboundUpdate.Attachment) seen.add(m) }
+        poller.cycle(cfg)
+        assertEquals(2, seen.size)
+        val video = seen[0]
+        assertEquals("video", video.kind)
+        assertEquals("demo.mp4", video.filename, "a named video keeps its own name")
+        assertEquals("video/mp4", video.mimeType)
+        val note = seen[1]
+        assertEquals("video", note.kind)
+        assertEquals("video-note-26.mp4", note.filename, "a round note is nameless — the update's own")
+        assertEquals("video/mp4", note.mimeType)
+    }
+
+    @Test
     fun aStrangersPhotoNeverDispatches() = runTest {
         val dir = tempDir()
         val seen = mutableListOf<InboundUpdate>()

@@ -297,14 +297,17 @@ class Poller(
     }
 
     /**
-     * The photo/document ladder (ATTACHMENTS IN): a well-formed photo (an
-     * ARRAY of sizes — the largest is the one worth downloading) or a
-     * document ({file_name, mime_type, file_size?, file_id}). A malformed
-     * shape (Telegram's `"photo":"x"` degenerate or an unnamed document)
-     * is skipped — the cursor already advanced, the honest silence is the
-     * log's. Photos carry no name: the wire's filename is the update's own.
+     * The media ladder (ATTACHMENTS IN): a well-formed photo (an ARRAY of
+     * sizes — the largest is the one worth downloading), one of the TABLE's
+     * single-object media shapes (voice, audio, video, video_note) or a
+     * document — the fork's own vocabulary speaks all four kinds («image» |
+     * «audio» | «video» | «file»), and a dropped voice note was pure silence
+     * (the owner, 13/11: «no se pueden enviar archivos y audios e
+     * imagenes»). A malformed shape (Telegram's `"photo":"x"` degenerate or
+     * an unnamed document) is skipped — the cursor already advanced, the
+     * honest silence is the log's. Nameless media take the update's own
+     * name; named ones (audio, video, document) keep Telegram's.
      */
-    @Suppress("ReturnCount") // the attachment ladder: one guard per photo/document shape — Python's normalize shape
     private fun normalizeAttachment(
         message: JsonObject,
         updateId: Long,
@@ -312,21 +315,73 @@ class Poller(
         mid: Long,
     ): InboundUpdate.Attachment? {
         val caption = (message["caption"] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: ""
-        (message["photo"] as? kotlinx.serialization.json.JsonArray)?.let { sizes ->
-            val largest = largestPhoto(sizes) ?: return null
-            val fileId = largest.str("file_id") ?: return null
+        return photoOf(message, updateId, fromId, mid, caption)
+            ?: mediaOf(message, updateId, fromId, mid, caption)
+            ?: documentOf(message, updateId, fromId, mid, caption)
+    }
+
+    /** The photo branch: the largest size is the one worth downloading. */
+    @Suppress("ReturnCount") // one guard per skip + the verdict — the ladder's own shape
+    private fun photoOf(
+        message: JsonObject,
+        updateId: Long,
+        fromId: Long?,
+        mid: Long,
+        caption: String,
+    ): InboundUpdate.Attachment? {
+        val sizes = message["photo"] as? kotlinx.serialization.json.JsonArray ?: return null
+        val largest = largestPhoto(sizes) ?: return null
+        val fileId = largest.str("file_id") ?: return null
+        return InboundUpdate.Attachment(
+            updateId = updateId,
+            fromId = fromId,
+            messageId = mid,
+            kind = "image",
+            fileId = fileId,
+            filename = "photo-$updateId.jpg",
+            mimeType = "image/jpeg",
+            sizeBytes = largest.long("file_size"),
+            caption = caption,
+        )
+    }
+
+    /** The table's single-object shapes — the first field that rides wins. */
+    @Suppress("ReturnCount") // one guard per skip + the verdict — the ladder's own shape
+    private fun mediaOf(
+        message: JsonObject,
+        updateId: Long,
+        fromId: Long?,
+        mid: Long,
+        caption: String,
+    ): InboundUpdate.Attachment? {
+        for (shape in MEDIA_SHAPES) {
+            val media = message[shape.field] as? JsonObject ?: continue
+            val fileId = media.str("file_id") ?: return null // malformed: skipped, the log speaks
             return InboundUpdate.Attachment(
                 updateId = updateId,
                 fromId = fromId,
                 messageId = mid,
-                kind = "image",
+                kind = shape.kind,
                 fileId = fileId,
-                filename = "photo-$updateId.jpg",
-                mimeType = "image/jpeg",
-                sizeBytes = largest.long("file_size"),
+                filename = (if (shape.named) media.str("file_name")?.takeIf { it.isNotBlank() } else null)
+                    ?: shape.fallbackName(updateId),
+                mimeType = media.str("mime_type") ?: shape.defaultMime,
+                sizeBytes = media.long("file_size"),
                 caption = caption,
             )
         }
+        return null
+    }
+
+    /** The document branch: keeps Telegram's own name and mime. */
+    @Suppress("ReturnCount") // one guard per skip + the verdict — the ladder's own shape
+    private fun documentOf(
+        message: JsonObject,
+        updateId: Long,
+        fromId: Long?,
+        mid: Long,
+        caption: String,
+    ): InboundUpdate.Attachment? {
         val document = message["document"] as? JsonObject ?: return null
         val fileId = document.str("file_id") ?: return null
         return InboundUpdate.Attachment(
@@ -390,6 +445,30 @@ internal fun largestPhoto(sizes: kotlinx.serialization.json.JsonArray): JsonObje
                 { it.long("file_size") ?: 0L },
             ),
         )
+
+/**
+ * THE SINGLE-OBJECT MEDIA SHAPES (13/11): the message fields that carry one
+ * `{file_id, file_name?, mime_type?, file_size?}` object. Voice and video
+ * notes arrive NAMELESS — the fallback names them by the update's own id;
+ * audio and video files keep Telegram's `file_name` when it rides. The
+ * kinds are the fork's own vocabulary («audio» rides as a multimodal
+ * block, «video» as the prompt's local path).
+ */
+private val MEDIA_SHAPES = listOf(
+    MediaShape("voice", "audio", named = false, defaultMime = "audio/ogg") { id -> "voice-$id.oga" },
+    MediaShape("audio", "audio", named = true, defaultMime = "audio/mpeg") { id -> "audio-$id" },
+    MediaShape("video", "video", named = true, defaultMime = "video/mp4") { id -> "video-$id.mp4" },
+    MediaShape("video_note", "video", named = false, defaultMime = "video/mp4") { id -> "video-note-$id.mp4" },
+)
+
+/** One row of [MEDIA_SHAPES]: where the object rides and how to name it. */
+private data class MediaShape(
+    val field: String,
+    val kind: String,
+    val named: Boolean,
+    val defaultMime: String,
+    val fallbackName: (Long) -> String,
+)
 
 /**
  * THE SUICIDAL UPDATES (the offset law's OWN vocabulary, 4/11): the
