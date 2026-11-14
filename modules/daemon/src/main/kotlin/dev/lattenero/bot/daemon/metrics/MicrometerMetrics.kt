@@ -38,16 +38,6 @@ class MicrometerMetrics(private val registry: PrometheusMeterRegistry) : Metrics
         gauge(BUS_FAILURES) { failures().toDouble() }
     }
 
-    override fun memoryInjected() {
-        counter(MEMORY_INJECTED).increment()
-    }
-
-    override fun memoryInjectFailed() {
-        counter(MEMORY_INJECT_FAILURES).increment()
-    }
-
-    override suspend fun <T> memoryFetch(block: suspend () -> T): T = timed(MEMORY_FETCH, block)
-
     override suspend fun <T> brainRequest(block: suspend () -> T): T = timed(BRAIN_REQUEST, block)
 
     override fun brainFailed() {
@@ -84,8 +74,8 @@ class MicrometerMetrics(private val registry: PrometheusMeterRegistry) : Metrics
 
     /**
      * The timer around the call itself: the elapsed time is real even for
-     * a call the caller cancels (the inject's deadline) — the finally
-     * records it and the cancellation still propagates.
+     * a call the caller cancels — the finally records it and the
+     * cancellation still propagates.
      */
     private suspend fun <T> timed(name: String, block: suspend () -> T): T {
         val timer = registry.timer(name)
@@ -127,9 +117,6 @@ class MicrometerMetrics(private val registry: PrometheusMeterRegistry) : Metrics
         const val TURN_DURATION = "bot.turn.duration"
         const val BUS_WRITTEN = "bot.bus.written"
         const val BUS_FAILURES = "bot.bus.failures"
-        const val MEMORY_INJECTED = "bot.memory.injected"
-        const val MEMORY_INJECT_FAILURES = "bot.memory.inject.failures"
-        const val MEMORY_FETCH = "bot.memory.fetch"
         const val BRAIN_REQUEST = "bot.brain.request"
         const val BRAIN_FAILURES = "bot.brain.failures"
         const val POLLER_CYCLES = "bot.poller.cycles"

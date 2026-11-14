@@ -1,7 +1,6 @@
 package dev.lattenero.bot.daemon
 
 import dev.lattenero.bot.channel.BotCommands
-import dev.lattenero.bot.daemon.brain.MemoryInjectKnob
 import dev.lattenero.bot.daemon.bus.EventBusKnob
 import dev.lattenero.bot.daemon.metrics.Lane
 import dev.lattenero.bot.daemon.metrics.MetricsKnob
@@ -90,11 +89,9 @@ fun main(args: Array<String>) {
     if (busKnob.warning != null) logger.warn { "event_bus knob $knobFile: ${busKnob.warning}" }
     logger.info { "event_bus knob: on=${busKnob.on} (file=$knobFile)" }
 
-    // U3's memory knob (ADR-020): read ONCE at boot, SHIPPED OFF. OFF means
-    // the send path never touches the brain (byte-for-byte the old prompt).
-    val memoryKnob = MemoryInjectKnob.load(knobFile)
-    if (memoryKnob.warning != null) logger.warn { "memory_inject knob $knobFile: ${memoryKnob.warning}" }
-    logger.info { "memory_inject knob: on=${memoryKnob.on} (file=$knobFile)" }
+    // memory_inject (ADR-020) RETIRED: the CLI's UserPromptSubmit hook carries
+    // the memory into every session as model-only context — always present,
+    // never in the prompt text. The daemon.json key (if present) stays inert.
 
     // E2's metrics knob: read ONCE at boot, SHIPPED OFF. OFF is the strict
     // zero — the no-op facade, no registry, no listener; the daemon is
@@ -157,7 +154,6 @@ fun main(args: Array<String>) {
         pythonState,
         pollKnob.on,
         eventBusOn = busKnob.on,
-        memoryInjectOn = memoryKnob.on,
         metrics = metrics,
         notificationsOn = notifKnob.on,
         otel = otelStack.tracker,

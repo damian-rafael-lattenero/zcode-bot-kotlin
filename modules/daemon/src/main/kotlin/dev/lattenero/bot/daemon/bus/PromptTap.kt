@@ -4,7 +4,6 @@ import dev.lattenero.bot.channel.ChannelClient
 import dev.lattenero.bot.channel.ChannelQuery
 import dev.lattenero.bot.channel.ChannelQuery.BotStatus
 import dev.lattenero.bot.channel.QueryAnswer
-import dev.lattenero.bot.daemon.brain.MemoryInjector
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
@@ -24,26 +23,23 @@ data class PromptContext(val sid: String, val ws: String?)
  *   command line ("/new", "/task …") is never a user prompt.
  * - [fired] publishes `user.prompt` once the channel CONFIRMED the delivery;
  *   [dropped] forgets the registration (dead channel, refusal, timeout).
- * - [prepare] is memory_inject (ADR-020): the text that ACTUALLY goes to the
- *   conversation, with agent-brain's bounded block prepended when the knob
- *   is on. The bus always keeps the ORIGINAL text.
+ * - [prepare] is the identity: memory rides the CLI's UserPromptSubmit hook
+ *   (model-only context, invisible to titles and to the transcript) — the old
+ *   ADR-020 text prepend is retired, its blob polluted both.
  *
- * The knobs are the caller's: a null [bus] and a null [inject] make every
- * method a no-op (zero I/O, not a single clock read).
+ * The knobs are the caller's: a null [bus] makes every bus method a no-op
+ * (zero I/O, not a single clock read).
  */
 class PromptTap(
     private val bus: BusProducer?,
     private val context: suspend () -> PromptContext? = { null },
-    private val inject: MemoryInjector? = null,
 ) {
 
     /**
-     * The text for the wire: memory_inject's block + the owner's words, or
-     * the words alone. A COMMAND line ("/new", "/task …") is never injected —
-     * the block in front of a slash command would break the fork's own parse.
+     * The text for the wire: the owner's words, whole and last. A COMMAND
+     * line ("/new", "/task …") is never a user prompt.
      */
-    suspend fun prepare(text: String): String =
-        if (inject == null || text.isBlank() || text.startsWith("/")) text else inject.prepend(text)
+    suspend fun prepare(text: String): String = text
 
     /** Registers the text before the send; null with the bus off or for a command line. */
     suspend fun begin(text: String, knownSid: String? = null): Long? {
