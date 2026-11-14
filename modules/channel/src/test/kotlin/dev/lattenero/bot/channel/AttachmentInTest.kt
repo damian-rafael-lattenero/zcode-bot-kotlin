@@ -156,6 +156,54 @@ class AttachmentInTest {
     }
 
     @Test
+    fun aStaticStickerRidesAsImage() = runTest {
+        val dir = tempDir()
+        val seen = mutableListOf<InboundUpdate.Attachment>()
+        val poller = poller(
+            dir,
+            """{"result":[{"update_id":27,"message":{"message_id":61,"from":{"id":7},
+                "sticker":{"file_id":"st-1","width":512,"height":512,"is_animated":false,
+                           "is_video":false,"mime_type":"image/webp","file_size":32100}}}]}""",
+        ) { _, m -> if (m is InboundUpdate.Attachment) seen.add(m) }
+        poller.cycle(cfg)
+        val att = seen.single()
+        assertEquals("st-1", att.fileId)
+        assertEquals("image", att.kind, "a static webp sticker IS an image for the fork's vocabulary")
+        assertEquals("sticker-27", att.filename)
+        assertEquals("image/webp", att.mimeType)
+        assertEquals(32100L, att.sizeBytes)
+    }
+
+    @Test
+    fun aVideoStickerAndAnAnimationRideAsVideo() = runTest {
+        val dir = tempDir()
+        val seen = mutableListOf<InboundUpdate.Attachment>()
+        val poller = poller(
+            dir,
+            """{"result":[
+                {"update_id":28,"message":{"message_id":62,"from":{"id":7},
+                 "sticker":{"file_id":"st-2","width":512,"height":512,"is_animated":false,
+                            "is_video":true,"mime_type":"video/webm","file_size":150000}}},
+                {"update_id":29,"message":{"message_id":63,"from":{"id":7},
+                 "caption":"mirá este gif",
+                 "animation":{"file_id":"an-1","file_name":"gato.gif","mime_type":"video/mp4",
+                              "file_size":2500000}}}
+            ]}""",
+        ) { _, m -> if (m is InboundUpdate.Attachment) seen.add(m) }
+        poller.cycle(cfg)
+        assertEquals(2, seen.size)
+        val sticker = seen[0]
+        assertEquals("video", sticker.kind, "a video/webm sticker rides as video — bytes the video path can speak")
+        assertEquals("sticker-28", sticker.filename)
+        assertEquals("video/webm", sticker.mimeType)
+        val animation = seen[1]
+        assertEquals("video", animation.kind, "the Bot API's own words: an animation IS a video")
+        assertEquals("gato.gif", animation.filename, "a named animation keeps its own name")
+        assertEquals("video/mp4", animation.mimeType)
+        assertEquals("mirá este gif", animation.caption)
+    }
+
+    @Test
     fun aStrangersPhotoNeverDispatches() = runTest {
         val dir = tempDir()
         val seen = mutableListOf<InboundUpdate>()

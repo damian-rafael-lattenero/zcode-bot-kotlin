@@ -299,14 +299,18 @@ class Poller(
     /**
      * The media ladder (ATTACHMENTS IN): a well-formed photo (an ARRAY of
      * sizes — the largest is the one worth downloading), one of the TABLE's
-     * single-object media shapes (voice, audio, video, video_note) or a
-     * document — the fork's own vocabulary speaks all four kinds («image» |
-     * «audio» | «video» | «file»), and a dropped voice note was pure silence
-     * (the owner, 13/11: «no se pueden enviar archivos y audios e
-     * imagenes»). A malformed shape (Telegram's `"photo":"x"` degenerate or
-     * an unnamed document) is skipped — the cursor already advanced, the
-     * honest silence is the log's. Nameless media take the update's own
-     * name; named ones (audio, video, document) keep Telegram's.
+     * single-object media shapes (voice, audio, video, video_note, sticker,
+     * animation) or a document — the fork's own vocabulary speaks all four
+     * kinds («image» | «audio» | «video» | «file»), and a dropped voice note
+     * was pure silence (the owner, 13/11: «no se pueden enviar archivos y
+     * audios e imagenes»). Stickers and animations have no vocabulary slot
+     * of their own: a sticker rides as «image» or «video» by its real mime
+     * (the [stickerKind] selector), an animation as «video» — the shape's
+     * own name (`sticker-…`, `animation-…`) and mime keep the truth. A
+     * malformed shape (Telegram's `"photo":"x"` degenerate or an unnamed
+     * document) is skipped — the cursor already advanced, the honest
+     * silence is the log's. Nameless media take the update's own name;
+     * named ones (audio, video, animation, document) keep Telegram's.
      */
     private fun normalizeAttachment(
         message: JsonObject,
@@ -361,7 +365,7 @@ class Poller(
                 updateId = updateId,
                 fromId = fromId,
                 messageId = mid,
-                kind = shape.kind,
+                kind = shape.kindByMime?.invoke(media.str("mime_type")) ?: shape.kind,
                 fileId = fileId,
                 filename = (if (shape.named) media.str("file_name")?.takeIf { it.isNotBlank() } else null)
                     ?: shape.fallbackName(updateId),
@@ -450,23 +454,40 @@ internal fun largestPhoto(sizes: kotlinx.serialization.json.JsonArray): JsonObje
  * THE SINGLE-OBJECT MEDIA SHAPES (13/11): the message fields that carry one
  * `{file_id, file_name?, mime_type?, file_size?}` object. Voice and video
  * notes arrive NAMELESS — the fallback names them by the update's own id;
- * audio and video files keep Telegram's `file_name` when it rides. The
- * kinds are the fork's own vocabulary («audio» rides as a multimodal
- * block, «video» as the prompt's local path).
+ * audio, video and animation files keep Telegram's `file_name` when it
+ * rides. The kinds are the fork's own vocabulary («audio» rides as a
+ * multimodal block, «video» as the prompt's local path). Sticker (15/11)
+ * and animation close the ladder's last silent drop: an animation IS a
+ * video (the Bot API's own words); a sticker's kind follows its real mime
+ * via [stickerKind] — a static webp is an «image», a video webm is a
+ * «video» — so the fork's handler always receives bytes it can speak.
  */
 private val MEDIA_SHAPES = listOf(
     MediaShape("voice", "audio", named = false, defaultMime = "audio/ogg") { id -> "voice-$id.oga" },
     MediaShape("audio", "audio", named = true, defaultMime = "audio/mpeg") { id -> "audio-$id" },
     MediaShape("video", "video", named = true, defaultMime = "video/mp4") { id -> "video-$id.mp4" },
     MediaShape("video_note", "video", named = false, defaultMime = "video/mp4") { id -> "video-note-$id.mp4" },
+    MediaShape("sticker", "image", named = false, defaultMime = "image/webp", kindByMime = ::stickerKind) { id ->
+        "sticker-$id"
+    },
+    MediaShape("animation", "video", named = true, defaultMime = "video/mp4") { id -> "animation-$id.mp4" },
 )
 
-/** One row of [MEDIA_SHAPES]: where the object rides and how to name it. */
+/**
+ * The sticker's vocabulary slot by its REAL mime: an `image/…` mime (the
+ * static webp) rides as «image»; anything else (the `video/webm` video
+ * stickers) rides as «video» — a webm inside an image block would be
+ * bytes the vision path can't speak, a local path it can.
+ */
+internal fun stickerKind(mime: String?): String = if (mime?.startsWith("image/") == true) "image" else "video"
+
+/** One [MEDIA_SHAPES] row: where the object rides, how to name it; [fallbackName] is LAST (the trailing lambda). */
 private data class MediaShape(
     val field: String,
     val kind: String,
     val named: Boolean,
     val defaultMime: String,
+    val kindByMime: ((String?) -> String)? = null,
     val fallbackName: (Long) -> String,
 )
 
