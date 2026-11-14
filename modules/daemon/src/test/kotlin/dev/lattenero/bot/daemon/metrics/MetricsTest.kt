@@ -35,8 +35,6 @@ class MetricsTest {
         m.turnStarted()
         m.turnSealed(TurnOutcome.COMPLETED, 1_500)
         m.turnSealed(TurnOutcome.FAILED, 300)
-        m.memoryInjected()
-        m.memoryInjectFailed()
         m.brainFailed()
         m.pollerCycle()
         m.pollerInbound()
@@ -48,8 +46,6 @@ class MetricsTest {
         assertEquals(2.0, valueOf(scrape, "bot_turns_started_total"))
         assertEquals(1.0, valueOf(scrape, """bot_turns_sealed_total{outcome="completed"}"""))
         assertEquals(1.0, valueOf(scrape, """bot_turns_sealed_total{outcome="failed"}"""))
-        assertEquals(1.0, valueOf(scrape, "bot_memory_injected_total"))
-        assertEquals(1.0, valueOf(scrape, "bot_memory_inject_failures_total"))
         assertEquals(1.0, valueOf(scrape, "bot_brain_failures_total"))
         assertEquals(1.0, valueOf(scrape, "bot_poller_cycles_total"))
         assertEquals(1.0, valueOf(scrape, "bot_poller_inbound_total"))
@@ -107,11 +103,8 @@ class MetricsTest {
     fun theTimersTimeTheRealCallAndReturnItsValue() = runBlocking {
         val reg = registry()
         val m = MicrometerMetrics(reg)
-        val block = "el bloque de memoria"
-        assertEquals(block, m.memoryFetch { block })
         val reply = m.brainRequest { BrainReply.Response(200, "{}") }
         assertIs<BrainReply.Response>(reply)
-        assertEquals(1.0, valueOf(reg.scrape(), "bot_memory_fetch_seconds_count"))
         assertEquals(1.0, valueOf(reg.scrape(), "bot_brain_request_seconds_count"))
     }
 
@@ -120,25 +113,22 @@ class MetricsTest {
         val reg = registry()
         val m = MicrometerMetrics(reg)
         try {
-            m.memoryFetch { throw IllegalStateException("the caller cancelled") }
+            m.brainRequest { throw IllegalStateException("the caller cancelled") }
             assertTrue(false, "the exception must propagate")
         } catch (_: IllegalStateException) {
             // the caller's cancellation is its own — the timer never swallows it
         }
-        assertEquals(1.0, valueOf(reg.scrape(), "bot_memory_fetch_seconds_count"))
+        assertEquals(1.0, valueOf(reg.scrape(), "bot_brain_request_seconds_count"))
     }
 
     @Test
     fun theNoopRunsTheBlockBareAndMeasuresNothing() = runBlocking {
         val m: Metrics = NoopMetrics
         assertFalse(m.measures, "OFF is OFF: the wiring builds no stateful tap")
-        assertEquals("x", m.memoryFetch { "x" })
         assertEquals(2, m.brainRequest { 1 + 1 })
         m.turnStarted()
         m.turnSealed(TurnOutcome.FAILED, null)
         m.busGauges({ 1 }, { 2 })
-        m.memoryInjected()
-        m.memoryInjectFailed()
         m.brainFailed()
         m.pollerCycle()
         m.pollerInbound()

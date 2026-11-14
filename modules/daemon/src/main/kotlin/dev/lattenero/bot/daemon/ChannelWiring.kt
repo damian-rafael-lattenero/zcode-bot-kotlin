@@ -49,7 +49,6 @@ import dev.lattenero.bot.daemon.bus.BusSink
 import dev.lattenero.bot.daemon.bus.PromptTap
 import dev.lattenero.bot.daemon.bus.activePromptContext
 import dev.lattenero.bot.daemon.brain.BrainEndpoint
-import dev.lattenero.bot.daemon.brain.MemoryInjector
 import dev.lattenero.bot.daemon.brain.brainGateway
 import dev.lattenero.bot.daemon.history.LIVE_VERBS
 import dev.lattenero.bot.daemon.history.SEQUENCE_LINE_DIFFER
@@ -248,8 +247,6 @@ internal fun wireChannel(
     pollOn: Boolean,
     /** U1b: the `event_bus` knob, read once at boot — OFF means the producer is never built. */
     eventBusOn: Boolean = false,
-    /** U3: the `memory_inject` knob — OFF means the send path never touches the brain. */
-    memoryInjectOn: Boolean = false,
     /** E2: the `metrics` knob's facade — the no-op when OFF (zero cost, byte-identical daemon). */
     metrics: Metrics = NoopMetrics,
     /** 🔔 the owner's key-moment notifications — read once at boot in Main; OFF builds nothing. */
@@ -526,15 +523,13 @@ internal fun wireChannel(
     val brain = BrainCommands(gateway)
     logger.info { "brain commands wired: ${brainEndpoint.url}" }
 
-    // U3 — memory_inject (ADR-020): the knob is read at boot in Main. OFF =
-    // no injector and the send path is byte-for-byte the pre-U1b one.
-    val injector = if (memoryInjectOn) {
-        logger.info { "memory_inject ON — top-k ${MemoryInjector.TOP_K}, deadline ${MemoryInjector.DEFAULT_TIMEOUT}" }
-        MemoryInjector(gateway.memorySearch, log = { message -> logger.info { message } }, metrics = metrics)
-    } else {
-        null
-    }
-    val promptTap = PromptTap(busTaps, { activePromptContext(client) }, injector)
+    // memory_inject RETIRED (ADR-020 superseded): prepending the brain blob to the
+    // prompt text polluted transcripts and session titles, and the CLI's own
+    // UserPromptSubmit hook already carries the memory into every session the right
+    // way — as model-only hook context, invisible to titles and to the transcript.
+    // The knob key in daemon.json stays inert; the memory is always there, unbothering.
+    logger.info { "memory_inject retired — memory rides the CLI UserPromptSubmit hook" }
+    val promptTap = PromptTap(busTaps, { activePromptContext(client) })
 
     // 🔔 THE OWNER'S KEY-MOMENT NOTIFICATIONS — one guarded block, the
     // merge stays a one-line conflict at worst. The subagent watcher rides
