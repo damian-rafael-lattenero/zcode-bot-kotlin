@@ -573,6 +573,21 @@ class ChannelClient(
     }
 
     /**
+     * STOPS FOLLOWING a task (14/11, the any-task watcher's drop): the
+     * remembered subscription dies FIRST — a reconnect never replays it —
+     * and the `unsubscribe` frame flies when a session is live. A task that
+     * was never subscribed is a no-op (the map is the truth).
+     */
+    suspend fun unsubscribe(taskId: String) {
+        val remembered = synchronized(subscriptions) { subscriptions.remove(taskId) != null }
+        if (!remembered) return
+        val live = session ?: return
+        runCatching { live.fire(ClientFrame.Unsubscribe("u${ids.incrementAndGet()}", taskId)) }
+            .onSuccess { logger.info { "channel unsubscribed taskId=$taskId (frame sent)" } }
+            .onFailure { logger.warn { "channel unsubscribe taskId=$taskId failed: ${it.message}" } }
+    }
+
+    /**
      * A subscription's remembered workspace — the CHILD auto-subscribe's
      * source (12/11): the child rides the parent's workspace, read from
      * the same map the reconnect replays. Null = the parent was never
