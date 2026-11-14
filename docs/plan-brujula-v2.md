@@ -21,7 +21,7 @@ One systematic gap per repo:
 ### agent-brain (highest learning density)
 
 - [x] **B1 — Graded retrieval metrics** (v1-U7 core): pure `RetrievalMetrics` (MRR / recall@1 / recall@5 / binary nDCG@5) with 9 law tests over the ranks the recall path already measured; `SuiteMetrics.retrieval` (RECALL only, a total failure reads 0.0 never absent), matrix comparison table + single-run markdown gain the columns, ledger `detail` rides free. Live first run (`35f7450`): 20/20 gate but **MRR 0.913 · recall@1 0.850 · nDCG@5 0.935** — the ordering story the binary gate could never tell; B2's rerank has its number to beat. *(Done 2026-11-14; deploy of the rebuilt brain pending owner's word.)*
-- [ ] **B2 — Rerank stage**: cross-encoder/listwise rerank after RRF (local Ollama or LLM-listwise via the existing providers); A/B against B1's numbers — **keep only if measurably better**. *Teaches: modern RAG.*
+- [x] **B2 — Rerank stage**: listwise rerank after RRF as an opt-in second stage — pure `Rerank.apply` (re-order, never drop; 7 laws), `RagService` with the optional chat (no chat wired throws, chat failure degrades honestly with `reranked=false`), eval `--rerank`, report/artifact name the stage. **A/B verdict (`ca787d7`): the local 1.5b listwise LOSES to the fusion — recall@1 0.350 vs 0.850, nDCG@5 0.747 vs 0.935 → ships default OFF**; the mechanism stays opt-in for a stronger model's one-command test. *Taught: modern RAG — the measured discipline of not shipping a feature the evals killed.*
 - [ ] **B3 — Memory lifecycle**: access-reinforces (search hits bump salience), decay → archive state machine (active/cooling/archived) with an explicit forgetting law, wired into `RankKey`. *Teaches: agent memory design (Mem0/Letta territory).*
 - [ ] **B4 — Memory graph**: memory-to-memory edges (entity / co-occurrence / temporal), related-memories traversal exposed in `memory_search`. *Teaches: GraphRAG.*
 - [ ] **B5 — Gates + close-out**: add `plan.md` F1/F2 CI gates; finish Phase C (branch `agent/phase-c`) and D (kap-arrow).
@@ -76,5 +76,6 @@ One systematic gap per repo:
 
 ## Changelog
 
+- 2026-11-14 v2.2: **B2 done and VERDICT'D** (`a61cef0` + A/B `ca787d7` in agent-brain) — the listwise rerank loses to the hybrid fusion on the local model; ships default OFF, opt-in stays.
 - 2026-11-14 v2.1: **B1 done** (`35f7450` in agent-brain) — the evals spine has graded columns; first live numbers: MRR 0.913 / recall@1 0.850 / nDCG@5 0.935.
 - 2026-11-14 v2.0: plan born — 2 explore agents over the 4 repos + serper pulse on 2026 AI-engineering skills; v1 open units folded in (U7→B1/T1, U10→F1, U11→K3, U5 parked).
