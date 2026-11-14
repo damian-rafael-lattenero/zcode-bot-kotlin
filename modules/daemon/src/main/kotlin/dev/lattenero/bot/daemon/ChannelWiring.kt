@@ -58,8 +58,10 @@ import dev.lattenero.bot.daemon.metrics.Metrics
 import dev.lattenero.bot.daemon.metrics.NoopMetrics
 import dev.lattenero.bot.daemon.metrics.TurnMetricsTap
 import dev.lattenero.bot.daemon.otel.TurnSpanTracker
+import dev.lattenero.bot.daemon.notifications.InterventionsNotifs
 import dev.lattenero.bot.daemon.notifications.NotificationsWire
 import dev.lattenero.bot.daemon.notifications.SubagentNotifs
+import dev.lattenero.bot.daemon.notifications.WatchOps
 import dev.lattenero.bot.daemon.nuclear.MacProcessEdge
 import dev.lattenero.bot.daemon.nuclear.NuclearLadder
 import dev.lattenero.bot.daemon.queue.InboundQueue
@@ -106,6 +108,18 @@ internal class ChannelStack(
      * lifecycle process.
      */
     val bootLadder: suspend () -> Unit = {},
+    /** 🧭 the any-task watcher (14/11) — null without a live send (nothing to deliver). */
+    val interventions: Interventions? = null,
+)
+
+/**
+ * The any-task watcher's two pieces: its OWN channel connection (the
+ * foreign-task traffic never reaches the live card) and the pass machine
+ * that reconciles the followed set every tick.
+ */
+internal class Interventions(
+    val client: ChannelClient,
+    val notifs: InterventionsNotifs,
 )
 
 /**
@@ -332,6 +346,12 @@ internal fun wireChannel(
     // frames route into the parent card's child windows at the hub. The
     // body binds right after the client exists.
     var childSubscribe: suspend (parentTaskId: String, agentId: String) -> Unit = { _, _ -> }
+    // THE TASK TITLES (14/11, the any-task law): a question card must say
+    // WHICH conversation asked. The ANY-TASK watcher fills this map from the
+    // tasks-index every tick; the stream callbacks read it (a miss is null =
+    // the card renders without the context line — honest, never a guess).
+    val taskTitles = java.util.concurrent.ConcurrentHashMap<String, String>()
+
     // U1b: the producer is assigned right after the client exists (its
     // final-answer read is a channel query) — the callback reads the holder.
     var busTaps: BusProducer? = null
@@ -354,8 +374,9 @@ internal fun wireChannel(
             // THE ANSWER ROUND-TRIP: the stream carries the questions AND
             // their resolutions — the board messages the owner on the
             // former (dedupe inside), seals honestly on the latter (the
-            // tap, the app's own answer, or the turn's own end).
-            board.onStreamEvent(frame)
+            // tap, the app's own answer, or the turn's own end). The task
+            // title rides the card when the index already knows it.
+            board.onStreamEvent(frame, taskTitles[frame.taskId])
             when ((frame.event["type"] as? JsonPrimitive)?.content) {
                 // THE CHILD'S OWN STREAM (12/11): a dispatch lane's launch
                 // ACK carries `subagentAgentId` — the fork contract's own
@@ -521,6 +542,58 @@ internal fun wireChannel(
     // seal (the facts the card already computed — nothing re-queried).
     // OFF = both null and the daemon is byte-for-byte the pre-feature one.
     val notifs = NotificationsWire.build(cfg, send, notificationsOn)
+
+    // 🧭 THE ANY-TASK WATCHER (14/11): the owner's order — every input
+    // zcode needs reaches his phone, even when he is NOT in the selected
+    // task. A SECOND channel connection follows the tasks the index names
+    // as live (plus the ones with a card still pending) and hands their
+    // questions to the SAME board; foreign traffic never touches the live
+    // card's hub — that isolation is the whole point of the separate
+    // client. LIVE-only: without a send there is no card to deliver.
+    val interventions: Interventions? = if (lanes.api != null) {
+        val watchClient = ChannelClient(
+            transportFactory = { UnixSocketTransport { socketFile } },
+            tokenReader = { tokenFile.takeIf { it.exists() }?.readText() },
+            onStreamEvent = { frame ->
+                // The same round-trip the main callback runs, minus the
+                // hub: the watch connection exists FOR the questions.
+                when ((frame.event["type"] as? JsonPrimitive)?.content) {
+                    "task_error" ->
+                        board.resolveTask(frame.taskId, "⌛ El turno terminó — la pregunta quedó sin responder.")
+
+                    "permission_response", "elicitation_response" ->
+                        (frame.event["requestId"] as? JsonPrimitive)?.content?.let {
+                            board.resolveByRequestId(it, "✅ Respondido desde la app.")
+                        }
+
+                    else -> board.onStreamEvent(frame, taskTitles[frame.taskId])
+                }
+            },
+        )
+        val ops = object : WatchOps {
+            override suspend fun subscribe(taskId: String, workspacePath: String) {
+                watchClient.subscribe(taskId, workspacePath)
+            }
+
+            override suspend fun unsubscribe(taskId: String) {
+                watchClient.unsubscribe(taskId)
+            }
+
+            override suspend fun snapshot(taskId: String, workspacePath: String): String? {
+                val query = ChannelQuery.TaskSnapshot(taskId, workspacePath, messageLimit = 1)
+                return when (val answer = watchClient.query(query)) {
+                    is QueryAnswer.Ok -> answer.resultJson
+                    else -> null
+                }
+            }
+        }
+        Interventions(
+            client = watchClient,
+            notifs = InterventionsNotifs(cfg.baseDir, board, ops, taskTitles),
+        )
+    } else {
+        null
+    }
 
     drainQueue = {
         val pending = queue.drain()
@@ -770,7 +843,16 @@ internal fun wireChannel(
             File(File(cfg.homeDir, "state"), AUTH_DISMISSED_FILE).writeText(pid)
         },
     )
-    return ChannelStack(client, liveView, wired?.poller, hub, busTaps, notifs?.watcher, wired?.bootLadder ?: {})
+    return ChannelStack(
+        client,
+        liveView,
+        wired?.poller,
+        hub,
+        busTaps,
+        notifs?.watcher,
+        wired?.bootLadder ?: {},
+        interventions,
+    )
 }
 
 private const val QUEUE_FILE = "inbound-queue.json"

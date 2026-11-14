@@ -57,6 +57,7 @@ one JVM runs every bot watcher:
 | `live-view` | every 3 s edit cadence | `state/hb-live-view` | the never-radio-silence card: one message edited in place (`LivePublisher`) |
 | `poller` | 1 s spacing + 3 s long-poll | `state/hb-poller` | getUpdates, the single reader since the Python retirement (`Poller`) |
 | `subagent-notifs` | every daemon tick (5 s) | `state/hb-subagent-notifs` | the 🔔 owner notifications from the store's transitions |
+| `interventions-watch` + its own `channel` client | every daemon tick (5 s) | `state/hb-interventions` | the any-task law (14/11): follows every recently-active task on a SECOND connection and hands its permission/elicitation questions to the same board — the phone answers questions from tasks the owner is not reading (`InterventionsNotifs`, `InterventionsWatch`) |
 | `outbox-drain` | every 15 s | none | paces the lane(s)' parked messages out of `outbox*.json`, 1 msg/s (both files only when the firehose split exists) |
 
 Sources: `modules/daemon/.../Main.kt` (the wiring), `modules/channel/.../ChannelClient.kt`,
@@ -64,7 +65,7 @@ Sources: `modules/daemon/.../Main.kt` (the wiring), `modules/channel/.../Channel
 
 ### 1.2 Heartbeats and what they prove — read this before trusting one
 
-All six `hb-*` files are **mtimes touched by KAP's heartbeat**, which beats
+All `hb-*` files are **mtimes touched by KAP's heartbeat**, which beats
 every 30 s *while the process is alive — including during the body's
 execution and during restart delays* (`kap-resilience/.../Process.kt`).
 
@@ -302,6 +303,7 @@ file is a single dead loop, not a dead daemon:
 | `hb-zconn-shadow` | the model-wire watcher | no ⚠️/✅ notices (the wire may be down unnoticed) |
 | `hb-spectator` | the marker scanner | nothing today — nothing writes markers (§6.4) |
 | `hb-subagent-notifs` | the 🔔 notifications | no key-moment pings |
+| `hb-interventions` | the any-task watcher (or its second channel client) | questions from tasks the owner is NOT reading stop reaching the phone (the selected task is unaffected) |
 
 If they are **all** stale, the JVM is not beating: check the crash noise
 and let launchd do its job (it will, `KeepAlive` is true).

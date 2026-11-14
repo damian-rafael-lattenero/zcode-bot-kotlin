@@ -240,11 +240,23 @@ fun main(args: Array<String>) {
         val notifHandle = stack.notifs
             ?.asProcess(cfg.interval, onHeartbeat = { touch(File(stateDir, HB_NOTIFS)) })
             ?.startIn(this)
+        // 🧭 the ANY-TASK watcher (14/11): its OWN channel connection (foreign
+        // tasks never reach the live card) + the reconciliation pass — one
+        // tick each, one heartbeat file (null without a live send)
+        val anyTaskClient = stack.interventions
+            ?.client
+            ?.asProcess(onHeartbeat = { touch(File(stateDir, HB_INTERVENTIONS)) })
+            ?.startIn(this)
+        val anyTaskHandle = stack.interventions
+            ?.notifs
+            ?.asProcess(cfg.interval, onHeartbeat = { touch(File(stateDir, HB_INTERVENTIONS)) })
+            ?.startIn(this)
         logger.info {
             val view = if (liveHandle != null) "on" else "off"
             val poll = if (pollerHandle != null) "ON" else "off"
+            val anyTask = if (anyTaskHandle != null && anyTaskClient != null) "on" else "off"
             "channel wired: client=on socket=${File(cfg.baseDir, "daemon-local.sock").path} " +
-                "liveView=$view poller=$poll"
+                "liveView=$view poller=$poll anyTask=$anyTask"
         }
 
         // Python's register_bot_menu: with the poller ON the daemon owns the
@@ -455,6 +467,7 @@ private const val HB_CHANNEL = "hb-channel"
 private const val HB_LIVE_VIEW = "hb-live-view"
 private const val HB_POLLER = "hb-poller"
 private const val HB_NOTIFS = "hb-subagent-notifs"
+private const val HB_INTERVENTIONS = "hb-interventions"
 private const val COMPONENT_KEY = "component"
 private val DEFAULT_HEARTBEAT_EVERY = 30.seconds
 private val SPECTATOR_SCAN = 2.seconds
