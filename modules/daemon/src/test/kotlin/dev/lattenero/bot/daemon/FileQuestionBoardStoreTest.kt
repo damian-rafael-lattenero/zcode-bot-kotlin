@@ -55,6 +55,8 @@ class FileQuestionBoardStoreTest {
                 ),
                 questionIndex = 1,
                 answers = mapOf(0 to "main"),
+                taskTitle = "kap — the detekt laws",
+                originLabel = "general-purpose · audit the migrations",
             ),
         )
         val store = FileQuestionBoardStore(file)
