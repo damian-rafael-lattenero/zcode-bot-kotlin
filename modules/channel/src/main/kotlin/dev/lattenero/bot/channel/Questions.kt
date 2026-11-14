@@ -108,6 +108,20 @@ data class PendingQuestion(
     val questionIndex: Int = 0,
     /** The answers collected so far: question index → the answer's value. */
     val answers: Map<Int, String> = emptyMap(),
+    /**
+     * THE TASK'S OWN TITLE (14/11, the any-task law): a question may arrive
+     * from a conversation the owner is NOT reading — the card must say
+     * which one it is. null = unknown (the stream event carries no title;
+     * the watcher's index pass fills it).
+     */
+    val taskTitle: String? = null,
+    /**
+     * THE SUBAGENT'S ORIGIN (the fork's delegating broker: `origin.kind =
+     * "subagent"` rewrites the child's blocking request onto the PARENT
+     * session) — «agentType · description», so the owner knows the question
+     * comes from a dispatch lane, not from the main agent.
+     */
+    val originLabel: String? = null,
 )
 
 /**
@@ -122,6 +136,7 @@ internal fun parseQuestionEvent(event: JsonObject): PendingQuestion? {
     val type = event.str("type") ?: return null
     val requestId = event.str("requestId")?.takeIf { it.isNotEmpty() } ?: return null
     val taskId = event.str("taskId") ?: return null
+    val origin = originLabelOf(event)
     return when (type) {
         "permission_request" -> {
             val raw = event["options"] as? JsonArray
@@ -160,6 +175,7 @@ internal fun parseQuestionEvent(event: JsonObject): PendingQuestion? {
                     ?: event.str("title")?.takeIf { it.isNotBlank() }
                     ?: "El agente pide permiso",
                 options = opts,
+                originLabel = origin,
             )
         }
 
@@ -177,6 +193,7 @@ internal fun parseQuestionEvent(event: JsonObject): PendingQuestion? {
                         QuestionOption("decline", "❌ Rechazar"),
                     ),
                     plan = schema.str("plan"),
+                    originLabel = origin,
                 )
             } else {
                 val questions = event["questions"] as? JsonArray
@@ -218,12 +235,25 @@ internal fun parseQuestionEvent(event: JsonObject): PendingQuestion? {
                     options = items.first().options,
                     questionCount = items.size,
                     questions = items,
+                    originLabel = origin,
                 )
             }
         }
 
         else -> null
     }
+}
+
+/**
+ * The fork's `origin` when a SUBAGENT asked (the delegating broker's
+ * metadata): «agentType · description» — a small, honest tag for the card.
+ * Any other origin shape (absent, a future kind) = null (the additive law).
+ */
+private fun originLabelOf(event: JsonObject): String? {
+    val origin = event.obj("origin")?.takeIf { it.str("kind") == "subagent" } ?: return null
+    val type = origin.str("agentType")?.takeIf { it.isNotBlank() }
+    val description = origin.str("description")?.takeIf { it.isNotBlank() }
+    return listOfNotNull(type, description).joinToString(" · ").ifBlank { null }
 }
 
 /** The elicitation's option rows (`value`+`label`), capped like every keyboard. */
@@ -240,11 +270,21 @@ private fun elicitationOptions(raw: JsonArray?): List<QuestionOption> = raw.orEm
 
 /**
  * The question message's TEXT — the dedicated message (never the card):
- * the head, the body, the plan's verbatim clip. User-facing Spanish. A
- * multi-question form says WHICH question is on screen («pregunta N de M»).
+ * the head, WHICH conversation (the task title) and WHICH subagent (the
+ * origin tag) asked, the body, the plan's verbatim clip. User-facing
+ * Spanish. A multi-question form says WHICH question is on screen
+ * («pregunta N de M»).
  */
 internal fun questionText(q: PendingQuestion): String = buildString {
     append("<b>").append(PyText.esc(q.header)).append("</b>")
+    q.taskTitle?.takeIf { it.isNotBlank() }?.let { title ->
+        append("\n<i>📋 ").append(PyText.esc(PyText.take(title, QuestionBoard.QUESTION_TASK_CP))).append("</i>")
+    }
+    q.originLabel?.takeIf { it.isNotBlank() }?.let { label ->
+        append("\n<i>🤖 subagente: ")
+            .append(PyText.esc(PyText.take(label, QuestionBoard.QUESTION_ORIGIN_CP)))
+            .append("</i>")
+    }
     append("\n").append(PyText.esc(q.title))
     if (q.questionCount > 1) {
         append("\n<i>pregunta ").append(q.questionIndex + 1).append(" de ").append(q.questionCount).append("</i>")
@@ -397,8 +437,8 @@ class QuestionBoard(
     private class Registration(val shortId: String, val evicted: List<PendingQuestion>)
 
     @Suppress("ReturnCount") // the dedupe's guards ARE the law
-    suspend fun onStreamEvent(frame: ServerFrame.StreamEvent): PendingQuestion? {
-        val parsed = parseQuestionEvent(frame.event) ?: return null
+    suspend fun onStreamEvent(frame: ServerFrame.StreamEvent, taskTitle: String? = null): PendingQuestion? {
+        val parsed = parseQuestionEvent(frame.event)?.copy(taskTitle = taskTitle) ?: return null
         val registered = synchronized(lock) {
             shortIdByRequestId[parsed.requestId]?.let { return null }
             val sid = nextShortId()
@@ -434,6 +474,14 @@ class QuestionBoard(
 
     /** The tap's lookup — null after a resolve (a second tap fails honestly). */
     fun byShortId(shortId: String): PendingQuestion? = synchronized(lock) { byShortId[shortId] }
+
+    /**
+     * THE QUESTIONS' TASKS (14/11, the any-task law): every taskId with a
+     * question still pending — the watcher keeps those subscriptions alive
+     * even after the task falls out of the activity window, so an app-side
+     * answer still seals the phone's card.
+     */
+    fun pendingTaskIds(): Set<String> = synchronized(lock) { byShortId.values.map { it.taskId }.toSet() }
 
     /**
      * One recorded answer (a `qa:` tap's option value or the ✍️ arm's free
@@ -527,6 +575,12 @@ class QuestionBoard(
 
         /** The plan's verbatim clip in the question message (code points). */
         const val QUESTION_PLAN_CP = 1600
+
+        /** The task title's clip on the card's context line (code points). */
+        const val QUESTION_TASK_CP = 80
+
+        /** The subagent origin tag's clip on the card (code points). */
+        const val QUESTION_ORIGIN_CP = 80
 
         /** An option's label cap on the button (Telegram's row sanity). */
         const val QUESTION_LABEL_CAP = 30
