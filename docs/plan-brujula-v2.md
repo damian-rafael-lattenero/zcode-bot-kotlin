@@ -35,7 +35,7 @@ One systematic gap per repo:
 ### zcode-bot-kotlin
 
 - [ ] **T1 — Shadow-judge evals**: daily LLM-as-judge over `~/.zcode/bot-recordings/` traces, reusing the comparator's launchd slot (`com.zcode.bot-comparator`); score → metrics + weekly digest. *Teaches: LLM-as-judge, quality observability.*
-- [ ] **T2 — Sticker/animation fix** (warm-up): extend `normalizeAttachment` — sticker → image, animation → video, honestly labeled; the last silent drop dies.
+- [x] **T2 — Sticker/animation fix** (warm-up): extend `normalizeAttachment` — sticker → image or video by its real mime (`stickerKind`), animation → video (the Bot API's own words); the shape's own name keeps the truth. The last silent drop dies. *(Done 2026-11-14, full gate green; deploy pending owner's word.)*
 - [ ] **T3 — /learn command**: weekly "what did the ecosystem learn" digest from the brain (`memory_recent` + `rag_query` + bus stats) to Telegram — closes the learning loop kept by hand today.
 - [ ] **T4 — Red-team §6 ACTIONs**: rotate the healthchecks.io heartbeat URL + `~/.zcode/agent-brain/mcp.token`, 0600 perms, thread `fromId` into destructive taps.
 
