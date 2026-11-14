@@ -1969,10 +1969,11 @@ class BotCommands(
     ): BotReply {
         val running = watched?.taskId?.let { setOf(it) } ?: emptySet()
         val dbRunning = watched?.taskId?.let { history.subagentsRunning(it) }.orEmpty()
+        val sorted = rows.runningFirst(running)
         return BotReply(
-            text = renderTaskList(rows, running, watched?.taskId, null, all, watchedSid = watched?.taskId) +
+            text = renderTaskList(sorted, running, watched?.taskId, null, all, watchedSid = watched?.taskId) +
                 (hint ?: ""),
-            markup = Keyboards.tasksKeyboard(rows, running, watched?.taskId, lanes, dbRunning, clock()),
+            markup = Keyboards.tasksKeyboard(sorted, running, watched?.taskId, lanes, dbRunning, clock()),
         )
     }
 
@@ -1992,9 +1993,12 @@ class BotCommands(
         val dbRunning = (watched?.taskId ?: ctx.value.activeTaskId)
             ?.let { history.subagentsRunning(it) }
             ?: emptyList()
+        // the owner's 14/11 law: the running conversations float to the top,
+        // the rest keeps the daemon's execution-time order beneath them
+        val sorted = rows.runningFirst(running)
         return BotReply(
             text = renderTaskList(
-                rows,
+                sorted,
                 running,
                 ctx.value.activeTaskId,
                 ctx.value.workspacePath,
@@ -2002,7 +2006,7 @@ class BotCommands(
                 watchedSid = watched?.taskId,
             ) + (hint ?: ""),
             markup = Keyboards.tasksKeyboard(
-                rows = rows,
+                rows = sorted,
                 running = running,
                 // the 🎯 follows THE PIPE THE OWNER IS WATCHING (30/10:
                 // «me muestra siempre unificador» — the bind REFUSES to

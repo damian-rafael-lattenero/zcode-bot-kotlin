@@ -178,8 +178,8 @@ class BotCommandsTest {
         assertEquals(
             """
             💬 <b>Conversations by project</b> — tap a row to watch it live
-            🎯 1. arreglá el login
-            🔄 2. second · 📁bot
+            🔄 1. second · 📁bot
+            🎯 2. arreglá el login
 
             Free text you send goes to the active conversation (🎯).
             """.trimIndent(),
@@ -193,8 +193,25 @@ class BotCommandsTest {
         val (bc, _) = commands(o)
         val reply = bc.reply("/all_tasks", 1L)!!
         assertTrue("💬 <b>All conversations</b> (loose ones included) — /tasks only projects" in reply)
-        assertTrue("🔄 2. second · 📁bot" in reply)
+        assertTrue("🔄 1. second · 📁bot" in reply, "the running row floats to the top (the owner's 14/11 law)")
         assertTrue("· 3. task-03 · 📁default" in reply) // loose row kept, sid tail as title
+    }
+
+    @Test
+    fun aRunningTaskFloatsAboveFresherIdleOnes() = runBlocking {
+        // the owner's 14/11 law: RUNNING first, then the most recently executed —
+        // an idle task touched minutes ago does NOT outrank a running one
+        val o = ops().apply { answers["activeTaskIds"] = """["task-old-running"]""" }
+        val history = FakeHistory(
+            listOf(
+                TaskRow(sid = "task-fresh-idle", title = "recien tocada", ws = app, whenMs = 5_000L),
+                TaskRow(sid = "task-old-running", title = "corriendo hace rato", ws = app, whenMs = 100L),
+            ),
+        )
+        val (bc, _) = commands(o, history)
+        val reply = bc.reply("/tasks", 1L)!!
+        assertTrue("🔄 1. corriendo hace rato" in reply, "the running row is FIRST")
+        assertTrue("· 2. recien tocada" in reply, "the idle row keeps its execution-time slot beneath")
     }
 
     @Test
