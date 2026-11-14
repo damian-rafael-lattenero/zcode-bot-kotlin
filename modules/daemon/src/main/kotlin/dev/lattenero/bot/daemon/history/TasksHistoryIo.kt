@@ -30,8 +30,17 @@ import java.util.Properties
  * only at its FIRST TURN'S END (created_at backdated — measured live:
  * the row was absent 3 min after birth), while the CLI db's own session
  * row exists from birth. Every interactive parent session younger than
- * [NEWBORN_WINDOW_MS] rides PREPENDED until the index catches up — the
- * anti-join retires the merged row the moment the real one lands.
+ * [NEWBORN_WINDOW_MS] rides until the index catches up — the anti-join
+ * retires the merged row the moment the real one lands.
+ *
+ * THE EXECUTION-TIME LAW (the owner, 14/11: «ordenadas por hora de
+ * ejecución... y luego las mas recientes»): the merged pool is ordered by
+ * each row's EXECUTION stamp — the last model_usage line's started_at,
+ * else the index's own updated_at, else the CLI session's time_updated
+ * for newborns — never by birth order (the prepend used to hoist a 2h-old
+ * idle newborn above a just-active conversation). The RUNNING-first half
+ * of the same law is the channel's: it floats the running sids on top of
+ * this order at render time.
  */
 @Suppress("TooManyFunctions") // one read per contract surface — the class IS the repo port
 internal class TasksHistoryIo(
@@ -40,9 +49,16 @@ internal class TasksHistoryIo(
 ) : TasksHistory {
 
     override suspend fun ctxTasks(limit: Int): List<TaskRow> {
-        val usage = usageBySession(cliDb())
-        val indexed = indexRows(tasksIndex(), usage, limit)
-        return withNewborns(indexed, newbornSessions(cliDb(), clock() - NEWBORN_WINDOW_MS), limit)
+        val db = cliDb()
+        val usage = usageBySession(db)
+        val index = tasksIndex()
+        val indexed = indexRows(index, usage, limit)
+        return withNewborns(
+            indexed,
+            newbornSessions(db, clock() - NEWBORN_WINDOW_MS, usage),
+            indexSids(index),
+            limit,
+        )
     }
 
     override suspend fun modelSelection(sid: String): ModelSel? {
@@ -187,22 +203,30 @@ internal class TasksHistoryIo(
     }
 
     /**
-     * The newborn merge: fresh CLI sessions PREPENDED (newest first) before
-     * the index's own rows, deduped against them (the anti-join retires a
-     * merged row the moment its real index row lands), the whole list capped.
+     * The merge: fresh CLI sessions whose sid the index does NOT hold —
+     * alive OR tombstoned, the tap's taskAlive refuses the tombstoned ones,
+     * so a visible row that cannot be attached is a lie — ride into the
+     * pool and the WHOLE pool is ordered by execution stamp, then capped.
      */
-    private fun withNewborns(indexed: List<TaskRow>, newborns: List<TaskRow>, limit: Int): List<TaskRow> {
-        val known = indexed.mapTo(mutableSetOf()) { it.sid }
-        return (newborns.filter { it.sid !in known } + indexed).take(limit)
-    }
+    private fun withNewborns(
+        indexed: List<TaskRow>,
+        newborns: List<TaskRow>,
+        knownAll: Set<String>,
+        limit: Int,
+    ): List<TaskRow> = (newborns.filter { it.sid !in knownAll } + indexed)
+        .sortedByDescending { it.whenMs }
+        .take(limit)
 
     /**
      * The CLI db's own `session` table — the one store that holds a
      * /run-born conversation from BIRTH (interactive parents only: subagent
-     * children and side chats are not conversations). A missing table (older
-     * db, tests) answers empty — the index rows ride alone, as before.
+     * children and side chats are not conversations). A session's stamp is
+     * its usage's started_at when the CLI already logged model calls, else
+     * its own time_updated — the execution time, never the birth time. A
+     * missing table (older db, tests) answers empty — the index rows ride
+     * alone, as before.
      */
-    private fun newbornSessions(db: File, cutoffMs: Long): List<TaskRow> {
+    private fun newbornSessions(db: File, cutoffMs: Long, usage: Map<String, Usage>): List<TaskRow> {
         if (!db.exists()) return emptyList()
         return runCatching {
             DriverManager.getConnection("jdbc:sqlite:${db.absolutePath}", roProps()).use { conn ->
@@ -211,14 +235,15 @@ internal class TasksHistoryIo(
                     ps.executeQuery().use { rs ->
                         val rows = mutableListOf<TaskRow>()
                         while (rs.next()) {
+                            val u = usage[rs.getString(NB_ID_COL)]
                             rows.add(
                                 TaskRow(
                                     sid = rs.getString(NB_ID_COL),
                                     title = rs.getString(NB_TITLE_COL).orEmpty(),
                                     ws = rs.getString(NB_DIR_COL).orEmpty(),
-                                    ctx = 0,
-                                    model = "",
-                                    whenMs = rs.getLong(NB_CREATED_COL),
+                                    ctx = u?.ctx ?: 0,
+                                    model = u?.model.orEmpty(),
+                                    whenMs = u?.whenMs ?: rs.getLong(NB_UPDATED_COL),
                                 ),
                             )
                         }
@@ -268,6 +293,27 @@ internal class TasksHistoryIo(
                 }
             }
         }.getOrDefault(emptyList())
+    }
+
+    /**
+     * EVERY task_id the index holds — alive, archived, deleted — the
+     * newborn merge's anti-tombstone set: a session the app already
+     * tombstoned must never ride as a newborn (the tap's taskAlive refuses
+     * it; a visible row that cannot be attached is a lie).
+     */
+    private fun indexSids(index: File): Set<String> {
+        if (!index.exists()) return emptySet()
+        return runCatching {
+            DriverManager.getConnection("jdbc:sqlite:${index.absolutePath}", roProps()).use { conn ->
+                conn.prepareStatement(INDEX_SIDS_QUERY).use { ps ->
+                    ps.executeQuery().use { rs ->
+                        val sids = mutableSetOf<String>()
+                        while (rs.next()) sids.add(rs.getString(1))
+                        sids
+                    }
+                }
+            }
+        }.getOrDefault(emptySet())
     }
 
     /**
@@ -335,6 +381,9 @@ internal class TasksHistoryIo(
             "SELECT task_id, title, workspace_path, updated_at FROM tasks WHERE deleted=0 AND archived=0 " +
                 "ORDER BY (workspace_key = workspace_path) DESC, pinned DESC, updated_at DESC"
 
+        /** The anti-tombstone set: every sid the index holds, tombstoned ones included. */
+        const val INDEX_SIDS_QUERY = "SELECT DISTINCT task_id FROM tasks"
+
         /** Python's model_selection: the newest runtime/model_selection row of the session. */
         const val SELECTION_QUERY =
             "SELECT data FROM session_entry WHERE session_id=? " +
@@ -387,7 +436,7 @@ internal class TasksHistoryIo(
 
         /** The newborns: interactive parent sessions born since the cutoff, newest first. */
         const val NEWBORN_QUERY =
-            "SELECT id, title, directory, time_created FROM session " +
+            "SELECT id, title, directory, time_updated FROM session " +
                 "WHERE parent_id IS NULL AND task_type = 'interactive' " +
                 "AND time_deleted IS NULL AND time_archived IS NULL AND time_created >= ? " +
                 "ORDER BY time_created DESC"
@@ -396,6 +445,6 @@ internal class TasksHistoryIo(
         const val NB_ID_COL = 1
         const val NB_TITLE_COL = 2
         const val NB_DIR_COL = 3
-        const val NB_CREATED_COL = 4
+        const val NB_UPDATED_COL = 4
     }
 }

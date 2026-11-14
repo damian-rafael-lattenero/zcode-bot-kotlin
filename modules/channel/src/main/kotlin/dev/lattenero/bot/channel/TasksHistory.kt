@@ -101,6 +101,15 @@ data class ModelSel(val modelId: String, val reasoningLevel: String)
 fun scopeRows(rows: List<TaskRow>, all: Boolean, defaultWs: String): List<TaskRow> =
     if (all) rows else rows.filter { it.ws != defaultWs }
 
+/**
+ * The owner's 14/11 law: RUNNING conversations first, then the most
+ * recently executed. The pool arrives execution-time ordered from the
+ * daemon ([TaskRow.whenMs]); this floats the running sids on top for the
+ * phone's view — stable, so ties keep the execution-time order beneath.
+ */
+fun List<TaskRow>.runningFirst(running: Set<String>): List<TaskRow> =
+    sortedWith(compareByDescending<TaskRow> { it.sid in running }.thenByDescending { it.whenMs })
+
 /** The history nobody wired — honest emptiness (tests, or a missing index). */
 val noHistory: TasksHistory = object : TasksHistory {
     override suspend fun ctxTasks(limit: Int): List<TaskRow> = emptyList()
