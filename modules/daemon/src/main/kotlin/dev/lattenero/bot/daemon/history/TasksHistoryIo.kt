@@ -24,13 +24,25 @@ import java.util.Properties
  * default-workspace rows last), plus each conversation's persisted model
  * selection. The same read-only pattern as the spectator: short-lived
  * xerial connections, mode=ro, zero writes.
+ *
+ * THE NEWBORN LAW (the owner, 14/11: «las tasks nuevas del /run no
+ * aparecen»): the app writes a /run-born conversation's tasks-index row
+ * only at its FIRST TURN'S END (created_at backdated — measured live:
+ * the row was absent 3 min after birth), while the CLI db's own session
+ * row exists from birth. Every interactive parent session younger than
+ * [NEWBORN_WINDOW_MS] rides PREPENDED until the index catches up — the
+ * anti-join retires the merged row the moment the real one lands.
  */
 @Suppress("TooManyFunctions") // one read per contract surface — the class IS the repo port
-internal class TasksHistoryIo(private val baseDir: File) : TasksHistory {
+internal class TasksHistoryIo(
+    private val baseDir: File,
+    private val clock: () -> Long = System::currentTimeMillis,
+) : TasksHistory {
 
     override suspend fun ctxTasks(limit: Int): List<TaskRow> {
         val usage = usageBySession(cliDb())
-        return indexRows(tasksIndex(), usage, limit)
+        val indexed = indexRows(tasksIndex(), usage, limit)
+        return withNewborns(indexed, newbornSessions(cliDb(), clock() - NEWBORN_WINDOW_MS), limit)
     }
 
     override suspend fun modelSelection(sid: String): ModelSel? {
@@ -164,6 +176,49 @@ internal class TasksHistoryIo(private val baseDir: File) : TasksHistory {
                                     sid = rs.getString(1).orEmpty(),
                                     title = rs.getString(2).orEmpty(),
                                     lastMs = rs.getLong(RUNNING_SUB_UPDATED_COL),
+                                ),
+                            )
+                        }
+                        rows
+                    }
+                }
+            }
+        }.getOrDefault(emptyList())
+    }
+
+    /**
+     * The newborn merge: fresh CLI sessions PREPENDED (newest first) before
+     * the index's own rows, deduped against them (the anti-join retires a
+     * merged row the moment its real index row lands), the whole list capped.
+     */
+    private fun withNewborns(indexed: List<TaskRow>, newborns: List<TaskRow>, limit: Int): List<TaskRow> {
+        val known = indexed.mapTo(mutableSetOf()) { it.sid }
+        return (newborns.filter { it.sid !in known } + indexed).take(limit)
+    }
+
+    /**
+     * The CLI db's own `session` table — the one store that holds a
+     * /run-born conversation from BIRTH (interactive parents only: subagent
+     * children and side chats are not conversations). A missing table (older
+     * db, tests) answers empty — the index rows ride alone, as before.
+     */
+    private fun newbornSessions(db: File, cutoffMs: Long): List<TaskRow> {
+        if (!db.exists()) return emptyList()
+        return runCatching {
+            DriverManager.getConnection("jdbc:sqlite:${db.absolutePath}", roProps()).use { conn ->
+                conn.prepareStatement(NEWBORN_QUERY).use { ps ->
+                    ps.setLong(1, cutoffMs)
+                    ps.executeQuery().use { rs ->
+                        val rows = mutableListOf<TaskRow>()
+                        while (rs.next()) {
+                            rows.add(
+                                TaskRow(
+                                    sid = rs.getString(NB_ID_COL),
+                                    title = rs.getString(NB_TITLE_COL).orEmpty(),
+                                    ws = rs.getString(NB_DIR_COL).orEmpty(),
+                                    ctx = 0,
+                                    model = "",
+                                    whenMs = rs.getLong(NB_CREATED_COL),
                                 ),
                             )
                         }
@@ -326,5 +381,21 @@ internal class TasksHistoryIo(private val baseDir: File) : TasksHistory {
         const val RUNNING_SUBS_TITLED_QUERY =
             "SELECT id, title, time_updated FROM session WHERE parent_id = ? AND COALESCE(last_outcome,'') = '' " +
                 "ORDER BY time_created DESC LIMIT 10"
+
+        /** The newborns' window: long enough for any first turn to end and flush its index row. */
+        const val NEWBORN_WINDOW_MS = 2 * 60 * 60 * 1000L
+
+        /** The newborns: interactive parent sessions born since the cutoff, newest first. */
+        const val NEWBORN_QUERY =
+            "SELECT id, title, directory, time_created FROM session " +
+                "WHERE parent_id IS NULL AND task_type = 'interactive' " +
+                "AND time_deleted IS NULL AND time_archived IS NULL AND time_created >= ? " +
+                "ORDER BY time_created DESC"
+
+        /** The newborn read's column positions (the read's own naming, MagicNumber's law). */
+        const val NB_ID_COL = 1
+        const val NB_TITLE_COL = 2
+        const val NB_DIR_COL = 3
+        const val NB_CREATED_COL = 4
     }
 }
