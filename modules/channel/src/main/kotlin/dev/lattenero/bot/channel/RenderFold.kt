@@ -70,6 +70,14 @@ fun reduce(
             phase = TurnPhase.Idle,
         )
 
+        // THE CHILD'S RESYNC (14/11): a re-subscribed child session's topic
+        // re-states its in-flight text — the lane's windows die BEFORE the
+        // burst lands or the re-stated deltas double onto them (the measured
+        // «CheckCheck…» seams: the child's tail on the parent card, doubled
+        // at every reconnect replay). The lane's ROW survives; the burst
+        // rebuilds its windows.
+        isSubagentSession(event.taskId) && state != null -> resyncChildLane(state, event.taskId)
+
         else -> state
     }
 
@@ -268,34 +276,43 @@ private fun reduceThought(state: RenderState, event: RenderEvent.Thought): Rende
         // Replay guard (measured live 30/10: the fork's stream recovery
         // can re-emit the same chunk; the tail already ends with it — a
         // duplicate would double-print the sentence in the cajita).
-        // Length-gated: tiny legitimate repeats (separators, short tokens)
-        // must pass — only sentence-sized re-emissions are replays.
-        if (delta.length >= REPLAY_GUARD_MIN_CP && state.cotTail.endsWith(delta)) return state
+        // [replayed] gates the floor: a pure run (separators like "----")
+        // still needs sentence size, any other delta is a replay from 8
+        // code points up (the measured «…tests): detekt + tests)» seam was
+        // a 17-cp re-emitted fragment).
+        if (replayed(state.cotTail, delta)) return state
         // THE REBURST'S FIRST THOUGHT (11/11): the re-stated first thinking
         // emission (chars equal, tail equal) appends nothing — the fork
         // re-stamps `at` on a re-delivery, so the stamp proves nothing; a
         // genuine chunk carries MORE content and grows the counter. The
         // answer's twin guard is the same shape.
         if (state.thoughtChars == delta.length && state.cotTail == delta) return state
-        val chars = state.thoughtChars + delta.length
+        // THE RE-STATED MERGED HEAD (14/11): the recovery re-emits the
+        // in-flight thinking MERGED (the fork coalesces same-key chunks) —
+        // one chunk that starts with the WHOLE current window and extends
+        // beyond it. Appended whole it doubled the window's head onto its
+        // tail (the measured «CheckCheck…» seam). Only the remainder is new.
+        val fresh = restatedThoughtFresh(state, delta)
+        if (fresh.isEmpty()) return state
+        val chars = state.thoughtChars + fresh.length
         // THE BLOCKS (Python's CotSealer.feed, reasoning.py): the pending
         // block seals EXACTLY at COT_BLOCK_CP code points — the sealer owns
         // the boundary law AND the block content keys (a re-stated burst's
         // twin block is skipped, already spoken).
-        val (blocks, keys, pending) = sealCotBlocks(state.cotBlocks, state.cotKeys, state.cotPending + delta)
+        val (blocks, keys, pending) = sealCotBlocks(state.cotBlocks, state.cotKeys, state.cotPending + fresh)
         state.copy(
             thoughtChars = chars,
             cotBlocks = blocks,
             cotKeys = keys,
             cotPending = pending,
-            cotTail = LiveTurn.takeLastCodePoints(state.cotTail + delta, LiveTurn.COT_TAIL_CP),
+            cotTail = LiveTurn.takeLastCodePoints(state.cotTail + fresh, LiveTurn.COT_TAIL_CP),
             // THE CoT'S FRESHNESS ANCHOR (v2 §2): only the main agent's real
             // deltas mark the thinking fresh — the «generando CoT vs
             // procesando…» split reads it, subagent lanes never touch it
             lastThoughtAtMs = event.atMs.takeIf { it > 0 } ?: event.nowMs,
             phase = TurnPhase.Thinking(chars = chars, sinceMs = phaseSince(state.phase, state, event.nowMs)),
             // REAL progress clears the retry pill (the fork's own recovery rule)
-            apiRetry = if (delta.isNotEmpty()) null else state.apiRetry,
+            apiRetry = if (fresh.isNotEmpty()) null else state.apiRetry,
         )
     } else {
         // A foreign lane's thought: the fork NEVER mirrors child text deltas
@@ -352,7 +369,7 @@ private fun sealCotBlocks(
 @Suppress("ReturnCount")
 private fun reduceAnswer(state: RenderState, event: RenderEvent.Answering): RenderState {
     val delta = event.delta
-    if (delta.length >= REPLAY_GUARD_MIN_CP && state.answerTail.endsWith(delta)) return state
+    if (replayed(state.answerTail, delta)) return state
     // THE REBURST'S FIRST WORD (11/11): the subscribe burst re-delivers the
     // answer's first emission — the whole streamed answer IS that delta
     // (chars equal, tail equal) — so appending it again doubled the first
@@ -361,13 +378,18 @@ private fun reduceAnswer(state: RenderState, event: RenderEvent.Answering): Rend
     // twin guard is the same shape. (The fork re-stamps `at` on a
     // re-delivery — the stamp proved nothing in production; content only.)
     if (state.answerChars == delta.length && state.answerTail == delta) return state
-    val chars = state.answerChars + delta.length
+    // THE RE-STATED MERGED HEAD (14/11): a recovery re-emission that starts
+    // with the WHOLE tail and extends beyond appends only its remainder —
+    // appended whole it doubled the window's head onto its tail.
+    val fresh = restatedFresh(state.answerTail, delta) ?: delta
+    if (fresh.isEmpty()) return state
+    val chars = state.answerChars + fresh.length
     return state.copy(
         answerChars = chars,
-        answerTail = LiveTurn.takeLastCodePoints(state.answerTail + delta, LiveTurn.ANSWER_TAIL_CP),
+        answerTail = LiveTurn.takeLastCodePoints(state.answerTail + fresh, LiveTurn.ANSWER_TAIL_CP),
         // THE VOICE'S SEGMENT (5/11): the prose accumulates for its violet
         // message — spoken whole when the model moves to a tool (or seals)
-        prosePending = (state.prosePending + delta).takeLast(LiveTurn.ANSWER_TAIL_CP),
+        prosePending = (state.prosePending + fresh).takeLast(LiveTurn.ANSWER_TAIL_CP),
         phase = when (val phase = state.phase) {
             is TurnPhase.Done -> phase
             else -> TurnPhase.Writing(
@@ -378,7 +400,7 @@ private fun reduceAnswer(state: RenderState, event: RenderEvent.Answering): Rend
                 sinceMs = phaseSince(phase, state, event.nowMs),
             )
         },
-        apiRetry = if (delta.isNotEmpty()) null else state.apiRetry,
+        apiRetry = if (fresh.isNotEmpty()) null else state.apiRetry,
     )
 }
 
@@ -471,11 +493,17 @@ private fun reduceChildStream(state: RenderState?, event: RenderEvent.ChildStrea
     if (event.delta.isEmpty()) return state
     val current = state.subagentLanes[event.laneId] ?: ChildLive()
     val tail = if (event.thought) current.cotTail else current.answerTail
-    // the replay guard's shape (the reburst law): a sentence-sized
-    // re-emission the tail already ends with appends nothing
-    if (event.delta.length >= REPLAY_GUARD_MIN_CP && tail.endsWith(event.delta)) return state
-    val chars = (if (event.thought) current.cotChars else current.answerChars) + event.delta.length
-    val nextTail = LiveTurn.takeLastCodePoints(tail + event.delta, LiveTurn.CHILD_TAIL_CP)
+    // the replay guard's shape (the reburst law): a re-emission the tail
+    // already ends with appends nothing ([replayed] gates the floor)
+    if (replayed(tail, event.delta)) return state
+    // THE RE-STATED MERGED HEAD (14/11): the child topic's re-subscribe
+    // burst re-states its in-flight text MERGED — a chunk that starts with
+    // the whole window appends only its remainder (the «CheckCheck…» seam
+    // measured on the child lanes).
+    val fresh = restatedFresh(tail, event.delta) ?: event.delta
+    if (fresh.isEmpty()) return state
+    val chars = (if (event.thought) current.cotChars else current.answerChars) + fresh.length
+    val nextTail = LiveTurn.takeLastCodePoints(tail + fresh, LiveTurn.CHILD_TAIL_CP)
     val next = if (event.thought) {
         current.copy(cotChars = chars, cotTail = nextTail, lastDeltaAtMs = event.nowMs)
     } else {
@@ -671,6 +699,76 @@ private fun phaseSince(phase: TurnPhase, state: RenderState, nowMs: Long): Long 
  * replays — legitimate small repeats (separators, short tokens) pass.
  */
 internal const val REPLAY_GUARD_MIN_CP = 24
+
+/**
+ * THE REPLAY'S SHORT FLOOR (14/11): a re-emitted fragment that is NOT a
+ * pure run of one character is a replay from this many code points up.
+ * The measured seam («…tests): detekt + tests)») was a 17-cp re-emitted
+ * fragment — under the sentence floor it appended and doubled the tail.
+ * Pure runs ("----", "\n\n\n") keep the sentence floor: a second rule
+ * line under a first one is a legitimate repeat, never a re-emission.
+ */
+internal const val REPLAY_GUARD_SHORT_CP = 8
+
+/**
+ * The replay guard, floored by shape: true when [delta] re-delivers text
+ * the [window] already ends with. A pure run (every code point equal to
+ * the first) needs sentence size — legitimate separators repeat — any
+ * other delta is a replay from [REPLAY_GUARD_SHORT_CP] up.
+ */
+internal fun replayed(window: String, delta: String): Boolean {
+    if (window.isEmpty() || delta.isEmpty()) return false
+    val run = delta.length > 1 && delta.all { it == delta.first() }
+    val floor = if (run) REPLAY_GUARD_MIN_CP else REPLAY_GUARD_SHORT_CP
+    return delta.length >= floor && window.endsWith(delta)
+}
+
+/**
+ * THE RE-STATED MERGED HEAD (14/11): a recovery re-emission arrives
+ * MERGED (the fork coalesces same-key chunks), so one chunk can start
+ * with the WHOLE current window and extend beyond it — in an append-only
+ * stream that is a re-statement by construction, and only the remainder
+ * is new. Null when the delta is not that shape (the ordinary case).
+ */
+// one guard per early exit: the two shape gates answer before the trim
+@Suppress("ReturnCount")
+internal fun restatedFresh(window: String, delta: String): String? {
+    if (delta.length < REPLAY_GUARD_MIN_CP || window.isEmpty()) return null
+    if (delta.length < window.length || !delta.startsWith(window)) return null
+    return delta.substring(window.length)
+}
+
+/**
+ * The thinking's own [restatedFresh]: the tail and the pending block are
+ * both suffixes of the stream, so the LONGEST window the delta re-states
+ * decides the remainder — the tail (capped at [LiveTurn.COT_TAIL_CP])
+ * goes blind past its cap, the pending (the current block) does not.
+ */
+// one guard per early exit: the floor gate and the no-recognitions gate
+@Suppress("ReturnCount")
+private fun restatedThoughtFresh(state: RenderState, delta: String): String {
+    if (delta.length < REPLAY_GUARD_MIN_CP) return delta
+    val recognized = longestRestated(listOf(state.cotTail, state.cotPending), delta) ?: return delta
+    return delta.substring(recognized.length)
+}
+
+/** The longest window the delta re-states in full (its own head); null = none. */
+private fun longestRestated(windows: List<String>, delta: String): String? =
+    windows
+        .filter { it.isNotEmpty() && delta.length >= it.length && delta.startsWith(it) }
+        .maxByOrNull { it.length }
+
+/**
+ * [RenderEvent.Resync] for a CHILD session topic (14/11): the lane whose
+ * dispatch ACK named this child re-baselines ITS windows — the replayed
+ * subscription's re-stated burst rebuilds them, never doubles onto them.
+ * The lane's row survives; a child no lane owns is nobody's traffic.
+ */
+private fun resyncChildLane(state: RenderState, childTaskId: String): RenderState {
+    val agentId = subagentAgentIdOf(childTaskId)
+    val laneId = state.tools.firstOrNull { it.subagentAgentId == agentId }?.toolId ?: return state
+    return state.copy(subagentLanes = state.subagentLanes + (laneId to ChildLive()))
+}
 
 /**
  * The box ceiling (U5b) — the same 120-entry cap the registry kept (a
