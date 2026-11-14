@@ -11,9 +11,8 @@ package dev.lattenero.bot.daemon.metrics
  * when OFF (every method a no-op; the daemon byte-for-byte the pre-E2 one)
  * or [MicrometerMetrics] when ON. OFF is strict by SHAPE:
  *
- * - the two request timers take the CALL itself (`memoryFetch`/
- *   `brainRequest`), so the no-op runs the block bare — not one clock
- *   read on a hot path;
+ * - the request timer takes the CALL itself (`brainRequest`), so the no-op
+ *   runs the block bare — not one clock read on a hot path;
  * - the gauges take suppliers that are read at SCRAPE time (a gauge must
  *   read a real value when Prometheus asks, never a cached one) — with
  *   the no-op they are simply never registered;
@@ -50,17 +49,6 @@ interface Metrics {
      * `.failures` are the one truth, read at scrape time.
      */
     fun busGauges(written: () -> Long, failures: () -> Long)
-
-    // ── memory_inject (ADR-020's bounded fetch) ──────────────────────────
-
-    /** A memory block actually PREPENDED (real injected text, not an attempt). */
-    fun memoryInjected()
-
-    /** The fetch did not produce a block: timeout, dead brain or an HTTP error. */
-    fun memoryInjectFailed()
-
-    /** The block-fetch's latency, timed around the call itself. */
-    suspend fun <T> memoryFetch(block: suspend () -> T): T
 
     // ── the brain HTTP leg (agent-brain over localhost) ──────────────────
 
@@ -126,12 +114,6 @@ object NoopMetrics : Metrics {
     override fun turnSealed(outcome: TurnOutcome, durationMs: Long?) {}
 
     override fun busGauges(written: () -> Long, failures: () -> Long) {}
-
-    override fun memoryInjected() {}
-
-    override fun memoryInjectFailed() {}
-
-    override suspend fun <T> memoryFetch(block: suspend () -> T): T = block()
 
     override suspend fun <T> brainRequest(block: suspend () -> T): T = block()
 
