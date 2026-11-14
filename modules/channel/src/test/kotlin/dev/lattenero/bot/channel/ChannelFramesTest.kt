@@ -51,6 +51,17 @@ class ChannelFramesTest {
     }
 
     @Test
+    fun backgroundTurnEncodesTheForksFrozenFrame() {
+        // the frozen contract (parallel fork work): kind backgroundTurn +
+        // the taskId — the demote keeps the turn running, nothing aborted
+        val line = encodeClient(ClientFrame.Query("q7", ChannelQuery.BackgroundTurn("task-77")))
+        assertEquals(
+            """{"type":"query","id":"q7","query":{"kind":"backgroundTurn","taskId":"task-77"}}""",
+            line,
+        )
+    }
+
+    @Test
     fun taskListCarriesScopesAndLimit() {
         val query = ChannelQuery.TaskList(
             listKind = "timeline",
@@ -178,6 +189,7 @@ class ChannelFramesTest {
         assertEquals("quota", queryKind(ChannelQuery.Quota()))
         assertEquals("botStatus", queryKind(ChannelQuery.BotStatus))
         assertEquals("stop", queryKind(ChannelQuery.Stop("t")))
+        assertEquals("backgroundTurn", queryKind(ChannelQuery.BackgroundTurn("t")))
         assertEquals("stopAll", queryKind(ChannelQuery.StopAll()))
         assertEquals("compact", queryKind(ChannelQuery.Compact("t")))
     }

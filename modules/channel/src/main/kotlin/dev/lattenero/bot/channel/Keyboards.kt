@@ -353,6 +353,24 @@ object Keyboards {
     }
 
     /**
+     * 🌙 Go to background — the live card's demote row (the owner asked for
+     * the SAME name ZCode's own button wears): ONE row, ONE button, the
+     * tap demotes the running turn to background — the turn keeps running
+     * and its result still arrives; nothing is aborted. The demote is
+     * INERT by design (never a destructive tap): a tap on an idle card is
+     * an honest noop, never a kill.
+     */
+    fun backgroundTurn(sid: String): JsonObject = buildJsonObject {
+        putJsonArray("inline_keyboard") {
+            add(
+                buildJsonArray {
+                    add(button("🌙 Go to background", "bgd:$sid"))
+                },
+            )
+        }
+    }
+
+    /**
      * /verbosity's PICKER (the owner's knob, 30/10): one row per level —
      * the current one wears ✅ — tap = set. `vb:<level>` worst case ≈ 12
      * bytes — Telegram's 64-byte law never even breathes.

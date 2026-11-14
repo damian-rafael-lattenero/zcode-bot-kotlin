@@ -47,6 +47,7 @@ instead.
 | 📭 | empty — no conversation / no rows / no answer / no usage |
 | ⏳ | wait / parked — «vivo hace Xm», the F17 keep-queued offer |
 | ⚡ | interrupt (`intr:`) — in the stream, the SHELL verb |
+| 🌙 | go to background (`bgd:`) — demote the running turn: it keeps running, nothing is aborted |
 | 📖 | expand (`cb:`) — in the stream, the READ verb |
 | 🙈 | collapse (`cb:`) |
 | 📬 | parked mail: the queue card, the qgo ack, /last's answer |

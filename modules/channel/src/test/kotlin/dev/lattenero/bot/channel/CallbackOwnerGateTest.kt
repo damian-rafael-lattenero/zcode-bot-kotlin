@@ -98,12 +98,14 @@ class CallbackOwnerGateTest {
         // payload that spells the heavy commands is the same tap
         listOf("/nuclear go", "/nuclear", "/nuke", "/stop", "/stop go", "/stop@bot go")
             .forEach { assertTrue(isDestructiveTap(it), "$it is destructive") }
-        // everything reversible or inert keeps the old law
+        // everything reversible or inert keeps the old law (the 🌙 demote
+        // never aborts anything — it is inert like qgo:)
         listOf(
             "t:task-77", "sa:deadbeef", "so:toolu_1", "sn:toolu_1", "odq:1", "qa:q1:0", "qf:q1",
-            "qgo:task-77", "ql:tg-1", "qd:tg-1", "vb:verbose", "sao:", "saa:", "pl:opencode-go-chat",
-            "pm:kimi-k2", "pe:max", "pd:", "pac:", "pcl:", "mo:task", "cly:", "gfy", "gxn:", "cl:plan",
-            "gf:WEEK", "cb:7", "bp:7:2", "bf:7", "nuclear", "stop", "/tasks", "/status", "/help",
+            "qgo:task-77", "bgd:task-77", "ql:tg-1", "qd:tg-1", "vb:verbose", "sao:", "saa:",
+            "pl:opencode-go-chat", "pm:kimi-k2", "pe:max", "pd:", "pac:", "pcl:", "mo:task",
+            "cly:", "gfy", "gxn:", "cl:plan", "gf:WEEK", "cb:7", "bp:7:2", "bf:7",
+            "nuclear", "stop", "/tasks", "/status", "/help",
         ).forEach { assertFalse(isDestructiveTap(it), "$it is not destructive") }
     }
 

@@ -117,6 +117,16 @@ sealed interface ChannelQuery {
     data class Stop(val taskId: String) : ChannelQuery
 
     /**
+     * 🌙 Go to background (the fork's `backgroundTurn` query): DEMOTE the
+     * running turn — the turn keeps running in background and its result
+     * still arrives when it seals; nothing is aborted, nothing is lost.
+     * A noop on an idle or mismatched conversation (the fork answers
+     * `{"backgrounded": [], "reasonCode": ...}`); an old host says
+     * unknown_query and the tap speaks that honestly.
+     */
+    data class BackgroundTurn(val taskId: String) : ChannelQuery
+
+    /**
      * /mode's write (the A4 fork cap `control:setMode`): the conversation's
      * collaboration mode through the SAME switch the desktop toolbar uses.
      * The fork validates the vocabulary at the edge — an unknown mode is a
@@ -392,6 +402,11 @@ private fun encodeQuery(query: ChannelQuery): JsonObject = when (query) {
         put("taskId", query.taskId)
     }
 
+    is ChannelQuery.BackgroundTurn -> buildJsonObject {
+        put("kind", "backgroundTurn")
+        put("taskId", query.taskId)
+    }
+
     is ChannelQuery.SetMode -> buildJsonObject {
         put("kind", "setMode")
         put("taskId", query.taskId)
@@ -621,6 +636,7 @@ fun queryKind(query: ChannelQuery): String = when (query) {
     is ChannelQuery.SetModelSelection -> "setModelSelection"
     ChannelQuery.BotStatus -> "botStatus"
     is ChannelQuery.Stop -> "stop"
+    is ChannelQuery.BackgroundTurn -> "backgroundTurn"
     is ChannelQuery.StopAll -> "stopAll"
     is ChannelQuery.Compact -> "compact"
     is ChannelQuery.SetMode -> "setMode"

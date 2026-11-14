@@ -670,7 +670,7 @@ class LivePublisher(
             lastText = ""
             tryBirth(cfg, state, text)
         } else {
-            if (telegram.edit(cfg, liveMid, text)) lastText = text
+            if (telegram.edit(cfg, liveMid, text, cardMarkup(state))) lastText = text
         }
     }
 
@@ -977,6 +977,21 @@ class LivePublisher(
     }
 
     /**
+     * THE LIVE CARD'S OWN BUTTON (🌙 Go to background): the demote rides
+     * EVERY live draw — the birth and the edit-in-place — while the turn
+     * is actually running. THE DEAD-TARGET LAW: a dead thing earns no
+     * buttons — only Thinking/Writing show it (never Idle, never Done),
+     * and the seal's own null-markup edits take it off the moment the turn
+     * ends (editMessageText without reply_markup clears the keyboard).
+     */
+    private fun cardMarkup(state: TurnLive): JsonObject? =
+        if (state.phase is TurnPhase.Thinking || state.phase is TurnPhase.Writing) {
+            state.taskId.takeIf { it.isNotBlank() }?.let { Keyboards.backgroundTurn(it) }
+        } else {
+            null
+        }
+
+    /**
      * A failed birth (cooldown window) must NOT retry every tick: the
      * 14:55 loop logged «born message_id=null» every 3s and would hammer
      * Telegram the moment the window lifted. Back off BIRTH_RETRY_TICKS
@@ -999,7 +1014,7 @@ class LivePublisher(
             if (birthCooldownTicks > 0) birthCooldownTicks -= 1
             return
         }
-        val born = telegram.birth(cfg, text, null)
+        val born = telegram.birth(cfg, text, cardMarkup(state))
         if (born == null) {
             if (!birthFailLogged) {
                 logger.warn {
