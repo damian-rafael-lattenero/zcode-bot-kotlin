@@ -21,6 +21,7 @@ import dev.lattenero.bot.channel.InboundAttachment
 import dev.lattenero.bot.channel.InboundAnswer
 import dev.lattenero.bot.channel.InboundReceipt
 import dev.lattenero.bot.channel.InboundUpdate
+import dev.lattenero.bot.channel.ConnSeqFloor
 import dev.lattenero.bot.channel.LastPrompt
 import dev.lattenero.bot.channel.LiveHub
 import dev.lattenero.bot.channel.LiveOrphanStore
@@ -122,18 +123,23 @@ internal class Interventions(
 )
 
 /**
- * The seq-gap rule (§3.3): `seq` is monotonic per connection — a jump
- * means events were lost in a reconnect, and the stream NEVER replays.
- * The live view re-baselines (the lost CoT stays lost); the turn's final
- * answer is safe — it comes from the taskSnapshot at task_complete.
+ * The seq-gap rule (§3.3), CONNECTION-SCOPED (14/11): `seq` is monotonic
+ * per connection and SHARED by every subscription on it (other tasks'
+ * events and keepalives consume it too), so the gap verdict reads
+ * [ConnSeqFloor] — everything the wire delivered — never the watched
+ * task's own [dev.lattenero.bot.channel.TurnLive.lastSeq] (the per-task
+ * read called the other subscriptions' traffic a lost-event GAP 1095
+ * times in one day and every false resync wiped the live windows
+ * mid-stream). A real jump still means events were lost in a reconnect
+ * and the stream NEVER replays: the live view re-baselines (the lost CoT
+ * stays lost); the turn's final answer is safe — it comes from the
+ * taskSnapshot at task_complete.
  */
-internal suspend fun feedAndResync(hub: LiveHub, frame: ServerFrame.StreamEvent, nowMs: Long) {
-    val before = hub.peek()
-    val lastSeq = before?.takeIf { it.taskId == frame.taskId }?.lastSeq
-    if (lastSeq != null && frame.seq > lastSeq + 1) {
+internal suspend fun feedAndResync(hub: LiveHub, floor: ConnSeqFloor, frame: ServerFrame.StreamEvent, nowMs: Long) {
+    if (floor.admit(frame.seq)) {
         logger.warn {
-            "channel seq GAP ${before.lastSeq} -> ${frame.seq} on ${frame.taskId}: events lost in the " +
-                "reconnect (continuous, no replay) — the live view re-baselines"
+            "channel seq GAP -> ${frame.seq} on ${frame.taskId}: events lost on the " +
+                "connection (continuous, no replay) — the live view re-baselines"
         }
         hub.resync(frame.taskId)
     }
@@ -356,11 +362,17 @@ internal fun wireChannel(
     // pattern); it counts the same frames the producer reads, never double-
     // counting the sink (whose written/failures stay the one bus truth).
     val turnTaps = if (metrics.measures) TurnMetricsTap(metrics) else null
+    // THE CONNECTION'S SEQ FLOOR (14/11): one tally for everything the wire
+    // delivers on THIS connection — stream events of every subscribed task
+    // and every keepalive — so the gap verdict never mistakes the other
+    // subscriptions' traffic for lost events (the pump serializes its
+    // callbacks: no lock, one reader).
+    val connSeqFloor = ConnSeqFloor()
     val client = ChannelClient(
         transportFactory = { UnixSocketTransport { socketFile } },
         tokenReader = { tokenFile.takeIf { it.exists() }?.readText() },
         onStreamEvent = { frame ->
-            feedAndResync(hub, frame, System.currentTimeMillis())
+            feedAndResync(hub, connSeqFloor, frame, System.currentTimeMillis())
             // ADR-019: the turn's lifecycle rides the same frames the live
             // view folds — the tap never changes what the bot says or does
             busTaps?.onFrame(frame)
@@ -449,7 +461,13 @@ internal fun wireChannel(
         // a lost-event gap and the resync wipes the accumulating CoT
         // (measured live 31/10: the blocks never reached 3000). The
         // future watchdog keys HERE: a missing heartbeat is a dead bus.
-        onKeepalive = { frame -> hub.keepalive(frame.taskId, frame.seq) },
+        // The floor admits EVERY keepalive's seq (any task's — they all
+        // consume the shared connection counter, 14/11): a heartbeat of
+        // one subscription is never a lost event of another.
+        onKeepalive = { frame ->
+            connSeqFloor.admit(frame.seq)
+            hub.keepalive(frame.taskId, frame.seq)
+        },
     )
 
     // THE DEFAULT-MODE ENFORCEMENT's body (the late bind — the callback above

@@ -1,5 +1,6 @@
 package dev.lattenero.bot.daemon
 
+import dev.lattenero.bot.channel.ConnSeqFloor
 import dev.lattenero.bot.channel.LiveHub
 import dev.lattenero.bot.channel.QueryAnswer
 import dev.lattenero.bot.channel.ServerFrame
@@ -22,9 +23,12 @@ class ChannelWiringTest {
     @Test
     fun aSeqJumpResyncsTheLiveView() = runTest {
         val hub = LiveHub()
+        val floor = ConnSeqFloor()
         // seq 1..3 arrive
         (1L..3L).forEach { seq ->
-            hub.apply(
+            feedAndResync(
+                hub,
+                floor,
                 ServerFrame.StreamEvent("task-9", seq, at = 100L, event = buildJsonObject { put("type", "task_run_started") }),
                 100L,
             )
@@ -34,6 +38,7 @@ class ChannelWiringTest {
         // a reconnect lost 4..9: the next seen is 10 — the gap re-baselines
         feedAndResync(
             hub,
+            floor,
             ServerFrame.StreamEvent("task-9", 10, at = 200L, event = buildJsonObject { put("type", "agent_thought_chunk"); put("content", "post") }),
             200L,
         )
@@ -45,12 +50,56 @@ class ChannelWiringTest {
     @Test
     fun aCleanSeqContinuesWithoutResync() = runTest {
         val hub = LiveHub()
-        hub.apply(ServerFrame.StreamEvent("t", 1, 100L, buildJsonObject { put("type", "task_run_started") }), 100L)
-        hub.apply(
+        val floor = ConnSeqFloor()
+        feedAndResync(hub, floor, ServerFrame.StreamEvent("t", 1, 100L, buildJsonObject { put("type", "task_run_started") }), 100L)
+        feedAndResync(
+            hub,
+            floor,
             ServerFrame.StreamEvent("t", 2, 110L, buildJsonObject { put("type", "agent_thought_chunk"); put("content", "pienso") }),
             110L,
         )
         assertEquals("pienso", hub.peek()!!.cotTail) // no gap: nothing was thrown away
+    }
+
+    /**
+     * THE FALSE-GAP LAW (14/11, measured live): the connection's seq is
+     * SHARED by every subscription — a sibling task's events and keepalives
+     * consume it too. The watched task's next frame must not read their
+     * traffic as its own lost events: 1095 spurious resyncs in one day
+     * wiped the accumulating windows mid-stream and doubled the re-stated
+     * seams on every reconnect.
+     */
+    @Test
+    fun aSiblingSubscriptionsTrafficNeverResyncsTheWatchedTask() = runTest {
+        val hub = LiveHub()
+        val floor = ConnSeqFloor()
+        hub.watchTaskId("task-9", 100L) // the owner's t: attach — the hold owns the card
+        feedAndResync(hub, floor, ServerFrame.StreamEvent("task-9", 1, 100L, buildJsonObject { put("type", "task_run_started") }), 100L)
+        feedAndResync(
+            hub,
+            floor,
+            ServerFrame.StreamEvent("task-9", 2, 110L, buildJsonObject { put("type", "agent_thought_chunk"); put("content", "acumulando pensamiento") }),
+            110L,
+        )
+        // the sibling task's event AND keepalive ride the same connection (seq 3..5);
+        // the hold drops their frames, the floor still counts their seqs
+        feedAndResync(
+            hub,
+            floor,
+            ServerFrame.StreamEvent("task-b", 3, 120L, buildJsonObject { put("type", "agent_thought_chunk"); put("content", "hermano") }),
+            120L,
+        )
+        floor.admit(4L) // the sibling's keepalive
+        feedAndResync(
+            hub,
+            floor,
+            ServerFrame.StreamEvent("task-9", 5, 130L, buildJsonObject { put("type", "agent_thought_chunk"); put("content", " y sigue") }),
+            130L,
+        )
+        val after = hub.peek()!!
+        assertEquals("task-9", after.taskId) // the hold kept the card on the watched task
+        assertEquals("acumulando pensamiento y sigue", after.cotTail) // NO false resync wiped the windows
+        assertEquals(5L, after.lastSeq)
     }
 
     @Test
