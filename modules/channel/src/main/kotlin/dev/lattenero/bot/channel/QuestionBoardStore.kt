@@ -43,6 +43,8 @@ fun PendingQuestion.storeEntry(shortId: String): JsonObject = buildJsonObject {
     put("title", JsonPrimitive(title))
     putJsonArray("options") { options.forEach { add(it.storeJson()) } }
     plan?.let { put("plan", JsonPrimitive(it)) }
+    taskTitle?.let { put("taskTitle", JsonPrimitive(it)) }
+    originLabel?.let { put("originLabel", JsonPrimitive(it)) }
     put("mid", JsonPrimitive(mid))
     put("questionCount", JsonPrimitive(questionCount))
     putJsonArray("questions") { questions.forEach { add(it.storeJson()) } }
@@ -78,6 +80,8 @@ fun pendingQuestionOf(entry: JsonObject): PendingQuestion? {
             .mapNotNull { (index, value) ->
                 index.toIntOrNull()?.let { it to (value as? JsonPrimitive)?.content.orEmpty() }
             }.toMap(),
+        taskTitle = entry.str("taskTitle"),
+        originLabel = entry.str("originLabel"),
     )
 }
 

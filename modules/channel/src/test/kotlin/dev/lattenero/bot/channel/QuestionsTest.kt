@@ -526,4 +526,52 @@ class QuestionsTest {
         assertNull(board.answer("q1", "allow"))
         assertEquals(0, seams.edits.size)
     }
+
+    // ---- the any-task law (14/11): WHICH task and WHICH subagent asked ----
+
+    @Test
+    fun aSubagentOriginTagRidesTheParsedQuestionAndTheCard() {
+        val q = parseQuestionEvent(
+            ev(
+                """{"type":"elicitation_request","taskId":"t1","requestId":"r9",
+                   "questions":[{"question":"¿sigo?","options":[{"value":"si","label":"sí"}]}],
+                   "origin":{"kind":"subagent","agentId":"a1","agentType":"general-purpose",
+                             "childSessionId":"sess_subagent_a1","parentSessionId":"t1",
+                             "description":"audit the migrations"}}""",
+            ),
+        )!!
+        assertEquals("general-purpose · audit the migrations", q.originLabel)
+        val text = questionText(q)
+        assertTrue("🤖 subagente: general-purpose · audit the migrations" in text)
+    }
+
+    @Test
+    fun anUnknownOriginShapeIsSilence() {
+        val q = parseQuestionEvent(
+            ev(
+                """{"type":"permission_request","taskId":"t1","requestId":"r10","title":"?",
+                   "origin":{"kind":"somethingElse","agentType":"x"}}""",
+            ),
+        )!!
+        assertNull(q.originLabel) // the additive law: a foreign origin renders nothing
+    }
+
+    @Test
+    fun theTaskTitleRidesTheCardAndTheBoard() = runBlocking {
+        val seams = Seams()
+        val board = seams.board()
+        board.onStreamEvent(questionFrame("rt"), taskTitle = "kap — the detekt laws")
+        assertTrue("📋 kap — the detekt laws" in seams.sent.single())
+        assertEquals("kap — the detekt laws", board.byShortId("q1")?.taskTitle)
+    }
+
+    @Test
+    fun pendingTaskIdsListsEveryTaskWithALiveQuestion() = runBlocking {
+        val board = Seams().board()
+        board.onStreamEvent(questionFrame("ra", taskId = "t1"))
+        board.onStreamEvent(questionFrame("rb", taskId = "t2"))
+        assertEquals(setOf("t1", "t2"), board.pendingTaskIds())
+        board.resolveByRequestId("ra", "✅ Respondido desde la app.")
+        assertEquals(setOf("t2"), board.pendingTaskIds())
+    }
 }
