@@ -9,8 +9,11 @@ import kotlin.test.assertNull
 
 /**
  * Python's ctx_tasks against REAL sqlite files with the app's schema —
- * the frozen SQL order (pinned → updated_at desc, loose rows last),
- * the usage filter, the dedupe and the cap are the contract.
+ * the usage filter, the dedupe, the tombstone-safe newborn merge and the
+ * cap are the contract, and since the owner's 14/11 law the merged pool
+ * rides in EXECUTION-TIME order (usage started_at, else updated_at, else
+ * the CLI session's time_updated) — Python's pinned sidebar order feeds
+ * the SQL, no longer the phone's list.
  */
 class TasksHistoryIoTest {
 
@@ -23,15 +26,20 @@ class TasksHistoryIoTest {
     }
 
     @Test
-    fun ctxTasksFollowsPythonsFrozenOrderAndFilters() {
+    fun ctxTasksOrdersByExecutionTimeNotTheSidebar() {
         buildDbs()
         val rows = TasksHistoryIo(base).run { kotlinx.coroutines.runBlocking { ctxTasks(10) } }
         assertEquals(
-            listOf("s-pinned", "s-nouse", "s-new", "s-plain"),
+            listOf("s-nouse", "s-pinned", "s-new", "s-plain"),
             rows.map { it.sid },
+            "execution stamps rule: s-nouse's index updated_at 5 beats the pinned row's usage stamp 4 — " +
+                "the pinned row no longer floats, the last executor leads",
         )
-        assertEquals("tarea pinned", rows[0].title)
-        assertEquals(30L, rows[0].ctx) // input 10 + output 20 of the LATEST usage row
+        assertEquals("sin uso", rows[0].title)
+        assertEquals(
+            30L,
+            rows.first { it.sid == "s-pinned" }.ctx, // input 10 + output 20 of the LATEST usage row
+        )
     }
 
     @Test
@@ -98,7 +106,7 @@ class TasksHistoryIoTest {
     // ---- the newborn law (the owner, 14/11: /run tasks missing from /tasks) ----
 
     @Test
-    fun aNewbornSessionRidesPrependedUntilTheIndexCatchesUp() {
+    fun aNewbornSessionRidesUntilTheIndexCatchesUp() {
         buildNewbornDbs(indexHasRun = false)
         val rows = kotlinx.coroutines.runBlocking { TasksHistoryIo(base) { NOW }.ctxTasks(10) }
         assertEquals(listOf("s-run", "s-old"), rows.map { it.sid })
@@ -107,7 +115,40 @@ class TasksHistoryIoTest {
         assertEquals("/w/app", run.ws, "the session's directory is its workspace")
         assertEquals(0L, run.ctx, "no usage yet: honestly empty")
         assertEquals("", run.model, "no model yet: honestly empty")
-        assertEquals(NOW - 60_000L, run.whenMs, "the session's own birth time")
+        assertEquals(NOW - 30_000L, run.whenMs, "the session's own time_updated — the execution time, never the birth time")
+    }
+
+    @Test
+    fun theMergeFollowsExecutionTimeNotBirthOrder() {
+        buildExecutionOrderDbs()
+        val rows = kotlinx.coroutines.runBlocking { TasksHistoryIo(base) { NOW }.ctxTasks(10) }
+        assertEquals(
+            listOf("s-nb-active", "s-idx-fresh", "s-nb-idle", "s-idx-old"),
+            rows.map { it.sid },
+            "execution stamps rule: an active newborn outranks a fresher-born but idle one, " +
+                "and an idle newborn does not jump an index row that executed after it",
+        )
+    }
+
+    @Test
+    fun aNewbornWithATombstonedIndexRowNeverRides() {
+        buildNewbornDbs(indexHasRun = false, indexArchivesRun = true)
+        val rows = kotlinx.coroutines.runBlocking { TasksHistoryIo(base) { NOW }.ctxTasks(10) }
+        assertEquals(
+            listOf("s-old"),
+            rows.map { it.sid },
+            "the archived index row tombstones the newborn — a row the tap would refuse is never shown",
+        )
+    }
+
+    @Test
+    fun aNewbornWithUsageCarriesItsRealExecutionStamp() {
+        buildNewbornDbs(indexHasRun = false, withUsage = true)
+        val rows = kotlinx.coroutines.runBlocking { TasksHistoryIo(base) { NOW }.ctxTasks(10) }
+        val run = rows.first { it.sid == "s-run" }
+        assertEquals(10L, run.ctx, "input 7 + output 3 of the CLI's own model_usage line")
+        assertEquals("GLM-9", run.model, "the CLI's own model, no longer honestly empty")
+        assertEquals(NOW - 10_000L, run.whenMs, "the usage's started_at — the real last model call")
     }
 
     @Test
@@ -131,14 +172,19 @@ class TasksHistoryIoTest {
     }
 
     @Test
-    fun theCapHoldsWithNewbornsPrepended() {
+    fun theCapHoldsAcrossTheExecutionTimeMerge() {
         buildNewbornDbs(indexHasRun = false)
         val rows = kotlinx.coroutines.runBlocking { TasksHistoryIo(base) { NOW }.ctxTasks(1) }
-        assertEquals(listOf("s-run"), rows.map { it.sid }, "the newborn is first, the cap still trims")
+        assertEquals(listOf("s-run"), rows.map { it.sid }, "the freshest executor rides first, the cap still trims")
     }
 
-    /** The newborn law's fixture: one index row, and the CLI db's session table as the app writes it. */
-    private fun buildNewbornDbs(indexHasRun: Boolean) {
+    /**
+     * The newborn law's fixture: one index row, and the CLI db's session
+     * table as the app writes it. [indexArchivesRun] tombstones the s-run
+     * row in the index (the anti-tombstone law); [withUsage] gives the CLI
+     * db a model_usage line for s-run (the execution stamp join).
+     */
+    private fun buildNewbornDbs(indexHasRun: Boolean, indexArchivesRun: Boolean = false, withUsage: Boolean = false) {
         val v2 = File(base, "v2").apply { mkdirs() }
         DriverManager.getConnection("jdbc:sqlite:${File(v2, "tasks-index.sqlite").absolutePath}").use { c ->
             c.createStatement().use { st ->
@@ -153,6 +199,12 @@ class TasksHistoryIoTest {
                         "INSERT INTO tasks VALUES ('s-run', 'tarea run del indice', '/w/app', '/w/app', 0, 90, 0, 0)",
                     )
                 }
+                if (indexArchivesRun) {
+                    // the app tombstoned the /run-born conversation: the newborn must not ride
+                    st.executeUpdate(
+                        "INSERT INTO tasks VALUES ('s-run', 'testeando', '/w/app', '/w/app', 0, 90, 0, 1)",
+                    )
+                }
             }
         }
         val db = File(File(base, "cli"), "db").apply { mkdirs() }
@@ -160,31 +212,80 @@ class TasksHistoryIoTest {
             c.createStatement().use { st ->
                 st.executeUpdate(
                     "CREATE TABLE session (id TEXT, title TEXT, directory TEXT, parent_id TEXT," +
-                        " task_type TEXT, time_created INTEGER, time_deleted INTEGER, time_archived INTEGER)",
+                        " task_type TEXT, time_created INTEGER, time_deleted INTEGER, time_archived INTEGER," +
+                        " time_updated INTEGER)",
                 )
                 st.executeUpdate(
                     "INSERT INTO session VALUES ('s-run', 'falta boton go to background', '/w/app', NULL," +
-                        " 'interactive', ${NOW - 60_000L}, NULL, NULL)",
+                        " 'interactive', ${NOW - 60_000L}, NULL, NULL, ${NOW - 30_000L})",
                 )
                 st.executeUpdate(
                     "INSERT INTO session VALUES ('s-ancient', 'vieja', '/w/app', NULL," +
-                        " 'interactive', ${NOW - 3 * 60 * 60 * 1000L}, NULL, NULL)",
+                        " 'interactive', ${NOW - 3 * 60 * 60 * 1000L}, NULL, NULL, ${NOW - 3 * 60 * 60 * 1000L})",
                 )
                 st.executeUpdate(
                     "INSERT INTO session VALUES ('s-sub', 'hijo', '/w/app', NULL," +
-                        " 'subagent_child', ${NOW - 60_000L}, NULL, NULL)",
+                        " 'subagent_child', ${NOW - 60_000L}, NULL, NULL, ${NOW - 30_000L})",
                 )
                 st.executeUpdate(
                     "INSERT INTO session VALUES ('s-child', 'hijo', '/w/app', 's-run'," +
-                        " 'interactive', ${NOW - 60_000L}, NULL, NULL)",
+                        " 'interactive', ${NOW - 60_000L}, NULL, NULL, ${NOW - 30_000L})",
                 )
                 st.executeUpdate(
                     "INSERT INTO session VALUES ('s-del', 'borrada', '/w/app', NULL," +
-                        " 'interactive', ${NOW - 60_000L}, ${NOW - 30_000L}, NULL)",
+                        " 'interactive', ${NOW - 60_000L}, ${NOW - 30_000L}, NULL, ${NOW - 30_000L})",
                 )
                 st.executeUpdate(
                     "INSERT INTO session VALUES ('s-arch', 'archivada', '/w/app', NULL," +
-                        " 'interactive', ${NOW - 60_000L}, NULL, ${NOW - 30_000L})",
+                        " 'interactive', ${NOW - 60_000L}, NULL, ${NOW - 30_000L}, ${NOW - 30_000L})",
+                )
+            }
+            if (withUsage) {
+                c.createStatement().use { st ->
+                    st.executeUpdate(
+                        "CREATE TABLE model_usage (session_id TEXT, input_tokens INTEGER," +
+                            " output_tokens INTEGER, model_id TEXT, started_at INTEGER)",
+                    )
+                    st.executeUpdate(
+                        "INSERT INTO model_usage VALUES ('s-run', 7, 3, 'GLM-9', ${NOW - 10_000L})",
+                    )
+                }
+            }
+        }
+    }
+
+    /** The execution-time law's fixture: epoch-scale stamps, newborns and index rows interleaved. */
+    private fun buildExecutionOrderDbs() {
+        val v2 = File(base, "v2").apply { mkdirs() }
+        DriverManager.getConnection("jdbc:sqlite:${File(v2, "tasks-index.sqlite").absolutePath}").use { c ->
+            c.createStatement().use { st ->
+                st.executeUpdate(
+                    "CREATE TABLE tasks (task_id TEXT, title TEXT, workspace_path TEXT," +
+                        " workspace_key TEXT, pinned INTEGER, updated_at INTEGER, deleted INTEGER, archived INTEGER)",
+                )
+                st.executeUpdate(
+                    "INSERT INTO tasks VALUES ('s-idx-fresh', 'indice fresco', '/w/app', '/w/app', 0, ${NOW - 2_000L}, 0, 0)",
+                )
+                st.executeUpdate(
+                    "INSERT INTO tasks VALUES ('s-idx-old', 'indice viejo', '/w/app', '/w/app', 0, ${NOW - 9_000L}, 0, 0)",
+                )
+            }
+        }
+        val db = File(File(base, "cli"), "db").apply { mkdirs() }
+        DriverManager.getConnection("jdbc:sqlite:${File(db, "db.sqlite").absolutePath}").use { c ->
+            c.createStatement().use { st ->
+                st.executeUpdate(
+                    "CREATE TABLE session (id TEXT, title TEXT, directory TEXT, parent_id TEXT," +
+                        " task_type TEXT, time_created INTEGER, time_deleted INTEGER, time_archived INTEGER," +
+                        " time_updated INTEGER)",
+                )
+                st.executeUpdate(
+                    "INSERT INTO session VALUES ('s-nb-idle', 'recien nacido ocioso', '/w/app', NULL," +
+                        " 'interactive', ${NOW - 4_000L}, NULL, NULL, ${NOW - 8_500L})",
+                )
+                st.executeUpdate(
+                    "INSERT INTO session VALUES ('s-nb-active', 'recien nacido activo', '/w/app', NULL," +
+                        " 'interactive', ${NOW - 6_000L}, NULL, NULL, ${NOW - 500L})",
                 )
             }
         }
