@@ -215,6 +215,104 @@ class RenderFoldTest {
         assertEquals(state, untouched)
     }
 
+    // ---- the re-statement seams (14/11, measured live) ---------------------------
+
+    @Test
+    fun aReEmittedShortFragmentNeverRepeatsTheTail() {
+        // THE MEASURED SEAM: the fork's stream recovery re-emitted the last
+        // 17-cp fragment of the streamed answer — under the sentence floor
+        // it appended and the owner read «…tests): detekt + tests)»
+        val preamble = "Sin tests huérfanos. Corro el gate completo del bot (`./gradlew build` — detekt + tests):"
+        var s = reduce(null, thought("preparando el gate"))
+        s = reduce(s, answer(preamble))!!
+        assertEquals(preamble, s.answerTail)
+        val reemitted = " detekt + tests):"
+        s = reduce(s, answer(reemitted))!!
+        assertEquals(preamble, s.answerTail, "a re-emitted fragment the tail already ends with appends nothing")
+        assertEquals(preamble.length, s.answerChars, "the counter never counted the second copy")
+    }
+
+    @Test
+    fun aPureRunKeepsTheSentenceFloor() {
+        // separators legitimately repeat: a second rule line under a first
+        // one is a REAL delta, never a re-emission — only the run shape
+        // demands sentence size
+        var s = reduce(null, answer("regla uno:\n----"))
+        s = reduce(s, answer("----"))!!
+        assertEquals("regla uno:\n----" + "----", s.answerTail, "a pure run's repeat lands: both rule lines survive")
+    }
+
+    @Test
+    fun aRestatedMergedChunkNeverDoublesTheFirstWord() {
+        // THE MEASURED SEAM: the first thinking emission was the word
+        // «Check» alone; the recovery re-emitted the text MERGED — one chunk
+        // starting with the whole window. Appended whole it read
+        // «CheckCheck leftover…»; only the remainder is new
+        var s = reduce(null, thought("Check"))
+        assertEquals("Check", s!!.cotTail)
+        val merged = "Check leftover unused imports in MetricsTest (BrainReply still used by " +
+            "brainRequest test ✓; assertTrue still used by the cancelled test ✓)"
+        s = reduce(s, thought(merged))!!
+        assertEquals(merged, s!!.cotTail, "the merged re-statement trimmed its head: the word never doubles")
+        assertEquals(merged.length, s.thoughtChars, "the counter counted the text once")
+    }
+
+    @Test
+    fun aChildSessionsResyncClearsItsOwnLanesWindows() {
+        // THE RECONNECT REPLAY (14/11): a re-subscribed child session's topic
+        // re-states its in-flight text — the lane's windows die BEFORE the
+        // burst lands, or the re-stated deltas double onto them
+        var s = reduce(null, toolOpenEvent(toolId = "lane-1", name = "Task", seq = 1))
+        s = reduce(s, toolOpenEvent(toolId = "lane-2", name = "Task", seq = 2))
+        s = reduce(
+            s,
+            RenderEvent.ToolOpen(
+                taskId = "task-9",
+                seq = 3,
+                atMs = 3,
+                nowMs = 3,
+                tool = ToolCall(
+                    toolId = "lane-1",
+                    name = "Task",
+                    subagentAgentId = "agent-7",
+                    streamedLines = 0,
+                    rawChars = null,
+                    isMcp = false,
+                ),
+                final = true,
+            ),
+        )
+        s = reduce(s, RenderEvent.ToolOpen(
+            taskId = "task-9",
+            seq = 4,
+            atMs = 4,
+            nowMs = 4,
+            tool = ToolCall(
+                toolId = "lane-2",
+                name = "Task",
+                subagentAgentId = "agent-8",
+                streamedLines = 0,
+                rawChars = null,
+                isMcp = false,
+            ),
+            final = true,
+        ))
+        s = reduce(s, RenderEvent.ChildStream("lane-1", thought = false, delta = "informe del hijo siete", nowMs = 5))
+        s = reduce(s, RenderEvent.ChildStream("lane-2", thought = false, delta = "informe del hijo ocho", nowMs = 6))
+        assertEquals("informe del hijo siete", s!!.subagentLanes["lane-1"]?.answerTail)
+        // the child's OWN topic resyncs (the reconnect replay): only ITS lane dies
+        s = reduce(s, RenderEvent.Resync("sess_subagent_agent-7"))
+        val seven = assertNotNull(assertNotNull(s).subagentLanes["lane-1"])
+        assertEquals("", seven.answerTail, "the re-subscribed child's window is empty: the burst rebuilds it")
+        assertEquals(0, seven.answerChars)
+        assertEquals(0L, seven.lastDeltaAtMs, "the row hides its tail until the burst speaks again")
+        val eight = assertNotNull(s.subagentLanes["lane-2"])
+        assertEquals("informe del hijo ocho", eight.answerTail, "a sibling lane never pays for another child's resync")
+        // a burst re-stating the child's text rebuilds the window instead of doubling
+        s = reduce(s, RenderEvent.ChildStream("lane-1", thought = false, delta = "informe del hijo siete y sigue", nowMs = 7))
+        assertEquals("informe del hijo siete y sigue", assertNotNull(s).subagentLanes["lane-1"]?.answerTail)
+    }
+
     @Test
     fun theWatchdogsRebaseKillsTheAnswerWindowsAndKeepsTheTurn() {
         // a turn mid-answer AND mid-thought: a sealed CoT block, one spent
