@@ -17,6 +17,11 @@ class TasksHistoryIoTest {
     @TempDir
     lateinit var base: File
 
+    private companion object {
+        /** The newborn tests' frozen now — every birth time hangs off it. */
+        const val NOW = 1_794_000_000_000L
+    }
+
     @Test
     fun ctxTasksFollowsPythonsFrozenOrderAndFilters() {
         buildDbs()
@@ -88,6 +93,101 @@ class TasksHistoryIoTest {
         assertEquals(false, kotlinx.coroutines.runBlocking { history.taskAlive("s-arch") }) // archived
         assertEquals(false, kotlinx.coroutines.runBlocking { history.taskAlive("s-dead") }) // deleted
         assertEquals(false, kotlinx.coroutines.runBlocking { history.taskAlive("unknown") })
+    }
+
+    // ---- the newborn law (the owner, 14/11: /run tasks missing from /tasks) ----
+
+    @Test
+    fun aNewbornSessionRidesPrependedUntilTheIndexCatchesUp() {
+        buildNewbornDbs(indexHasRun = false)
+        val rows = kotlinx.coroutines.runBlocking { TasksHistoryIo(base) { NOW }.ctxTasks(10) }
+        assertEquals(listOf("s-run", "s-old"), rows.map { it.sid })
+        val run = rows.first { it.sid == "s-run" }
+        assertEquals("falta boton go to background", run.title, "the session's own first_input title")
+        assertEquals("/w/app", run.ws, "the session's directory is its workspace")
+        assertEquals(0L, run.ctx, "no usage yet: honestly empty")
+        assertEquals("", run.model, "no model yet: honestly empty")
+        assertEquals(NOW - 60_000L, run.whenMs, "the session's own birth time")
+    }
+
+    @Test
+    fun theNewbornRetiresTheMomentItsIndexRowLands() {
+        buildNewbornDbs(indexHasRun = true)
+        val rows = kotlinx.coroutines.runBlocking { TasksHistoryIo(base) { NOW }.ctxTasks(10) }
+        // the merged row is gone and the INDEX's own order rules (updated_at 90 < s-old's 100)
+        assertEquals(listOf("s-old", "s-run"), rows.map { it.sid }, "one row, never two of the same sid")
+        assertEquals("tarea run del indice", rows[1].title, "the INDEX row wins once it exists")
+    }
+
+    @Test
+    fun newbornsOutsideTheWindowOrNotConversationsNeverRide() {
+        buildNewbornDbs(indexHasRun = false)
+        val rows = kotlinx.coroutines.runBlocking { TasksHistoryIo(base) { NOW }.ctxTasks(10) }
+        assertEquals(
+            listOf("s-run", "s-old"),
+            rows.map { it.sid },
+            "ancient/subagent/child/deleted/archived sessions never ride",
+        )
+    }
+
+    @Test
+    fun theCapHoldsWithNewbornsPrepended() {
+        buildNewbornDbs(indexHasRun = false)
+        val rows = kotlinx.coroutines.runBlocking { TasksHistoryIo(base) { NOW }.ctxTasks(1) }
+        assertEquals(listOf("s-run"), rows.map { it.sid }, "the newborn is first, the cap still trims")
+    }
+
+    /** The newborn law's fixture: one index row, and the CLI db's session table as the app writes it. */
+    private fun buildNewbornDbs(indexHasRun: Boolean) {
+        val v2 = File(base, "v2").apply { mkdirs() }
+        DriverManager.getConnection("jdbc:sqlite:${File(v2, "tasks-index.sqlite").absolutePath}").use { c ->
+            c.createStatement().use { st ->
+                st.executeUpdate(
+                    "CREATE TABLE tasks (task_id TEXT, title TEXT, workspace_path TEXT," +
+                        " workspace_key TEXT, pinned INTEGER, updated_at INTEGER, deleted INTEGER, archived INTEGER)",
+                )
+                st.executeUpdate("INSERT INTO tasks VALUES ('s-old', 'tarea vieja', '/w/app', '/w/app', 0, 100, 0, 0)")
+                if (indexHasRun) {
+                    // the real row, landed at the first turn's end: the merged one retires
+                    st.executeUpdate(
+                        "INSERT INTO tasks VALUES ('s-run', 'tarea run del indice', '/w/app', '/w/app', 0, 90, 0, 0)",
+                    )
+                }
+            }
+        }
+        val db = File(File(base, "cli"), "db").apply { mkdirs() }
+        DriverManager.getConnection("jdbc:sqlite:${File(db, "db.sqlite").absolutePath}").use { c ->
+            c.createStatement().use { st ->
+                st.executeUpdate(
+                    "CREATE TABLE session (id TEXT, title TEXT, directory TEXT, parent_id TEXT," +
+                        " task_type TEXT, time_created INTEGER, time_deleted INTEGER, time_archived INTEGER)",
+                )
+                st.executeUpdate(
+                    "INSERT INTO session VALUES ('s-run', 'falta boton go to background', '/w/app', NULL," +
+                        " 'interactive', ${NOW - 60_000L}, NULL, NULL)",
+                )
+                st.executeUpdate(
+                    "INSERT INTO session VALUES ('s-ancient', 'vieja', '/w/app', NULL," +
+                        " 'interactive', ${NOW - 3 * 60 * 60 * 1000L}, NULL, NULL)",
+                )
+                st.executeUpdate(
+                    "INSERT INTO session VALUES ('s-sub', 'hijo', '/w/app', NULL," +
+                        " 'subagent_child', ${NOW - 60_000L}, NULL, NULL)",
+                )
+                st.executeUpdate(
+                    "INSERT INTO session VALUES ('s-child', 'hijo', '/w/app', 's-run'," +
+                        " 'interactive', ${NOW - 60_000L}, NULL, NULL)",
+                )
+                st.executeUpdate(
+                    "INSERT INTO session VALUES ('s-del', 'borrada', '/w/app', NULL," +
+                        " 'interactive', ${NOW - 60_000L}, ${NOW - 30_000L}, NULL)",
+                )
+                st.executeUpdate(
+                    "INSERT INTO session VALUES ('s-arch', 'archivada', '/w/app', NULL," +
+                        " 'interactive', ${NOW - 60_000L}, NULL, ${NOW - 30_000L})",
+                )
+            }
+        }
     }
 
     /** The app's schema (the columns Python's frozen SQL touches) with Python-like rows. */
