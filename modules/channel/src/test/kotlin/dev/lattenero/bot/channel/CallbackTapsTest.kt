@@ -153,6 +153,35 @@ class CallbackTapsTest {
     }
 
     @Test
+    fun theBackgroundTapSendsTheDemote() = runBlocking {
+        val o = FakeOps().apply { answers["backgroundTurn"] = """{"backgrounded":["task-77"]}""" }
+        val reply = commands(o).onCallback("bgd:task-77", 1L, OWNER)!!
+        assertEquals("🌙 Al fondo — sigue corriendo y el resultado llega al terminar.", reply.text)
+        assertEquals(
+            listOf<ChannelQuery>(ChannelQuery.BackgroundTurn("task-77")),
+            o.queries,
+            "the demote IS the backgroundTurn query — the turn keeps running, nothing aborted",
+        )
+    }
+
+    @Test
+    fun theBackgroundTapOnIdleAnswersHonestly() = runBlocking {
+        // the fork's noop: nothing running (or the target changed) — the
+        // empty `backgrounded` is the honest «nothing to demote»
+        val o = FakeOps().apply { answers["backgroundTurn"] = """{"backgrounded":[]}""" }
+        val reply = commands(o).onCallback("bgd:task-77", 1L, OWNER)!!
+        assertEquals("🌙 Nada que pasar al fondo — la conversación no tiene un turno corriendo ahora.", reply.text)
+    }
+
+    @Test
+    fun theBackgroundTapOnADownChannelSaysSo() = runBlocking {
+        val o = FakeOps().apply { available = false }
+        val reply = commands(o).onCallback("bgd:task-77", 1L, OWNER)!!
+        assertEquals(BotCommands.DEGRADED, reply.text)
+        assertEquals(listOf<ChannelQuery>(ChannelQuery.BackgroundTurn("task-77")), o.queries)
+    }
+
+    @Test
     fun theConfirmTapRunsTheWholeLadderThroughTheTable() = runBlocking {
         val o = FakeOps().apply { answers["botStatus"] = status }
         var runs = 0

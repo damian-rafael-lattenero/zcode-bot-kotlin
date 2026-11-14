@@ -366,6 +366,10 @@ class BotCommands(
     private suspend fun routeCallback(data: String, updateId: Long): BotReply? = when {
         data.startsWith("intr:") -> interruptNow(data.removePrefix("intr:"), updateId)
 
+        // the 🌙 demote (bgd:<sid>): the running turn goes to background —
+        // nothing is aborted, so it stays OUT of the destructive vocabulary
+        data.startsWith("bgd:") -> backgroundNow(data.removePrefix("bgd:"))
+
         data.startsWith("t:") -> taskAttach(data.removePrefix("t:"), updateId)
 
         data.startsWith("sa:") -> laneAttach(data.removePrefix("sa:"))
@@ -1114,6 +1118,32 @@ class BotCommands(
             is QueryAnswer.Failed -> BotReply(
                 "⚠️ No pude interrumpir (${answer.code}): ${PyText.esc(answer.message ?: "?")}" +
                     " — /stop go es la vía dura.",
+            )
+        }
+    }
+
+    /**
+     * 🌙 — the live card's demote: the turn keeps running in background and
+     * its result still arrives when it seals; NOTHING is aborted (the fork
+     * never kills here). Every outcome is the honest one: the noop when the
+     * conversation has no turn running (the fork's empty `backgrounded`),
+     * the degraded line on a down channel, the host's verbatim error
+     * otherwise — an old host's unknown_query speaks itself.
+     */
+    private suspend fun backgroundNow(sid: String): BotReply {
+        logger.info { "callback 🌙 bgd: demoting $sid — the turn keeps running in background" }
+        return when (val answer = ops.query(ChannelQuery.BackgroundTurn(sid))) {
+            is QueryAnswer.Ok -> {
+                val backgrounded = parseStringsOf(answer.resultJson, "backgrounded")
+                if (sid in backgrounded) {
+                    BotReply("🌙 Al fondo — sigue corriendo y el resultado llega al terminar.")
+                } else {
+                    BotReply("🌙 Nada que pasar al fondo — la conversación no tiene un turno corriendo ahora.")
+                }
+            }
+            is QueryAnswer.Unavailable -> BotReply(DEGRADED)
+            is QueryAnswer.Failed -> BotReply(
+                "⚠️ No pude pasar al fondo (${answer.code}): ${PyText.esc(answer.message ?: "?")}",
             )
         }
     }

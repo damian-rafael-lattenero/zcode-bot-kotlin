@@ -151,6 +151,22 @@ class KeyboardsTest {
     }
 
     @Test
+    fun backgroundTurnIsTheOneMoonRow() {
+        // the 🌙 row IS the demote: the SAME name ZCode's own button wears,
+        // ONE row, ONE button, the sid rides the data
+        val row = Keyboards.backgroundTurn("ses_0f84de0cf002474fe596446e627129dc")
+            .jsonObject["inline_keyboard"]!!.jsonArray[0].jsonArray
+        assertEquals(1, row.size, "one row, one button — the demote needs no confirm")
+        assertEquals("🌙 Go to background", row[0].jsonObject["text"]!!.jsonPrimitive.content)
+        assertEquals("bgd:ses_0f84de0cf002474fe596446e627129dc", row[0].jsonObject["callback_data"]!!.jsonPrimitive.content)
+        // "bgd:" (4) + the worst sid rides the 64-byte law with room to spare
+        assertTrue(
+            Keyboards.callbackDataValid("bgd:ses_0f84de0cf002474fe596446e627129dc"),
+            "the demote's data must pass the 64-byte check",
+        )
+    }
+
+    @Test
     fun deployTargetsIsTheOneTapRow() {
         // the ONE-TAP LAW (4/11): the target row IS the deploy — no go/no
         // confirm half exists anymore (the tap fires the door). 10/11: the
@@ -236,6 +252,7 @@ class KeyboardsTest {
             Keyboards.cotToggle(7, expanded = false),
             Keyboards.cotToggle(7, expanded = true),
             Keyboards.interruptQuestion("ses_0f84de0cf002474fe596446e627129dc"),
+            Keyboards.backgroundTurn("ses_0f84de0cf002474fe596446e627129dc"),
             Keyboards.nuclearConfirm(),
             Keyboards.stopConfirm(),
             Keyboards.subagentsViewButtons(inactiveView = false),
@@ -318,6 +335,7 @@ class KeyboardsTest {
             if ("👁" in text) assertTrue(data.startsWith("sa:"), "👁 attaches, nothing else: $data")
             if ("🚀" in text) assertTrue(data.startsWith("ql:"), "🚀 launches a parked text: $data")
             if (text.startsWith("⚡")) assertTrue(data.startsWith("intr:"), "⚡ interrupts: $data")
+            if (text.startsWith("🌙")) assertTrue(data.startsWith("bgd:"), "🌙 demotes to background: $data")
             if (text.startsWith("🟢")) assertTrue(data.startsWith("t:"), "🟢 rows attach tasks: $data")
             if (text.startsWith("🔵")) assertTrue(data.startsWith("sn:"), "🔵 rows open the detail card: $data")
         }
