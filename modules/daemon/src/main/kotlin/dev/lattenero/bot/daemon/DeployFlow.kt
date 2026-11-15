@@ -131,11 +131,14 @@ class DeployFlow(
         }
         try {
             // ALL splits HERE, in the door: fork FIRST — its job must be armed
-            // before the daemon's deploy boots out this daemon. The order is
-            // the survival law, so it lives where the tests can pin it.
+            // before the daemon's deploy boots out this daemon; brain next for
+            // the same reason (its restart must be armed before this daemon's
+            // own bootout). The order is the survival law, so it lives where
+            // the tests can pin it.
             when (target) {
                 Target.ALL -> {
                     spawn(Target.FORK)
+                    spawn(Target.BRAIN)
                     spawn(Target.BOT)
                     spawn(Target.WHATSAPP)
                 }
@@ -165,6 +168,7 @@ class DeployFlow(
         Target.BOT -> FLOWN_BOT
         Target.FORK -> FLOWN_FORK
         Target.WHATSAPP -> FLOWN_WHATSAPP
+        Target.BRAIN -> FLOWN_BRAIN
         Target.ALL -> FLOWN_ALL
     }
 
@@ -172,6 +176,7 @@ class DeployFlow(
         Target.BOT -> THE_ANNOUNCE
         Target.FORK -> THE_ANNOUNCE_FORK
         Target.WHATSAPP -> THE_ANNOUNCE_WHATSAPP
+        Target.BRAIN -> THE_ANNOUNCE_BRAIN
         Target.ALL -> THE_ANNOUNCE_ALL
     }
 
@@ -179,6 +184,7 @@ class DeployFlow(
         Target.BOT -> SPAWNED
         Target.FORK -> SPAWNED_FORK
         Target.WHATSAPP -> SPAWNED_WHATSAPP
+        Target.BRAIN -> SPAWNED_BRAIN
         Target.ALL -> SPAWNED_ALL
     }
 
@@ -187,6 +193,7 @@ class DeployFlow(
         const val TARGET_WORD_BOT = "bot"
         const val TARGET_WORD_FORK = "fork"
         const val TARGET_WORD_WHATSAPP = "whatsapp"
+        const val TARGET_WORD_BRAIN = "brain"
         const val TARGET_WORD_ALL = "all"
 
         /** The pre-rename word («Ambos» era) — stale cards on the phone still carry it. */
@@ -196,6 +203,7 @@ class DeployFlow(
             TARGET_WORD_BOT -> Target.BOT
             TARGET_WORD_FORK -> Target.FORK
             TARGET_WORD_WHATSAPP -> Target.WHATSAPP
+            TARGET_WORD_BRAIN -> Target.BRAIN
             TARGET_WORD_ALL -> Target.ALL
             // THE STALE-CARD ALIAS (the owner's rename, 10/11): cards still
             // living on the phone carry dep:both — they must keep answering.
@@ -216,13 +224,16 @@ class DeployFlow(
                 "cierra ZCode solo → swap → reabre (unos segundos de canal 📡 al final)\n" +
                 "📱 <b>WhatsApp (whatsdigest)</b> — build con tests → install → el LaunchAgent del bot " +
                 "de los grupos se reinicia y se verifica solo (nunca toca ESTE daemon)\n" +
-                "🚀 <b>Todos</b> — fork PRIMERO, después el daemon y el bot de WhatsApp (jobs hermanos de launchd)"
+                "🧠 <b>Brain (agent-brain)</b> — build (installDist + detekt) → install → el LaunchAgent " +
+                "del brain se reinicia (outage breve de /brain y memoria; el plugin reconecta solo)\n" +
+                "🚀 <b>Todos</b> — fork PRIMERO, después brain, el daemon y el bot de WhatsApp (jobs hermanos de launchd)"
             )
 
         /** The card's flown rows — the edit's text: keyboard stripped, the choice marked. */
         const val FLOWN_BOT = "🤖 Bot Kotlin — ▶️ en vuelo"
         const val FLOWN_FORK = "🍴 ZCode Fork — ▶️ en vuelo"
         const val FLOWN_WHATSAPP = "📱 WhatsApp (whatsdigest) — ▶️ en vuelo"
+        const val FLOWN_BRAIN = "🧠 Brain (agent-brain) — ▶️ en vuelo"
         const val FLOWN_ALL = "🚀 Todos — ▶️ en vuelo (fork primero)"
 
         /** The in-flight refusal — THIS target flew; its own slot rearms itself. */
@@ -251,8 +262,20 @@ class DeployFlow(
                 "la app sigue viva); al final CIERRA ZCode solo, hace el swap y la reabre"
             )
 
+        const val THE_ANNOUNCE_BRAIN = (
+            "🧠 Deployando el brain (agent-brain) — build con detekt, install y el LaunchAgent " +
+                "se reinicia con verificación /ready; ESTE daemon no se toca, sigo vivo " +
+                "(outage breve de /brain y memoria)"
+            )
+
+        const val SPAWNED_BRAIN = (
+            "🛠 Script del brain lanzado detached — installDist + detekt, el LaunchAgent de " +
+                "agent-brain se reinicia y verifica /ready solo (el plugin brain-mcp reconecta solo). " +
+                "Log: <code>~/.zcode/bot-kotlin/logs/deploy-brain.log</code> — /file lo trae."
+            )
+
         const val THE_ANNOUNCE_ALL = (
-            "🚀 Deployando TODOS — primero el fork, después el daemon y el bot de WhatsApp; vuelvo en un momento"
+            "🚀 Deployando TODOS — primero el fork, después brain, el daemon y el bot de WhatsApp; vuelvo en un momento"
             )
 
         const val SPAWNED = (
@@ -269,10 +292,11 @@ class DeployFlow(
             )
 
         const val SPAWNED_ALL = (
-            "🛠 Los tres scripts lanzados detached — fork, daemon y WhatsApp compilan en paralelo " +
-                "y cada verificación saluda al volver. " +
+            "🛠 Los cuatro scripts lanzados detached — fork, brain, daemon y WhatsApp compilan " +
+                "en paralelo y cada verificación saluda al volver. " +
                 "Logs: <code>~/.zcode/bot-kotlin/logs/deploy-fork.log</code>, " +
-                "<code>deploy-daemon.log</code> y <code>deploy-whatsapp.log</code> — /file los trae."
+                "<code>deploy-brain.log</code>, <code>deploy-daemon.log</code> y " +
+                "<code>deploy-whatsapp.log</code> — /file los trae."
             )
 
         const val ANNOUNCE_FAILED = (

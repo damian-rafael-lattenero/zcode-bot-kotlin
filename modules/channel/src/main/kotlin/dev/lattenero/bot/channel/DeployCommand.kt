@@ -48,10 +48,21 @@ class DeployCommand(
         WHATSAPP,
 
         /**
-         * ALL THREE — fork FIRST, then this daemon, then WhatsApp (each is
-         * its own launchd job, and siblings survive each other's bootouts;
-         * the order is the survival law, not a style choice). The owner's
-         * rename, 10/11: «no debería decir "ambos", sino "todos"».
+         * The agent-brain (the RAG + memory server behind rag_query and the
+         * bus): build (installDist + detekt) → its own LaunchAgent restart
+         * → /ready verification. A sibling ecosystem deploy — the brief
+         * outage only degrades memory-recall honestly (the 2s deadline,
+         * silence on down) and brain-mcp reconnects alone; THIS daemon is
+         * never at stake.
+         */
+        BRAIN,
+
+        /**
+         * ALL FOUR — fork FIRST, then brain, this daemon and WhatsApp (each
+         * is its own launchd job, and siblings survive each other's
+         * bootouts; the order is the survival law, not a style choice — the
+         * same wave `zcode-deploy-all` runs). The owner's rename, 10/11:
+         * «no debería decir "ambos", sino "todos"».
          */
         ALL,
     }

@@ -67,7 +67,7 @@ class DeployFlowTest {
         )
 
     @Test
-    fun theBareCardOffersFourTargetsAndFiresNothing() = runTest {
+    fun theBareCardOffersFiveTargetsAndFiresNothing() = runTest {
         val rig = Rig()
         val f = flow(rig)
         f.onText("", OWNER)
@@ -77,11 +77,12 @@ class DeployFlowTest {
         assertTrue(text.contains("Tocar ES lanzar"), "the one-tap law is ON the card")
         assertEquals(false, loud)
         val row = markup!!.jsonObject["inline_keyboard"]!!.jsonArray[0].jsonArray
-        assertEquals(4, row.size)
+        assertEquals(5, row.size)
         assertEquals("dep:bot", row[0].jsonObject["callback_data"]!!.jsonPrimitive.content)
         assertEquals("dep:fork", row[1].jsonObject["callback_data"]!!.jsonPrimitive.content)
         assertEquals("dep:whatsapp", row[2].jsonObject["callback_data"]!!.jsonPrimitive.content)
-        assertEquals("dep:all", row[3].jsonObject["callback_data"]!!.jsonPrimitive.content)
+        assertEquals("dep:brain", row[3].jsonObject["callback_data"]!!.jsonPrimitive.content)
+        assertEquals("dep:all", row[4].jsonObject["callback_data"]!!.jsonPrimitive.content)
         // the retired go/no NEVER fires: a stale button just re-shows the card
         f.onTap("go", OWNER)
         f.onTap("no", OWNER)
@@ -114,6 +115,26 @@ class DeployFlowTest {
     }
 
     @Test
+    fun aBrainTapFiresExactlyThatTarget() = runTest {
+        val rig = Rig()
+        val f = flow(rig)
+        f.onTap("brain", OWNER) // the tap IS the confirmation — no second step exists
+        // the 🧠 target's honesty: THIS daemon is never at stake — the brief
+        // memory/RAG outage degrades honestly and brain-mcp reconnects alone
+        assertTrue(
+            DeployFlow.THE_ANNOUNCE_BRAIN.contains("ESTE daemon no se toca"),
+            "the announce says this daemon stays alive",
+        )
+        assertEquals(listOf(Target.BRAIN), rig.spawnedTargets)
+        assertEquals(2, rig.spoken.size) // announce, spawned-note — no confirm card anywhere
+        assertEquals(DeployFlow.THE_ANNOUNCE_BRAIN, rig.spoken[0].first)
+        assertEquals(true, rig.spoken[0].second) // the door is LOUD
+        // THE ORDER: the announce is in the record BEFORE the spawn ran
+        assertEquals("say", rig.events[0].substringBefore(':'))
+        assertEquals("spawn:BRAIN", rig.events[1])
+    }
+
+    @Test
     fun aTargetTapFiresTheDoorImmediately() = runTest {
         val rig = Rig()
         val f = flow(rig)
@@ -142,18 +163,20 @@ class DeployFlowTest {
     }
 
     @Test
-    fun allSpawnsTheForkFirstThenTheDaemonThenWhatsapp() = runTest {
+    fun allSpawnsTheForkFirstThenBrainThenTheDaemonThenWhatsapp() = runTest {
         val rig = Rig()
         val f = flow(rig)
         f.onTap("all", OWNER)
         // the spawn ORDER is the survival law: fork's job is armed before
-        // the daemon's deploy boots out this daemon; WhatsApp is a sibling
-        // of everything and joins last
-        assertEquals(listOf(Target.FORK, Target.BOT, Target.WHATSAPP), rig.spawnedTargets)
+        // the daemon's deploy boots out this daemon; brain joins next (its
+        // restart must also be armed before this daemon's own bootout);
+        // WhatsApp is a sibling of everything and joins last
+        assertEquals(listOf(Target.FORK, Target.BRAIN, Target.BOT, Target.WHATSAPP), rig.spawnedTargets)
         assertEquals(DeployFlow.THE_ANNOUNCE_ALL, rig.spoken[0].first)
         assertEquals("spawn:FORK", rig.events[1])
-        assertEquals("spawn:BOT", rig.events[2])
-        assertEquals("spawn:WHATSAPP", rig.events[3])
+        assertEquals("spawn:BRAIN", rig.events[2])
+        assertEquals("spawn:BOT", rig.events[3])
+        assertEquals("spawn:WHATSAPP", rig.events[4])
     }
 
     @Test
@@ -164,7 +187,7 @@ class DeployFlowTest {
         val rig = Rig()
         val f = flow(rig)
         f.onTap("both", OWNER)
-        assertEquals(listOf(Target.FORK, Target.BOT, Target.WHATSAPP), rig.spawnedTargets)
+        assertEquals(listOf(Target.FORK, Target.BRAIN, Target.BOT, Target.WHATSAPP), rig.spawnedTargets)
         assertEquals(DeployFlow.THE_ANNOUNCE_ALL, rig.spoken[0].first)
     }
 

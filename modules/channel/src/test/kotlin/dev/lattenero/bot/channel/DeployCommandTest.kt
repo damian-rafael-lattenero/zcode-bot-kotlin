@@ -125,9 +125,20 @@ class DeployCommandTest {
     }
 
     @Test
-    fun theTargetVocabularyIsExactlyFour() {
-        // the card offers exactly what the machine can fire — nothing else exists
-        assertEquals(4, DeployCommand.Target.entries.size)
+    fun theTargetVocabularyIsExactlyFive() {
+        // the card offers exactly what the machine can fire — nothing else
+        // exists (15/11: 🧠 brain joins bot/fork/whatsapp/all)
+        assertEquals(5, DeployCommand.Target.entries.size)
+        assertEquals(
+            setOf(
+                DeployCommand.Target.BOT,
+                DeployCommand.Target.FORK,
+                DeployCommand.Target.WHATSAPP,
+                DeployCommand.Target.BRAIN,
+                DeployCommand.Target.ALL,
+            ),
+            DeployCommand.Target.entries.toSet(),
+        )
     }
 
     /** A bendable clock — the TTL law is pinned against real time arithmetic. */

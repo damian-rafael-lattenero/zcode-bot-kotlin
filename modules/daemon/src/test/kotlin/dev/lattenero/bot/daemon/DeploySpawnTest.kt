@@ -429,6 +429,31 @@ class DeploySpawnTest {
         assertContains(edge().plist(), "<string>${DeploySpawn.JOB_LABEL}</string>")
     }
 
+    // 2026-11-15 — the BRAIN edge: its own label, its own log, its own plist —
+    // a sibling of everything (agent-brain's canonical deploy, the wave's 2/4 leg).
+
+    @Test
+    fun theBrainJobCarriesItsOwnLabelAndLogNeverTheDaemons() {
+        val brainScript = File("/Users/fake/Projects/agent-brain/scripts/deploy-brain.nu")
+        val brainLog = File(tmp, "logs/deploy-brain.log")
+        val brainPlist = File(tmp, "state/deploy-brain-job.plist")
+        val p = DeploySpawn(
+            brainScript,
+            brainLog,
+            brainPlist,
+            label = DeploySpawn.BRAIN_JOB_LABEL,
+            uid = "501",
+            javaHome = "/jdk-25",
+            home = "/Users/fake",
+        ).plist()
+        assertContains(p, "<string>${DeploySpawn.BRAIN_JOB_LABEL}</string>")
+        assertContains(p, "<string>${brainScript.absolutePath}</string>")
+        // the labels never collide — each job bootouts/bootstraps ITSELF only
+        assertEquals("com.zcode.brain-deploy", DeploySpawn.BRAIN_JOB_LABEL)
+        assertEquals("deploy-brain.log", DeploySpawn.BRAIN_LOG_FILE_NAME)
+        assertEquals("deploy-brain-job.plist", DeploySpawn.BRAIN_JOB_PLIST_NAME)
+    }
+
     // 2026-11-04 hardening — args, bootout logging, and the error-5 self-heal.
 
     @Test
@@ -532,6 +557,22 @@ class DeploySpawnTest {
         // the daemon's key is NOT the fork's key
         val daemonOnly = tempJson("""{"deploy_script": "/opt/daemon-only.nu"}""")
         assertEquals(DeployScriptKnob.FORK_DEFAULT, DeployScriptKnob.loadFork(daemonOnly))
+    }
+
+    @Test
+    fun theBrainKnobDefaultsToTheBrainScriptAndHonorsItsOwnKey() {
+        val missing = File("/nonexistent/daemon.json")
+        assertEquals(DeployScriptKnob.BRAIN_DEFAULT, DeployScriptKnob.loadBrain(missing))
+        assertEquals(DeployScriptKnob.BRAIN_DEFAULT, DeployScriptKnob.loadBrain(tempJson("{}")))
+        // its OWN key — no other target's deploy_script leaks into the brain's edge
+        val custom = tempJson("""{"deploy_brain_script": "/opt/my-brain-deploy.nu"}""")
+        assertEquals(File("/opt/my-brain-deploy.nu"), DeployScriptKnob.loadBrain(custom))
+        // the daemon's key is NOT the brain's key
+        val daemonOnly = tempJson("""{"deploy_script": "/opt/daemon-only.nu"}""")
+        assertEquals(DeployScriptKnob.BRAIN_DEFAULT, DeployScriptKnob.loadBrain(daemonOnly))
+        // the same degrade law: garbage and blank fall back to the canonical script
+        assertEquals(DeployScriptKnob.BRAIN_DEFAULT, DeployScriptKnob.loadBrain(tempJson("not json at all")))
+        assertEquals(DeployScriptKnob.BRAIN_DEFAULT, DeployScriptKnob.loadBrain(tempJson("""{"deploy_brain_script": "  "}""")))
     }
 
     @Test

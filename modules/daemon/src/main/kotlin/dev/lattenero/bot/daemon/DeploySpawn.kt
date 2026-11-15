@@ -299,6 +299,18 @@ class DeploySpawn(
         /** The whatsdigest deploy's own label — a sibling of everything. */
         const val WHATSAPP_JOB_LABEL = "com.zcode.wd-deploy"
 
+        /**
+         * The agent-brain deploy's log (the 🧠 target, 15/11): the RAG/memory
+         * server's build words, never mixed with the daemon's.
+         */
+        const val BRAIN_LOG_FILE_NAME = "deploy-brain.log"
+
+        /** The brain job's rendered plist name — its own file, its own bootout. */
+        const val BRAIN_JOB_PLIST_NAME = "deploy-brain-job.plist"
+
+        /** The brain deploy's own label — a sibling of everything. */
+        const val BRAIN_JOB_LABEL = "com.zcode.brain-deploy"
+
         /** The beat between a failed bootstrap and its one retry (lib/deploy.nu's measured fix). */
         const val BOOTOUT_BEAT_MS = 2_000L
 
@@ -364,6 +376,7 @@ object DeployScriptKnob {
     private const val KEY = "deploy_script"
     private const val FORK_KEY = "deploy_fork_script"
     private const val WHATSAPP_KEY = "deploy_whatsapp_script"
+    private const val BRAIN_KEY = "deploy_brain_script"
 
     val DEFAULT: File =
         File(System.getProperty("user.home"), "Projects/zcode-bot-kotlin/scripts/deploy-daemon.nu")
@@ -385,6 +398,15 @@ object DeployScriptKnob {
     val WHATSAPP_DEFAULT: File =
         File(System.getProperty("user.home"), "Projects/whatsdigest-kt/scripts/deploy-daemon.nu")
 
+    /**
+     * The agent-brain deploy's script (the 🧠 target, 15/11): the brain
+     * repo's own canonical deploy (installDist + detekt → its LaunchAgent
+     * restart → /ready verification), the same script `zcode-deploy-all`'s
+     * 2/4 leg runs. The knob `deploy_brain_script` still overrides.
+     */
+    val BRAIN_DEFAULT: File =
+        File(System.getProperty("user.home"), "Projects/agent-brain/scripts/deploy-brain.nu")
+
     // any reading failure is the same answer: the default (SendKnob's degrade law)
     @Suppress("TooGenericExceptionCaught")
     fun load(daemonJson: File): File = load(daemonJson, KEY, DEFAULT, "deploy_script")
@@ -396,6 +418,10 @@ object DeployScriptKnob {
     /** The whatsdigest knob — its own key (`deploy_whatsapp_script`), the same degrade law. */
     @Suppress("TooGenericExceptionCaught")
     fun loadWhatsapp(daemonJson: File): File = load(daemonJson, WHATSAPP_KEY, WHATSAPP_DEFAULT, WHATSAPP_KEY)
+
+    /** The brain knob — its own key (`deploy_brain_script`), the same degrade law. */
+    @Suppress("TooGenericExceptionCaught")
+    fun loadBrain(daemonJson: File): File = load(daemonJson, BRAIN_KEY, BRAIN_DEFAULT, BRAIN_KEY)
 
     // any reading failure is the same answer: the default (SendKnob's degrade law)
     @Suppress("TooGenericExceptionCaught")
