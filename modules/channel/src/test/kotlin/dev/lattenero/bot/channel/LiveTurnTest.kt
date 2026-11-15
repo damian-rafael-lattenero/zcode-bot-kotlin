@@ -194,6 +194,34 @@ class LiveTurnTest {
     }
 
     @Test
+    fun theMergedSeamInsideADeltaNeverDoublesTheHead() {
+        // 15/11, measured on Telegram («TheTheThe report is already parsed…»
+        // and «ElElEl trap de hoy…»; the model-io ground truth was CLEAN):
+        // the fork's coalescer joins the stale head INTO the recovery chunk,
+        // so the 14/11 single cut left the head doubled. Every window copy
+        // standing at the remainder's head is a seam — the stream stays
+        // append-only, the cut iterates.
+        var s = reduce(null, thought("The"))
+        s = reduce(s, thought("TheThe report is already parsed by `open`."))
+        assertEquals("The report is already parsed by `open`.", s!!.cotTail)
+        assertEquals(1, s.cotTail.split("The report").size - 1, "…and the head never doubles")
+        // the triple: two stale copies stacked onto the re-emission
+        s = reduce(null, thought("El"))
+        s = reduce(s, thought("ElElEl trap de hoy otra vez."))
+        assertEquals("El trap de hoy otra vez.", s!!.cotTail)
+    }
+
+    @Test
+    fun theAnswersMergedSeamNeverDoublesItsHead() {
+        // 15/11: the answer tail's own [restatedFresh] cuts the merged seam
+        // iteratively too — «La» + «LaLa respuesta…» appends « respuesta…».
+        var s = reduce(null, ev("agent_message_chunk", "content" to str("La")))
+        s = reduce(s, ev("agent_message_chunk", "content" to str("LaLa respuesta llega completa al final.")))
+        assertEquals("La respuesta llega completa al final.", s!!.answerTail)
+        assertEquals(1, s.answerTail.split("respuesta").size - 1, "…and the head never doubles")
+    }
+
+    @Test
     fun theCardSpeaksTheAnswerAsItStreams() {
         var s: TurnLive? = null
         s = reduce(s, ev("task_run_started"))
