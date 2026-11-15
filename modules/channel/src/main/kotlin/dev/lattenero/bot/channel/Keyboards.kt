@@ -292,12 +292,14 @@ object Keyboards {
 
     /**
      * 2026-11-04, THE ONE-TAP LAW — /deploy's target row IS the deploy:
-     * bot / fork / whatsapp / all, one row, no confirm half (the tap fires
-     * the door and the flow strips THIS keyboard from the card). The wiring
-     * intercepts `dep:` taps BEFORE the callback fallback — the sst: law:
-     * a stray data must never ride to the agent as the owner's own words.
-     * The owner's rename, 10/11: with three targets the last row is
-     * «Todos», not «Ambos» (dep:all; dep:both still answers — stale cards).
+     * bot / fork / whatsapp / brain / all, one row, no confirm half (the
+     * tap fires the door and the flow strips THIS keyboard from the card).
+     * The wiring intercepts `dep:` taps BEFORE the callback fallback — the
+     * sst: law: a stray data must never ride to the agent as the owner's
+     * own words. The owner's rename, 10/11: with three targets the last
+     * row is «Todos», not «Ambos» (dep:all; dep:both still answers —
+     * stale cards). 15/11: 🧠 brain joins (the RAG/memory server's own
+     * deploy, the zcode-deploy-all wave's 2/4 leg).
      */
     fun deployTargets(): JsonObject = buildJsonObject {
         putJsonArray("inline_keyboard") {
@@ -306,6 +308,7 @@ object Keyboards {
                     add(button("🤖 Bot Kotlin", "dep:bot"))
                     add(button("🍴 ZCode Fork", "dep:fork"))
                     add(button("📱 WhatsApp", "dep:whatsapp"))
+                    add(button("🧠 Brain", "dep:brain"))
                     add(button("🚀 Todos", "dep:all"))
                 },
             )

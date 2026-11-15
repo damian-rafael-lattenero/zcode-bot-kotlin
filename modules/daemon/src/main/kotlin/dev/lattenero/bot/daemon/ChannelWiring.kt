@@ -700,6 +700,18 @@ internal fun wireChannel(
         plistFile = File(File(cfg.homeDir, "state"), DeploySpawn.WHATSAPP_JOB_PLIST_NAME),
         label = DeploySpawn.WHATSAPP_JOB_LABEL,
     )
+    // THE BRAIN EDGE (15/11, the 🧠 target): agent-brain's own canonical
+    // deploy (installDist + detekt → its LaunchAgent restart → /ready), the
+    // same script zcode-deploy-all's 2/4 leg runs. A sibling job of
+    // everything: the brief memory/RAG outage degrades honestly, THIS daemon
+    // is never at stake.
+    val brainDeployLog = File(File(cfg.homeDir, "logs"), DeploySpawn.BRAIN_LOG_FILE_NAME)
+    val brainDeployEdge = DeploySpawn(
+        script = DeployScriptKnob.loadBrain(File(cfg.homeDir, SendKnob.FILE_NAME)),
+        logFile = brainDeployLog,
+        plistFile = File(File(cfg.homeDir, "state"), DeploySpawn.BRAIN_JOB_PLIST_NAME),
+        label = DeploySpawn.BRAIN_JOB_LABEL,
+    )
     // THE ROW-DIE EDIT (4/11, the one-tap law): when a target fires, the
     // targets card's button row dies IN PLACE — the mirror's exact edit
     // throat (LiveTelegram.edit over the shared cooldown file, the bot's
@@ -755,6 +767,13 @@ internal fun wireChannel(
                     logger.warn {
                         "deploy(whatsapp): ${DeploySpawn.WHATSAPP_JOB_LABEL} bootstrapped as its OWN job " +
                             "(sibling of everything; this daemon is never at stake) — log: $whatsappDeployLog"
+                    }
+                }
+                DeployCommand.Target.BRAIN -> {
+                    brainDeployEdge.spawn()
+                    logger.warn {
+                        "deploy(brain): ${DeploySpawn.BRAIN_JOB_LABEL} bootstrapped as its OWN job " +
+                            "(sibling of everything; this daemon is never at stake) — log: $brainDeployLog"
                     }
                 }
                 DeployCommand.Target.ALL -> throw IllegalStateException(
