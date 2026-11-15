@@ -94,7 +94,7 @@ internal fun planRoute(facts: RouteFacts, newIntent: Boolean): RoutePlan = when 
     newIntent -> RoutePlan.Fire(
         sid = facts.activeTaskId ?: DRAFT_TARGET,
         bind = false,
-        reason = "new-intent (/tasks new armed the draft)",
+        reason = "new-intent (/run armed the draft)",
     )
 
     // THE OWNER'S SELECTION (5/11): the tap IS the law — the text flies AT
@@ -172,7 +172,7 @@ private fun freshBindRoute(facts: RouteFacts): RoutePlan {
     }
 }
 
-/** The pseudo-target for /tasks new's armed text: the draft itself (no bind). */
+/** The pseudo-target for /run's armed text: the draft itself (no bind). */
 internal const val DRAFT_TARGET = "(draft)"
 
 /** The router's owner-facing texts — the owner's Spanish, one line each. */
@@ -192,7 +192,7 @@ internal object RouteTexts {
     /** The tombstone refusal: the bound conversation is gone and nothing is open to re-aim at. */
     const val BOUND_GONE_NO_OPEN =
         "🪦 The bot's conversation was deleted and no conversation is open in the app — " +
-            "/tasks n picks one (or /tasks new opens a fresh one)."
+            "/tasks and tap a row (or /run «prompt» opens a fresh one)."
 
     /**
      * The re-aim refusal (the owner's words, 29/10): the old task's turn
@@ -203,5 +203,5 @@ internal object RouteTexts {
 
     /** The bind did not land (race or vanished conversation). */
     const val BIND_FAILED =
-        "⚠️ The switch did not land (a turn may have started mid-switch) — /tasks n again, or /stop first."
+        "⚠️ The switch did not land (a turn may have started mid-switch) — tap the /tasks row again, or /stop first."
 }

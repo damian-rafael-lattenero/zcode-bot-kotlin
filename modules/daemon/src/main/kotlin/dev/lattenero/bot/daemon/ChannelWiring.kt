@@ -1465,7 +1465,7 @@ private suspend fun diffNow(client: ChannelClient, history: TasksHistory, rest: 
         else -> return DIFF_DOWN
     }
     val taskId = (ctx.get("activeTaskId") as? JsonPrimitive)?.content
-        ?: return "📭 No active conversation — /tasks n picks one; /diff reads the files it changed."
+        ?: return "📭 No active conversation — /tasks and tap a row; /diff reads the files it changed."
     val ws = (ctx.get("workspacePath") as? JsonPrimitive)?.content
     return when (val answer = client.query(ChannelQuery.TaskSnapshot(taskId, ws))) {
         is QueryAnswer.Ok -> {

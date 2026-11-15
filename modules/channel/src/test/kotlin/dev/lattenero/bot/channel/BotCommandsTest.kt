@@ -231,23 +231,25 @@ class BotCommandsTest {
     }
 
     @Test
-    fun tasksNumericArgIsRetiredTheListIsTheAnswer() = runBlocking {
+    fun tasksArgIsIgnoredTheBareListIsTheAnswer() = runBlocking {
+        // THE BARE LAW (owner, 15/11): the commands receive NO parameters —
+        // whatever rest is typed, the tappable list is the whole answer.
         val o = ops().apply { answers["activeTaskIds"] = """["task-77"]""" }
         val (bc, _) = commands(o)
         val reply = bc.handle("/tasks 2", 7L)!!
-        assertTrue("Conversations by project" in reply.text, "a number just re-shows the tappable list")
+        assertTrue("Conversations by project" in reply.text, "any rest is ignored — the list answers")
         assertTrue(reply.markup != null, "the list is never buttonless")
-        assertTrue("Sin números" in reply.text, "the retirement hint rides along")
-        assertTrue(o.inbound.isEmpty() && o.awaited.isEmpty(), "no bind ever fires from a number")
+        assertTrue("Sin números" !in reply.text, "the retirement hint died with the parameter era")
+        assertTrue(o.inbound.isEmpty() && o.awaited.isEmpty(), "no bind ever fires from a rest")
     }
 
     @Test
-    fun allTasksNumericArgIsRetiredToo() = runBlocking {
+    fun allTasksArgIsIgnoredToo() = runBlocking {
         val (bc, _) = commands(ops())
         val reply = bc.handle("/all_tasks 5", 1L)!!
         assertTrue("All conversations" in reply.text)
         assertTrue(reply.markup != null, "the all-list is tappable")
-        assertTrue("Sin números" in reply.text)
+        assertTrue("Sin números" !in reply.text)
     }
 
     @Test
@@ -260,18 +262,6 @@ class BotCommandsTest {
         assertTrue("Conversations by project" in reply.text)
         assertTrue(reply.markup != null, "buttons ride on the local session store, not on the channel's context")
         assertTrue(reply.markup.toString().contains("\"t:task-77\""))
-    }
-
-    @Test
-    fun pickBySidWhileThePreviousTaskRunsSaysStopFirst() = runBlocking {
-        val o = ops().apply { answers["activeTaskIds"] = """["task-77"]""" }
-        val (bc, _) = commands(o)
-        assertEquals(
-            "⏳ The previous task's turn is still running — the switch did NOT happen. " +
-                "/stop first, then pick again.",
-            bc.reply("/tasks @task-02", 1L),
-        )
-        assertTrue(o.inbound.isEmpty()) // the doomed bind never fires
     }
 
     @Test
@@ -520,21 +510,6 @@ class BotCommandsTest {
         assertTrue("qgo:" in datas, "the ⏳ keep-queued button is there")
         assertTrue(o.inbound.isEmpty()) // parked, not fired
         assertEquals(listOf(Triple("y ahora esto", "tg-5", 1_000_000L)), o.queued)
-    }
-
-    @Test
-    fun tasksNewArmsTheNextTextToCreate() = runBlocking {
-        val o = ops().apply {
-            botStatusJson = draftStatus
-            answers["botStatus"] = draftStatus
-        }
-        val (bc, _) = commands(o)
-        val reply = bc.reply("/tasks new", 3L)!!
-        assertTrue(reply.startsWith("🆕 New conversation in app"))
-        assertNull(bc.reply("primer mensaje", 4L))
-        assertEquals(2, o.inbound.size)
-        assertTrue(o.inbound[0].first == "/new") // the botsService's own draft
-        assertTrue(o.inbound.none { it.first.startsWith("/task ") }) // no bind: CREATE intent
     }
 
     @Test
@@ -902,36 +877,10 @@ class BotCommandsTest {
     }
 
     @Test
-    fun tasksNewWithAProjectTagIsRefused() = runBlocking {
-        val o = ops(status = draftStatus).apply { answers["botStatus"] = draftStatus }
-        val (bc, _) = commands(o)
-        val reply = bc.reply("/tasks new otro-proyecto", 1L)!!
-        assertTrue(reply.startsWith("⚠️ /tasks new opens it in the ACTIVE project"), reply)
-        assertTrue(o.inbound.none { it.first == "/new" }, "the refusal fires nothing")
-    }
-
-    @Test
-    fun tasksAtSidPicksDirectlyLikeTheButton() = runBlocking {
-        val boundTo02 = """
-            {"bot":{"id":"daemon-local","enabled":true},
-             "context":{"workspacePath":"$app","activeTaskId":"task-02","mode":"task"}}
-        """.trimIndent()
-        val o = ops().apply {
-            botStatusJson = draftStatus
-            answers["botStatus"] = draftStatus
-            onInbound = { text -> if (text.startsWith("/task ")) answers["botStatus"] = boundTo02 }
-        }
-        val (bc, _) = commands(o)
-        val reply = bc.reply("/tasks @task-02", 8L)!!
-        assertTrue("✅ CONFIRMADO: «second» es la conversación activa" in reply)
-        assertEquals(listOf("/task task-02" to "tg-8-bind"), o.awaited)
-    }
-
-    @Test
     fun allTasksNumericArgIsJustTheList() = runBlocking {
         val (bc, _) = commands(ops())
         val reply = bc.reply("/all_tasks 9", 1L)!!
-        assertTrue("All conversations" in reply, "a number never errors — it re-shows the list")
+        assertTrue("All conversations" in reply, "a rest never errors — it is ignored, the list answers")
     }
 
     @Test
