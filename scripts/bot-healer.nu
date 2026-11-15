@@ -25,17 +25,17 @@
 # ~/.zcode/telegram-remote.json, and the token travels through curl's
 # config on stdin, never argv.
 
-const LABEL = "com.zcode.bot-daemon"
-const STALE_AFTER_S = 180
-const MIN_INTERVAL_S = 300
-const DEPLOY_GRACE_S = 900
+const LABEL: string = "com.zcode.bot-daemon"
+const STALE_AFTER_S: int = 180
+const MIN_INTERVAL_S: int = 300
+const DEPLOY_GRACE_S: int = 900
 
 def expanded [p: string]: nothing -> string {
     $p | str replace --all "~" $nu.home-dir
 }
 
 def cfg_path [name: string, fallback: string]: nothing -> string {
-    let raw = ($env | get --optional $name | default $fallback | into string)
+    let raw: string = ($env | get --optional $name | default $fallback | into string)
     expanded $raw
 }
 
@@ -47,12 +47,12 @@ def now_s []: nothing -> int {
 # is exactly the case this script exists for.
 def file_age_s [p: string, now: int]: nothing -> int {
     if not ($p | path exists) { return 999999999 }
-    let m = (^/usr/bin/stat -f %m $p | str trim | into int)
+    let m: int = (^/usr/bin/stat -f %m $p | str trim | into int)
     $now - $m
 }
 
 def agent_loaded [domain: string, label: string]: nothing -> bool {
-    let r = (do { ^/bin/launchctl print $"($domain)/($label)" } | complete)
+    let r: record = (do { ^/bin/launchctl print $"($domain)/($label)" } | complete)
     $r.exit_code == 0
 }
 
@@ -62,7 +62,7 @@ def read_last_heal [state: string]: nothing -> int {
 }
 
 def log_line [log: string, message: string]: nothing -> nothing {
-    let stamp = (date now | format date "%Y-%m-%dT%H:%M:%S%:z")
+    let stamp: string = (date now | format date "%Y-%m-%dT%H:%M:%S%:z")
     let parent = ($log | path dirname)
     mkdir $parent
     $"($stamp) ($message)\n" | save --append $log
@@ -91,38 +91,38 @@ def decide [
 }
 
 def notify [text: string]: nothing -> nothing {
-    let path = (cfg_path "HEALER_TELEGRAM" "~/.zcode/telegram-remote.json")
+    let path: string = (cfg_path "HEALER_TELEGRAM" "~/.zcode/telegram-remote.json")
     if not ($path | path exists) { return }
-    let cfg = (try { open --raw $path | from json } catch { return })
-    let token = ($cfg | get --optional token | default "")
-    let chat = ($cfg | get --optional chat_id | default "")
+    let cfg: any = (try { open --raw $path | from json } catch { return })
+    let token: string = ($cfg | get --optional token | default "")
+    let chat: any = ($cfg | get --optional chat_id | default "")
     if ($token | is-empty) or ($chat | is-empty) { return }
     # the token goes through curl's config on stdin, never argv
-    let curl_cfg = $"url = \"https://api.telegram.org/bot($token)/sendMessage\"\n"
-    let body = ({chat_id: ($chat | into string), text: $text} | to json)
-    let res = ($curl_cfg | ^curl -fsS --max-time 8 -K - -H "Content-Type: application/json" -d $body | complete)
+    let curl_cfg: string = $"url = \"https://api.telegram.org/bot($token)/sendMessage\"\n"
+    let body: string = ({chat_id: ($chat | into string), text: $text} | to json)
+    let res: record = ($curl_cfg | ^curl -fsS --max-time 8 -K - -H "Content-Type: application/json" -d $body | complete)
     if $res.exit_code != 0 {
         log_line (cfg_path "HEALER_LOG" "~/.zcode/bot-kotlin/logs/healer.log") $"notify FAILED: ($res.stderr | str trim)"
     }
 }
 
 def main [--dry-run, --force, --status]: nothing -> nothing {
-    let now = (now_s)
-    let hb = (cfg_path "HEALER_HB" "~/.zcode/bot-kotlin/state/hb-channel")
-    let marker = (cfg_path "HEALER_DEPLOY_MARKER" "~/.zcode/bot-kotlin/state/deploying")
-    let state = (cfg_path "HEALER_STATE" "~/.zcode/bot-kotlin/state/healer.json")
-    let log = (cfg_path "HEALER_LOG" "~/.zcode/bot-kotlin/logs/healer.log")
-    let label = ($env | get --optional HEALER_LABEL | default $LABEL | into string)
-    let daemon_plist = (cfg_path "HEALER_DAEMON_PLIST" "~/Library/LaunchAgents/com.zcode.bot-daemon.plist")
-    let uid = (^/usr/bin/id -u | str trim)
-    let domain = $"gui/($uid)"
+    let now: int = (now_s)
+    let hb: string = (cfg_path "HEALER_HB" "~/.zcode/bot-kotlin/state/hb-channel")
+    let marker: string = (cfg_path "HEALER_DEPLOY_MARKER" "~/.zcode/bot-kotlin/state/deploying")
+    let state: string = (cfg_path "HEALER_STATE" "~/.zcode/bot-kotlin/state/healer.json")
+    let log: string = (cfg_path "HEALER_LOG" "~/.zcode/bot-kotlin/logs/healer.log")
+    let label: string = ($env | get --optional HEALER_LABEL | default $LABEL | into string)
+    let daemon_plist: string = (cfg_path "HEALER_DAEMON_PLIST" "~/Library/LaunchAgents/com.zcode.bot-daemon.plist")
+    let uid: string = (^/usr/bin/id -u | str trim)
+    let domain: string = $"gui/($uid)"
 
-    let hb_age = (file_age_s $hb $now)
-    let marker_age = (file_age_s $marker $now)
-    let deploy_in_flight = ($marker_age < $DEPLOY_GRACE_S)
-    let since_last = ($now - (read_last_heal $state))
-    let loaded = (agent_loaded $domain $label)
-    let plan = (decide $hb_age $deploy_in_flight $since_last $loaded $force)
+    let hb_age: int = (file_age_s $hb $now)
+    let marker_age: int = (file_age_s $marker $now)
+    let deploy_in_flight: bool = ($marker_age < $DEPLOY_GRACE_S)
+    let since_last: int = ($now - (read_last_heal $state))
+    let loaded: bool = (agent_loaded $domain $label)
+    let plan: record = (decide $hb_age $deploy_in_flight $since_last $loaded $force)
 
     if $status {
         print ({hb: $hb, hb_age_s: $hb_age, deploy_in_flight: $deploy_in_flight, loaded: $loaded, since_last_heal_s: $since_last, plan: $plan} | to json)
@@ -140,13 +140,13 @@ def main [--dry-run, --force, --status]: nothing -> nothing {
         return
     }
 
-    let result = if $plan.action == "kickstart" {
+    let result: record = if $plan.action == "kickstart" {
         do { ^/bin/launchctl kickstart -k $"($domain)/($label)" } | complete
     } else {
         do { ^/bin/launchctl bootstrap $domain $daemon_plist } | complete
     }
-    let ok = ($result.exit_code == 0)
-    let detail = if $ok { "" } else { ($result.stderr | str trim | str substring 0..200) }
+    let ok: bool = ($result.exit_code == 0)
+    let detail: string = if $ok { "" } else { ($result.stderr | str trim | str substring 0..200) }
 
     mkdir ($state | path dirname)
     {ts: $now, action: $plan.action, hb_age_s: $hb_age, ok: $ok, detail: $detail}

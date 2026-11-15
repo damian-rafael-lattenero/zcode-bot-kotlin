@@ -17,10 +17,10 @@
 # fights the Mac's getUpdates monopoly (bot ADR-001). Stable-Nushell
 # compatible on purpose: it does not need the nightly build.
 
-const GIST_ID = "d61ac1dd354d8d69579a2df683db1688"
-const GIST_RAW = "https://gist.githubusercontent.com/damian-rafael-lattenero/d61ac1dd354d8d69579a2df683db1688/raw/beacon.json"
-const STALE_AFTER_S = 150
-const POLL_EVERY_S = 30
+const GIST_ID: string = "d61ac1dd354d8d69579a2df683db1688"
+const GIST_RAW: string = "https://gist.githubusercontent.com/damian-rafael-lattenero/d61ac1dd354d8d69579a2df683db1688/raw/beacon.json"
+const STALE_AFTER_S: int = 150
+const POLL_EVERY_S: int = 30
 
 def now_epoch []: nothing -> int {
     date now | format date "%s" | into int
@@ -38,29 +38,29 @@ def send [text: string]: nothing -> bool {
         return false
     }
 
-    let url = $"https://api.telegram.org/bot($env.WATCHDOG_BOT_TOKEN)/sendMessage"
+    let url: string = $"https://api.telegram.org/bot($env.WATCHDOG_BOT_TOKEN)/sendMessage"
     # Explicit JSON: the runner's stable nu does not auto-serialize
     # records in http post (accepted types there: binary, string).
-    let body = ({chat_id: ($env.WATCHDOG_CHAT_ID | into string), text: $text} | to json)
+    let body: string = ({chat_id: ($env.WATCHDOG_CHAT_ID | into string), text: $text} | to json)
 
-    let max_retries = 3
-    let backoff_s = 5
-    mut attempt = 0
-    mut delivered = false
-    mut last_error = ''
+    let max_retries: int = 3
+    let backoff_s: int = 5
+    mut attempt: int = 0
+    mut delivered: bool = false
+    mut last_error: string = ''
 
     loop {
         $attempt = ($attempt + 1)
         # The catch closure may not capture mutable vars, so it only
         # builds a value; all mutation happens outside it.
-        let outcome = (try {
+        let outcome: record = (try {
             {kind: 'response', resp: (http post --content-type "application/json" $url $body)}
         } catch {|err|
             {kind: 'network', error: ($err.msg | str substring 0..200)}
         })
 
         if ($outcome.kind == 'response') {
-            let resp = $outcome.resp
+            let resp: record = $outcome.resp
             if ($resp.ok? == true) {
                 print $"sent: ($text | str substring 0..60)..."
                 $delivered = true
@@ -99,21 +99,21 @@ def main [--loop-seconds: int = 0, --simulate-stale-minutes: int = 0]: nothing -
         }
         return
     }
-    mut slept = 0
-    mut first = true
-    mut alerted_dead = false
-    mut warned_poll = false
-    mut undelivered = false
+    mut slept: int = 0
+    mut first: bool = true
+    mut alerted_dead: bool = false
+    mut warned_poll: bool = false
+    mut undelivered: bool = false
     loop {
         # Via the API, NOT the raw URL: gist.githubusercontent.com is CDN-
         # cached for minutes (measured live 30/10: a healthy beacon read as
         # 2 min stale → a FALSE 💀). The API answer is always fresh; the
         # gist is UNLISTED (secret-by-URL), so anonymous reads work and the
         # Actions token does not cover gists anyway (measured: 403).
-        let api = $"https://api.github.com/gists/($GIST_ID)"
-        let beacon = (http get $api | get files."beacon.json".content | from json)
-        let stale_s = ((now_epoch) - ($beacon.epoch | into int))
-        let mins = ($stale_s // 60)
+        let api: string = $"https://api.github.com/gists/($GIST_ID)"
+        let beacon: record = (http get $api | get files."beacon.json".content | from json)
+        let stale_s: int = ((now_epoch) - ($beacon.epoch | into int))
+        let mins: int = ($stale_s // 60)
         if $stale_s > $STALE_AFTER_S {
             # One 💀 per job (~every 5 min while dead — never radio
             # silence, bounded to 12/hour); the next job re-alerts.
