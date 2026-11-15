@@ -9,7 +9,7 @@
 
 use lib/deploy.nu *
 
-const LABEL = "com.zcode.bot-daemon"
+const LABEL: string = "com.zcode.bot-daemon"
 
 # Event-driven arming wait (the waiting law): `watch` on the state dir wakes
 # us the moment hb-zconn-shadow is born or touched; `job recv --timeout` is
@@ -23,7 +23,7 @@ const LABEL = "com.zcode.bot-daemon"
 def wait-armed [hb: path, zconn: path, since: int, deadline: duration]: nothing -> bool {
     let dir: string = ($hb | path dirname)
     let base: string = ($hb | path basename)
-    let watcher = (job spawn {
+    let watcher: int = (job spawn {
         watch $dir
         | each {|ev|
             if ($ev.path | path basename) == $base {
@@ -45,10 +45,10 @@ def wait-armed [hb: path, zconn: path, since: int, deadline: duration]: nothing 
 }
 
 def main []: nothing -> nothing {
-    let repo = ($env.FILE_PWD | path dirname)
-    let home = $nu.home-dir
-    let dest = ($home | path join ".zcode/bot-daemon")
-    let data = ($home | path join ".zcode/bot-kotlin")
+    let repo: path = ($env.FILE_PWD | path dirname)
+    let home: path = $nu.home-dir
+    let dest: path = ($home | path join ".zcode/bot-daemon")
+    let data: path = ($home | path join ".zcode/bot-kotlin")
 
     # THE HEALER'S DOOR (bot-healer.nu): a deploy is SUPPOSED to leave the
     # daemon down for a minute or two. The marker tells the healer to stand
@@ -77,7 +77,7 @@ def main []: nothing -> nothing {
     mkdir ($data | path join "shadow")
     mkdir ($data | path join "logs")
     rm -rf ($dest | path join "bin") ($dest | path join "lib")
-    let built = ($repo | path join "modules/daemon/build/install/daemon")
+    let built: path = ($repo | path join "modules/daemon/build/install/daemon")
     ^/bin/cp -R $"($built)/." $"($dest)/"
 
     # The healer is installed BEFORE the daemon's own restart: if the
@@ -87,13 +87,13 @@ def main []: nothing -> nothing {
     bootstrap-agent $repo "com.zcode.bot-healer"
 
     step $"LaunchAgent ($LABEL) \(KeepAlive: launchd is the dumb outer ring\)"
-    let started = (date now | format date "%s" | into int)
+    let started: int = (date now | format date "%s" | into int)
     bootstrap-agent $repo $LABEL
 
     step "verification: first heartbeat + armed state (deadline 45s)"
     announce "🚀 deploy Bot Kotlin espejo ZCode 4/4 — verification (heartbeat + estado armado, deadline 45 s)"
-    let hb = ($data | path join "state/hb-zconn-shadow")
-    let zconn = ($data | path join "state/zconn.json")
+    let hb: path = ($data | path join "state/hb-zconn-shadow")
+    let zconn: path = ($data | path join "state/zconn.json")
     let ok = (wait-armed $hb $zconn $started 45sec)
     if not $ok {
         print -e "✗ daemon did not arm — last words:"
@@ -108,8 +108,8 @@ def main []: nothing -> nothing {
     }
     log $"heartbeat: (^stat -f '%Sm' $hb | str trim)"
     log $"state: (open --raw $zconn | str trim)"
-    let daemon_log = ($data | path join "logs/daemon.jsonl")
-    let last = (tail-lines $daemon_log 1)
+    let daemon_log: path = ($data | path join "logs/daemon.jsonl")
+    let last: list<string> = (tail-lines $daemon_log 1)
     if ($last | length) > 0 {
         log $"log tail: ($last | first)"
     }

@@ -47,17 +47,17 @@ def now_s []: nothing -> int {
 }
 
 def log_line [log: string, message: string]: nothing -> nothing {
-    let stamp = (date now | format date "%Y-%m-%dT%H:%M:%S%:z")
-    let parent = ($log | path dirname)
+    let stamp: string = (date now | format date "%Y-%m-%dT%H:%M:%S%:z")
+    let parent: string = ($log | path dirname)
     mkdir $parent
     $"($stamp) ($message)\n" | save --append $log
 }
 
 # The dialog's host process, or the honest dead baseline.
 def detect []: nothing -> record {
-    let hits = (ps | where name in $WATCHED | sort-by pid)
+    let hits: table = (ps | where name in $WATCHED | sort-by pid)
     if ($hits | is-empty) { return {alive: false, pid: 0, name: ""} }
-    let first = ($hits | first)
+    let first: record = ($hits | first)
     {alive: true, pid: ($first.pid | into int), name: ($first.name | into string)}
 }
 
@@ -113,16 +113,16 @@ def etime_to_s [e: string]: nothing -> int {
 # WHO probably asked: asker-named processes always, the three youngest
 # others as context — an honest guess, labeled as one, never a verdict.
 def suspects []: nothing -> string {
-    let rows = (do { ^/bin/ps -axo pid,etime,comm } | complete | get stdout | lines | skip 1)
-    let parsed = ($rows | each {|l|
+    let rows: list<string> = (do { ^/bin/ps -axo pid,etime,comm } | complete | get stdout | lines | skip 1)
+    let parsed: table = ($rows | each {|l|
         $l | parse -r '^\s*(?<pid>\d+)\s+(?<etime>\S+)\s+(?<comm>\S+)' | first
     } | compact)
     if ($parsed | is-empty) { return "No identifiqué al peticionario." }
-    let named = ($parsed | where {|r| ($r.comm | path basename) in $ASKERS })
-    let young = ($parsed | where {|r|
+    let named: table = ($parsed | where {|r| ($r.comm | path basename) in $ASKERS })
+    let young: table = ($parsed | where {|r|
         ($r.comm | path basename) not-in $ASKERS and (etime_to_s $r.etime) < 120
     } | sort-by {|r| etime_to_s $r.etime } | first 3)
-    let all = ($named | append $young)
+    let all: table = ($named | append $young)
     if ($all | is-empty) { return "No identifiqué al peticionario." }
     $all | each {|r|
         $"• ($r.comm | path basename) — pid ($r.pid), hace (etime_to_s $r.etime)s"
@@ -150,21 +150,21 @@ def resolve_text [episode: record]: nothing -> string {
 # Stateless sendMessage (the healer's siren): button_pid >= 0 attaches the
 # «already attended» tap (auth:<pid>); -1 sends bare text.
 def notify [text: string, button_pid: int]: nothing -> nothing {
-    let path = (cfg_path "AUTH_SENTINEL_TELEGRAM" "~/.zcode/telegram-remote.json")
+    let path: string = (cfg_path "AUTH_SENTINEL_TELEGRAM" "~/.zcode/telegram-remote.json")
     if not ($path | path exists) { return }
-    let cfg = (try { open --raw $path | from json } catch { return })
-    let token = ($cfg | get --optional token | default "")
-    let chat = ($cfg | get --optional chat_id | default "")
+    let cfg: any = (try { open --raw $path | from json } catch { return })
+    let token: string = ($cfg | get --optional token | default "")
+    let chat: any = ($cfg | get --optional chat_id | default "")
     if ($token | is-empty) or ($chat | is-empty) { return }
-    let base = {chat_id: ($chat | into string), text: $text}
-    let body = (if $button_pid >= 0 {
+    let base: record = {chat_id: ($chat | into string), text: $text}
+    let body: record = (if $button_pid >= 0 {
         $base | insert reply_markup {inline_keyboard: [[{text: "✅ Ya la atendí", callback_data: $"auth:($button_pid)"}]]}
     } else {
         $base
     })
     # the token goes through curl's config on stdin, never argv
-    let curl_cfg = $"url = \"https://api.telegram.org/bot($token)/sendMessage\"\n"
-    let res = ($curl_cfg | ^curl -fsS --max-time 8 -K - -H "Content-Type: application/json" -d ($body | to json -r) | complete)
+    let curl_cfg: string = $"url = \"https://api.telegram.org/bot($token)/sendMessage\"\n"
+    let res: record = ($curl_cfg | ^curl -fsS --max-time 8 -K - -H "Content-Type: application/json" -d ($body | to json -r) | complete)
     if $res.exit_code != 0 {
         log_line (cfg_path "AUTH_SENTINEL_LOG" "~/.zcode/bot-kotlin/logs/auth-sentinel.log") $"notify FAILED: ($res.stderr | str trim)"
     }
@@ -199,18 +199,18 @@ def selftest []: nothing -> nothing {
 
 def main [--status, --dry-run, --selftest, --test-alert]: nothing -> nothing {
     if $selftest { selftest; return }
-    let log = (cfg_path "AUTH_SENTINEL_LOG" "~/.zcode/bot-kotlin/logs/auth-sentinel.log")
+    let log: string = (cfg_path "AUTH_SENTINEL_LOG" "~/.zcode/bot-kotlin/logs/auth-sentinel.log")
     if $test_alert {
         notify "🔐 Prueba del sentinel — si leés esto y el botón contesta, el canal anda." 0
         log_line $log "test alert sent (callback auth:0)"
         return
     }
 
-    let now = (now_s)
-    let state = (cfg_path "AUTH_SENTINEL_STATE" "~/.zcode/bot-kotlin/state/auth-sentinel.json")
-    let marker = (cfg_path "AUTH_SENTINEL_MARKER" "~/.zcode/bot-kotlin/state/auth-dismissed")
-    let present = (detect)
-    let episode = (if ($state | path exists) {
+    let now: int = (now_s)
+    let state: string = (cfg_path "AUTH_SENTINEL_STATE" "~/.zcode/bot-kotlin/state/auth-sentinel.json")
+    let marker: string = (cfg_path "AUTH_SENTINEL_MARKER" "~/.zcode/bot-kotlin/state/auth-dismissed")
+    let present: record = (detect)
+    let episode: record = (if ($state | path exists) {
         try { open --raw $state | from json } catch { {} }
     } else {
         {}
@@ -230,7 +230,7 @@ def main [--status, --dry-run, --selftest, --test-alert]: nothing -> nothing {
         $episode
     })
 
-    let plan = (decide $effective $present $now)
+    let plan: record = (decide $effective $present $now)
     if $status {
         print ({present: $present, marker_pid: $marker_pid, plan: $plan} | to json -r)
         return
@@ -241,7 +241,7 @@ def main [--status, --dry-run, --selftest, --test-alert]: nothing -> nothing {
     }
 
     if $marker_pid >= 0 { rm -f $marker }
-    let e = $plan.episode
+    let e: record = $plan.episode
     match $plan.action {
         "alert" => {
             notify (alert_text $e (suspects)) ($e.pid | into int)
