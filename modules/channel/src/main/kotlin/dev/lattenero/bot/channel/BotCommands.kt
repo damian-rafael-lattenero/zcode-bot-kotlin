@@ -271,7 +271,7 @@ class BotCommands(
     /** /nuclear's single-flight companion: the in-process half (the wiring adds the cross-restart mtime gate). */
     private val nuclearGate = java.util.concurrent.atomic.AtomicBoolean(false)
 
-    /** /tasks new's pending intent: the NEXT free text skips the bind and CREATES (Python's /task new). */
+    /** /run's pending intent: the fired prompt CREATES in its fresh draft; the NEXT free text routes as always. */
     private var newIntent = false
 
     /**
@@ -279,7 +279,7 @@ class BotCommands(
      * choice — the router's freshest-row heuristic can NEVER clobber it
      * (measured live 16:05: his text flew to «go_to_background» because
      * the index said «open conversation moved»). Armed by a CONFIRMED tap
-     * bind, moved by the next tap, wiped by ☢️ and /tasks new; a selection
+     * bind, moved by the next tap, wiped by ☢️; a selection
      * that dies in the index is cleared at facts time (the old laws
      * resume). It rides EVERY fire on the wire (bindTaskId) — the sid is
      * the aim, not a memory the next route may override.
@@ -295,8 +295,12 @@ class BotCommands(
     suspend fun handle(text: String, updateId: Long): BotReply? {
         val (base, rest) = parseCommand(text) ?: return route(text, updateId)
         val reply: BotReply = when (base) {
-            "tasks", "task" -> tasks(rest, updateId) // "task" keeps Python's muscle memory alive
-            "all_tasks", "alltasks" -> allTasks(rest, updateId)
+            // THE BARE LAW (owner, 15/11 — the command goes out argument-free):
+            // the lists take NO parameters — any typed rest is ignored and the
+            // tappable list is always the answer. "task" keeps Python's muscle
+            // memory alive.
+            "tasks", "task" -> taskList(all = false)
+            "all_tasks", "alltasks" -> taskList(all = true)
             "status" -> BotReply(status())
             "stop" -> stop(rest)
             "nuclear", "nuke" -> nuclear(rest)
@@ -1922,22 +1926,11 @@ class BotCommands(
     // ---- the commands -------------------------------------------------------
 
     /**
-     * /tasks — Python's `/task`: the projects-scope history (usage-backed
-     * tasks, loose DEFAULT-workspace ones excluded), NOW with the owner's
-     * 2/11 law: NO numeric args — the answer is always the TAPPABLE list
-     * (tasks + subagents); `new` arms the next text to CREATE, `@sid`
-     * stays for the taps' internal resolution.
+     * /tasks and /all_tasks are BARE (the owner, 15/11): the tappable list
+     * is the only answer, no parameters ever reach them. `/tasks new` died —
+     * /run opens a fresh conversation — and the taps' `@sid` picks died with
+     * it (nothing ever sent them; the row taps go through [taskAttach]).
      */
-    private suspend fun tasks(rest: String, updateId: Long): BotReply = when {
-        rest.startsWith("@") -> BotReply(pickBySid(rest.substring(1), updateId))
-        rest.substringBefore(' ') == "new" -> BotReply(newConversation(rest.removePrefix("new").trim()))
-        else -> taskList(all = false, hint = if (rest.isNotEmpty()) NO_NUMBERS_HINT else null)
-    }
-
-    /** /all_tasks — Python's `/all_tasks`: every conversation, loose ones included — buttons only, no numbers. */
-    @Suppress("UnusedParameter") // the dispatcher's uniform (rest, updateId) shape; numbers are retired
-    private suspend fun allTasks(rest: String, updateId: Long): BotReply =
-        taskList(all = true, hint = if (rest.isNotEmpty()) NO_NUMBERS_HINT else null)
 
     /**
      * The list itself — Python's task_list_report(scope): rows + stamps +
@@ -1948,14 +1941,14 @@ class BotCommands(
      * lanes + the store's running sessions; a tap on a dead channel fails
      * honestly at the tap, never buttonless at the list).
      */
-    private suspend fun taskList(all: Boolean, hint: String? = null): BotReply {
+    private suspend fun taskList(all: Boolean): BotReply {
         val rows = scopeRows(history.ctxTasks(if (all) ALL_CAP else TASKS_CAP), all, defaultWorkspacePath)
         val watched = hub.peek()
         val lanes = dispatchLanes(watched)
         return when (val ctx = contextAnswer()) {
             ContextAnswer.Degraded -> BotReply(degraded("botStatus"))
-            ContextAnswer.None -> taskListWithoutContext(rows, all, hint, watched, lanes)
-            is ContextAnswer.Ctx -> taskListWithContext(rows, all, hint, ctx, watched, lanes)
+            ContextAnswer.None -> taskListWithoutContext(rows, all, watched, lanes)
+            is ContextAnswer.Ctx -> taskListWithContext(rows, all, ctx, watched, lanes)
         }
     }
 
@@ -1963,7 +1956,6 @@ class BotCommands(
     private suspend fun taskListWithoutContext(
         rows: List<TaskRow>,
         all: Boolean,
-        hint: String?,
         watched: TurnLive?,
         lanes: List<ToolLive>,
     ): BotReply {
@@ -1971,8 +1963,7 @@ class BotCommands(
         val dbRunning = watched?.taskId?.let { history.subagentsRunning(it) }.orEmpty()
         val sorted = rows.runningFirst(running)
         return BotReply(
-            text = renderTaskList(sorted, running, watched?.taskId, null, all, watchedSid = watched?.taskId) +
-                (hint ?: ""),
+            text = renderTaskList(sorted, running, watched?.taskId, null, all, watchedSid = watched?.taskId),
             markup = Keyboards.tasksKeyboard(sorted, running, watched?.taskId, lanes, dbRunning, clock()),
         )
     }
@@ -1981,7 +1972,6 @@ class BotCommands(
     private suspend fun taskListWithContext(
         rows: List<TaskRow>,
         all: Boolean,
-        hint: String?,
         ctx: ContextAnswer.Ctx,
         watched: TurnLive?,
         lanes: List<ToolLive>,
@@ -2004,7 +1994,7 @@ class BotCommands(
                 ctx.value.workspacePath,
                 all,
                 watchedSid = watched?.taskId,
-            ) + (hint ?: ""),
+            ),
             markup = Keyboards.tasksKeyboard(
                 rows = sorted,
                 running = running,
@@ -2027,8 +2017,8 @@ class BotCommands(
      * A /tasks row tap: ATTACH to that task's pipe FIRST — the channel's
      * stream is per-task and a watch is pure reading (no ownership, no
      * bind, nothing refuses it, even mid-turn of ANOTHER conversation) —
-     * then the old bind semantics ride along via [pickBySid] and may
-     * refuse honestly; the watch already happened. What ran before the
+     * then the bind attempt rides along and may refuse honestly; the
+     * watch already happened. What ran before the
      * tap stays behind (the fork's continuous delivery has no replay);
      * /last carries the final answer when the turn ends.
      */
@@ -2615,46 +2605,6 @@ class BotCommands(
         )
     }
 
-    /**
-     * Python's _task_select_sid: bind + the 🎯 reply (the buttons' and
-     * `/task n`'s shared end). The botsService REJECTS switches mid-turn
-     * (getContextTaskBlockReason → taskRunning) — pre-checked here with
-     * the channel's own activeTaskIds so the refusal is instant.
-     */
-    @Suppress("ReturnCount") // one guard per refusal, Python's three-error ladder
-    private suspend fun pickBySid(sid: String, updateId: Long): String {
-        val ctx = contextAnswer() as? ContextAnswer.Ctx
-            ?: return RouteTexts.NO_CONTEXT
-        val current = ctx.value.activeTaskId
-        if (current != null && current != sid && isRunning(current, ctx.value.workspacePath)) {
-            logger.warn { "pick $sid refused: ${current} still runs (taskRunning)" }
-            return "⏳ The previous task's turn is still running — the switch did NOT happen. " +
-                "/stop first, then pick again."
-        }
-        val row = history.ctxTasks(SCOPE_FOR_PICK).firstOrNull { it.sid == sid }
-        val title = row?.title?.takeIf { it.isNotEmpty() } ?: sid.takeLast(SID_TAIL)
-        // the SAME confirmed-text law the tap follows — one selection, one truth
-        return bindAttempt(sid, updateId, title, row?.ws)
-    }
-
-    /** Python's `/task new [project]`: arms the next free text to CREATE (live: the botsService draft). */
-    @Suppress("ReturnCount") // one guard per refusal shape
-    private suspend fun newConversation(tag: String): String {
-        if (tag.isNotEmpty()) {
-            return "⚠️ /tasks new opens it in the ACTIVE project — switching projects from " +
-                "the phone is a next hot-fix. No conversation was opened."
-        }
-        val ws = (contextAnswer() as? ContextAnswer.Ctx)?.value?.workspacePath
-        if (ws == null || ops.sendInbound("/new", "tg-new-${clock()}", clock()) != InboundReceipt.FIRED) {
-            return DEGRADED
-        }
-        newIntent = true
-        selectedSid = null // a fresh conversation is a new world — the old tap dies
-        selectedTitle = null
-        return "🆕 New conversation in ${PyText.esc(ws.substringAfterLast('/'))} — " +
-            "send the first message and it starts."
-    }
-
     /** /status — what runs NOW (sessions-index) + the daemon's own live view. */
     private suspend fun status(): String {
         val lines = mutableListOf("📊 <b>Status</b>")
@@ -2857,7 +2807,7 @@ class BotCommands(
     private suspend fun usage(): String {
         val ctx = contextAnswer() as? ContextAnswer.Ctx ?: return noConversationOrDown()
         val taskId = ctx.value.activeTaskId
-            ?: return "📭 No active conversation — /tasks n picks one; its answers come back here."
+            ?: return "📭 No active conversation — /tasks and tap a row; its answers come back here."
         val title = history.ctxTasks(SCOPE_FOR_PICK).firstOrNull { it.sid == taskId }
             ?.title?.takeIf { it.isNotEmpty() } ?: taskId.takeLast(SID_TAIL)
         return when (val answer = ops.query(ChannelQuery.TaskUsage(taskId, ctx.value.workspacePath))) {
@@ -2954,7 +2904,7 @@ class BotCommands(
     private suspend fun lastAnswer(): String {
         val ctx = contextAnswer() as? ContextAnswer.Ctx ?: return noConversationOrDown()
         val taskId = ctx.value.activeTaskId
-            ?: return "📭 No active conversation — /tasks n picks one; its answers come back here."
+            ?: return "📭 No active conversation — /tasks and tap a row; its answers come back here."
         val title = history.ctxTasks(SCOPE_FOR_PICK).firstOrNull { it.sid == taskId }
             ?.title?.takeIf { it.isNotEmpty() } ?: taskId.takeLast(SID_TAIL)
         return when (val answer = ops.query(ChannelQuery.TaskSnapshot(taskId, ctx.value.workspacePath))) {
@@ -2966,7 +2916,7 @@ class BotCommands(
 
     /** The context's two shapes speak differently: no conversation ≠ channel down. */
     private suspend fun noConversationOrDown(): String = when (contextAnswer()) {
-        ContextAnswer.None -> "📭 No active conversation — /tasks n picks one; its answers come back here."
+        ContextAnswer.None -> "📭 No active conversation — /tasks and tap a row; its answers come back here."
         else -> DEGRADED
     }
 
@@ -2992,7 +2942,7 @@ class BotCommands(
     private suspend fun compact(): BotReply {
         val ctx = contextAnswer() as? ContextAnswer.Ctx ?: return BotReply(noConversationOrDown())
         val taskId = ctx.value.activeTaskId
-            ?: return BotReply("🤷 No active conversation to compact — /tasks n picks one.")
+                ?: return BotReply("🤷 No active conversation to compact — /tasks and tap a row.")
         return when (val answer = ops.query(ChannelQuery.Compact(taskId))) {
             is QueryAnswer.Ok -> BotReply(
                 "🗜 Compact sent to <code>${PyText.esc(taskId.takeLast(SID_TAIL))}</code> — " +
@@ -3018,7 +2968,7 @@ class BotCommands(
     private suspend fun contextWindow(): BotReply {
         val ctx = contextAnswer() as? ContextAnswer.Ctx ?: return BotReply(noConversationOrDown())
         val taskId = ctx.value.activeTaskId
-            ?: return BotReply("📭 No active conversation — /tasks n picks one; its answers come back here.")
+            ?: return BotReply("📭 No active conversation — /tasks and tap a row; its answers come back here.")
         val title = history.ctxTasks(SCOPE_FOR_PICK).firstOrNull { it.sid == taskId }
             ?.title?.takeIf { it.isNotEmpty() } ?: taskId.takeLast(SID_TAIL)
         return when (val answer = ops.query(ChannelQuery.ContextWindow(taskId, ctx.value.workspacePath))) {
@@ -3098,7 +3048,7 @@ class BotCommands(
         // turn is not the one in front of the owner.
         hub.peekPin()?.takeIf { it.startsWith(SUBAGENT_SESSION_PREFIX) }?.let { return steerSubagent(it, text) }
         val taskId = ctx.value.activeTaskId
-            ?: return BotReply("📭 No active conversation — /tasks n picks one; its answers come back here.")
+            ?: return BotReply("📭 No active conversation — /tasks and tap a row; its answers come back here.")
         val title = history.ctxTasks(SCOPE_FOR_PICK).firstOrNull { it.sid == taskId }
             ?.title?.takeIf { it.isNotEmpty() } ?: taskId.takeLast(SID_TAIL)
         val running = isRunning(taskId, ctx.value.workspacePath)
@@ -3566,9 +3516,7 @@ class BotCommands(
         const val TASK_MISSING_MARKER = "Task not found"
         const val WS_MISSING_MARKER = "No available workspace found."
 
-        /** The owner's 2/11 law: the lists are BUTTONS only — a typed number just re-shows them. */
-        internal const val NO_NUMBERS_HINT =
-            "\n⚠️ Sin números: tocá una fila para verla en vivo · /tasks new [project] crea"
+        /** Python's status: «🎯 Active: none (/task n to pick one)» — buttons are the picker now. */
 
         /** Python's status: «🎯 Active: none (/task n to pick one)» — buttons are the picker now. */
         internal const val ACTIVE_NONE = "🎯 Active: none — /tasks and tap a row"
@@ -3614,7 +3562,7 @@ class BotCommands(
          * real»). Descriptions in Python's menu_desc tone.
          */
         val MENU = listOf(
-            "tasks" to "conversations by project · /tasks n picks the active one",
+            "tasks" to "conversations by project — tap a row to watch it live",
             "all_tasks" to "all conversations, loose ones included",
             "status" to "what is running + the active conversation",
             "plan" to "elige el plan — cada uno con su quota restante al lado",
@@ -3648,7 +3596,7 @@ class BotCommands(
                 "",
                 "Anything else is TEXT: it goes to the ACTIVE conversation (live mode) " +
                     "and the live view shows every thought, tool and line as it happens. " +
-                    "Free text never opens a new one — /tasks new or /run «prompt» do.",
+                    "Free text never opens a new one — /run «prompt» does.",
             )).joinToString("\n")
 
         /**
@@ -3746,7 +3694,7 @@ class BotCommands(
 
         /** /mode needs a conversation: the mode is PER conversation, not a global knob. */
         internal const val MODE_NO_CONTEXT =
-            "📭 No hay conversación activa — /tasks n elige una: el modo es POR conversación."
+            "📭 No hay conversación activa — /tasks y tocá una fila: el modo es POR conversación."
 
         /**
          * A tap from a menu born BEFORE the 11/11 split — nothing rides,
