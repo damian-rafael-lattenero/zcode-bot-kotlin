@@ -730,12 +730,12 @@ internal fun replayed(window: String, delta: String): Boolean {
  * stream that is a re-statement by construction, and only the remainder
  * is new. Null when the delta is not that shape (the ordinary case).
  */
-// one guard per early exit: the two shape gates answer before the trim
+// one guard per early exit: the two shape gates answer before the cut loop
 @Suppress("ReturnCount")
 internal fun restatedFresh(window: String, delta: String): String? {
     if (delta.length < REPLAY_GUARD_MIN_CP || window.isEmpty()) return null
     if (delta.length < window.length || !delta.startsWith(window)) return null
-    return delta.substring(window.length)
+    return cutRestatedHead(listOf(window), delta)
 }
 
 /**
@@ -744,12 +744,11 @@ internal fun restatedFresh(window: String, delta: String): String? {
  * decides the remainder — the tail (capped at [LiveTurn.COT_TAIL_CP])
  * goes blind past its cap, the pending (the current block) does not.
  */
-// one guard per early exit: the floor gate and the no-recognitions gate
+// one guard per early exit: the floor gate answers before the cut loop
 @Suppress("ReturnCount")
 private fun restatedThoughtFresh(state: RenderState, delta: String): String {
     if (delta.length < REPLAY_GUARD_MIN_CP) return delta
-    val recognized = longestRestated(listOf(state.cotTail, state.cotPending), delta) ?: return delta
-    return delta.substring(recognized.length)
+    return cutRestatedHead(listOf(state.cotTail, state.cotPending), delta)
 }
 
 /** The longest window the delta re-states in full (its own head); null = none. */
@@ -757,6 +756,20 @@ private fun longestRestated(windows: List<String>, delta: String): String? =
     windows
         .filter { it.isNotEmpty() && delta.length >= it.length && delta.startsWith(it) }
         .maxByOrNull { it.length }
+
+/**
+ * THE MERGED SEAM'S SECOND COPY (15/11): the coalescer joins the stale
+ * head INTO the recovery chunk («The» + «The report…»), so the copy the
+ * windows recognize leaves ANOTHER copy in the remainder — one cut kept
+ * the head doubled on Telegram («TheTheThe report…», «ElElEl trap…»; the
+ * owner read both, the model-io ground truth was CLEAN). The stream is
+ * append-only: a window copy still standing at the remainder's head is a
+ * seam, never new text — cut every copy, append only what follows.
+ */
+private fun cutRestatedHead(windows: List<String>, delta: String): String =
+    longestRestated(windows, delta)
+        ?.let { cutRestatedHead(windows, delta.substring(it.length)) }
+        ?: delta
 
 /**
  * [RenderEvent.Resync] for a CHILD session topic (14/11): the lane whose
