@@ -150,8 +150,9 @@ class LiveHub {
      * THE CHILD'S ROUTING (12/11), extracted from [apply]'s gate ladder:
      * the frame's child topic names its agentId; the CURRENT state's open
      * dispatch lane that owns the child receives the delta as a
-     * [RenderEvent.ChildStream] — or the frame drops whole (the child's
-     * own tools/seal/errors are the parent's Task close's business).
+     * [RenderEvent.ChildStream], its tool frames as INNER lanes of that
+     * dispatch ([foldChildTool]) — or the frame drops whole (the child's
+     * own seal/errors stay the parent's Task close's business).
      * Caller holds [mutex].
      */
     private fun routeChild(frame: ServerFrame.StreamEvent, nowMs: Long, differ: LineDiffer): TurnLive? {
@@ -159,8 +160,8 @@ class LiveHub {
         val lane = states.value?.tools
             ?.firstOrNull { it.status == null && it.subagentAgentId == agentId }
         val type = StreamEvents.type(frame.event)
-        if (lane != null && (type == StreamEvents.THOUGHT || type == StreamEvents.MESSAGE)) {
-            fold(
+        when {
+            lane != null && (type == StreamEvents.THOUGHT || type == StreamEvents.MESSAGE) -> fold(
                 RenderEvent.ChildStream(
                     laneId = lane.toolId,
                     thought = type == StreamEvents.THOUGHT,
@@ -169,8 +170,56 @@ class LiveHub {
                 ),
                 differ,
             )
+
+            lane != null && agentId != null &&
+                (type == StreamEvents.TOOL_CALL || type == StreamEvents.TOOL_UPDATE) ->
+                foldChildTool(frame, nowMs, lane, agentId, differ)
         }
         return states.value
+    }
+
+    /**
+     * THE CHILD'S EXECUTIONS (15/11): the child topic's own tool frames —
+     * the raw events the fork persists under the child session and routes to
+     * its publisher — folded as the dispatch lane's INNER lanes, re-based
+     * into the parent card's namespace (the re-base is the law, see the
+     * helper): the owner READS what the child runs (the verb + its detail,
+     * the shell's full command in the NOW line, the edit's +N/−M, the
+     * close's output lines), not just the child's words. The seal still
+     * drops — the dispatch close's report stays the verdict.
+     * Caller holds [mutex].
+     */
+    private fun foldChildTool(
+        frame: ServerFrame.StreamEvent,
+        nowMs: Long,
+        lane: ToolLive,
+        agentId: String,
+        differ: LineDiffer,
+    ) {
+        val parentTaskId = states.value?.taskId ?: return
+        fun rebase(tool: ToolCall) = tool.copy(
+            toolId = childToolLaneId(agentId, tool.toolId),
+            parentToolUseId = lane.toolId,
+            subagentAgentId = agentId,
+        )
+        when (val classified = classifyFrame(frame, nowMs)) {
+            is RenderEvent.ToolOpen -> fold(
+                classified.copy(taskId = parentTaskId, tool = rebase(classified.tool)),
+                differ,
+            )
+
+            is RenderEvent.ToolRunning -> fold(
+                classified.copy(taskId = parentTaskId, tool = rebase(classified.tool)),
+                differ,
+            )
+
+            is RenderEvent.ToolClose -> fold(
+                classified.copy(taskId = parentTaskId, tool = rebase(classified.tool)),
+                differ,
+            )
+
+            else -> Unit // a non-tool shape under the tool ladder: nobody's lane
+        }
     }
 
     /** Back to the whole-task world — a t: attach lifts any pin. */

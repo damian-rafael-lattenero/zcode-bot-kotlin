@@ -746,6 +746,76 @@ class LivePublisherTest {
     }
 
     @Test
+    fun theChildsToolEventsFoldAsTheDispatchsInnerLanes() = runTest {
+        // THE CHILD'S EXECUTIONS (15/11): the child topic's tool frames fold as
+        // the dispatch's INNER lanes — the owner reads WHAT the child runs, not
+        // just its words — re-based so the fold never sees the child's address.
+        val parent = "task-9"
+        val child = subagentSessionId("agent_1")
+        val hub = LiveHub()
+        // the parent turn with an OPEN dispatch lane whose ACK named the child
+        hub.apply(
+            frame(
+                parent, "tool_call", at = 1_000,
+                "toolId" to JsonPrimitive("d1"), "toolName" to JsonPrimitive("Agent"),
+                "subagentAgentId" to JsonPrimitive("agent_1"),
+            ),
+            nowMs = 1_000,
+        )
+        // the child runs something: a REAL lane, off the dispatch, in the parent card
+        hub.apply(
+            frame(
+                child, "tool_call", at = 1_100,
+                "toolId" to JsonPrimitive("call_c1"), "toolName" to JsonPrimitive("Bash"),
+                "input" to buildJsonObject { put("command", "rg -n sess_subagent src") },
+            ),
+            nowMs = 1_100,
+        )
+        var s = hub.peek()!!
+        assertEquals(parent, s.taskId, "the card stays the parent's — never a task switch")
+        val innerId = childToolLaneId("agent_1", "call_c1")
+        val inner = s.tools.firstOrNull { it.toolId == innerId }
+        assertEquals("Bash", inner?.name, "the child's execution is a REAL lane")
+        assertEquals("rg -n sess_subagent src", inner?.input?.str("command"), "the command rides — readable")
+        assertEquals("d1", inner?.parentToolUseId, "the lane hangs off the dispatch")
+        assertEquals("agent_1", inner?.subagentAgentId, "the lane names its child — never frozen")
+        // the child's in_progress ping touches the SAME lane (the deterministic id)
+        hub.apply(
+            frame(
+                child, "tool_call_update", at = 1_200, "status" to JsonPrimitive("in_progress"),
+                "toolId" to JsonPrimitive("call_c1"), "toolName" to JsonPrimitive("Bash"),
+            ),
+            nowMs = 1_200,
+        )
+        s = hub.peek()!!
+        assertEquals(1, s.tools.count { it.toolId == innerId }, "one lane, not one per frame")
+        // the close lands the verdict on the same lane
+        hub.apply(
+            frame(
+                child, "tool_call_update", at = 1_300, "status" to JsonPrimitive("completed"),
+                "toolId" to JsonPrimitive("call_c1"), "content" to JsonPrimitive("line1\nline2"),
+            ),
+            nowMs = 1_300,
+        )
+        s = hub.peek()!!
+        val closed = s.tools.first { it.toolId == innerId }
+        assertEquals("completed", closed.status)
+        assertEquals(2, closed.outputLines, "the close's output lines are counted")
+        // the dispatch closes: its inner world folds away with it (the corpse law)
+        hub.apply(
+            frame(
+                parent, "tool_call_update", at = 1_400, "status" to JsonPrimitive("completed"),
+                "toolId" to JsonPrimitive("d1"), "content" to JsonPrimitive("the child's report"),
+            ),
+            nowMs = 1_400,
+        )
+        assertTrue(
+            hub.peek()!!.tools.none { it.toolId == innerId },
+            "the dispatch's close folds its child lanes away",
+        )
+    }
+
+    @Test
     fun aPinnedChildStreamsAsItsOwnCard() = runTest {
         val child = subagentSessionId("agent_1")
         val hub = LiveHub()

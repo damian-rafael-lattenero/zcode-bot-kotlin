@@ -23,3 +23,12 @@ fun isSubagentSession(taskId: String): Boolean = taskId.startsWith(SUBAGENT_SESS
 /** The agentId inside a child-session topic; null for any other taskId. */
 fun subagentAgentIdOf(taskId: String): String? =
     taskId.takeIf { isSubagentSession(it) }?.removePrefix(SUBAGENT_SESSION_PREFIX)
+
+/**
+ * The child-tool lane's INNER id on the parent card — `sa:<agentId>:<childToolCallId>`.
+ * Deterministic from the frame alone: the child's open/stream/close of one tool
+ * collide into ONE lane without a registry, and the namespace can never collide
+ * with a parent lane id. Null (a frame with no toolCallId) folds as nothing.
+ */
+fun childToolLaneId(agentId: String, childToolCallId: String?): String? =
+    childToolCallId?.let { "sa:$agentId:$it" }
