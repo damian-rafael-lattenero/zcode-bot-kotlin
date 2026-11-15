@@ -12,13 +12,13 @@
 
 use lib/deploy.nu *
 
-const LABEL = "com.zcode.bot-comparator"
+const LABEL: string = "com.zcode.bot-comparator"
 
 def main []: nothing -> nothing {
-    let repo = ($env.FILE_PWD | path dirname)
-    let home = $nu.home-dir
-    let dest = ($home | path join ".zcode/bot-comparator")
-    let parity = ($home | path join ".zcode/bot-kotlin/parity")
+    let repo: path = ($env.FILE_PWD | path dirname)
+    let home: path = $nu.home-dir
+    let dest: path = ($home | path join ".zcode/bot-comparator")
+    let parity: path = ($home | path join ".zcode/bot-kotlin/parity")
 
     step "building (Gradle daemon on 25)"
     cd $repo
@@ -28,14 +28,14 @@ def main []: nothing -> nothing {
     mkdir $dest
     mkdir $parity
     rm -rf ($dest | path join "bin") ($dest | path join "lib")
-    let built = ($repo | path join "modules/comparator/build/install/comparator")
+    let built: path = ($repo | path join "modules/comparator/build/install/comparator")
     ^/bin/cp -R $"($built)/." $"($dest)/"
 
     step $"LaunchAgent ($LABEL) \(daily, 86400 s\)"
     bootstrap-agent $repo $LABEL
 
     step "first daily report (manual)"
-    let comparator = ($dest | path join "bin/comparator")
+    let comparator: path = ($dest | path join "bin/comparator")
     ^$comparator --shadow-dir ($home | path join ".zcode/bot-kotlin/shadow") --logs-dir ($home | path join ".zcode/hooks/logs") --out $parity
 
     print "done. The verdict above is today's; from tomorrow launchd writes it to"

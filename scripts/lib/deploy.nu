@@ -64,13 +64,13 @@ export def user-id []: nothing -> string {
 }
 
 export def agent-loaded [label: string]: nothing -> bool {
-    let r = (do { ^launchctl print $"gui/(user-id)/($label)" } | complete)
+    let r: record = (do { ^launchctl print $"gui/(user-id)/($label)" } | complete)
     $r.exit_code == 0
 }
 
 export def bootout-agent [label: string]: nothing -> nothing {
     if (agent-loaded $label) {
-        let r = (do { ^launchctl bootout $"gui/(user-id)/($label)" } | complete)
+        let r: record = (do { ^launchctl bootout $"gui/(user-id)/($label)" } | complete)
         if $r.exit_code != 0 {
             print -e $"⚠ bootout ($label) failed: ($r.stderr | str trim)"
         }
@@ -82,7 +82,7 @@ export def bootout-agent [label: string]: nothing -> nothing {
 # error 5 — "Input/output error", a lie about the cause — until the label
 # is enabled. Enabling a label we own is idempotent and safe.
 export def enable-agent [label: string]: nothing -> nothing {
-    let r = (do { ^launchctl enable $"gui/(user-id)/($label)" } | complete)
+    let r: record = (do { ^launchctl enable $"gui/(user-id)/($label)" } | complete)
     if $r.exit_code != 0 {
         print -e $"⚠ launchctl enable ($label) failed: ($r.stderr | str trim)"
     }
@@ -93,20 +93,20 @@ export def enable-agent [label: string]: nothing -> nothing {
 # the bootstrap (measured: error 5, "Input/output error"), so retry once
 # after a beat — the same fix the bash deploy earned the hard way.
 export def bootstrap-agent [repo: string, label: string]: nothing -> nothing {
-    let home = $nu.home-dir
-    let src = ($repo | path join "scripts" $"($label).plist")
-    let dst = ($home | path join "Library/LaunchAgents" $"($label).plist")
+    let home: path = $nu.home-dir
+    let src: path = ($repo | path join "scripts" $"($label).plist")
+    let dst: path = ($home | path join "Library/LaunchAgents" $"($label).plist")
     if not (($src | path type) == "file") {
         die $"missing plist: ($src)"
     }
-    let rendered = (open --raw $src | str replace --all "__HOME__" $home)
+    let rendered: string = (open --raw $src | str replace --all "__HOME__" $home)
     $rendered | save -f $dst
     bootout-agent $label
     enable-agent $label
-    let first = (do { ^launchctl bootstrap $"gui/(user-id)" $dst } | complete)
+    let first: record = (do { ^launchctl bootstrap $"gui/(user-id)" $dst } | complete)
     if $first.exit_code != 0 {
         sleep 2sec
-        let second = (do { ^launchctl bootstrap $"gui/(user-id)" $dst } | complete)
+        let second: record = (do { ^launchctl bootstrap $"gui/(user-id)" $dst } | complete)
         if $second.exit_code != 0 {
             die $"launchctl bootstrap ($label) failed: ($second.stderr | str trim)"
         }
