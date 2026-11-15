@@ -14,22 +14,22 @@
 # The heartbeat URL is a secret (anyone holding it can forge a ping), so
 # it lives in ~/.zcode/bot-kotlin/heartbeat.url, never in this repo.
 
-const GIST_ID = "d61ac1dd354d8d69579a2df683db1688"
-const GIST_FILE = "beacon.json"
-const DAEMON_LOG = "~/.zcode/bot-kotlin/logs/daemon.jsonl"
-const BEACON_LOG = "~/.zcode/bot-kotlin/logs/beacon.log"
-const HEARTBEAT_URL_FILE = "~/.zcode/bot-kotlin/heartbeat.url"
-const TELEGRAM_CFG = "~/.zcode/telegram-remote.json"
-const POLL_FAIL_NEEDLE = "getUpdates failed"
-const POLL_RECOVERED_NEEDLE = "poller RECOVERED"
-const POLL_FAIL_WINDOW = 10min
+const GIST_ID: string = "d61ac1dd354d8d69579a2df683db1688"
+const GIST_FILE: string = "beacon.json"
+const DAEMON_LOG: string = "~/.zcode/bot-kotlin/logs/daemon.jsonl"
+const BEACON_LOG: string = "~/.zcode/bot-kotlin/logs/beacon.log"
+const HEARTBEAT_URL_FILE: string = "~/.zcode/bot-kotlin/heartbeat.url"
+const TELEGRAM_CFG: string = "~/.zcode/telegram-remote.json"
+const POLL_FAIL_NEEDLE: string = "getUpdates failed"
+const POLL_RECOVERED_NEEDLE: string = "poller RECOVERED"
+const POLL_FAIL_WINDOW: duration = 10min
 # Staleness bound for the log signal. The poller writes a failure every
 # ~30.2 s while Telegram is down, so the newest one is always < 31 s old;
 # 60 s covers two cycles with margin. A 30 s window is not enough: with
 # the beacon sampling every 60 s it would miss roughly every other
 # failure (aliasing), flapping the check between /fail and a normal ping.
 def poll_fail_alert_window []: nothing -> duration { 60sec }
-const TAIL_LINES = 400
+const TAIL_LINES: int = 400
 
 # The wire shape — one schema, writer and reader (the house rule).
 type Beacon = record<epoch: int, iso: string, daemon_log_age_s: int, poll_fail_recent: bool, beacon_version: int>
@@ -54,7 +54,7 @@ def file_epoch [path: string]: nothing -> int {
 # still ships because GitHub is reachable).
 def poll_fail_since [log: string, window: duration]: nothing -> bool {
     if not ($log | path exists) { return false }
-    let cutoff = (date now) - $window
+    let cutoff: datetime = (date now) - $window
     open --raw $log
     | lines
     | last $TAIL_LINES
@@ -82,8 +82,8 @@ def poll_fail_recent [log: string]: nothing -> bool {
 # stop trusting the log (e.g. the poller thread died silently).
 def poller_failing [log: string, window: duration]: nothing -> bool {
     if not ($log | path exists) { return false }
-    let cutoff = (date now) - $window
-    let events = (
+    let cutoff: datetime = (date now) - $window
+    let events: list = (
         open --raw $log
         | lines
         | last $TAIL_LINES
@@ -104,7 +104,7 @@ def poller_failing [log: string, window: duration]: nothing -> bool {
         | where {|event| $event != null }
     )
     if ($events | is-empty) { return false }
-    let last = ($events | last)
+    let last: record = ($events | last)
     $last.failed and ($last.ts > $cutoff)
 }
 
@@ -115,12 +115,12 @@ def poller_failing [log: string, window: duration]: nothing -> bool {
 # falls back to the log. The token never touches argv: curl reads its
 # config (including the URL) from stdin.
 def telegram_probe []: nothing -> string {
-    let path = (expanded $TELEGRAM_CFG)
+    let path: string = (expanded $TELEGRAM_CFG)
     if not ($path | path exists) { return "skip" }
-    let token = (try { open --raw $path | from json | get token } catch { "" })
+    let token: string = (try { open --raw $path | from json | get token } catch { "" })
     if ($token | is-empty) { return "skip" }
-    let cfg = $"url = \"https://api.telegram.org/bot($token)/getMe\"\n"
-    let res = ($cfg | ^curl -fsS --max-time 6 -K - | complete)
+    let cfg: string = $"url = \"https://api.telegram.org/bot($token)/getMe\"\n"
+    let res: record = ($cfg | ^curl -fsS --max-time 6 -K - | complete)
     if $res.exit_code == 0 { "ok" } else { "fail" }
 }
 
@@ -152,10 +152,10 @@ def ping_heartbeat [url: string, telegram_down: bool, reason: string]: nothing -
         log_line "heartbeat SKIP: no ~/.zcode/bot-kotlin/heartbeat.url"
         return
     }
-    let target = if $telegram_down { $"($url)/fail" } else { $url }
-    let curl_cfg = $"url = \"($target)\"\n"
-    let res = ($curl_cfg | ^curl -fsS --retry 2 --retry-delay 2 --max-time 8 -K - | complete)
-    let body = ($res.stdout | str trim)
+    let target: string = if $telegram_down { $"($url)/fail" } else { $url }
+    let curl_cfg: string = $"url = \"($target)\"\n"
+    let res: record = ($curl_cfg | ^curl -fsS --retry 2 --retry-delay 2 --max-time 8 -K - | complete)
+    let body: string = ($res.stdout | str trim)
     if $res.exit_code == 0 {
         if ($body | str contains "not found") {
             log_line $"heartbeat ERROR: check not found — bad heartbeat.url? fail=($telegram_down) body=($body)"
@@ -170,7 +170,7 @@ def ping_heartbeat [url: string, telegram_down: bool, reason: string]: nothing -
 }
 
 def main []: nothing -> nothing {
-    let log = (expanded $DAEMON_LOG)
+    let log: string = (expanded $DAEMON_LOG)
     let beacon: Beacon = {
         epoch: (now_epoch),
         iso: (date now | format date "%Y-%m-%dT%H:%M:%S%:z"),
@@ -182,15 +182,15 @@ def main []: nothing -> nothing {
     # reachable right now (and clears a stale outage instantly), while
     # the poller's own last event catches breakage getMe cannot see
     # (409 Conflict from a second poller, 401, 429).
-    let probe = (telegram_probe)
-    let log_failing = (poller_failing $log (poll_fail_alert_window))
-    let telegram_down = ($probe == "fail") or $log_failing
-    let reason = if $probe == "fail" { "telegram-probe" } else { "poll-log" }
+    let probe: string = (telegram_probe)
+    let log_failing: bool = (poller_failing $log (poll_fail_alert_window))
+    let telegram_down: bool = ($probe == "fail") or $log_failing
+    let reason: string = if $probe == "fail" { "telegram-probe" } else { "poll-log" }
     # Heartbeat FIRST: a GitHub outage must not look like a Mac outage.
     ping_heartbeat (heartbeat_url) $telegram_down $reason
-    let tmp = (mktemp)
+    let tmp: path = (mktemp)
     $beacon | to json | save --force $tmp
-    let pushed = (^gh gist edit $GIST_ID $tmp --filename $GIST_FILE | complete)
+    let pushed: record = (^gh gist edit $GIST_ID $tmp --filename $GIST_FILE | complete)
     rm --force $tmp
     if $pushed.exit_code == 0 {
         log_line $"ok epoch=($beacon.epoch) daemon_age_s=($beacon.daemon_log_age_s) poll_fail_recent=($beacon.poll_fail_recent) telegram_probe=($probe)"
