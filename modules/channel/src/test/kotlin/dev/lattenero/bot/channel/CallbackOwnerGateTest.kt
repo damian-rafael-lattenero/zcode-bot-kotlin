@@ -102,7 +102,7 @@ class CallbackOwnerGateTest {
         // never aborts anything — it is inert like qgo:)
         listOf(
             "t:task-77", "sa:deadbeef", "so:toolu_1", "sn:toolu_1", "odq:1", "qa:q1:0", "qf:q1",
-            "qgo:task-77", "bgd:task-77", "ql:tg-1", "qd:tg-1", "vb:verbose", "sao:", "saa:",
+            "qgo:task-77", "bgd:task-77", "bgc:toolu_1", "ql:tg-1", "qd:tg-1", "vb:verbose", "sao:", "saa:",
             "pl:opencode-go-chat", "pm:kimi-k2", "pe:max", "pd:", "pac:", "pcl:", "mo:task",
             "cly:", "gfy", "gxn:", "cl:plan", "gf:WEEK", "cb:7", "bp:7:2", "bf:7",
             "nuclear", "stop", "/tasks", "/status", "/help",

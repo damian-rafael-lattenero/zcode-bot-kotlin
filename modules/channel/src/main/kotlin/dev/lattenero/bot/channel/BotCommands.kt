@@ -374,6 +374,12 @@ class BotCommands(
         // nothing is aborted, so it stays OUT of the destructive vocabulary
         data.startsWith("bgd:") -> backgroundNow(data.removePrefix("bgd:"))
 
+        // the 🌙 LANE demote (bgc:<tail>): ONE Agent tool call goes to the
+        // background, the rest of the turn stays where it is — inert like
+        // bgd:, so the noop is the honest answer and nothing joins the
+        // destructive vocabulary
+        data.startsWith("bgc:") -> backgroundLane(data.removePrefix("bgc:"))
+
         data.startsWith("t:") -> taskAttach(data.removePrefix("t:"), updateId)
 
         data.startsWith("sa:") -> laneAttach(data.removePrefix("sa:"))
@@ -1148,6 +1154,50 @@ class BotCommands(
             is QueryAnswer.Unavailable -> BotReply(DEGRADED)
             is QueryAnswer.Failed -> BotReply(
                 "⚠️ No pude pasar al fondo (${answer.code}): ${PyText.esc(answer.message ?: "?")}",
+            )
+        }
+    }
+
+    /**
+     * 🌙 — the live card's PER-LANE demote (`bgc:<tail>`): ONE running
+     * Agent tool call goes to the background while the rest of the turn
+     * stays in the foreground (the fork's `backgroundToolCall`; `bgd:`
+     * demotes the whole turn instead). The lane resolves exactly like the
+     * ⏹️'s target — last tail wins over the hub's open dispatch lanes —
+     * and every outcome is honest: a lane that is gone or already closed,
+     * the noop when the fork names nothing (its reasonCode
+     * `guard.stopTargetChanged`), the degraded line on a down channel and
+     * the host's verbatim error otherwise. Nothing is aborted: the child
+     * keeps running and its result still arrives at seal.
+     */
+    @Suppress("ReturnCount") // one exit per honest gate: gone, no parent, the query
+    private suspend fun backgroundLane(tail: String): BotReply {
+        val turn = hub.peek()
+        val lane = dispatchLanes(turn).lastOrNull { it.toolId.endsWith(tail) }
+        if (lane == null || lane.status != null) {
+            logger.info { "callback 🌙 bgc: tail=$tail resolves to nothing running — honest gone" }
+            return BotReply("🌙 Ese agente ya no está corriendo en primer plano.")
+        }
+        val name = Keyboards.subagentName(lane)
+        val parentSid = turn?.taskId
+        if (parentSid.isNullOrBlank()) {
+            logger.info { "callback 🌙 bgc: «$name» (${lane.toolId}) has no parent session — honest refusal" }
+            return BotReply("🌙 No sé en qué conversación corre «${PyText.esc(name)}» — refrescá /tasks.")
+        }
+        logger.info { "callback 🌙 bgc: demoting «$name» (${lane.toolId}) of $parentSid to background" }
+        return when (val answer = ops.query(ChannelQuery.BackgroundToolCall(parentSid, lane.toolId))) {
+            is QueryAnswer.Ok -> {
+                val backgrounded = parseStringsOf(answer.resultJson, "backgrounded")
+                if (lane.toolId in backgrounded) {
+                    BotReply("🌙 «${PyText.esc(name)}» al fondo — sigue corriendo y el resultado llega al terminar.")
+                } else {
+                    BotReply("🌙 Nada que pasar al fondo — «${PyText.esc(name)}» ya no corre en primer plano.")
+                }
+            }
+            is QueryAnswer.Unavailable -> BotReply(DEGRADED)
+            is QueryAnswer.Failed -> BotReply(
+                "⚠️ No pude pasar «${PyText.esc(name)}» al fondo (${answer.code}): " +
+                    PyText.esc(answer.message ?: "?"),
             )
         }
     }
