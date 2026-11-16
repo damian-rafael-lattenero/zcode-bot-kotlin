@@ -269,7 +269,10 @@ private fun reduceFrame(state: RenderState?, event: RenderEvent.FromFrame, diffe
 // one guard per early exit: the two replay gates answer before the fold
 @Suppress("ReturnCount")
 private fun reduceThought(state: RenderState, event: RenderEvent.Thought): RenderState {
-    val delta = event.delta
+    // THE GLUED ECHO (16/11): the merged seam dies inside the delta, before
+    // any window guard reads it (the window may have moved on — measured
+    // live: «TheTheThe report…» arrived with the tail nowhere near «The»).
+    val delta = cutGluedEcho(event.delta)
     val parent = event.parentToolUseId
     val isMain = parent == null || parent == state.watchedLane
     return if (isMain) {
@@ -368,7 +371,8 @@ private fun sealCotBlocks(
 // one guard per early exit: the two replay gates answer before the fold
 @Suppress("ReturnCount")
 private fun reduceAnswer(state: RenderState, event: RenderEvent.Answering): RenderState {
-    val delta = event.delta
+    // THE GLUED ECHO (16/11): the merged seam dies inside the delta first.
+    val delta = cutGluedEcho(event.delta)
     if (replayed(state.answerTail, delta)) return state
     // THE REBURST'S FIRST WORD (11/11): the subscribe burst re-delivers the
     // answer's first emission — the whole streamed answer IS that delta
@@ -490,17 +494,19 @@ private const val COT_KEY_CAP = 128
 @Suppress("ReturnCount")
 private fun reduceChildStream(state: RenderState?, event: RenderEvent.ChildStream): RenderState? {
     if (state == null) return null
-    if (event.delta.isEmpty()) return state
+    // THE GLUED ECHO (16/11): the child topic's merged seams die first too.
+    val delta = cutGluedEcho(event.delta)
+    if (delta.isEmpty()) return state
     val current = state.subagentLanes[event.laneId] ?: ChildLive()
     val tail = if (event.thought) current.cotTail else current.answerTail
     // the replay guard's shape (the reburst law): a re-emission the tail
     // already ends with appends nothing ([replayed] gates the floor)
-    if (replayed(tail, event.delta)) return state
+    if (replayed(tail, delta)) return state
     // THE RE-STATED MERGED HEAD (14/11): the child topic's re-subscribe
     // burst re-states its in-flight text MERGED — a chunk that starts with
     // the whole window appends only its remainder (the «CheckCheck…» seam
     // measured on the child lanes).
-    val fresh = restatedFresh(tail, event.delta) ?: event.delta
+    val fresh = restatedFresh(tail, delta) ?: delta
     if (fresh.isEmpty()) return state
     val chars = (if (event.thought) current.cotChars else current.answerChars) + fresh.length
     val nextTail = LiveTurn.takeLastCodePoints(tail + fresh, LiveTurn.CHILD_TAIL_CP)
@@ -709,6 +715,40 @@ internal const val REPLAY_GUARD_MIN_CP = 24
  * line under a first one is a legitimate repeat, never a re-emission.
  */
 internal const val REPLAY_GUARD_SHORT_CP = 8
+
+/** THE GLUED ECHO'S UNIT FLOOR (16/11): the smallest unit the merge glued live was «El» — 2 cp. */
+internal const val GLUED_ECHO_MIN_CP = 2
+
+/**
+ * THE GLUED ECHO (16/11): the fork's coalescer merges the stale in-flight
+ * head INTO the recovery chunk, so the seam rides inside ONE delta — and
+ * when the window has moved on, no window-anchored guard sees it
+ * (measured live on Telegram: «TheTheThe report…», «ElElEl trap…»).
+ * A prefix that repeats itself with NO separator is that seam; real
+ * repetitions carry whitespace («ha ha»), pure runs are rule lines
+ * («----»), and an echo ends on a word boundary («papas» never splits).
+ */
+internal fun cutGluedEcho(delta: String): String =
+    gluedEchoUnit(delta)?.let { cutGluedEcho(delta.substring(it)) } ?: delta
+
+/** The smallest k whose k-prefix immediately repeats, glued; null = clean (the ordinary case). */
+private fun gluedEchoUnit(delta: String): Int? =
+    (GLUED_ECHO_MIN_CP..delta.length / 2).firstOrNull { k ->
+        val unit = delta.substring(0, k)
+        unit.any { it.isLetter() } &&
+            unit.any { it != unit.first() } &&
+            !delta[k - 1].isWhitespace() &&
+            delta.substring(k, 2 * k) == unit &&
+            echoEndsAtBoundary(delta, k)
+    }
+
+/** True when the copy run is followed by DIFFERENT text — a run that consumes the delta is a chant, not a seam. */
+private fun echoEndsAtBoundary(delta: String, k: Int): Boolean {
+    val unit = delta.substring(0, k)
+    var at = 2 * k
+    while (at + k <= delta.length && delta.substring(at, at + k) == unit) at += k
+    return at < delta.length && !delta[at].isLetterOrDigit()
+}
 
 /**
  * The replay guard, floored by shape: true when [delta] re-delivers text
