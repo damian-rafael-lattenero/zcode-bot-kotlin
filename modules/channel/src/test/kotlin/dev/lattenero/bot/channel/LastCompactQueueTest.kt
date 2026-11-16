@@ -147,6 +147,17 @@ class LastCompactQueueTest {
         assertFalse(long in text)
     }
 
+    @Test
+    fun lastEscapesTheAnswerBodyForHtml() = runBlocking {
+        val o = ops()
+        // the 15/11 poison: an answer discussing `<=>` died on Telegram with
+        // «Unsupported start tag "="» — the body must ride escaped
+        o.answers["taskSnapshot"] = snapshot("assistant" to "la distancia es <=> en pgvector, y a <= b")
+        val text = commands(o).handle("/last", 1L)!!.text
+        assertTrue("la distancia es &lt;=&gt; en pgvector, y a &lt;= b" in text)
+        assertFalse("<=>" in text)
+    }
+
     // ---- /compact -----------------------------------------------------------
 
     @Test

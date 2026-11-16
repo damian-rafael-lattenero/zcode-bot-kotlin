@@ -2925,12 +2925,16 @@ class BotCommands(
         if (text.isNullOrBlank()) {
             return "📭 «${PyText.esc(title)}» has no answer yet — the turn never completed one."
         }
+        // THE RAW `<` POISON (15/11): the body rides parse_mode HTML — an answer
+        // discussing `<=>` reached Telegram raw and died with HTTP 400
+        // («Unsupported start tag "="») five times, then the outbox dropped it.
+        // Cut FIRST (on raw code points), escape AFTER — an entity is never split.
         val body = if (PyText.cpLength(text) > LAST_BODY_CAP) {
             PyText.take(text, LAST_BODY_CAP) + "\n\n✂️ …the tail was cut — the full answer lives in the app."
         } else {
             text
         }
-        return "📬 <b>Last answer of «${PyText.esc(title)}»</b>\n$body"
+        return "📬 <b>Last answer of «${PyText.esc(title)}»</b>\n${PyText.esc(body)}"
     }
 
     /**
