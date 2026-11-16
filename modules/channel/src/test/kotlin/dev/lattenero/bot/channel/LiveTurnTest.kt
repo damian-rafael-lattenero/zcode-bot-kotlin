@@ -222,6 +222,48 @@ class LiveTurnTest {
     }
 
     @Test
+    fun theGluedEchoDiesInsideTheDeltaWhateverTheWindowSays() {
+        // 16/11, measured live (the owner still read «TheTheThe report…» /
+        // «ElElEl trap…» AFTER the 15/11 cut deployed): when the tail has
+        // moved on, the merged chunk arrives carrying the seam INSIDE and no
+        // window-anchored guard can see it — the glued copy dies in the delta.
+        var s = reduce(null, thought("The user is saying hello."))
+        s = reduce(s, thought("TheThe report is already parsed."))
+        assertTrue(s!!.cotTail.endsWith(" hello.The report is already parsed."), s.cotTail)
+        assertEquals(1, s.cotTail.split("The report").size - 1, "…the head never doubles")
+        // the triple: the copies keep collapsing until one stays
+        s = reduce(s, thought("ElElEl trap de hoy otra vez."))
+        assertTrue(s!!.cotTail.endsWith(".El trap de hoy otra vez."), s.cotTail)
+        assertEquals(1, s.cotTail.split("El trap de hoy").size - 1, "…the triple collapses")
+    }
+
+    @Test
+    fun theGluedEchoDiesInTheAnswerPathToo() {
+        // 16/11: the answer's own entry (the card's <pre> speaks this tail).
+        var s = reduce(null, ev("agent_message_chunk", "content" to str("La respuesta llega.")))
+        s = reduce(s, ev("agent_message_chunk", "content" to str("TheThe report is done.")))
+        assertTrue(s!!.answerTail.endsWith("llega.The report is done."), s.answerTail)
+    }
+
+    @Test
+    fun theGluedEchoLawNeverManglesLegitText() {
+        // the guards that keep real prose alive: separators («ha ha»),
+        // word continuations («papas» never splits), letterless units
+        // (version chains, rule runs), clean starts — and CHANTS: a delta
+        // that IS nothing but glued copies (streamed fixtures, chanted
+        // text) is a repetition, not a seam: the seam always continues.
+        var s = reduce(null, thought("hola "))
+        s = reduce(s, thought("papas fritas y 4.4.4.4 y ha ha ha"))
+        assertTrue(s!!.cotTail.endsWith("papas fritas y 4.4.4.4 y ha ha ha"), s.cotTail)
+        s = reduce(s, thought("---- la regla ----"))
+        assertTrue(s!!.cotTail.endsWith("---- la regla ----"), s.cotTail)
+        s = reduce(s, thought("chunk0".repeat(10)))
+        assertTrue(s!!.cotTail.endsWith("chunk0".repeat(10)), "a pure copy run is a chant, not a seam")
+        s = reduce(s, thought("el bloque sellado ".repeat(20)))
+        assertTrue(s!!.cotTail.endsWith("el bloque sellado ".repeat(20)), "trailing copies stay whole")
+    }
+
+    @Test
     fun theCardSpeaksTheAnswerAsItStreams() {
         var s: TurnLive? = null
         s = reduce(s, ev("task_run_started"))
