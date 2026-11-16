@@ -91,7 +91,7 @@ class BoxFoldTest {
         config = { cfg },
         channelAlive = { true },
         speak = { text, markup -> spoke += text to markup; speakAnswer },
-        finalAnswer = { null },
+        finalTurn = { null },
         clock = { 2_000L },
         verbosity = VolatileVerbosity().apply { set(FeedVerbosity.NORMAL) },
     )

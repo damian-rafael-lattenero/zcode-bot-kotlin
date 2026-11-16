@@ -1,6 +1,7 @@
 package dev.lattenero.bot.daemon.bus
 
 import dev.lattenero.bot.channel.ServerFrame
+import dev.lattenero.bot.channel.TurnVoice
 import dev.lattenero.bot.contracts.BusWire
 import dev.lattenero.bot.contracts.PyText
 import kotlinx.coroutines.CancellationException
@@ -35,10 +36,11 @@ import kotlin.math.round
  * - [onFrame] — every stream frame the channel delivers: `task_run_started`
  *   births the turn (`turn.started`), `tool_call`/`tool_call_update` carry
  *   the tool lifecycle, `task_complete`/`task_error` seal it;
- * - `turn.completed` carries the assistant's FINAL TEXT, fetched from the
- *   task snapshot (the same source the live view speaks at the seal) — the
- *   memory worker (P3) extracts from `payload.reply`, so an empty reply is
- *   said empty, never invented.
+ * - `turn.completed` carries the turn's CONCLUSION (the digest's trailing
+ *   step — the final text the model wrote, not the whole turn's
+ *   concatenation), fetched from the task snapshot (the same source the
+ *   live view speaks at the seal) — the memory worker (P3) extracts from
+ *   `payload.reply`, so an empty reply is said empty, never invented.
  *
  * Laws (each one a test):
  * - the bus NEVER breaks a turn: every public entry point swallows its own
@@ -55,8 +57,8 @@ class BusProducer(
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
     private val clockMs: () -> Long = System::currentTimeMillis,
     private val newId: () -> String = BusWire::newId,
-    /** taskSnapshot → the last assistant message (the live view's own source). */
-    private val finalAnswer: suspend (String) -> String? = { null },
+    /** taskSnapshot → the turn's organized voice (the live view's own source); its conclusion rides the bus. */
+    private val finalTurn: suspend (String) -> TurnVoice? = { null },
     private val log: (String) -> Unit = {},
 ) : AutoCloseable {
 
@@ -254,7 +256,7 @@ class BusProducer(
         // the snapshot lives on the SAME socket the frame arrived on: query it
         // OFF the read loop (the live view does the same from its own tick)
         scope.launch {
-            val reply = withTimeoutOrNull(REPLY_TIMEOUT_MS) { finalAnswer(frame.taskId) }
+            val reply = withTimeoutOrNull(REPLY_TIMEOUT_MS) { finalTurn(frame.taskId)?.conclusion }
             if (reply.isNullOrBlank()) {
                 log("bus: turn.completed ${frame.taskId} without reply text (snapshot unavailable) — empty reply said")
             }
