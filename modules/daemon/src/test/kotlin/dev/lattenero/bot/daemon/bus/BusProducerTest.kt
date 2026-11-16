@@ -1,6 +1,8 @@
 package dev.lattenero.bot.daemon.bus
 
 import dev.lattenero.bot.channel.ServerFrame
+import dev.lattenero.bot.channel.TurnProse
+import dev.lattenero.bot.channel.TurnVoice
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
@@ -38,7 +40,7 @@ class BusProducerTest {
             scope = scope,
             clockMs = { nowMs },
             newId = { "%032x".format(++nextId) },
-            finalAnswer = { reply },
+            finalTurn = { reply?.let { TurnVoice(listOf(TurnProse(it))) } },
             log = {},
         )
         return producer to file
@@ -256,7 +258,7 @@ class BusProducerTest {
             scope = CoroutineScope(Dispatchers.Unconfined),
             clockMs = { nowMs },
             newId = { "%032x".format(++nextId) },
-            finalAnswer = { "reply" },
+            finalTurn = { TurnVoice(listOf(TurnProse("reply"))) },
             log = {},
         )
         try {

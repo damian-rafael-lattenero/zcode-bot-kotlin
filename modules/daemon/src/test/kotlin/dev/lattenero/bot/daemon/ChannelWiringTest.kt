@@ -144,15 +144,15 @@ class ChannelWiringTest {
               {"role":"user","content":"gracias","timestamp":3}
             ]}
         """.trimIndent()
-        assertEquals("ya está", snapshotAnswerOf(snapshot))
+        assertEquals("ya está", snapshotVoiceOf(snapshot)?.conclusion)
     }
 
     @Test
     fun snapshotAnswerDegradesToNull() {
-        assertNull(snapshotAnswerOf("""{"messages":[]}"""))
-        assertNull(snapshotAnswerOf("""{"messages":[{"role":"user","content":"x"}]}"""))
-        assertNull(snapshotAnswerOf("""{"messages":[{"role":"assistant","content":"  "}]}"""))
-        assertNull(snapshotAnswerOf("not json"))
+        assertNull(snapshotVoiceOf("""{"messages":[]}"""))
+        assertNull(snapshotVoiceOf("""{"messages":[{"role":"user","content":"x"}]}"""))
+        assertNull(snapshotVoiceOf("""{"messages":[{"role":"assistant","content":"  "}]}"""))
+        assertNull(snapshotVoiceOf("not json"))
     }
 
     // ── THE DEFAULT-MODE ENFORCEMENT (4/11: «por defecto siempre Full access») ──
