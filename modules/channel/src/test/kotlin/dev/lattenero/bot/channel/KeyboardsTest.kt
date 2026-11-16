@@ -167,6 +167,43 @@ class KeyboardsTest {
     }
 
     @Test
+    fun liveCardLeadsWithTheTurnRowThenOneMoonPerOpenLane() {
+        // THE LIVE CARD: the turn's own 🌙 first, then ONE row per running
+        // dispatch lane — the per-lane demote (bgc:) rides the toolId's
+        // shared tail; a CLOSED lane earns no row (nothing left to demote)
+        val open = ToolLive(
+            toolId = "toolu_open1234567890",
+            name = "Task",
+            parentToolUseId = null,
+            openedAtMs = 1,
+            input = buildJsonObject { put("description", JsonPrimitive("root-cause hunter")) },
+        )
+        val closed = ToolLive(
+            toolId = "toolu_closed123456789",
+            name = "Agent",
+            parentToolUseId = null,
+            openedAtMs = 1,
+            status = "completed",
+        )
+        val rows = rowsOf(Keyboards.liveCard("ses_live", listOf(open, closed))!!)
+        assertEquals(2, rows.size, "the turn row + the one OPEN lane; the closed lane is no row at all")
+        assertEquals(listOf("🌙 Go to background" to "bgd:ses_live"), rows[0], "the turn's demote leads")
+        assertEquals(
+            listOf("🌙 root-cause hunter" to "bgc:" + open.toolId.takeLast(Keyboards.LANE_TAIL)),
+            rows[1],
+            "one 🌙 per open lane, the toolId tail as the address",
+        )
+        // the lane's data is tiny — the 64-byte law never even breathes
+        assertTrue(Keyboards.callbackDataValid(rows[1].single().second))
+    }
+
+    @Test
+    fun liveCardOfABlankSidIsNoKeyboardAtAll() {
+        assertNull(Keyboards.liveCard("", emptyList()))
+        assertNull(Keyboards.liveCard("   ", listOf(ToolLive(toolId = "toolu_x", name = "Agent", openedAtMs = 1))))
+    }
+
+    @Test
     fun deployTargetsIsTheOneTapRow() {
         // the ONE-TAP LAW (4/11): the target row IS the deploy — no go/no
         // confirm half exists anymore (the tap fires the door). 10/11: the
@@ -257,6 +294,7 @@ class KeyboardsTest {
             Keyboards.cotToggle(7, expanded = true),
             Keyboards.interruptQuestion("ses_0f84de0cf002474fe596446e627129dc"),
             Keyboards.backgroundTurn("ses_0f84de0cf002474fe596446e627129dc"),
+            Keyboards.liveCard("ses_0f84de0cf002474fe596446e627129dc", lanes)!!,
             Keyboards.nuclearConfirm(),
             Keyboards.stopConfirm(),
             Keyboards.subagentsViewButtons(inactiveView = false),
@@ -339,7 +377,12 @@ class KeyboardsTest {
             if ("👁" in text) assertTrue(data.startsWith("sa:"), "👁 attaches, nothing else: $data")
             if ("🚀" in text) assertTrue(data.startsWith("ql:"), "🚀 launches a parked text: $data")
             if (text.startsWith("⚡")) assertTrue(data.startsWith("intr:"), "⚡ interrupts: $data")
-            if (text.startsWith("🌙")) assertTrue(data.startsWith("bgd:"), "🌙 demotes to background: $data")
+            if (text.startsWith("🌙")) {
+                assertTrue(
+                    data.startsWith("bgd:") || data.startsWith("bgc:"),
+                    "🌙 demotes a turn (bgd:) or one lane (bgc:), nothing else: $data",
+                )
+            }
             if (text.startsWith("🟢")) assertTrue(data.startsWith("t:"), "🟢 rows attach tasks: $data")
             if (text.startsWith("🔵")) assertTrue(data.startsWith("sn:"), "🔵 rows open the detail card: $data")
         }

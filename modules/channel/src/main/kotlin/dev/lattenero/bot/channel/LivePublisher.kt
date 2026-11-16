@@ -1036,16 +1036,18 @@ class LivePublisher(
     }
 
     /**
-     * THE LIVE CARD'S OWN BUTTON (🌙 Go to background): the demote rides
-     * EVERY live draw — the birth and the edit-in-place — while the turn
-     * is actually running. THE DEAD-TARGET LAW: a dead thing earns no
-     * buttons — only Thinking/Writing show it (never Idle, never Done),
-     * and the seal's own null-markup edits take it off the moment the turn
-     * ends (editMessageText without reply_markup clears the keyboard).
+     * THE LIVE CARD'S OWN BUTTONS (🌙): the turn's own demote FIRST, then
+     * one per running dispatch lane — the birth and the edit-in-place both
+     * carry them while the turn is actually running. THE DEAD-TARGET LAW:
+     * a dead thing earns no buttons — only Thinking/Writing show them
+     * (never Idle, never Done), only OPEN lanes get a row (dispatchLanes is
+     * open by definition) — and the seal's own null-markup edits take the
+     * keyboard off the moment the turn ends (editMessageText without
+     * reply_markup clears it).
      */
     private fun cardMarkup(state: TurnLive): JsonObject? =
         if (state.phase is TurnPhase.Thinking || state.phase is TurnPhase.Writing) {
-            state.taskId.takeIf { it.isNotBlank() }?.let { Keyboards.backgroundTurn(it) }
+            Keyboards.liveCard(state.taskId, dispatchLanes(state))
         } else {
             null
         }
