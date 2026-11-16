@@ -58,6 +58,9 @@ one JVM runs every bot watcher:
 | `poller` | 1 s spacing + 3 s long-poll | `state/hb-poller` | getUpdates, the single reader since the Python retirement (`Poller`) |
 | `subagent-notifs` | every daemon tick (5 s) | `state/hb-subagent-notifs` | the 🔔 owner notifications from the store's transitions |
 | `interventions-watch` + its own `channel` client | every daemon tick (5 s) | `state/hb-interventions` | the any-task law (14/11): follows every recently-active task on a SECOND connection and hands its permission/elicitation questions to the same board — the phone answers questions from tasks the owner is not reading (`InterventionsNotifs`, `InterventionsWatch`) |
+| `stream-effects` | drains on demand | `state/hb-stream-effects` | M2 (16/11): the pump's effects as data — question cards, default-mode writes, menu refreshes, the F17 queue drain, child subscribes. The channel's ONE reader never runs any of this inline (`StreamEffects`, `StreamEffect`) |
+| `palette-refresher` | every 5 min | `state/hb-palette` | M1 (16/11): re-registers Telegram's «/» menu ONLY when the usage ranking moved (`PaletteRefresher`, `PaletteStore`, `CommandUsage.rank`) |
+| `global-notices` | every 5 s | `state/hb-global-notices` | M4 (16/11): polls the tasks-index; ANY task's finished/failed speaks — subscribed or not — with a silent boot baseline and a 15-minute freshness window (`GlobalNoticesIo`, `GlobalNotices`) |
 | `outbox-drain` | every 15 s | none | paces the lane(s)' parked messages out of `outbox*.json`, 1 msg/s (both files only when the firehose split exists) |
 
 Sources: `modules/daemon/.../Main.kt` (the wiring), `modules/channel/.../ChannelClient.kt`,
@@ -89,6 +92,58 @@ healer (§2.4) exists to catch the other case: the loop itself died.
 | `make down` in the brain repo | survives | yes | yes | **no** — memory/RAG fail loudly (`bot_brain_failures_total`) | no |
 | colima stopped (§8.5) | survives | yes | yes | `/ready` DEGRADED or the job exits 75 and launchd retries | no |
 | the Mac reboots | launchd starts everything | yes, once it is up | yes | launchd starts it; colima must be started by hand | by hand (`make up`) |
+
+### 1.4 The stabilization laws (2026-11-16)
+
+Measured against branch `agent/stabilize` (base master `685c26e`). The chronic
+instability had measured causes — not bad luck — and these are the laws that
+replaced them. §1.1's table is the process side.
+
+1. **THE PUMP NEVER BLOCKS (M2).** `onStreamEvent` folds the frame and EMITS a
+   `StreamEffect` into a bounded mailbox (256 slots, drops counted); the
+   `stream-effects` Process runs each effect with a 45 s budget and failure
+   isolation. A channel query, a Telegram send, the one-second queue drain or a
+   child subscribe can no longer freeze the channel's only reader. Diagnose:
+   `bot_stream_stalls_total` must stay flat; a callback over 1 s is a regression.
+2. **THE ATTACH HOLDS FIRST (M2).** A `t:` tap moves the hub's hold/pin to the
+   new task BEFORE the subscribe frame flies (the fork's burst lands on a hub
+   that keeps it) and nudges the publisher (`LiveHub.requestTick`) so the card
+   is drawn now, not on the 3 s cadence. The failed-birth cooldown is per task.
+3. **THE FOCUS LAW (M3).** Subscribing a new task unsubscribes the previous
+   focus (`ChannelClient.subscribeFocus`); a child topic rides
+   `subscribeChild` (plain subscribe, never a focus change) and a lane close
+   unsubscribes its child. Diagnose: `bot_channel_subscriptions` stays bounded
+   by live work (~2–3), never grows with taps.
+4. **THE TAP BUDGETS (M2).** Context 2 s, active-task check 1.5 s, callback
+   toast 2 s. A dead channel degrades the tap honestly instead of freezing
+   every later tap behind a 15/35 s ACK.
+5. **THE PALETTE RANKS BY USAGE (M1).** `CommandUsage.rank` (pure) orders
+   Telegram's «/» menu; `palette-refresher` re-registers only when the order
+   really moved. Counts live in `~/.zcode/bot-kotlin/command-usage.json`
+   (atomic write); `/help` keeps the canonical order.
+6. **THE GLOBAL NOTICES (M4).** `global-notices` polls the tasks-index every
+   5 s; the PURE `GlobalNotices` fold speaks task finished/failed for ANY task
+   (silent boot baseline, 15-minute freshness, one notice per transition,
+   bounded memory in `state/global-notices.json`). Subagent starts speak
+   through `subagent-notifs` (`announceStarts`).
+7. **THE CHILD STREAM (M5).** The fork's CLI accepts `session/subscribe` for
+   `sess_subagent_<agentId>` (fork branch `agent/daemon-workspace-stream`): the
+   child's raw events ride the legacy `session/event` stream to the bot's
+   `sa:` attach, and the card renders the child's own turn. The pump never
+   emits `EnforceMode` for a child — it follows its parent.
+
+**A note on `RenderSpine` (the M6 decision).** The KapStream render spine
+(`RenderSpine.kt`, conflate CoT / exact tools / dropOldest ticks) stays the
+tested design artifact, NOT the production path: law 1 removed the backpressure
+it was built to absorb (the pump no longer waits on slow effects), and wiring a
+second fold would duplicate the hub's. If a future surface makes the fold the
+bottleneck again, the spine is the ready, law-tested answer.
+
+Drills (owner-visible): (a) tap a running task → card ≤ 2 s; (b) tap another
+task → ONE card, no freeze; (c) use `/tasks` five times → the palette order
+moves at the next refresh; (d) finish a task in another workspace → a notice
+without being subscribed; (e) run a subagent, tap its lane → its own text
+streams; (f) `/metrics` → `bot_stream_stalls_total` flat.
 
 ## 2. Start, stop, deploy
 
