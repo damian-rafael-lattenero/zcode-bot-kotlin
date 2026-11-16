@@ -127,6 +127,23 @@ sealed interface ChannelQuery {
     data class BackgroundTurn(val taskId: String) : ChannelQuery
 
     /**
+     * 🌙 the LANE demote (the fork's `backgroundToolCall` query): move ONE
+     * running Agent tool call to the background — different granularity
+     * from [BackgroundTurn], which demotes the whole turn that owns it.
+     * [toolCallId] is the PARENT conversation's Agent tool call id (the
+     * live card's dispatch lane); the fork maps it to the in-flight
+     * local_agent by `parentToolCallId`.
+     *
+     * Success answers `{"backgrounded": ["<toolCallId>"]}`; the honest
+     * noop answers `{"backgrounded": [], "reasonCode":
+     * "guard.stopTargetChanged"}` (the lane already ended or its target
+     * moved). Nothing is aborted: the child keeps running and its result
+     * still arrives at seal. An old host says unknown_query and the tap
+     * speaks that honestly.
+     */
+    data class BackgroundToolCall(val taskId: String, val toolCallId: String) : ChannelQuery
+
+    /**
      * /mode's write (the A4 fork cap `control:setMode`): the conversation's
      * collaboration mode through the SAME switch the desktop toolbar uses.
      * The fork validates the vocabulary at the edge — an unknown mode is a
@@ -407,6 +424,12 @@ private fun encodeQuery(query: ChannelQuery): JsonObject = when (query) {
         put("taskId", query.taskId)
     }
 
+    is ChannelQuery.BackgroundToolCall -> buildJsonObject {
+        put("kind", "backgroundToolCall")
+        put("taskId", query.taskId)
+        put("toolCallId", query.toolCallId)
+    }
+
     is ChannelQuery.SetMode -> buildJsonObject {
         put("kind", "setMode")
         put("taskId", query.taskId)
@@ -637,6 +660,7 @@ fun queryKind(query: ChannelQuery): String = when (query) {
     ChannelQuery.BotStatus -> "botStatus"
     is ChannelQuery.Stop -> "stop"
     is ChannelQuery.BackgroundTurn -> "backgroundTurn"
+    is ChannelQuery.BackgroundToolCall -> "backgroundToolCall"
     is ChannelQuery.StopAll -> "stopAll"
     is ChannelQuery.Compact -> "compact"
     is ChannelQuery.SetMode -> "setMode"
