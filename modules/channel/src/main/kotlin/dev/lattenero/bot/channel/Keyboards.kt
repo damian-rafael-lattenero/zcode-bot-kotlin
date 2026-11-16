@@ -206,9 +206,9 @@ object Keyboards {
      * the ✍️ `so:` tap ARMS the next free text as an ORDER direct to it,
      * the 🌙 `bgc:` tap demotes THAT agent to the background (it keeps
      * running; the result still arrives at seal), and the ⏹️ `sst:` tap
-     * stops the child's generation live — then the view-switch row. The «inactivos» view stays text-only: ended
-     * sessions have no stream to attach to, no ear to hear an order,
-     * nothing left to stop.
+     * stops the child's generation live — then the view-switch row. The
+     * «inactivos» view stays text-only: ended sessions have no stream to
+     * attach to, no ear to hear an order, nothing left to stop.
      */
     fun subagentsKeyboard(
         lanes: List<ToolLive>,
