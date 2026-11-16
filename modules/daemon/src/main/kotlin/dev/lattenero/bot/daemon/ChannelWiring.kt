@@ -106,8 +106,8 @@ internal class ChannelStack(
     val hub: LiveHub,
     /** U1b's producer — null with the `event_bus` knob off (zero I/O). */
     val bus: BusProducer? = null,
-    /** 🔔 the subagent watcher — null with the `notifications` knob off (zero I/O). */
-    val notifs: SubagentNotifs? = null,
+    /** 🔔 the notifications bundle (subagent watcher + global task notifier) — null with the knob off. */
+    val notifs: NotificationsWire.NotifTaps? = null,
     /**
      * THE BOOT DEFAULT LADDER (the owner's 11/11): ONE run at boot — the
      * first plan WITH tokens in HIS order applies itself to the
@@ -971,7 +971,7 @@ internal fun wireChannel(
         wired?.poller,
         hub,
         busTaps,
-        notifs?.watcher,
+        notifs,
         wired?.bootLadder ?: {},
         interventions,
         palette,

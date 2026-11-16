@@ -17,7 +17,11 @@ CREATE TABLE tasks (
   title_overridden INTEGER,
   cli_title TEXT,
   cli_updated_at INTEGER,
-  cli_deleted INTEGER
+  cli_deleted INTEGER,
+  -- M4: the lifecycle facts the global notifier reads (the app writes them
+  -- through task-facts; typing-only like the rest of this block).
+  task_status TEXT,
+  cli_last_outcome TEXT
 );
 
 CREATE TABLE model_usage (
