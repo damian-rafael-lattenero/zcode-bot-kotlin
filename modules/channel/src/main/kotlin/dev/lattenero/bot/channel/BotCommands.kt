@@ -163,6 +163,13 @@ interface ChannelOps {
     suspend fun queueTake(messageId: String): QueuedText? = null
 
     suspend fun subscribe(taskId: String, workspacePath: String)
+
+    /**
+     * M5: a CHILD session's own stream — NEVER a focus change. The parent's
+     * subscription must survive while the owner watches a subagent (the
+     * focus law would have dropped it). Default = the plain subscribe.
+     */
+    suspend fun subscribeChild(taskId: String, workspacePath: String) = subscribe(taskId, workspacePath)
 }
 
 /**
@@ -2588,12 +2595,13 @@ class BotCommands(
                                 "no hay stream que mostrar. Su resultado: 📄 /last o /tasks.",
                         )
                     }
-                    ops.subscribe(sess, ws)
+                    ops.subscribeChild(sess, ws)
                     hub.pin(sess)
                     // THE INSTANT SWITCH (4/11): the fold must BE the child
                     // NOW — a quiet child never streams first, and without
                     // this the card stayed the parent's until its next event.
                     hub.watchTaskId(sess, clock())
+                    hub.requestTick() // M2/M5: the child card is born NOW
                     logger.info { "callback 🔵 sa: STORED session ATTACHED $sess — pinned" }
                     return BotReply("👁 Subagente attachado — su turno completo fluye acá; se sella cuando cierra.")
                 }
@@ -2609,8 +2617,13 @@ class BotCommands(
         if (agentId != null && ws != null) {
             val sessId = "$SUBAGENT_SESSION_PREFIX$agentId"
             if (sessId in history.subagentSessionIds(hub.peek()?.taskId ?: "")) {
-                ops.subscribe(sessId, ws)
+                // M5: the child's OWN stream — the parent's focus is untouched
+                ops.subscribeChild(sessId, ws)
                 hub.pin(sessId)
+                // M5's instant switch: a quiet child's card must be the child
+                // NOW (the stored-session path's own law, applied here too)
+                hub.watchTaskId(sessId, clock())
+                hub.requestTick()
                 logger.info {
                     "callback 🔵 sa: SESSION ATTACHED $sessId (${lane.name}) — the card IS the subagent's turn"
                 }
@@ -2622,6 +2635,7 @@ class BotCommands(
             logger.info { "callback 🔵 sa: $sessId not in the running store — honest lane-scope fallback" }
         }
         hub.attachLane(lane.toolId)
+        hub.requestTick() // M5: the lane-scoped card speaks NOW
         logger.info { "callback 🔵 sa: lane ATTACHED ${lane.toolId} (${lane.name}) — the card speaks only its stream" }
         return BotReply(
             "👁 Subagente «${PyText.esc(lane.name)}» en vivo — la misma carta que una task, " +
