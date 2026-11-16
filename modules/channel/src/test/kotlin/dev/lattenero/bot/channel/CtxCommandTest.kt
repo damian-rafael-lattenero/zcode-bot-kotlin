@@ -214,7 +214,7 @@ class CtxCommandTest {
 
     @Test
     fun menuCarriesCtxBesideUsage() {
-        val names = BotCommands.MENU.map { it.first }
+        val names = BotCommands.MENU.map { it.name }
         assertTrue("ctx" in names)
         assertEquals(names.indexOf("usage") + 1, names.indexOf("ctx")) // Python's usage→ctx adjacency
         assertTrue("/ctx — context % per conversation" in BotCommands.HELP)

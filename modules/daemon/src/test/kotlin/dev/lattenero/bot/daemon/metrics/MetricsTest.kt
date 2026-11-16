@@ -122,6 +122,32 @@ class MetricsTest {
     }
 
     @Test
+    fun theStabilizationTapsMeasureTheRealEvents() {
+        val reg = registry()
+        val m = MicrometerMetrics(reg)
+        m.streamCallback(1_250)
+        m.streamCallback(40)
+        m.streamStall()
+        m.attachFirstFrame(180)
+        m.handler("/tasks", 25)
+        m.handler("/tasks", 30)
+        var subs = 2
+        m.subscriptions { subs }
+
+        val scrape = reg.scrape()
+        assertEquals(2.0, valueOf(scrape, "bot_stream_callback_seconds_count"))
+        assertEquals(1.0, valueOf(scrape, "bot_stream_stalls_total"))
+        assertEquals(1.0, valueOf(scrape, "bot_attach_first_frame_seconds_count"))
+        assertEquals(0.18, valueOf(scrape, "bot_attach_first_frame_seconds_sum"))
+        assertEquals(2.0, valueOf(scrape, """bot_handler_duration_seconds_count{verb="/tasks"}"""))
+        assertEquals(2.0, valueOf(scrape, "bot_channel_subscriptions"))
+
+        // the gauge reads at SCRAPE time — the next scrape sees the new value
+        subs = 5
+        assertEquals(5.0, valueOf(reg.scrape(), "bot_channel_subscriptions"))
+    }
+
+    @Test
     fun theNoopRunsTheBlockBareAndMeasuresNothing() = runBlocking {
         val m: Metrics = NoopMetrics
         assertFalse(m.measures, "OFF is OFF: the wiring builds no stateful tap")
@@ -133,6 +159,11 @@ class MetricsTest {
         m.pollerCycle()
         m.pollerInbound()
         m.pollerCallback()
+        m.streamCallback(1)
+        m.streamStall()
+        m.attachFirstFrame(1)
+        m.handler("t:", 1)
+        m.subscriptions { 1 }
         m.outboxDepth(Lane.MAIN) { 3 }
         m.cooldownActive(Lane.MAIN) { true }
         m.zconnTransition(down = true)

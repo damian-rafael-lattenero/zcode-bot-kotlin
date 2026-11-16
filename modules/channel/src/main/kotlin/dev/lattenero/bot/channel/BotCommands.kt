@@ -190,6 +190,13 @@ class BotCommands(
     /** Python's config.DEFAULT_WS — the loose-tasks workspace the /tasks scope excludes. */
     private val defaultWorkspacePath: String = "",
     /**
+     * M1's usage tap: called with the CANONICAL palette name of every
+     * dispatched command (aliases folded), never for free text or unknown
+     * verbs. The daemon feeds the owner's own ranking so Telegram's «/»
+     * menu lists the commands he actually uses first. Default no-op.
+     */
+    private val onCommand: (String) -> Unit = {},
+    /**
      * The transcript feed's level (the /verbosity knob): WRITTEN here,
      * read PER TICK by the publisher — the daemon injects ONE shared
      * instance (the file-backed store), tests the in-memory default.
@@ -294,6 +301,9 @@ class BotCommands(
     @Suppress("CyclomaticComplexMethod") // one branch per command — the dispatcher's own shape
     suspend fun handle(text: String, updateId: Long): BotReply? {
         val (base, rest) = parseCommand(text) ?: return route(text, updateId)
+        // M1: count the command the owner actually used — the canonical
+        // palette name (aliases fold), never free text or an unknown verb.
+        CommandUsage.paletteNameOf(base, PALETTE_NAMES)?.let(onCommand)
         val reply: BotReply = when (base) {
             // THE BARE LAW (owner, 15/11 — the command goes out argument-free):
             // the lists take NO parameters — any typed rest is ignored and the
@@ -3565,32 +3575,35 @@ class BotCommands(
          * owner, 29/10: «la lista de commands no corresponde con la lista
          * real»). Descriptions in Python's menu_desc tone.
          */
-        val MENU = listOf(
-            "tasks" to "conversations by project — tap a row to watch it live",
-            "all_tasks" to "all conversations, loose ones included",
-            "status" to "what is running + the active conversation",
-            "plan" to "elige el plan — cada uno con su quota restante al lado",
-            "model" to "los modelos del plan vigente",
-            "effort" to "los niveles de effort del plan y modelo vigentes",
-            "mode" to "the conversation's mode — yolo · build · edit · guarded",
-            "plan_mode" to "Plan mode ON/OFF — the separate toggle (/mode no longer offers plan)",
-            "last" to "re-sends the active conversation's last answer",
-            "compact" to "shrinks the active conversation's context",
-            "context_window" to "context window used — tokens, model window and percent",
-            "queue" to "the parked texts — launch or discard",
-            "run" to "opens a NEW conversation in the active project and sends the prompt — /run «prompt»",
-            "steer" to "steers the RUNNING turn — the text enters the live turn",
-            "stop" to "stops the active task's turn",
-            "nuclear" to "emergency: stops EVERYTHING and resets the bot",
-            "quota" to "the active plan's limits — z.ai pools or OpenCode Go windows",
-            "usage" to "token usage of the active conversation — real, cumulative",
-            "ctx" to "context % per conversation — the real meter list",
-            "subagents" to "the active subagents · «inactivos» shows today's ended",
-            "verbosity" to "cuánto habla el feed en vivo — summary / normal / verbose",
-            "brain" to "pregunta al RAG de agent-brain — /brain status para el pulso",
-            "memory" to "recuerdos del brain — /memory «texto» · recent [k] · status",
-            "help" to "all commands",
+        val MENU: List<MenuCommand> = listOf(
+            MenuCommand("tasks", "conversations by project — tap a row to watch it live"),
+            MenuCommand("all_tasks", "all conversations, loose ones included"),
+            MenuCommand("status", "what is running + the active conversation"),
+            MenuCommand("plan", "elige el plan — cada uno con su quota restante al lado"),
+            MenuCommand("model", "los modelos del plan vigente"),
+            MenuCommand("effort", "los niveles de effort del plan y modelo vigentes"),
+            MenuCommand("mode", "the conversation's mode — yolo · build · edit · guarded"),
+            MenuCommand("plan_mode", "Plan mode ON/OFF — the separate toggle (/mode no longer offers plan)"),
+            MenuCommand("last", "re-sends the active conversation's last answer"),
+            MenuCommand("compact", "shrinks the active conversation's context"),
+            MenuCommand("context_window", "context window used — tokens, model window and percent"),
+            MenuCommand("queue", "the parked texts — launch or discard"),
+            MenuCommand("run", "opens a NEW conversation in the active project and sends the prompt — /run «prompt»"),
+            MenuCommand("steer", "steers the RUNNING turn — the text enters the live turn"),
+            MenuCommand("stop", "stops the active task's turn"),
+            MenuCommand("nuclear", "emergency: stops EVERYTHING and resets the bot"),
+            MenuCommand("quota", "the active plan's limits — z.ai pools or OpenCode Go windows"),
+            MenuCommand("usage", "token usage of the active conversation — real, cumulative"),
+            MenuCommand("ctx", "context % per conversation — the real meter list"),
+            MenuCommand("subagents", "the active subagents · «inactivos» shows today's ended"),
+            MenuCommand("verbosity", "cuánto habla el feed en vivo — summary / normal / verbose"),
+            MenuCommand("brain", "pregunta al RAG de agent-brain — /brain status para el pulso"),
+            MenuCommand("memory", "recuerdos del brain — /memory «texto» · recent [k] · status"),
+            MenuCommand("help", "all commands"),
         )
+
+        /** The palette's own names — the usage tap's gate (aliases fold into these). */
+        internal val PALETTE_NAMES: PaletteNames = PaletteNames.of(MENU)
 
         internal val HELP = (listOf(
             "📖 <b>The ${MENU.size}</b> (the owner's MVP — the rest is hot-fix territory):",

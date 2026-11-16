@@ -324,7 +324,7 @@ class BrainCommandsTest {
 
     @Test
     fun bothCommandsRideTheMenuAndTheHelp() {
-        val names = BotCommands.MENU.map { it.first }
+        val names = BotCommands.MENU.map { it.name }
         assertTrue("brain" in names)
         assertTrue("memory" in names)
         assertTrue("/brain — " in BotCommands.HELP)

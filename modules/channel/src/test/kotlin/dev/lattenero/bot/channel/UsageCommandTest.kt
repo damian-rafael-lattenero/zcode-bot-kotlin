@@ -249,7 +249,7 @@ class UsageCommandTest {
 
     @Test
     fun menuCarriesUsageBesideQuota() {
-        val names = BotCommands.MENU.map { it.first }
+        val names = BotCommands.MENU.map { it.name }
         assertTrue("usage" in names)
         assertEquals(names.indexOf("quota") + 1, names.indexOf("usage")) // Python's quota→usage adjacency
         assertTrue("/usage — token usage of the active conversation" in BotCommands.HELP)

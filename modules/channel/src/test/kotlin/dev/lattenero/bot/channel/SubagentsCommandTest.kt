@@ -270,8 +270,8 @@ class SubagentsCommandTest {
     fun menuSpeaksTheNewDescriptionOnce() {
         // the TOTAL count is BotCommandsTest's own pin (the menu is a shared
         // surface — this test only owns the subagents entry)
-        assertEquals(1, BotCommands.MENU.count { it.first == "subagents" })
-        val desc = BotCommands.MENU.first { it.first == "subagents" }.second
+        assertEquals(1, BotCommands.MENU.count { it.name == "subagents" })
+        val desc = BotCommands.MENU.first { it.name == "subagents" }.description
         assertTrue("inactivos" in desc, "the /help entry documents the switch: $desc")
     }
 }
