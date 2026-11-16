@@ -236,7 +236,14 @@ fun main(args: Array<String>) {
         // 🔔 the notifications' watcher: the store's transitions, one pass
         // per daemon tick, its own heartbeat (null with the knob off)
         val notifHandle = stack.notifs
+            ?.watcher
             ?.asProcess(cfg.interval, onHeartbeat = { touch(File(stateDir, HB_NOTIFS)) })
+            ?.startIn(this)
+        // M4: the GLOBAL task notifier — ANY task's end speaks, subscribed or
+        // not; its own cadence and heartbeat (null with the knob off)
+        val globalHandle = stack.notifs
+            ?.global
+            ?.asProcess(GLOBAL_NOTICE_EVERY, onHeartbeat = { touch(File(stateDir, HB_GLOBAL)) })
             ?.startIn(this)
         // 🧭 the ANY-TASK watcher (14/11): its OWN channel connection (foreign
         // tasks never reach the live card) + the reconciliation pass — one
@@ -494,6 +501,7 @@ private const val HB_NOTIFS = "hb-subagent-notifs"
 private const val HB_INTERVENTIONS = "hb-interventions"
 private const val HB_PALETTE = "hb-palette"
 private const val HB_EFFECTS = "hb-stream-effects"
+private const val HB_GLOBAL = "hb-global-notices"
 private const val COMPONENT_KEY = "component"
 private val DEFAULT_HEARTBEAT_EVERY = 30.seconds
 private val SPECTATOR_SCAN = 2.seconds
@@ -501,4 +509,7 @@ private val OUTBOX_DRAIN_EVERY = 15.seconds
 
 /** M1's palette refresh cadence — a ranking move rides at most this late. */
 private val PALETTE_REFRESH_EVERY = 5.minutes
+
+/** M4's global notice cadence — the tasks-index is polled at this pace. */
+private val GLOBAL_NOTICE_EVERY = 5.seconds
 private const val MILLIS_PER_SECOND = 1000.0
