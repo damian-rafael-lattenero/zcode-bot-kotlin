@@ -68,16 +68,21 @@ object TurnDigest {
             .filter { (it["role"] as? JsonPrimitive)?.content == "assistant" }
             .lastOrNull() ?: return null
 
+        stepsOf(message) ?: legacyContentOf(message)
+    }.getOrNull()
+
+    /**
+     * The message's steps, walked from its `parts`: consecutive content
+     * parts form ONE step; a tool-call part closes the current step and
+     * names the next one's [TurnProse.afterTool]; thought parts stay silent
+     * (the CoT has its own collapsed channel). Null when the message
+     * carries no parts (the old shape) or yields no steps.
+     */
+    private fun stepsOf(message: JsonObject): TurnVoice? {
+        val parts = message["parts"] as? JsonArray ?: return null
         val toolNames: List<String> = (message["tools"] as? JsonArray)?.mapNotNull { entry ->
             ((entry as? JsonObject)?.get("toolName") as? JsonPrimitive)?.content
         } ?: emptyList()
-
-        val parts = message["parts"] as? JsonArray
-        if (parts == null) {
-            val text = (message["content"] as? JsonPrimitive)?.content?.trim('\n') ?: return null
-            return if (text.isBlank()) null else TurnVoice(listOf(TurnProse(text)))
-        }
-
         val segments = mutableListOf<TurnProse>()
         val run = StringBuilder()
         var afterTool: String? = null
@@ -99,8 +104,14 @@ object TurnDigest {
             }
         }
         closeRun()
-        if (segments.isEmpty()) null else TurnVoice(segments)
-    }.getOrNull()
+        return if (segments.isEmpty()) null else TurnVoice(segments)
+    }
+
+    /** THE OLD SHAPE'S FALLBACK: a message without `parts` rides its whole `content` as one step. */
+    private fun legacyContentOf(message: JsonObject): TurnVoice? {
+        val text = (message["content"] as? JsonPrimitive)?.content?.trim('\n') ?: return null
+        return if (text.isBlank()) null else TurnVoice(listOf(TurnProse(text)))
+    }
 
     /**
      * THE FOLD'S PROJECTION — the never-lost fallback for the seal moment
@@ -170,11 +181,11 @@ object TurnDigest {
      * it); the rest count from 1 and name the tool they followed. A
      * single-step turn earns no chrome — the voice speaks bare.
      */
-    private fun labelOf(index: Int, total: Int, afterTool: String?): String? {
-        if (total == 1) return null
-        if (index == total - 1) return "✅ Respuesta"
-        val step = "Paso ${index + 1}"
-        return afterTool?.let { "$step · tras 🔧 $it" } ?: step
+    private fun labelOf(index: Int, total: Int, afterTool: String?): String? = when {
+        total == 1 -> null
+        index == total - 1 -> "✅ Respuesta"
+        afterTool != null -> "Paso ${index + 1} · tras 🔧 $afterTool"
+        else -> "Paso ${index + 1}"
     }
 
     /** One chunk of [RichVoice.BLOCK_CP], prose preferring its last line boundary under the cap. */
