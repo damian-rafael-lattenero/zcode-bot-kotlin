@@ -36,6 +36,23 @@ private val logger = KotlinLogging.logger {}
 class LiveHub {
     private val mutex = Mutex()
 
+    /**
+     * M2's TICK NUDGE: an attach asks for a draw NOW instead of waiting out
+     * the 3s cadence (the owner's first frame must not depend on a clock).
+     * CONFLATED — a burst of taps is one draw.
+     */
+    private val beat = kotlinx.coroutines.channels.Channel<Unit>(kotlinx.coroutines.channels.Channel.CONFLATED)
+
+    /** The card moved (a tap, an attach): draw on the next loop turn. */
+    fun requestTick() {
+        beat.trySend(Unit)
+    }
+
+    /** The publisher's beat: a nudge, or [every] of silence — whichever comes first. */
+    suspend fun awaitBeat(every: Duration) {
+        kotlinx.coroutines.withTimeoutOrNull(every) { beat.receive() }
+    }
+
     /** THE SCAN'S ACCUMULATOR — the fold's state, held. Written ONLY by [fold]. */
     private val states = MutableStateFlow<TurnLive?>(null)
 
@@ -1067,7 +1084,11 @@ class LivePublisher(
         // blocked-birth cooldown rides the same gate.
         val now = clock()
         val lastSameTaskBirth = lastBirthAtMs?.takeIf { lastBirthTaskId == state.taskId }
-        val spaced = birthCooldownTicks > 0 ||
+        // M2: a FAILED birth's cooldown belongs to ITS task — a blocked card
+        // of task A must never delay task B's birth (the switch is the
+        // never-silence law; the old global cooldown added 30 s to it).
+        val cooldownBlocks = birthCooldownTicks > 0 && birthCooldownTaskId == state.taskId
+        val spaced = cooldownBlocks ||
             (lastSameTaskBirth != null && now - lastSameTaskBirth < BIRTH_SPACING_MS)
         if (spaced) {
             if (birthCooldownTicks > 0) birthCooldownTicks -= 1
@@ -1082,6 +1103,7 @@ class LivePublisher(
                 birthFailLogged = true
             }
             birthCooldownTicks = BIRTH_RETRY_TICKS
+            birthCooldownTaskId = state.taskId
             return
         }
         statusMessageId = born
@@ -1095,10 +1117,13 @@ class LivePublisher(
         logger.info { "live view born: taskId=${state.taskId} message_id=$statusMessageId" }
     }
 
-    /** The never-silence Process — the edit cadence is schedule algebra. */
+    /** The never-silence Process — the edit cadence is schedule algebra... plus the tap's nudge (M2). */
     fun asProcess(every: Duration = EDIT_CADENCE, onHeartbeat: () -> Unit = {}): Process<Unit> =
-        Kap { tick() }
-            .repeat(Schedule.spaced(every))
+        Kap {
+            tick()
+            hub.awaitBeat(every) // a tap's requestTick wakes this loop NOW
+        }
+            .repeat(Schedule.immediate())
             .process(
                 name = "live-view",
                 restart = RestartPolicy.exponential(base = 1.seconds, max = 15.seconds),
@@ -1216,6 +1241,7 @@ class LivePublisher(
     }
 
     private var birthCooldownTicks = 0
+    private var birthCooldownTaskId: String? = null
     private var birthFailLogged = false
     private var lastBirthAtMs: Long? = null
     private var lastBirthTaskId: String? = null

@@ -249,6 +249,11 @@ fun main(args: Array<String>) {
             ?.notifs
             ?.asProcess(cfg.interval, onHeartbeat = { touch(File(stateDir, HB_INTERVENTIONS)) })
             ?.startIn(this)
+        // M2: the pump's effect worker — the ONLY place a frame's Telegram
+        // send, channel query or queue drain can block; the reader never does
+        stack.streamEffects
+            .asProcess(stack.runStreamEffect, onHeartbeat = { touch(File(stateDir, HB_EFFECTS)) })
+            .startIn(this)
         logger.info {
             val view = if (liveHandle != null) "on" else "off"
             val poll = if (pollerHandle != null) "ON" else "off"
@@ -488,6 +493,7 @@ private const val HB_POLLER = "hb-poller"
 private const val HB_NOTIFS = "hb-subagent-notifs"
 private const val HB_INTERVENTIONS = "hb-interventions"
 private const val HB_PALETTE = "hb-palette"
+private const val HB_EFFECTS = "hb-stream-effects"
 private const val COMPONENT_KEY = "component"
 private val DEFAULT_HEARTBEAT_EVERY = 30.seconds
 private val SPECTATOR_SCAN = 2.seconds
