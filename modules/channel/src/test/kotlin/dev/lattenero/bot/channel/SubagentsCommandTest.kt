@@ -145,13 +145,14 @@ class SubagentsCommandTest {
         assertTrue("Grep" !in reply.text, "completed inner lanes must not mix in: ${reply.text}")
         assertTrue("Bash" !in reply.text, "completed top-level lanes must not mix in: ${reply.text}")
         // the live dispatch lane's row: the name tap (the DETAIL CARD —
-        // the full name the row caps) + the ✍️ order arm + the ⏹️ stop,
-        // then the view switch (30/10: the owner taps a subagent to READ
-        // its stream and to WRITE it an order — and the ⏹️ stops it live)
+        // the full name the row caps) + the ✍️ order arm + the 🌙 per-lane
+        // demote + the ⏹️ stop, then the view switch (30/10: the owner taps
+        // a subagent to READ its stream and to WRITE it an order — and the
+        // ⏹️ stops it live; the 🌙 sends it to the background)
         assertEquals(
-            listOf("sn:dispatch-1", "so:dispatch-1", "sst:dispatch-1", "sao:"),
+            listOf("sn:dispatch-1", "so:dispatch-1", "bgc:dispatch-1", "sst:dispatch-1", "sao:"),
             buttonData(reply),
-            "detail card + order arm + stop + the switch",
+            "detail card + order arm + background demote + stop + the switch",
         )
     }
 
@@ -180,7 +181,11 @@ class SubagentsCommandTest {
         assertTrue("Task" in reply.text, "the dispatch lane is the group's head: ${reply.text}")
         assertTrue("Read" in reply.text)
         assertTrue("10 chars thought" in reply.text)
-        assertEquals(listOf("sn:t1", "so:t1", "sst:t1", "sao:"), buttonData(reply), "the dispatch earns its own row")
+        assertEquals(
+            listOf("sn:t1", "so:t1", "bgc:t1", "sst:t1", "sao:"),
+            buttonData(reply),
+            "the dispatch earns its own row",
+        )
     }
 
     @Test

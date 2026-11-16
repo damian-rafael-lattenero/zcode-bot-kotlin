@@ -204,8 +204,9 @@ object Keyboards {
      * + the attach/order/stop row, rendered fresh at tap time; the row
      * label caps at TITLE_CAP and the spawn descriptions are longísimos),
      * the ✍️ `so:` tap ARMS the next free text as an ORDER direct to it,
-     * and the ⏹️ `sst:` tap stops the child's generation live — then the
-     * view-switch row. The «inactivos» view stays text-only: ended
+     * the 🌙 `bgc:` tap demotes THAT agent to the background (it keeps
+     * running; the result still arrives at seal), and the ⏹️ `sst:` tap
+     * stops the child's generation live — then the view-switch row. The «inactivos» view stays text-only: ended
      * sessions have no stream to attach to, no ear to hear an order,
      * nothing left to stop.
      */
@@ -246,6 +247,17 @@ object Keyboards {
                         // an OPEN lane earns it (the pulse gate would refuse
                         // a dead one; a dead-end button is decoration)
                         if (lane.status == null) add(button("✍️", "so:${lane.toolId.takeLast(LANE_TAIL)}"))
+                        // the 🌙 demotes THIS agent to the background (bgc:) —
+                        // only an OPEN lane earns it (an ended child has
+                        // nothing left to demote)
+                        if (lane.status == null) {
+                            add(
+                                button(
+                                    "$BG_MARK ${subagentName(lane).take(TITLE_CAP)}",
+                                    "bgc:${lane.toolId.takeLast(LANE_TAIL)}",
+                                ),
+                            )
+                        }
                         // the ⏹️ stops the child's generation live (sst:) —
                         // only an OPEN lane earns it
                         if (lane.status == null) add(button(STOP_BUTTON, "sst:${lane.toolId.takeLast(LANE_TAIL)}"))
@@ -367,9 +379,42 @@ object Keyboards {
         putJsonArray("inline_keyboard") {
             add(
                 buildJsonArray {
-                    add(button("🌙 Go to background", "bgd:$sid"))
+                    add(button(BG_TURN_LABEL, "bgd:$sid"))
                 },
             )
+        }
+    }
+
+    /**
+     * THE LIVE CARD's keyboard while a turn runs: the turn's own 🌙 demote
+     * row FIRST (`bgd:<sid>`), then ONE 🌙 row per open dispatch lane
+     * (`bgc:<toolId tail>`) — the same granularity split the fork's two
+     * queries speak: `backgroundTurn` demotes the turn, `backgroundToolCall`
+     * demotes a single Agent tool call, which keeps running and still
+     * delivers its result at seal. Only OPEN lanes belong here (the caller
+     * passes dispatch lanes, open by definition; the status gate is the
+     * defensive second lock). Blank sid = no card = no keyboard at all.
+     * Every data rides the shared LANE_TAIL law, well under 64 bytes.
+     */
+    fun liveCard(sid: String, lanes: List<ToolLive>): JsonObject? {
+        if (sid.isBlank()) return null
+        return buildJsonObject {
+            putJsonArray("inline_keyboard") {
+                add(buildJsonArray { add(button(BG_TURN_LABEL, "bgd:$sid")) })
+                lanes.forEach { lane ->
+                    if (lane.status != null) return@forEach
+                    add(
+                        buildJsonArray {
+                            add(
+                                button(
+                                    "$BG_MARK ${subagentName(lane).take(TITLE_CAP)}",
+                                    "bgc:${lane.toolId.takeLast(LANE_TAIL)}",
+                                ),
+                            )
+                        },
+                    )
+                }
+            }
         }
     }
 
@@ -560,6 +605,10 @@ object Keyboards {
 
     /** The stop tap's own button — the ⏹️ beside the ▶️/✍️, the action it names. */
     private const val STOP_BUTTON = "⏹️"
+
+    /** The background demote's mark and the turn row's label (ZCode's own words). */
+    private const val BG_MARK = "🌙"
+    private const val BG_TURN_LABEL = "🌙 Go to background"
 
     private const val TITLE_CAP = 34
 

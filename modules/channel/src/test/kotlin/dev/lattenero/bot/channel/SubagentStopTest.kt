@@ -242,12 +242,14 @@ class SubagentStopTest {
             nowMs = now,
         )
         val rows = buttonDatas(reply)
-        // alive lane: attach + order + stop — the closed lane: no ⏹️
-        assertEquals(listOf("sn:toolu_alive", "so:toolu_alive", "sst:toolu_alive"), rows[0])
-        // a DEAD lane's row: the name card survives as a memory; the ✍️
-        // and the ⏹️ die with it (dead-end buttons are decoration)
+        // alive lane: attach + order + 🌙 demote + stop — the closed lane:
+        // no 🌙, no ⏹️
+        assertEquals(listOf("sn:toolu_alive", "so:toolu_alive", "bgc:toolu_alive", "sst:toolu_alive"), rows[0])
+        // a DEAD lane's row: the name card survives as a memory; the ✍️,
+        // the 🌙 and the ⏹️ die with it (dead-end buttons are decoration)
         assertEquals(listOf("sn:toolu_dead"), rows[1])
-        // a FRESH store row is running now: it earns both actions
+        // a FRESH store row is running now: it earns both actions (its sid
+        // is not a toolCallId, so no per-lane 🌙 — that door is the lane's)
         val freshTail = "sess_subagent_agent-3".takeLast(Keyboards.LANE_TAIL)
         assertEquals(listOf("sn:$freshTail", "so:$freshTail", "sst:$freshTail"), rows[2])
         // the GHOST row is NOT here at all (owner, 2/11 22:38: the 432m
