@@ -29,12 +29,6 @@ data class FeedMessage(
      */
     val editPath: String? = null,
     /**
-     * THE VOICE (5/11; 16/11 the digest owns it — no producer sets this
-     * anymore): the LLM's own prose, one spent segment. Null = not a voice
-     * message.
-     */
-    val prose: String? = null,
-    /**
      * BORN OPEN (12/11 — «no muestra expandido por defecto el texto»): the
      * message is a collapsed output box whose page 1 SHOWS at birth — the
      * child's report must arrive read, not behind one more tap — with the

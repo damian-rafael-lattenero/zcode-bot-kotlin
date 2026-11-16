@@ -3604,20 +3604,15 @@ class BotCommands(
             )).joinToString("\n")
 
         /**
-         * taskSnapshot → the last ASSISTANT message — /last's answer AND
-         * the live view's final shower (the daemon's own parser is this
-         * one, injected), so both renders can never drift.
+         * taskSnapshot → the turn's CONCLUSION — /last's answer AND the
+         * seal's digest source (the daemon's own parser is this one,
+         * injected), so both renders can never drift. THE 16/11 LAW: the
+         * fork's merged message carries the WHOLE turn's prose in `content`
+         * (zcodePersistedMessageMerge concatenates every step); the
+         * conclusion is the trailing step [TurnDigest] rebuilds from
+         * `parts` — a message without parts falls back to the content.
          */
-        fun snapshotLastAnswer(resultJson: String): String? = runCatching {
-            val root = Json.parseToJsonElement(resultJson) as? JsonObject ?: return null
-            val messages = root["messages"] as? JsonArray ?: return null
-            messages.asSequence()
-                .mapNotNull { it as? JsonObject }
-                .filter { (it["role"] as? JsonPrimitive)?.content == "assistant" }
-                .lastOrNull()
-                ?.let { (it["content"] as? JsonPrimitive)?.content }
-                ?.takeIf { it.isNotBlank() }
-        }.getOrNull()
+        fun snapshotLastAnswer(resultJson: String): String? = TurnDigest.ofSnapshot(resultJson)?.conclusion
 
         /** /last's body cap: the header + the ✂️ note must fit inside the pipe's CH_REPLY. */
         internal const val LAST_BODY_CAP = 3600
