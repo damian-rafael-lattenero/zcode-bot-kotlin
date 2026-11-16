@@ -13,6 +13,8 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.sql.DriverManager
 import java.util.Properties
@@ -52,12 +54,14 @@ internal class TasksHistoryIo(
     private val clock: () -> Long = System::currentTimeMillis,
 ) : TasksHistory {
 
-    override suspend fun ctxTasks(limit: Int): List<TaskRow> {
+    // M3: the SQLite walk rides the IO dispatcher — the poller's coroutine
+    // (and every tap behind it) never blocks on a file read again.
+    override suspend fun ctxTasks(limit: Int): List<TaskRow> = withContext(Dispatchers.IO) {
         val db = cliDb()
         val usage = usageBySession(db)
         val index = tasksIndex()
         val indexed = indexRows(index, usage, limit)
-        return withNewborns(
+        withNewborns(
             indexed,
             newbornSessions(db, clock() - NEWBORN_WINDOW_MS, usage),
             indexSids(index),
@@ -114,26 +118,27 @@ internal class TasksHistoryIo(
      * updated today, newest first, MAX 10 (the owner's cap). Same
      * read-only pattern as every other read here.
      */
-    override suspend fun subagentsToday(parentSid: String?, dayStartMs: Long): List<SubagentRow> {
-        val db = cliDb()
-        if (!db.exists()) return emptyList()
-        val parent = parentSid?.takeIf { it.isNotEmpty() }
-        return runCatching {
-            DriverManager.getConnection("jdbc:sqlite:${db.absolutePath}", roProps()).use { conn ->
-                conn.typed { bot ->
-                    if (parent != null) {
-                        bot.cliQueries.subagentsTodayOfParent(dayStart = dayStartMs, parentId = parent)
-                            .executeAsList()
-                            .map(::subagentRowOf)
-                    } else {
-                        bot.cliQueries.subagentsTodayAll(dayStart = dayStartMs)
-                            .executeAsList()
-                            .map(::subagentRowOf)
+    override suspend fun subagentsToday(parentSid: String?, dayStartMs: Long): List<SubagentRow> =
+        withContext(Dispatchers.IO) {
+            val db = cliDb()
+            if (!db.exists()) return@withContext emptyList()
+            val parent = parentSid?.takeIf { it.isNotEmpty() }
+            runCatching {
+                DriverManager.getConnection("jdbc:sqlite:${db.absolutePath}", roProps()).use { conn ->
+                    conn.typed { bot ->
+                        if (parent != null) {
+                            bot.cliQueries.subagentsTodayOfParent(dayStart = dayStartMs, parentId = parent)
+                                .executeAsList()
+                                .map(::subagentRowOf)
+                        } else {
+                            bot.cliQueries.subagentsTodayAll(dayStart = dayStartMs)
+                                .executeAsList()
+                                .map(::subagentRowOf)
+                        }
                     }
                 }
-            }
-        }.getOrDefault(emptyList())
-    }
+            }.getOrDefault(emptyList())
+        }
 
     /** One ended-subagent row, from either scope's generated row. */
     private fun subagentRowOf(row: SubagentsTodayAll): SubagentRow =
@@ -160,19 +165,20 @@ internal class TasksHistoryIo(
     }
 
     /** The /subagents ACTIVE view's stream-independent half: the parent's RUNNING children, titled, newest first. */
-    override suspend fun subagentsRunning(parentSid: String): List<RunningSubagent> {
-        val db = cliDb()
-        if (!db.exists()) return emptyList()
-        return runCatching {
-            DriverManager.getConnection("jdbc:sqlite:${db.absolutePath}", roProps()).use { conn ->
-                conn.typed { bot ->
-                    bot.cliQueries.runningSubsTitled(parentId = parentSid)
-                        .executeAsList()
-                        .map { RunningSubagent(sid = it.id, title = it.title.orEmpty(), lastMs = it.time_updated) }
+    override suspend fun subagentsRunning(parentSid: String): List<RunningSubagent> =
+        withContext(Dispatchers.IO) {
+            val db = cliDb()
+            if (!db.exists()) return@withContext emptyList()
+            runCatching {
+                DriverManager.getConnection("jdbc:sqlite:${db.absolutePath}", roProps()).use { conn ->
+                    conn.typed { bot ->
+                        bot.cliQueries.runningSubsTitled(parentId = parentSid)
+                            .executeAsList()
+                            .map { RunningSubagent(sid = it.id, title = it.title.orEmpty(), lastMs = it.time_updated) }
+                    }
                 }
-            }
-        }.getOrDefault(emptyList())
-    }
+            }.getOrDefault(emptyList())
+        }
 
     /**
      * The merge: fresh CLI sessions whose sid the index does NOT hold —

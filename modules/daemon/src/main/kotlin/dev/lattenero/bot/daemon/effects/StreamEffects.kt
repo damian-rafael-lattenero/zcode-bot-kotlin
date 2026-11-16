@@ -50,6 +50,9 @@ sealed interface StreamEffect {
     /** A dispatch lane named its child: subscribe the child's own session topic. */
     data class SubscribeChild(val parentTaskId: String, val agentId: String) : StreamEffect
 
+    /** A dispatch lane closed: the child's session topic stops being followed (M3). */
+    data class UnsubscribeChild(val agentId: String) : StreamEffect
+
     /**
      * A reconnect re-baselined [taskId]: the stream never replays, so the
      * already-pending interactions are re-read ONCE from the snapshot and

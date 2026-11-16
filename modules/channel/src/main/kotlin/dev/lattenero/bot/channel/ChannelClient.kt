@@ -570,7 +570,12 @@ class ChannelClient(
     }
 
     /** The remembered subscriptions right now — the leak's gauge reads THIS (scrape time, never cached). */
-    val subscriptionCount: Int get() = synchronized(subscriptions) { subscriptions.size }
+    val subscriptionCount: Int
+        get() = synchronized(subscriptions) { subscriptions.size }
+
+    /** The main view's current FOCUS (M3) — the previous one is dropped on a switch. */
+    @Volatile
+    private var focusTaskId: String? = null
 
     /** Remembers a subscription (replayed on every reconnect) and fires it now if a session is live. */
     suspend fun subscribe(taskId: String, workspacePath: String) {
@@ -579,6 +584,19 @@ class ChannelClient(
         runCatching { live.fire(ClientFrame.Subscribe("s${ids.incrementAndGet()}", taskId, workspacePath)) }
             .onSuccess { logger.info { "channel subscribed taskId=$taskId (frame sent)" } }
             .onFailure { logger.warn { "channel subscribe taskId=$taskId failed: ${it.message}" } }
+    }
+
+    /**
+     * M3's FOCUS law: the main view watches ONE task — subscribing a new
+     * focus DROPS the previous one (a child topic is never a focus; its
+     * subscription dies with its dispatch lane). The remembered map stops
+     * growing with every tap, and a reconnect replays only live work.
+     */
+    suspend fun subscribeFocus(taskId: String, workspacePath: String) {
+        val previous = focusTaskId
+        focusTaskId = taskId
+        if (previous != null && previous != taskId && !isSubagentSession(previous)) unsubscribe(previous)
+        subscribe(taskId, workspacePath)
     }
 
     /**
