@@ -1,0 +1,54 @@
+-- Queries over the CLI's db.sqlite (typing-only schema in Schema.sq).
+
+-- Latest model_usage per session, subagents excluded — Python's usage dict.
+usageBySession:
+SELECT m.session_id AS session_id, m.input_tokens, m.output_tokens, m.model_id, m.started_at
+FROM model_usage m
+JOIN (
+  SELECT session_id AS session_id, MAX(started_at) AS ms FROM model_usage GROUP BY session_id
+) l ON l.session_id = m.session_id AND l.ms = m.started_at
+WHERE m.session_id NOT LIKE 'sess_subagent%';
+
+-- Python's model_selection: the newest runtime/model_selection row of the session.
+modelSelection:
+SELECT data FROM session_entry
+WHERE session_id = :sessionId AND type = 'runtime/model_selection'
+ORDER BY time_created DESC LIMIT 1;
+
+-- /subagents «inactivos»: ENDED subagents (last_outcome != ''), today's,
+-- newest first, 10 (the owner's cap).
+subagentsTodayAll:
+SELECT title, last_outcome, time_created, time_updated FROM session
+WHERE parent_id IS NOT NULL AND COALESCE(last_outcome, '') != '' AND time_updated >= :dayStart
+ORDER BY time_updated DESC LIMIT 10;
+
+-- The watched-conversation scope of the same read (parent_id = the task).
+subagentsTodayOfParent:
+SELECT title, last_outcome, time_created, time_updated FROM session
+WHERE parent_id IS NOT NULL AND COALESCE(last_outcome, '') != ''
+  AND time_updated >= :dayStart AND parent_id = :parentId
+ORDER BY time_updated DESC LIMIT 10;
+
+-- The tap's verification read: the parent's RUNNING children (empty outcome).
+runningSubIds:
+SELECT id FROM session
+WHERE parent_id = :parentId AND COALESCE(last_outcome, '') = '';
+
+-- The ACTIVE view's titled read: the same running children, with the prompt's first words.
+runningSubsTitled:
+SELECT id, title, time_updated FROM session
+WHERE parent_id = :parentId AND COALESCE(last_outcome, '') = ''
+ORDER BY time_created DESC LIMIT 10;
+
+-- The newborns: interactive parent sessions born since the cutoff, newest first.
+newborns:
+SELECT id, title, directory, time_updated FROM session
+WHERE parent_id IS NULL AND task_type = 'interactive'
+  AND time_deleted IS NULL AND time_archived IS NULL AND time_created >= :cutoff
+ORDER BY time_created DESC;
+
+-- The one read of the subagent-done watcher: running children (the future's
+-- witnesses) + fresh ends.
+children:
+SELECT id, title, COALESCE(last_outcome, '') AS outcome, time_created, time_updated FROM session
+WHERE parent_id IS NOT NULL AND (COALESCE(last_outcome, '') = '' OR time_updated >= :floor);

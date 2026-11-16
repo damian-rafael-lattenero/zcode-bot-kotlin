@@ -4,6 +4,7 @@ import dev.lattenero.bot.contracts.PyText
 import dev.lattenero.bot.contracts.BotSession
 import dev.lattenero.bot.contracts.StateFiles
 import dev.lattenero.bot.contracts.WorkersRegistry
+import dev.lattenero.bot.daemon.db.typed
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.JsonObject
 import java.io.File
@@ -100,22 +101,20 @@ internal object SpectatorIo {
     fun taskLabel(baseDir: File, sid: String): String = try {
         val db = File(File(baseDir, "v2"), "tasks-index.sqlite")
         val ro = Properties().apply { put("open_mode", SQLITE_READONLY.toString()) }
-        DriverManager.getConnection("jdbc:sqlite:${db.absolutePath}", ro).use { conn -> queryLabel(conn, sid) }
+        DriverManager.getConnection("jdbc:sqlite:${db.absolutePath}", ro).use { conn ->
+            conn.typed { bot -> bot.tasksQueries.taskLabelRow(taskId = sid).executeAsOneOrNull() }
+                ?.let { labelOf(it.title, it.workspace_path, it.root_path) }
+                ?: "ZCode"
+        }
     } catch (_: java.sql.SQLException) {
         "ZCode" // best-effort label, exactly like Python's broad except
     }
 
-    private fun queryLabel(conn: java.sql.Connection, sid: String): String =
-        conn.prepareStatement(TASK_QUERY).use { ps ->
-            ps.setString(1, sid)
-            ps.executeQuery().use { rs -> if (rs.next()) labelOf(rs) else "ZCode" }
-        }
-
     /** The row to the label: the title if present, else the workspace's basename, else ZCode. */
-    private fun labelOf(rs: java.sql.ResultSet): String {
-        val title = PyText.strip(rs.getString(TITLE_COL) ?: "")
-        if (title.isNotEmpty()) return PyText.take(title, TITLE_CAP)
-        val cwd = rs.getString(WORKSPACE_COL) ?: rs.getString(ROOT_COL) ?: ""
+    private fun labelOf(title: String?, workspacePath: String?, rootPath: String?): String {
+        val clean = PyText.strip(title ?: "")
+        if (clean.isNotEmpty()) return PyText.take(clean, TITLE_CAP)
+        val cwd = workspacePath ?: rootPath ?: ""
         return PyText.take(baseName(cwd), TITLE_CAP).ifEmpty { "ZCode" }
     }
 
@@ -156,9 +155,4 @@ internal object SpectatorIo {
 
     private const val SQLITE_READONLY = 0x00000001
     private const val MILLIS_PER_SECOND = 1000.0
-    private const val TITLE_COL = 1
-    private const val WORKSPACE_COL = 2
-    private const val ROOT_COL = 3
-    private const val TASK_QUERY =
-        "SELECT title, workspace_path, root_path FROM tasks WHERE task_id = ? AND deleted = 0 LIMIT 1"
 }

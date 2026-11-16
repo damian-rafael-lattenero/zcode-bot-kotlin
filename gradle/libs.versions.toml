@@ -12,6 +12,9 @@ sqlite-jdbc = "3.50.3.0"
 ktor = "3.6.0"
 micrometer = "1.17.2"
 opentelemetry = "1.67.0"
+# Compile-time checked SQL for the daemon's 15 read-only SELECTs over the
+# app/CLI SQLite files. Upstream dialect: nothing pgvector-ish here.
+sqldelight = "2.4.1"
 
 [libraries]
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "serialization" }
@@ -25,6 +28,7 @@ kotlin-logging = { module = "io.github.oshai:kotlin-logging-jvm", version.ref = 
 logback-classic = { module = "ch.qos.logback:logback-classic", version.ref = "logback" }
 logstash-logback-encoder = { module = "net.logstash.logback:logstash-logback-encoder", version.ref = "logstash-encoder" }
 xerial-sqlite-jdbc = { module = "org.xerial:sqlite-jdbc", version.ref = "sqlite-jdbc" }
+sqldelight-jdbc-driver = { module = "app.cash.sqldelight:jdbc-driver", version.ref = "sqldelight" }
 kotest-property = { module = "io.kotest:kotest-property", version.ref = "kotest" }
 ktor-client-core = { module = "io.ktor:ktor-client-core", version.ref = "ktor" }
 ktor-client-cio = { module = "io.ktor:ktor-client-cio", version.ref = "ktor" }
@@ -39,3 +43,4 @@ opentelemetry-exporter-otlp = { module = "io.opentelemetry:opentelemetry-exporte
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
 detekt = { id = "dev.detekt", version.ref = "detekt" }
+sqldelight = { id = "app.cash.sqldelight", version.ref = "sqldelight" }

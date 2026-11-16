@@ -1,0 +1,49 @@
+-- TYPING-ONLY declarations: both SQLite files are owned by the ZCode app/CLI
+-- (docs/fork-interface-map.md). Nothing here creates or migrates anything —
+-- the daemon opens them read-only (open_mode=1). These blocks exist so the
+-- compiler can type the queries; a missing table/column at runtime still
+-- degrades to the previous "empty answer" through the existing runCatching
+-- wrappers (SQLException at prepare time).
+CREATE TABLE tasks (
+  task_id TEXT NOT NULL,
+  title TEXT,
+  workspace_path TEXT NOT NULL,
+  workspace_key TEXT NOT NULL,
+  pinned INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  deleted INTEGER NOT NULL,
+  archived INTEGER NOT NULL,
+  root_path TEXT,
+  title_overridden INTEGER,
+  cli_title TEXT,
+  cli_updated_at INTEGER,
+  cli_deleted INTEGER
+);
+
+CREATE TABLE model_usage (
+  session_id TEXT NOT NULL,
+  input_tokens INTEGER NOT NULL,
+  output_tokens INTEGER NOT NULL,
+  model_id TEXT,
+  started_at INTEGER NOT NULL
+);
+
+CREATE TABLE session (
+  id TEXT NOT NULL PRIMARY KEY,
+  title TEXT,
+  directory TEXT,
+  parent_id TEXT,
+  task_type TEXT,
+  time_created INTEGER NOT NULL,
+  time_deleted INTEGER,
+  time_archived INTEGER,
+  time_updated INTEGER NOT NULL,
+  last_outcome TEXT
+);
+
+CREATE TABLE session_entry (
+  session_id TEXT NOT NULL,
+  type TEXT NOT NULL,
+  data TEXT NOT NULL,
+  time_created INTEGER NOT NULL
+);
