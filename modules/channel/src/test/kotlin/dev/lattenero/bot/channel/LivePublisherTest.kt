@@ -1019,10 +1019,12 @@ class LivePublisherTest {
     }
 
     @Test
-    fun theVoiceSpeaksProseSegmentsAsRichMessages() = runTest {
-        // THE VIOLET CHANNEL (5/11): the LLM's mid-turn prose — «El meter es
-        // real…» — accumulates while streaming and at the tool boundary it
-        // SPENDS: one rich pullquote message, in order, then the close
+    fun theFeedNeverSpeaksProseTheVoiceWaitsForTheSeal() = runTest {
+        // THE 16/11 LAW (the owner: the raw mid-turn violet bubbles were the
+        // unorganized wall): the LLM's mid-turn prose — «El meter es real…» —
+        // accumulates and spends at the tool boundary as always, but the
+        // FEED no longer speaks it. The seal's digest ([TurnDigest]) owns
+        // the voice; the card's answer tail still streams the words.
         val taskId = "task-9"
         val hub = LiveHub()
         hub.apply(frame(taskId, "task_run_started", at = 1_000), nowMs = 1_000)
@@ -1044,11 +1046,12 @@ class LivePublisherTest {
         )
         now += 31_000L
         publisher.tick()
-        val rich = wire.bodies.firstOrNull { it.second == "sendRichMessage" }
-        assertTrue(rich != null, "the prose flew as a RICH message: methods=${wire.bodies.map { it.second }}")
-        assertTrue("El meter es real" in rich.first, "the violet body: ${rich.first.take(400)}")
-        assertTrue("\"pullquote\"" in rich.first, "the violet block type: ${rich.first.take(300)}")
-        // a SECOND segment spends at the NEXT boundary: the ladder keeps order
+        assertTrue(
+            wire.bodies.none { it.second == "sendRichMessage" && "El meter es real" in it.first },
+            "the mid-turn prose speaks NOTHING: ${wire.bodies.map { it.second }}",
+        )
+        // a second segment spends at the NEXT boundary; the seal's own copy
+        // (the fold's answerAtSeal) is the only violet left in the old shape
         hub.apply(
             frame(taskId, "tool_call_update", at = now + 100, "status" to JsonPrimitive("completed"), "toolId" to JsonPrimitive("tb")),
             nowMs = now + 100,
@@ -1060,11 +1063,9 @@ class LivePublisherTest {
         hub.apply(frame(taskId, "task_complete", at = now + 300, "stopReason" to JsonPrimitive("end_turn")), nowMs = now + 300)
         now += 31_000L
         publisher.tick()
-        val richCount = wire.bodies.count { it.second == "sendRichMessage" }
-        assertTrue(richCount >= 2, "each segment its own violet message: $richCount")
         assertTrue(
-            wire.bodies.any { it.second == "sendRichMessage" && "Segundo tramo." in it.first },
-            "the second segment spoke its own violet message",
+            wire.bodies.none { it.second == "sendRichMessage" && "El meter es real" in it.first },
+            "the mid-turn segment never speaks — not even at the seal's feed drain",
         )
     }
 
