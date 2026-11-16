@@ -775,8 +775,9 @@ class RenderFoldTest {
 
     @Test
     fun theMidTurnSegmentsStillSpendAtBoundaries() {
-        // the fix moves only the SEAL's copy: the mid-turn boundaries keep
-        // the old law (segment spent, spoken violet at the drain)
+        // 16/11: the mid-turn boundaries keep the spending law (segment
+        // spent, keyed) — but the FEED never speaks it; the seal's digest
+        // ([TurnDigest.ofFold]) owns the voice
         var s = reduce(null, RenderEvent.Answering("task-9", seq = 1, atMs = 1_000, nowMs = 1_000, delta = "hablo"))
         s = reduce(s, toolOpenEvent(toolId = "t1", seq = 2))
         s = assertNotNull(s)

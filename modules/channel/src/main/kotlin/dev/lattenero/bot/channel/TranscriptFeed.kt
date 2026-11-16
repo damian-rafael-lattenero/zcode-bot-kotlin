@@ -29,12 +29,6 @@ data class FeedMessage(
      */
     val editPath: String? = null,
     /**
-     * THE VOICE (5/11): the LLM's own prose, one spent segment — the
-     * publisher speaks it as a violet rich message. Null = not a voice
-     * message.
-     */
-    val prose: String? = null,
-    /**
      * BORN OPEN (12/11 — «no muestra expandido por defecto el texto»): the
      * message is a collapsed output box whose page 1 SHOWS at birth — the
      * child's report must arrive read, not behind one more tap — with the
@@ -96,11 +90,10 @@ object TranscriptFeed {
         if (prev == null || prev.taskId != curr.taskId) return emptyList()
         val out = mutableListOf<FeedMessage>()
 
-        // THE VOICE'S SPENT SEGMENTS (5/11): every prose the model spoke
-        // since the last tick, each one violet message, oldest first
-        for (i in prev.proseSpent.size until curr.proseSpent.size) {
-            out += FeedMessage(text = "", prose = curr.proseSpent[i])
-        }
+        // THE VOICE'S SEGMENTS (16/11): the prose no longer travels the feed
+        // — the seal's digest ([TurnDigest]) speaks it ONCE, labeled and
+        // organized, and the mid-turn violet bubbles were its raw preview.
+        // The card's answer tail still streams the words live.
 
         // the SEALED CoT blocks — every one below [prev.cotBlocks.size] was
         // already spoken; the diff never re-speaks history. COLLAPSED: the

@@ -4,6 +4,8 @@ import dev.lattenero.bot.channel.BotCommands
 import dev.lattenero.bot.channel.ChannelQuery
 import dev.lattenero.bot.channel.ModeMenu
 import dev.lattenero.bot.channel.QueryAnswer
+import dev.lattenero.bot.channel.TurnDigest
+import dev.lattenero.bot.channel.TurnVoice
 import dev.lattenero.bot.contracts.PyText
 import dev.lattenero.bot.channel.ToolLive
 import dev.lattenero.bot.channel.ToolOutputPages
@@ -102,16 +104,20 @@ internal fun feedBoxOf(tool: ToolLive): String {
 /** The output tail's cap — the box's own output budget (ToolBox.OUTPUT_CAP's sense). */
 private const val OUTPUT_TAIL_CP = 800
 
-/** taskSnapshot → the last ASSISTANT message (the turn's answer, from the store). */
-internal fun snapshotAnswerOf(resultJson: String): String? = BotCommands.snapshotLastAnswer(resultJson)
+/** taskSnapshot → the turn's organized voice ([TurnDigest] over the last assistant message). */
+internal fun snapshotVoiceOf(resultJson: String): TurnVoice? = TurnDigest.ofSnapshot(resultJson)
 
 /** The final-answer window: two bounded retries after the first miss (the CLI's persist race, a reconnect window). */
 internal const val FINAL_ANSWER_ATTEMPTS = 3
 internal const val FINAL_ANSWER_RETRY_MS = 600L
 
 /**
- * taskSnapshot → the turn's answer, asked with the task's OWN workspace and
- * a ONE-MESSAGE limit.
+ * taskSnapshot → the turn's ORGANIZED VOICE ([TurnVoice]: the merged turn's
+ * steps + the trailing conclusion), asked with the task's OWN workspace and
+ * a ONE-MESSAGE limit. THE 16/11 LAW: the fork coalesces every assistant
+ * step of a turn into ONE message whose `content` is a plain concatenation —
+ * the raw wall the seal used to ship whole — and the SAME message carries
+ * `parts`, the real interleaving; the digest rebuilds the steps from it.
  *
  * Measured 2026-11-03, three bugs deep:
  * 1. both consumers (the live view's seal and the bus producer's
@@ -130,20 +136,20 @@ internal const val FINAL_ANSWER_RETRY_MS = 600L
  * 3. the loud warn on EVERY non-Ok is what exposed both — silence here is
  *    what hid the first bug for hours.
  */
-internal suspend fun finalAnswerOf(
+internal suspend fun finalTurnOf(
     taskId: String,
     query: suspend (ChannelQuery) -> QueryAnswer,
     workspaceOf: suspend (String) -> String?,
     delayMs: suspend (Long) -> Unit = { delay(it) },
     log: (String) -> Unit,
-): String? {
+): TurnVoice? {
     val ws = runCatching { workspaceOf(taskId) }.getOrNull()
     repeat(FINAL_ANSWER_ATTEMPTS) { attempt ->
         val attemptNo = attempt + 1
         when (val answer = query(ChannelQuery.TaskSnapshot(taskId, ws, messageLimit = 1))) {
             is QueryAnswer.Ok -> {
-                val text = snapshotAnswerOf(answer.resultJson)
-                if (text != null) return text
+                val voice = snapshotVoiceOf(answer.resultJson)
+                if (voice != null) return voice
                 log(
                     "taskSnapshot($taskId, ws=${ws != null}) has no assistant message yet — " +
                         "the CLI has not persisted the answer (attempt $attemptNo/$FINAL_ANSWER_ATTEMPTS)",
@@ -151,7 +157,7 @@ internal suspend fun finalAnswerOf(
             }
             else -> log(
                 "taskSnapshot($taskId, ws=${ws != null}) answered $answer — " +
-                    "the seal's answer stays empty (attempt $attemptNo/$FINAL_ANSWER_ATTEMPTS)",
+                    "the seal's voice stays empty (attempt $attemptNo/$FINAL_ANSWER_ATTEMPTS)",
             )
         }
         if (attemptNo < FINAL_ANSWER_ATTEMPTS) delayMs(FINAL_ANSWER_RETRY_MS)

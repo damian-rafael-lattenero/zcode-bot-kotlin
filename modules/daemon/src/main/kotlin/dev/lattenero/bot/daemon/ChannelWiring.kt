@@ -519,8 +519,8 @@ internal fun wireChannel(
         metrics.busGauges(written = { sink.written }, failures = { sink.failures })
         busTaps = BusProducer(
             sink = sink,
-            finalAnswer = { taskId ->
-                finalAnswerOf(
+            finalTurn = { taskId ->
+                finalTurnOf(
                     taskId,
                     query = { q -> client.query(q) },
                     workspaceOf = { sid -> workspacePathOf(cfg.baseDir, sid) },
@@ -971,8 +971,8 @@ private fun buildLiveView(
         // (the final transcript's own), status mark inside the head + the
         // VERBATIM output tail (the owner's «leer los commands de bash»)
         toolBox = { tool -> feedBoxOf(tool) },
-        finalAnswer = { taskId ->
-            finalAnswerOf(
+        finalTurn = { taskId ->
+            finalTurnOf(
                 taskId,
                 query = { q -> client.query(q) },
                 workspaceOf = workspaceOf,

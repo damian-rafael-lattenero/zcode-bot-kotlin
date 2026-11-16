@@ -387,9 +387,11 @@ private fun reduceAnswer(state: RenderState, event: RenderEvent.Answering): Rend
     return state.copy(
         answerChars = chars,
         answerTail = LiveTurn.takeLastCodePoints(state.answerTail + fresh, LiveTurn.ANSWER_TAIL_CP),
-        // THE VOICE'S SEGMENT (5/11): the prose accumulates for its violet
-        // message — spoken whole when the model moves to a tool (or seals)
-        prosePending = (state.prosePending + fresh).takeLast(LiveTurn.ANSWER_TAIL_CP),
+        // THE VOICE'S SEGMENT (5/11; 16/11 the digest owns it): the prose
+        // accumulates UNCAPPED for its digest step — spoken whole at the
+        // seal ([TurnDigest.ofFold]), never by the feed. Uncapped: the
+        // conclusion the seal copy holds must be the WHOLE final step.
+        prosePending = state.prosePending + fresh,
         phase = when (val phase = state.phase) {
             is TurnPhase.Done -> phase
             else -> TurnPhase.Writing(
@@ -405,10 +407,11 @@ private fun reduceAnswer(state: RenderState, event: RenderEvent.Answering): Rend
 }
 
 /**
- * THE VOICE'S BOUNDARY (5/11): a tool's arrival/closing or the seal ends
- * the current prose segment — the pending words become a SPENT segment,
- * the feed speaks it as one violet message, in order. Blank pending =
- * nothing to spend (a tool after a tool).
+ * THE VOICE'S BOUNDARY (5/11; 16/11 the feed stops speaking it): a tool's
+ * arrival/closing or the seal ends the current prose segment — the pending
+ * words become a SPENT segment, the seal's digest ([TurnDigest.ofFold])
+ * speaks them, labeled and in order. Blank pending = nothing to spend (a
+ * tool after a tool). Uncapped: the digest's fallback owns every word.
  */
 // one guard per early exit: the blank pending and the already-spent key
 @Suppress("ReturnCount")
@@ -425,7 +428,7 @@ internal fun flushProse(state: RenderState): RenderState {
     val keys: Set<String> = (state.proseKeys + key)
         .let { if (it.size > PROSE_KEY_CAP) it.drop(it.size - PROSE_KEY_CAP).toSet() else it }
     return state.copy(
-        proseSpent = (state.proseSpent + pending).takeLast(PROSE_SPENT_CAP),
+        proseSpent = state.proseSpent + pending,
         proseKeys = keys,
         prosePending = "",
     )
@@ -443,9 +446,6 @@ private fun proseKey(text: String): String =
 
 /** The content keys' ceiling — a turn spends far fewer segments than this. */
 private const val PROSE_KEY_CAP = 128
-
-/** The spent segments' ceiling — the feed's diff only needs the newest. */
-private const val PROSE_SPENT_CAP = 24
 
 /**
  * THE THINKING'S BOUNDARY (the owner, 10/11 — either the 3K cap or the

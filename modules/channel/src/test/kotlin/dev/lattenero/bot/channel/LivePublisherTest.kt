@@ -11,6 +11,8 @@ import io.ktor.client.engine.mock.respond
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.content.TextContent
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -72,7 +74,7 @@ class LivePublisherTest {
         toolBox: (ToolLive) -> String = { "" },
         verbosity: VerbositySetting = VolatileVerbosity(),
         cooldown: Cooldown = Cooldown(readFile = { null }),
-        finalAnswer: suspend (String) -> String? = { null },
+        finalTurn: suspend (String) -> TurnVoice? = { null },
         clock: () -> Long = { TICK_MS },
         resubscribe: suspend (String) -> Unit = {},
         richVoice: Boolean = true,
@@ -90,7 +92,7 @@ class LivePublisherTest {
             channelAlive = { true },
             speak = { text, _ -> spoken.add(text); 777L },
             toolBox = toolBox,
-            finalAnswer = finalAnswer,
+            finalTurn = finalTurn,
             clock = clock,
             verbosity = verbosity,
             resubscribe = resubscribe,
@@ -98,6 +100,21 @@ class LivePublisherTest {
             resolveTitle = resolveTitle,
             onSeal = onSeal,
         )
+
+    /** A one-step voice — the injected resolver's shorthand (the tests' common shape). */
+    private fun voiceOf(text: String): TurnVoice = TurnVoice(listOf(TurnProse(text)))
+
+    /** The rich message's PULLQUOTE block texts (the voice's prose — the CoT's expandable blocks excluded). */
+    private fun blockTexts(body: String): List<String> {
+        val blocks = ((Json.parseToJsonElement(body) as? JsonObject)
+            ?.get("rich_message") as? JsonObject)
+            ?.get("blocks") as? JsonArray ?: return emptyList()
+        return blocks.mapNotNull { b ->
+            val obj = b as? JsonObject ?: return@mapNotNull null
+            if ((obj["type"] as? JsonPrimitive)?.content != "pullquote") return@mapNotNull null
+            (obj["text"] as? JsonPrimitive)?.content
+        }
+    }
 
     @Test
     fun theBirthCarriesTheRealTitleResolvedOnce() = runTest {
@@ -530,7 +547,7 @@ class LivePublisherTest {
             hub,
             spoken,
             toolBox = { "BOX(${it.name})" },
-            finalAnswer = { "LA RESPUESTA" },
+            finalTurn = { voiceOf("LA RESPUESTA") },
             richVoice = false,
         )
         publisher.tick() // birth — feedSeen snapshots (no tools yet)
@@ -616,7 +633,7 @@ class LivePublisherTest {
         val publisher = publisher(
             Wire(),
             hub,
-            finalAnswer = { "LA RESPUESTA" },
+            finalTurn = { voiceOf("LA RESPUESTA") },
             onSeal = { received.add(it) },
         )
         publisher.tick() // birth
@@ -637,7 +654,7 @@ class LivePublisherTest {
         val publisher2 = publisher(
             Wire(),
             hub2,
-            finalAnswer = { "R" },
+            finalTurn = { voiceOf("R") },
             onSeal = { error("the wire is down") },
         )
         publisher2.tick()
@@ -671,7 +688,7 @@ class LivePublisherTest {
             hub,
             spoken,
             verbosity = VolatileVerbosity().apply { set(FeedVerbosity.SUMMARY) },
-            finalAnswer = { "LA RESPUESTA" },
+            finalTurn = { voiceOf("LA RESPUESTA") },
             richVoice = false,
         )
         publisher.tick() // birth
@@ -953,7 +970,7 @@ class LivePublisherTest {
                 markups += markup
                 777L
             },
-            finalAnswer = { null },
+            finalTurn = { null },
             clock = { now },
             toolBox = { lane -> "✏️ ${lane.input?.str("file_path")} listo" },
             fileMenu = fileMenu,
@@ -1019,10 +1036,12 @@ class LivePublisherTest {
     }
 
     @Test
-    fun theVoiceSpeaksProseSegmentsAsRichMessages() = runTest {
-        // THE VIOLET CHANNEL (5/11): the LLM's mid-turn prose — «El meter es
-        // real…» — accumulates while streaming and at the tool boundary it
-        // SPENDS: one rich pullquote message, in order, then the close
+    fun theFeedNeverSpeaksProseTheVoiceWaitsForTheSeal() = runTest {
+        // THE 16/11 LAW (the owner: the raw mid-turn violet bubbles were the
+        // unorganized wall): the LLM's mid-turn prose — «El meter es real…» —
+        // accumulates and spends at the tool boundary as always, but the
+        // FEED no longer speaks it. The seal's digest ([TurnDigest]) owns
+        // the voice; the card's answer tail still streams the words.
         val taskId = "task-9"
         val hub = LiveHub()
         hub.apply(frame(taskId, "task_run_started", at = 1_000), nowMs = 1_000)
@@ -1044,11 +1063,12 @@ class LivePublisherTest {
         )
         now += 31_000L
         publisher.tick()
-        val rich = wire.bodies.firstOrNull { it.second == "sendRichMessage" }
-        assertTrue(rich != null, "the prose flew as a RICH message: methods=${wire.bodies.map { it.second }}")
-        assertTrue("El meter es real" in rich.first, "the violet body: ${rich.first.take(400)}")
-        assertTrue("\"pullquote\"" in rich.first, "the violet block type: ${rich.first.take(300)}")
-        // a SECOND segment spends at the NEXT boundary: the ladder keeps order
+        assertTrue(
+            wire.bodies.none { it.second == "sendRichMessage" && "El meter es real" in it.first },
+            "the mid-turn prose speaks NOTHING: ${wire.bodies.map { it.second }}",
+        )
+        // a second segment spends at the NEXT boundary; the seal's own copy
+        // (the fold's answerAtSeal) is the only violet left in the old shape
         hub.apply(
             frame(taskId, "tool_call_update", at = now + 100, "status" to JsonPrimitive("completed"), "toolId" to JsonPrimitive("tb")),
             nowMs = now + 100,
@@ -1060,12 +1080,11 @@ class LivePublisherTest {
         hub.apply(frame(taskId, "task_complete", at = now + 300, "stopReason" to JsonPrimitive("end_turn")), nowMs = now + 300)
         now += 31_000L
         publisher.tick()
-        val richCount = wire.bodies.count { it.second == "sendRichMessage" }
-        assertTrue(richCount >= 2, "each segment its own violet message: $richCount")
-        assertTrue(
-            wire.bodies.any { it.second == "sendRichMessage" && "Segundo tramo." in it.first },
-            "the second segment spoke its own violet message",
-        )
+        // the seal: the fold's digest speaks the spent steps ONCE, organized —
+        // the words arrive at the end, labeled, never as mid-turn bubbles
+        val digest = wire.bodies.lastOrNull { it.second == "sendRichMessage" && "✅ Respuesta" in it.first }
+        assertTrue(digest != null, "the seal's digest spoke: ${wire.bodies.map { it.second }}")
+        assertTrue("El meter es real" in digest!!.first, "the spent step rides the digest, organized")
     }
 
     @Test
@@ -1075,12 +1094,105 @@ class LivePublisherTest {
         hub.apply(frame(taskId, "task_run_started", at = 1_000), nowMs = 1_000)
         hub.apply(frame(taskId, "agent_thought_chunk", at = 1_050, "content" to JsonPrimitive("p")), nowMs = 1_050)
         val wire = Wire()
-        val publisher = publisher(wire, hub, finalAnswer = { "La respuesta final con `codigo`." })
+        val publisher = publisher(wire, hub, finalTurn = { voiceOf("La respuesta final con `codigo`.") })
         publisher.tick()
         hub.apply(frame(taskId, "task_complete", at = 1_200, "stopReason" to JsonPrimitive("end_turn")), nowMs = 1_200)
         publisher.tick()
         val answerRich = wire.bodies.lastOrNull { it.second == "sendRichMessage" && "respuesta final" in it.first }
         assertTrue(answerRich != null, "the final answer is a violet message: ${wire.bodies.map { it.second }}")
+    }
+
+    @Test
+    fun theSealSpeaksTheOrganizedDigestViolet() = runTest {
+        // THE 16/11 LAW (the owner chose the digest): the turn's voice seals
+        // ORGANIZED — the steps labeled with the tool each followed, the
+        // conclusion marked ✅ — one violet message (packed pages), never
+        // the raw concatenated wall.
+        val taskId = "task-9"
+        val hub = LiveHub()
+        hub.apply(frame(taskId, "task_run_started", at = 1_000), nowMs = 1_000)
+        hub.apply(frame(taskId, "agent_thought_chunk", at = 1_050, "content" to JsonPrimitive("p")), nowMs = 1_050)
+        val wire = Wire()
+        val publisher = publisher(
+            wire,
+            hub,
+            finalTurn = {
+                TurnVoice(
+                    listOf(
+                        TurnProse("Reviso el handler primero."),
+                        TurnProse("Los tests pasan; aplico el diff.", afterTool = "Bash"),
+                        TurnProse("El fix consistió en X."),
+                    ),
+                )
+            },
+        )
+        publisher.tick()
+        hub.apply(frame(taskId, "task_complete", at = 1_200, "stopReason" to JsonPrimitive("end_turn")), nowMs = 1_200)
+        publisher.tick()
+        val digest = wire.bodies.lastOrNull { it.second == "sendRichMessage" && "✅ Respuesta" in it.first }
+        assertTrue(digest != null, "the digest is a violet message: ${wire.bodies.map { it.second }}")
+        assertTrue("Paso 1" in digest!!.first, "the opening step carries its number")
+        assertTrue("tras 🔧 Bash" in digest.first, "the step names the tool it followed")
+        assertTrue("El fix consistió en X." in digest.first, "the conclusion rides the ✅ block")
+        assertTrue("pullquote" in digest.first, "the violet identity holds")
+        // the conclusion is the digest's LAST block
+        val lastText = blockTexts(digest.first).lastOrNull()
+        assertTrue(lastText?.startsWith("✅ Respuesta") == true, "the conclusion closes the digest: $lastText")
+    }
+
+    @Test
+    fun anOversizedConclusionChunksAcrossRichMessagesAndNothingDrops() = runTest {
+        // THE CONTINUATION LAW: a conclusion longer than one message CHUNKS
+        // across rich messages — the pieces concatenate to the whole, byte
+        // for byte. Truncation with no continuation is the 16/11 bug, dead.
+        val taskId = "task-9"
+        val hub = LiveHub()
+        hub.apply(frame(taskId, "task_run_started", at = 1_000), nowMs = 1_000)
+        hub.apply(frame(taskId, "agent_thought_chunk", at = 1_050, "content" to JsonPrimitive("p")), nowMs = 1_050)
+        val wire = Wire()
+        val text = "x".repeat(9000)
+        val publisher = publisher(wire, hub, finalTurn = { voiceOf(text) })
+        publisher.tick()
+        hub.apply(frame(taskId, "task_complete", at = 1_200, "stopReason" to JsonPrimitive("end_turn")), nowMs = 1_200)
+        publisher.tick()
+        val rich = wire.bodies.filter { it.second == "sendRichMessage" }
+        assertTrue(rich.size >= 3, "9000 cp over the 3500 page: several violet messages: ${rich.size}")
+        val joined = rich.flatMap { blockTexts(it.first) }.joinToString("")
+        assertEquals(text, joined, "the chunks CONCATENATE to the whole — nothing dropped")
+    }
+
+    @Test
+    fun theSnapshotMissSpeaksTheFoldsDigestWithNumberedSteps() = runTest {
+        // NEVER LOST, organized (11/11 ladder + 16/11 digest): the snapshot
+        // cannot answer → the fold's own projection speaks — the spent steps
+        // numbered, the seal's copy as the ✅ conclusion.
+        val taskId = "task-9"
+        val hub = LiveHub()
+        hub.apply(frame(taskId, "task_run_started", at = 1_000), nowMs = 1_000)
+        hub.apply(
+            frame(taskId, "agent_message_chunk", at = 1_100, "content" to JsonPrimitive("Primer tramo hablado.")),
+            nowMs = 1_100,
+        )
+        hub.apply(
+            frame(taskId, "tool_call", at = 1_200, "toolId" to JsonPrimitive("tb"), "toolName" to JsonPrimitive("Read"),
+                "input" to buildJsonObject { put("file_path", "/w/a.kt") }),
+            nowMs = 1_200,
+        )
+        hub.apply(
+            frame(taskId, "agent_message_chunk", at = 1_300, "content" to JsonPrimitive("La conclusión del fold.")),
+            nowMs = 1_300,
+        )
+        hub.apply(frame(taskId, "task_complete", at = 2_000, "stopReason" to JsonPrimitive("end_turn")), nowMs = 2_000)
+        val wire = Wire()
+        val publisher = publisher(wire, hub, finalTurn = { null })
+        publisher.tick()
+        publisher.tick()
+        val violet = wire.bodies.lastOrNull { it.second == "sendRichMessage" }
+        assertTrue(violet != null, "the fold's digest spoke violet: ${wire.bodies.map { it.second }}")
+        assertTrue("Paso 1" in violet!!.first, "the spent step rides numbered: ${violet.first.take(300)}")
+        assertTrue("✅ Respuesta" in violet.first, "the seal's copy is the conclusion")
+        assertTrue("La conclusión del fold." in violet.first)
+        assertEquals(1, wire.bodies.count { it.second == "sendRichMessage" }, "one digest, one message")
     }
 
     @Test
@@ -1351,7 +1463,7 @@ class LivePublisherTest {
         )
         hub.apply(frame(taskId, "task_complete", at = 1_200, "stopReason" to JsonPrimitive("end_turn")), nowMs = 1_200)
         val wire = Wire()
-        val publisher = publisher(wire, hub, finalAnswer = { "La respuesta completa y final." })
+        val publisher = publisher(wire, hub, finalTurn = { voiceOf("La respuesta completa y final.") })
         publisher.tick() // birth
         publisher.tick() // the seal tick — the prose rides answerAtSeal, never the feed
         val copies = wire.bodies.count { it.second == "sendRichMessage" && "La respuesta completa" in it.first }
@@ -1373,7 +1485,7 @@ class LivePublisherTest {
         )
         hub.apply(frame(taskId, "task_complete", at = 2_000, "stopReason" to JsonPrimitive("end_turn")), nowMs = 2_000)
         val wire = Wire()
-        val publisher = publisher(wire, hub, finalAnswer = { null })
+        val publisher = publisher(wire, hub, finalTurn = { null })
         publisher.tick()
         publisher.tick()
         val violet = wire.bodies.lastOrNull { it.second == "sendRichMessage" }
@@ -1402,7 +1514,7 @@ class LivePublisherTest {
         val spoken = mutableListOf<String>()
         var now = TICK_MS
         var seals = 0
-        val publisher = publisher(wire, hub, spoken, finalAnswer = { "La conclusión única." }, onSeal = { seals += 1 }, clock = { now })
+        val publisher = publisher(wire, hub, spoken, finalTurn = { voiceOf("La conclusión única.") }, onSeal = { seals += 1 }, clock = { now })
         publisher.tick()
         hub.apply(frame(taskId, "task_complete", at = 2_000, "stopReason" to JsonPrimitive("end_turn")), nowMs = 2_000)
         publisher.tick()

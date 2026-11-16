@@ -417,7 +417,8 @@ class LiveHub {
  * lag: the redraw rides the 3s tick and the change law (a quiet render
  * moves nothing), and under a 429 window the card stays where it is —
  * stale but present, never missing. At `task_complete` the seal speaks
- * the one-line record and the turn's answer.
+ * the one-line record and the turn's ORGANIZED DIGEST (the steps with
+ * their tools, the conclusion marked ✅ — [TurnDigest]).
  *
  * THE TRANSCRIPT FEED (the owner's 30/10 order: «quiero VER los archivos,
  * leer los commands de bash…»): every tick drains [TranscriptFeed]'s
@@ -448,7 +449,13 @@ class LivePublisher(
      * an input-less lane) falls back to the feed's honest one-liner.
      */
     private val toolBox: (ToolLive) -> String = { "" },
-    private val finalAnswer: suspend (taskId: String) -> String?,
+    /**
+     * THE TURN'S ORGANIZED VOICE (injected like [resolveTitle]): the
+     * snapshot's [TurnVoice] — the merged turn's steps, the tool each
+     * followed, the trailing conclusion. The seal speaks its digest; a null
+     * answer falls back to the fold's own projection ([TurnDigest.ofFold]).
+     */
+    private val finalTurn: suspend (taskId: String) -> TurnVoice?,
     private val clock: () -> Long = System::currentTimeMillis,
     /** The per-action verbs — the wiring injects the spectator's classification map. */
     private val verbs: ToolVerbifier = ToolVerbs.MINIMAL,
@@ -497,10 +504,11 @@ class LivePublisher(
     private val fileMenu: FileMenu? = null,
     /**
      * THE VIOLET VOICE's knob (the owner, 5/11, daemon.json `rich_voice`):
-     * the LLM's prose segments, the CoT blocks and the final answer travel
-     * as rich messages — pullquote/pre/expandable blocks (Bot API 10.x),
-     * each send falling back to the HTML blockquote on any rejection.
-     * false = the pre-feature shapes (plain texts, the toggle buttons).
+     * the digest's steps, the CoT blocks and the final answer travel as
+     * rich messages — pullquote/pre/expandable blocks (Bot API 10.x), ONE
+     * rich message per digest page, each send falling back to the HTML
+     * blockquote on any rejection. false = the pre-feature shapes (plain
+     * texts, the toggle buttons).
      */
     private val richVoice: Boolean = true,
 ) : CoTTaps, BoxTaps {
@@ -774,18 +782,14 @@ class LivePublisher(
      * — the fold names the id, the send names the message). The collapsed
      * header is all the chat sees until the owner asks.
      *
-     * THE VIOLET VOICE (5/11, knob-gated): the LLM's prose segments and
-     * the CoT blocks travel as RICH messages — pullquotes for the talk,
-     * the native expandable quote for the thinking (no custom button, the
-     * client collapses/expands). richVoice=false keeps the old shapes.
+     * THE VIOLET VOICE (5/11, knob-gated): the CoT blocks travel as RICH
+     * messages — the native expandable quote for the thinking (no custom
+     * button, the client collapses/expands). The LLM's PROSE never rides
+     * here (16/11: the feed is not the voice's channel — the seal's digest
+     * speaks it). richVoice=false keeps the old shapes.
      */
     private suspend fun speakFeed(feed: List<FeedMessage>, state: TurnLive) {
         feed.forEach { msg ->
-            // THE VOICE: the model's own prose — one violet message
-            msg.prose?.takeIf { richVoice }?.let { prose ->
-                telegram.sendRich(config(), RichVoice.proseBlocks(prose))
-                return@forEach
-            }
             // a COLLAPSED tool output: the header speaks with its one
             // button; the fold keeps the numbered pages for the taps. THE
             // CHILD'S REPORT (12/11) is the exception: born OPEN on page 1
@@ -963,27 +967,33 @@ class LivePublisher(
             speakFeed(feed, state)
             speak(LiveTurn.sealText(state, now), null)
         }
-        val answer = finalAnswer(state.taskId)?.takeIf { it.isNotBlank() }
-            ?: state.answerAtSeal?.takeIf { it.isNotBlank() }
-        // THE VOICE'S LAST WORD (5/11): the final answer IS the LLM talking —
-        // it seals as a violet rich message (pullquote prose + pre code).
-        // NEVER LOST twice over (11/11): the snapshot's full text first; when
-        // the snapshot cannot answer NOW, the fold's own [answerAtSeal] copy
-        // speaks (the prose no longer travels the feed — the seal owns the
-        // answer). A violet send that could not fly (a cooldown window
-        // opened mid-seal) falls back to the parked speak lane — the answer
-        // arrives, even degraded. richVoice=false keeps the escaped plain
-        // text (the HTML law comment below still governs that leg).
-        if (answer != null) {
-            val violet = if (richVoice) telegram.sendRich(cfg, RichVoice.proseBlocks(answer)) else null
-            if (violet == null) speak(PyText.esc(answer), null)
+        val voice = finalTurn(state.taskId)?.takeIf { it.segments.isNotEmpty() }
+            ?: TurnDigest.ofFold(state).takeIf { it.segments.isNotEmpty() }
+        // THE VOICE'S LAST WORD (5/11; 16/11 THE DIGEST): the turn's prose
+        // seals ORGANIZED — [TurnDigest.pages] builds the steps (each one
+        // labeled with the tool it followed, the conclusion marked ✅) and
+        // packs them into pages of BLOCK_CP, ONE rich message per page. THE
+        // CONTINUATION LAW: an oversized step chunks across pages and the
+        // chunks concatenate to the whole — nothing is ever dropped, no
+        // message ever truncates silently. NEVER LOST (11/11, same ladder):
+        // the snapshot's voice first; when the snapshot cannot answer NOW,
+        // the fold's own projection ([TurnDigest.ofFold]) speaks. A violet
+        // page that could not fly (a cooldown window opened mid-seal) falls
+        // back to the parked speak lane — the words arrive, even degraded.
+        // richVoice=false keeps the escaped plain pages.
+        voice?.let { v ->
+            TurnDigest.pages(v).forEach { page ->
+                val violet = if (richVoice) telegram.sendRich(cfg, page) else null
+                if (violet == null) speak(PyText.esc(TurnDigest.pageText(page)), null)
+            }
         }
+        val answer = voice?.conclusion
         logger.info {
             "live view sealed: taskId=${state.taskId} reason=${(state.phase as TurnPhase.Done).stopReason} " +
                 "thought=${state.thoughtChars} tools=${state.doneTools} answer=${answer?.length ?: 0} chars " +
-                "feed=${feed.size}"
+                "steps=${voice?.segments?.size ?: 0} feed=${feed.size}"
         }
-        sealTap(state, answer, now, answerSpoken = answer != null)
+        sealTap(state, answer, now, answerSpoken = voice != null)
         // THE REGISTRY SURVIVES THE SEAL (the collapsed buttons keep
         // working after the turn ends — the owner reads the CoT calmly);
         // only the entry cap prunes it. The PIN dies only if THIS turn is
