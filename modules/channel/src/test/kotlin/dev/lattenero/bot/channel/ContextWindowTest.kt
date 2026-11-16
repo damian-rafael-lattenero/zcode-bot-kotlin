@@ -208,7 +208,7 @@ class ContextWindowTest {
     @Test
     fun menuListsTheThirteenWithContextWindowBesideCompact() {
         assertTrue(BotCommands.MENU.size >= 14) // steer landed — the count is MENU.size-driven now
-        val names = BotCommands.MENU.map { it.first }
+        val names = BotCommands.MENU.map { it.name }
         assertTrue("context_window" in names)
         assertEquals(names.indexOf("compact") + 1, names.indexOf("context_window"))
         assertTrue("/context_window — context window used" in BotCommands.HELP)

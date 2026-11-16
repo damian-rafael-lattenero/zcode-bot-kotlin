@@ -1,6 +1,7 @@
 package dev.lattenero.bot.daemon
 
 import dev.lattenero.bot.channel.BotCommands
+import dev.lattenero.bot.channel.PaletteOrder
 import dev.lattenero.bot.daemon.bus.EventBusKnob
 import dev.lattenero.bot.daemon.metrics.Lane
 import dev.lattenero.bot.daemon.metrics.MetricsKnob
@@ -38,6 +39,7 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.IOException
 import kotlin.system.exitProcess
+import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 
 /**
@@ -258,7 +260,24 @@ fun main(args: Array<String>) {
         // Python's register_bot_menu: with the poller ON the daemon owns the
         // phone, so the «/» menu must be OUR eight — never Python's leftovers
         if (pollerHandle != null) {
-            launch { registerTelegramMenu(cfg, api, logger) }
+            launch { registerTelegramMenu(cfg, api, logger, stack.palette) }
+            // M1: the usage ranking's edge — re-registers ONLY when the order
+            // really moved (one setMyCommands per real change, never a flood)
+            val paletteRefresher = dev.lattenero.bot.daemon.palette.PaletteRefresher(
+                store = stack.palette,
+                register = { ranked ->
+                    val tgCfg = dev.lattenero.bot.transport.TgConfig.load(File(cfg.baseDir, "telegram-remote.json"))
+                    val menuApi = api ?: dev.lattenero.bot.transport.TgApi({ tgCfg })
+                    try {
+                        dev.lattenero.bot.channel.BotMenu.register(menuApi, tgCfg, ranked)
+                    } finally {
+                        if (api == null) menuApi.close()
+                    }
+                },
+            )
+            paletteRefresher
+                .asProcess(PALETTE_REFRESH_EVERY, onHeartbeat = { touch(File(stateDir, HB_PALETTE)) })
+                .startIn(this)
         }
 
         // the outbox drain (Python's poller used to do this; retired with it):
@@ -353,14 +372,18 @@ private suspend fun registerTelegramMenu(
     cfg: DaemonConfig,
     api: dev.lattenero.bot.transport.TgApi?,
     logger: io.github.oshai.kotlinlogging.KLogger,
+    palette: dev.lattenero.bot.daemon.palette.PaletteStore,
 ) {
     val tgCfg = dev.lattenero.bot.transport.TgConfig.load(File(cfg.baseDir, "telegram-remote.json"))
     val menuApi = api ?: dev.lattenero.bot.transport.TgApi({ tgCfg })
-    val ok = dev.lattenero.bot.channel.BotMenu.register(menuApi, tgCfg)
+    // M1: the menu the OWNER's usage ranks — a fresh install is the canonical order
+    val ranked = palette.ranked()
+    val ok = dev.lattenero.bot.channel.BotMenu.register(menuApi, tgCfg, ranked)
+    if (ok) palette.markRegistered(PaletteOrder(ranked.map { it.name }))
     logger.info {
         "telegram menu ${if (ok) "registered" else "FAILED to register"}: " +
-            BotCommands.MENU.joinToString(" ") { "/${it.first}" } +
-            " — ${BotCommands.MENU.size} commands"
+            ranked.joinToString(" ") { "/${it.name}" } +
+            " — ${ranked.size} commands (usage-ranked)"
     }
     if (api == null) menuApi.close()
 }
@@ -464,8 +487,12 @@ private const val HB_LIVE_VIEW = "hb-live-view"
 private const val HB_POLLER = "hb-poller"
 private const val HB_NOTIFS = "hb-subagent-notifs"
 private const val HB_INTERVENTIONS = "hb-interventions"
+private const val HB_PALETTE = "hb-palette"
 private const val COMPONENT_KEY = "component"
 private val DEFAULT_HEARTBEAT_EVERY = 30.seconds
 private val SPECTATOR_SCAN = 2.seconds
 private val OUTBOX_DRAIN_EVERY = 15.seconds
+
+/** M1's palette refresh cadence — a ranking move rides at most this late. */
+private val PALETTE_REFRESH_EVERY = 5.minutes
 private const val MILLIS_PER_SECOND = 1000.0

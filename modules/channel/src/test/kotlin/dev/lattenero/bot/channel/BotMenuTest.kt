@@ -39,12 +39,22 @@ class BotMenuTest {
         val commands = body["commands"]!!.jsonArray
         assertEquals(BotCommands.MENU.size, commands.size)
         assertEquals(
-            BotCommands.MENU.map { it.first },
+            BotCommands.MENU.map { it.name },
             commands.map { it.jsonObject["command"]!!.jsonPrimitive.content },
         )
         commands.forEach { c ->
             assertTrue(c.jsonObject["description"]!!.jsonPrimitive.content.isNotEmpty())
         }
+    }
+
+    @Test
+    fun bodyHonorsTheGivenUsageOrder() {
+        val ranked = listOf(MenuCommand("help", "all commands"), MenuCommand("tasks", "conversations"))
+        val commands = BotMenu.body(TgConfig(token = "t", chatId = JsonNull), ranked)["commands"]!!.jsonArray
+        assertEquals(
+            listOf("help", "tasks"),
+            commands.map { it.jsonObject["command"]!!.jsonPrimitive.content },
+        )
     }
 
     @Test

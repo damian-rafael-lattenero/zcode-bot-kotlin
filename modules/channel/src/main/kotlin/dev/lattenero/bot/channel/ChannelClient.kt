@@ -563,6 +563,9 @@ class ChannelClient(
         }
     }
 
+    /** The remembered subscriptions right now — the leak's gauge reads THIS (scrape time, never cached). */
+    val subscriptionCount: Int get() = synchronized(subscriptions) { subscriptions.size }
+
     /** Remembers a subscription (replayed on every reconnect) and fires it now if a session is live. */
     suspend fun subscribe(taskId: String, workspacePath: String) {
         synchronized(subscriptions) { subscriptions[taskId] = workspacePath }

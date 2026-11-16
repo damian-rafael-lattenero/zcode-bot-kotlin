@@ -54,13 +54,17 @@ import dev.lattenero.bot.daemon.brain.brainGateway
 import dev.lattenero.bot.daemon.history.LIVE_VERBS
 import dev.lattenero.bot.daemon.history.SEQUENCE_LINE_DIFFER
 import dev.lattenero.bot.daemon.history.TasksHistoryIo
+import dev.lattenero.bot.daemon.metrics.AttachClock
+import dev.lattenero.bot.daemon.metrics.HandlerVerb
 import dev.lattenero.bot.daemon.metrics.Metrics
 import dev.lattenero.bot.daemon.metrics.NoopMetrics
+import dev.lattenero.bot.daemon.metrics.STALL_LINE_MS
 import dev.lattenero.bot.daemon.metrics.TurnMetricsTap
 import dev.lattenero.bot.daemon.otel.TurnSpanTracker
 import dev.lattenero.bot.daemon.notifications.InterventionsNotifs
 import dev.lattenero.bot.daemon.notifications.NotificationsWire
 import dev.lattenero.bot.daemon.notifications.SubagentNotifs
+import dev.lattenero.bot.daemon.palette.PaletteStore
 import dev.lattenero.bot.daemon.notifications.WatchOps
 import dev.lattenero.bot.daemon.nuclear.MacProcessEdge
 import dev.lattenero.bot.daemon.nuclear.NuclearLadder
@@ -110,6 +114,8 @@ internal class ChannelStack(
     val bootLadder: suspend () -> Unit = {},
     /** 🧭 the any-task watcher (14/11) — null without a live send (nothing to deliver). */
     val interventions: Interventions? = null,
+    /** M1: the palette's persisted ledger + registered order (Main's boot and refresher read it). */
+    val palette: PaletteStore,
 )
 
 /**
@@ -244,7 +250,14 @@ private val OPENCODE_HEADERS = mapOf(
  * the only thing that flips it). The final render rides the spectator's
  * own renderer, INJECTED so the channel module never depends on daemon.
  */
-@Suppress("LongMethod", "CyclomaticComplexMethod") // wiring breadth: the stack's every piece, one home
+@Suppress(
+    "LongMethod",
+    "CyclomaticComplexMethod",
+    // the stream callback's tracer rethrows EVERY exception (the session's
+    // restart policy owns the recovery — M0 only makes the failure visible)
+    "TooGenericExceptionCaught",
+    "ThrowsCount",
+) // wiring breadth: the stack's every piece, one home
 internal fun wireChannel(
     cfg: DaemonConfig,
     send: DaemonSend,
@@ -259,6 +272,8 @@ internal fun wireChannel(
     notificationsOn: Boolean = false,
     /** E3: the span tracker — null with the `otel` knob off (zero cost, byte-identical daemon). */
     otel: TurnSpanTracker? = null,
+    /** M1: the palette's own store — the command tap's counter and the registered order. */
+    palette: PaletteStore = PaletteStore(File(cfg.homeDir, "command-usage.json")),
 ): ChannelStack {
     val hub = LiveHub()
     val tokenFile = File(cfg.baseDir, ChannelSpec.TOKEN_FILENAME)
@@ -368,11 +383,18 @@ internal fun wireChannel(
     // subscriptions' traffic for lost events (the pump serializes its
     // callbacks: no lock, one reader).
     val connSeqFloor = ConnSeqFloor()
+    // M0's attach clock: armed by a subscribe, fired by the FIRST folded
+    // frame of that very task (a subscription with no burst never records).
+    val attachClock = dev.lattenero.bot.daemon.metrics.AttachClock()
     val client = ChannelClient(
         transportFactory = { UnixSocketTransport { socketFile } },
         tokenReader = { tokenFile.takeIf { it.exists() }?.readText() },
         onStreamEvent = { frame ->
-            feedAndResync(hub, connSeqFloor, frame, System.currentTimeMillis())
+            // M0: the pump's own clock — how long this callback holds the ONE
+            // reader; the stall counter is the freeze the owner feels.
+            val startedAt = System.nanoTime()
+            try {
+                feedAndResync(hub, connSeqFloor, frame, System.currentTimeMillis())
             // ADR-019: the turn's lifecycle rides the same frames the live
             // view folds — the tap never changes what the bot says or does
             busTaps?.onFrame(frame)
@@ -444,6 +466,23 @@ internal fun wireChannel(
                     }
                 }
             }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e // cancellation is the process's own — never logged as a frame failure
+            } catch (e: Exception) {
+                // M0 keeps the old policy (the pump's caller restarts the session)
+                // but the failure must LEAVE A TRACE — a silent throw here was
+                // exactly the kind of hole the stabilization is closing.
+                logger.warn(e) {
+                    "stream callback FAILED on ${frame.taskId.takeLast(SID_TAIL)} — propagating " +
+                        "(the session's restart policy owns the recovery)"
+                }
+                throw e
+            } finally {
+                val elapsedMs = (System.nanoTime() - startedAt) / NANOS_PER_MS
+                metrics.streamCallback(elapsedMs)
+                if (elapsedMs > STALL_LINE_MS) metrics.streamStall()
+                attachClock.fire(frame.taskId)?.let { latencyMs -> metrics.attachFirstFrame(latencyMs) }
+            }
         },
         onInboundResult = { result ->
             when {
@@ -469,6 +508,11 @@ internal fun wireChannel(
             hub.keepalive(frame.taskId, frame.seq)
         },
     )
+
+    // M0: the subscriptions gauge — the leak's witness, read at scrape time
+    // (the main view never unsubscribed the task it left; the number must
+    // stay bounded by the watcher's caps, not grow with every tap).
+    metrics.subscriptions { client.subscriptionCount }
 
     // THE DEFAULT-MODE ENFORCEMENT's body (the late bind — the callback above
     // captured the holder): the same snapshot read the /mode card uses, the
@@ -866,6 +910,7 @@ internal fun wireChannel(
         promptTap = promptTap,
         brain = brain,
         metrics = metrics,
+        attachClock = attachClock,
         mirror = mirrorRefresh,
         fileTaps = fileMenu,
         // THE AUTH SENTINEL's marker (12/11): the owner's «already attended»
@@ -874,6 +919,9 @@ internal fun wireChannel(
         authDismiss = { pid ->
             File(File(cfg.homeDir, "state"), AUTH_DISMISSED_FILE).writeText(pid)
         },
+        // M1: every dispatched command lands in the palette's ledger (the
+        // refresher re-registers only when the resulting order moves).
+        onCommand = palette::record,
     )
     return ChannelStack(
         client,
@@ -884,6 +932,7 @@ internal fun wireChannel(
         notifs?.watcher,
         wired?.bootLadder ?: {},
         interventions,
+        palette,
     )
 }
 
@@ -1005,7 +1054,13 @@ private fun buildLiveView(
 }
 
 /** The single reader — knob-gated (retire-python.nu turns it on). */
-@Suppress("LongMethod", "CyclomaticComplexMethod") // wiring breadth: the reader's every piece, one home
+@Suppress(
+    "LongMethod",
+    "CyclomaticComplexMethod",
+    // the handler tracer rethrows EVERY exception (the poller moves on with
+    // its own catch — M0 only makes the failing verb visible)
+    "TooGenericExceptionCaught",
+) // wiring breadth: the reader's every piece, one home
 private fun buildPoller(
     cfg: DaemonConfig,
     api: TgApi?,
@@ -1040,6 +1095,9 @@ private fun buildPoller(
     // E2: the metrics facade (the no-op when off) — the poller's cycles and
     // the owner's accepted updates, counted at the wiring
     metrics: Metrics = NoopMetrics,
+    // M0: the attach clock — armed here (a subscribe), fired by the client's
+    // stream callback (the first folded frame of that very task)
+    attachClock: AttachClock = AttachClock(),
     // THE OPEN MENU MIRROR (null when the live api is missing): the dispatch
     // registers the born /mode and /plan_model_effort menus into it
     mirror: MenuMirrorRefresher? = null,
@@ -1049,6 +1107,9 @@ private fun buildPoller(
     // THE AUTH SENTINEL's marker (12/11): the auth: tap's verdict, written
     // to the state dir the sentinel polls — default no-op for unwired tests
     authDismiss: (String) -> Unit = {},
+    // M1: the usage tap — every dispatched command's canonical palette name
+    // (the wiring binds it to the palette store's ledger)
+    onCommand: (String) -> Unit = {},
 ): PollerWiring? {
     if (!pollOn) return null
     val liveApi = api ?: TgApi({ TgConfig.load(remote) })
@@ -1148,6 +1209,10 @@ private fun buildPoller(
                     // task's subscribe rebases nothing (an unborn turn's
                     // windows do not exist).
                     hub.rebase(taskId)
+                    // M0: the attach's clock starts at the FRAME, not at the
+                    // tap — the tap's own handling is timed by the handler
+                    // metric; this one measures the wire's first answer.
+                    attachClock.arm(taskId)
                     client.subscribe(taskId, workspacePath)
                 }
             },
@@ -1173,6 +1238,8 @@ private fun buildPoller(
         // Python's ctx_tasks + model_selection — the same two sqlite files the spectator reads
         history = history,
         defaultWorkspacePath = File(File(cfg.baseDir, "workspace"), "default").absolutePath,
+        // M1: the palette's ledger tap — the SAME store the refresher reads
+        onCommand = onCommand,
         verbosity = verbosity,
         board = board,
         quotaDirect = quotaDirectRung(cfg),
@@ -1237,42 +1304,79 @@ private fun buildPoller(
         dispatch = { cfg, update ->
             // the buttons' dispatch: a tap is answered (the toast) and runs
             // as the owner's typed words; a message is the words themselves
-            when (update) {
-                is InboundUpdate.Message -> {
-                    metrics.pollerInbound()
-                    // F23: 👀 the second the words are in, ✅ once handled —
-                    // feedback on the owner's own message, zero new messages
-                    Ack.react(liveApi, cfg, update.messageId, Ack.RECEIVED)
-                    // FILES OUT + /diff (30/10): the two commands that need
-                    // the wiring's own throats (the multipart upload; the
-                    // snapshot query + the mini-diff render) — intercepted
-                    // BEFORE the text dispatcher, which never sees them.
-                    // B6: /deploy joins the pattern — the anti-suicide door
-                    // lives HERE, never in the free-text router.
-                    dispatchMessage(liveApi, cfg, client, history, commands, speak, deployFlow, mirror, update)
-                    Ack.react(liveApi, cfg, update.messageId, Ack.HANDLED)
-                }
+            // M0: the handler clock — the poller is ONE consumer, so this
+            // duration is the time every later tap waits behind.
+            val handlerStartedAt = System.nanoTime()
+            val verb = when (update) {
+                is InboundUpdate.Message -> HandlerVerb.ofText(update.text)
+                is InboundUpdate.Attachment -> HandlerVerb.ATTACHMENT
+                is InboundUpdate.Callback -> HandlerVerb.ofCallback(update.data)
+            }
+            try {
+                when (update) {
+                    is InboundUpdate.Message -> {
+                        metrics.pollerInbound()
+                        // F23: 👀 the second the words are in, ✅ once handled —
+                        // feedback on the owner's own message, zero new messages
+                        Ack.react(liveApi, cfg, update.messageId, Ack.RECEIVED)
+                        // FILES OUT + /diff (30/10): the two commands that need
+                        // the wiring's own throats (the multipart upload; the
+                        // snapshot query + the mini-diff render) — intercepted
+                        // BEFORE the text dispatcher, which never sees them.
+                        // B6: /deploy joins the pattern — the anti-suicide door
+                        // lives HERE, never in the free-text router.
+                        dispatchMessage(
+                            liveApi,
+                            cfg,
+                            client,
+                            history,
+                            commands,
+                            speak,
+                            deployFlow,
+                            mirror,
+                            update,
+                        )
+                        Ack.react(liveApi, cfg, update.messageId, Ack.HANDLED)
+                    }
 
-                is InboundUpdate.Attachment -> {
-                    metrics.pollerInbound()
-                    dispatchAttachment(liveApi, cfg, pythonState, client, speak, prompts = promptTap, update = update)
-                }
+                    is InboundUpdate.Attachment -> {
+                        metrics.pollerInbound()
+                        dispatchAttachment(
+                            liveApi,
+                            cfg,
+                            pythonState,
+                            client,
+                            speak,
+                            prompts = promptTap,
+                            update = update,
+                        )
+                    }
 
-                is InboundUpdate.Callback -> {
-                    metrics.pollerCallback()
-                    answerCallback(liveApi, update.callbackId)
-                    when {
-                        // B6 — the deploy taps: intercepted BEFORE the
-                        // callback fallback (the sst: law: a stray data must
-                        // never ride to the agent as the owner's own words —
-                        // «/deploy go» launching a build would be the graver bug)
-                        update.data.startsWith("dep:") ->
-                            deployFlow.onTap(update.data.removePrefix("dep:"), update.fromId)
+                    is InboundUpdate.Callback -> {
+                        metrics.pollerCallback()
+                        answerCallback(liveApi, update.callbackId)
+                        when {
+                            // B6 — the deploy taps: intercepted BEFORE the
+                            // callback fallback (the sst: law: a stray data must
+                            // never ride to the agent as the owner's own words —
+                            // «/deploy go» launching a build would be the graver bug)
+                            update.data.startsWith("dep:") ->
+                                deployFlow.onTap(update.data.removePrefix("dep:"), update.fromId)
 
-                        else -> commands.onCallback(update.data, update.updateId, update.fromId)
-                            ?.let { reply -> speakReply(mirror, cfg.chatId, reply, speak) }
+                            else -> commands.onCallback(update.data, update.updateId, update.fromId)
+                                ?.let { reply -> speakReply(mirror, cfg.chatId, reply, speak) }
+                        }
                     }
                 }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e // cancellation is the daemon's own — never logged as a handler failure
+            } catch (e: Exception) {
+                // the poller already moves on (its own catch) — the TRACE is
+                // this line: verb + update id name the exact handler that died
+                logger.warn(e) { "handler $verb FAILED on update ${update.updateId} — propagating" }
+                throw e
+            } finally {
+                metrics.handler(verb, (System.nanoTime() - handlerStartedAt) / NANOS_PER_MS)
             }
         },
         ),
@@ -1366,6 +1470,9 @@ private suspend fun dispatchAttachment(
 /** The nuclear gate's file (mtime = the last start) and its double-trigger window. */
 private const val NUCLEAR_GATE = "nuclear-last"
 private const val NUCLEAR_DEBOUNCE_MS = 180_000L
+
+/** The pump clock's unit step (M0): nanoTime is monotonic, the metric speaks ms. */
+private const val NANOS_PER_MS = 1_000_000L
 
 /**
  * THE MIRROR'S REGISTRATION LEG: speak the reply and, when it carries the

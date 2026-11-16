@@ -56,6 +56,26 @@ class MicrometerMetrics(private val registry: PrometheusMeterRegistry) : Metrics
         counter(POLLER_CALLBACKS).increment()
     }
 
+    override fun streamCallback(durationMs: Long) {
+        registry.timer(STREAM_CALLBACK).record(durationMs, TimeUnit.MILLISECONDS)
+    }
+
+    override fun streamStall() {
+        counter(STREAM_STALLS).increment()
+    }
+
+    override fun attachFirstFrame(durationMs: Long) {
+        registry.timer(ATTACH_FIRST_FRAME).record(durationMs, TimeUnit.MILLISECONDS)
+    }
+
+    override fun handler(verb: String, durationMs: Long) {
+        registry.timer(HANDLER, TAG_VERB, verb).record(durationMs, TimeUnit.MILLISECONDS)
+    }
+
+    override fun subscriptions(size: () -> Int) {
+        gauge(SUBSCRIPTIONS) { size().toDouble() }
+    }
+
     override fun outboxDepth(lane: Lane, depth: () -> Int) {
         gauge(OUTBOX_DEPTH, TAG_LANE, lane.tag) { depth().toDouble() }
     }
@@ -111,6 +131,7 @@ class MicrometerMetrics(private val registry: PrometheusMeterRegistry) : Metrics
         const val TAG_OUTCOME = "outcome"
         const val TAG_LANE = "lane"
         const val TAG_DIRECTION = "direction"
+        const val TAG_VERB = "verb"
 
         const val TURN_STARTED = "bot.turns.started"
         const val TURN_SEALED = "bot.turns.sealed"
@@ -122,6 +143,11 @@ class MicrometerMetrics(private val registry: PrometheusMeterRegistry) : Metrics
         const val POLLER_CYCLES = "bot.poller.cycles"
         const val POLLER_INBOUND = "bot.poller.inbound"
         const val POLLER_CALLBACKS = "bot.poller.callbacks"
+        const val STREAM_CALLBACK = "bot.stream.callback"
+        const val STREAM_STALLS = "bot.stream.stalls"
+        const val ATTACH_FIRST_FRAME = "bot.attach.first_frame"
+        const val HANDLER = "bot.handler.duration"
+        const val SUBSCRIPTIONS = "bot.channel.subscriptions"
         const val OUTBOX_DEPTH = "bot.outbox.depth"
         const val COOLDOWN_ACTIVE = "bot.cooldown.active"
         const val ZCONN_TRANSITIONS = "bot.zconn.transitions"
