@@ -36,6 +36,7 @@ import dev.lattenero.bot.channel.QuotaDirect
 import dev.lattenero.bot.channel.QueryAnswer
 import dev.lattenero.bot.channel.SealFacts
 import dev.lattenero.bot.channel.ServerFrame
+import dev.lattenero.bot.channel.isSubagentSession
 import dev.lattenero.bot.channel.subagentSessionId
 import dev.lattenero.bot.channel.TasksHistory
 import dev.lattenero.bot.channel.ToolLive
@@ -461,8 +462,14 @@ internal fun wireChannel(
 
                 // THE DEFAULT-MODE ENFORCEMENT (4/11): a turn starting for a
                 // watched task is the moment the default (Full access) is
-                // WRITTEN when the conversation never chose one
-                "task_run_started" -> streamEffects.emit(StreamEffect.EnforceMode(frame.taskId))
+                // WRITTEN when the conversation never chose one.
+                // M5: NEVER for a CHILD session — the child follows its
+                // parent's mode; a SetMode aimed at sess_subagent_<id> would
+                // be a write to a session that has no mode of its own.
+                "task_run_started" ->
+                    if (!isSubagentSession(frame.taskId)) {
+                        streamEffects.emit(StreamEffect.EnforceMode(frame.taskId))
+                    }
 
                 "permission_response", "elicitation_response" ->
                     (frame.event["requestId"] as? JsonPrimitive)?.content?.let {
@@ -1290,6 +1297,14 @@ private fun buildPoller(
                     // (the map stops growing with every tap; the reconnect
                     // replays only live work). Child topics are not focus.
                     client.subscribeFocus(taskId, workspacePath)
+                }
+
+                override suspend fun subscribeChild(taskId: String, workspacePath: String) {
+                    // M5: the child's topic — a PLAIN subscribe: the parent's
+                    // focus keeps its own subscription (the owner watches a
+                    // child while the parent's card stays fed).
+                    attachClock.arm(taskId)
+                    client.subscribe(taskId, workspacePath)
                 }
             },
         hub = hub,
