@@ -3,6 +3,7 @@ package dev.lattenero.bot.channel
 import dev.lattenero.bot.contracts.PyText
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -13,6 +14,8 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.seconds
 
 private val logger = KotlinLogging.logger {}
 
@@ -1764,7 +1767,13 @@ class BotCommands(
 
     /** The active task has a live turn (sessions-index's non-terminal phases). */
     private suspend fun isRunning(taskId: String, workspacePath: String): Boolean =
-        when (val answer = ops.query(ChannelQuery.ActiveTaskIds(workspacePath))) {
+        when (
+            // M2: the tap's budget — a degraded channel answers FALSE in
+            // 1.5 s instead of freezing the tap behind the query's 15 s ACK.
+            val answer = withTimeoutOrNull(QUERY_BUDGET) {
+                ops.query(ChannelQuery.ActiveTaskIds(workspacePath))
+            }
+        ) {
             is QueryAnswer.Ok -> taskId in parseStrings(answer.resultJson)
             else -> false // degraded guess: fire — the channel's own «task running» reply still speaks
         }
@@ -2041,14 +2050,19 @@ class BotCommands(
             logger.info { "callback 🟢 t: attach refused: $sid is in no known index/context" }
             return BotReply("🤷 No encuentro esa task en el índice — /tasks para ver las que hay.")
         }
-        val live = isRunning(sid, ws)
-        ops.subscribe(sid, ws)
+        // M2: THE SWITCH'S ORDER — the hub OWNS the new task BEFORE the
+        // subscribe flies. The fork answers a subscribe with a burst; if the
+        // hold still named the old task, the hub dropped that burst (the
+        // first-frame loss the owner felt). Hold first, then subscribe.
         hub.unpin() // a task attach is the WHOLE world — any pin or lane scope dies here
         hub.watchTask()
         // THE ATTACH'S INSTANT SWITCH (4/11): an idle task never streams, so
         // without this the card AND the 🎯 stayed on the previous turn until
         // its next event — the owner's «no me la deja marcada».
         hub.watchTaskId(sid, clock())
+        ops.subscribe(sid, ws)
+        hub.requestTick() // M2: the card is born NOW, not on the next 3s tick
+        val live = isRunning(sid, ws)
         logger.info { "callback 🟢 t: pipe ATTACHED to $sid (running=$live) — bind attempt rides along" }
         val title = row?.title?.takeIf { it.isNotEmpty() } ?: sid.takeLast(SID_TAIL)
         val watchLine = if (live) {
@@ -3394,7 +3408,11 @@ class BotCommands(
     }
 
     /** The bot's context: workspace + the active task (botStatus query). */
-    private suspend fun contextAnswer(): ContextAnswer = when (val answer = ops.query(ChannelQuery.BotStatus)) {
+    private suspend fun contextAnswer(): ContextAnswer = when (
+        // M2: the tap's budget — a dead channel answers DEGRADED in 2 s
+        // instead of freezing every later tap behind the 15 s ACK.
+        val answer = withTimeoutOrNull(CONTEXT_BUDGET) { ops.query(ChannelQuery.BotStatus) }
+    ) {
         is QueryAnswer.Ok -> {
             val root = parse(answer.resultJson) ?: return ContextAnswer.Degraded
             val bot = root.obj("bot")
@@ -3413,6 +3431,7 @@ class BotCommands(
 
         QueryAnswer.Unavailable -> ContextAnswer.Degraded
         is QueryAnswer.Failed -> ContextAnswer.Degraded
+        null -> ContextAnswer.Degraded // the budget ran out — honest degradation
     }
 
     /** After an inbound fires, watch the conversation it lands in (the stream's own subscription). */
@@ -3830,6 +3849,15 @@ class BotCommands(
 
         /** The inactive row's title cap — the prompt head, one phone line. */
         private const val SUBAGENT_TITLE_CAP = 64
+
+        /**
+         * M2's per-tap budgets: a chatty answer is better than a frozen
+         * phone. The context read (workspace + active task) and the running
+         * check each own a short window; the channel's own 15 s ACK is no
+         * longer the tap's worst case.
+         */
+        private val CONTEXT_BUDGET = 2.seconds
+        private val QUERY_BUDGET = 1_500.milliseconds
 
         /** The discard's one-line preview of what was thrown away. */
         private const val DISCARD_PREVIEW = 40

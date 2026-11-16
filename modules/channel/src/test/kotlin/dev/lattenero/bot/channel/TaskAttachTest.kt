@@ -69,8 +69,12 @@ class TaskAttachTest {
         override suspend fun enqueueInbound(text: String, messageId: String, receivedAt: Long): Int = 1
 
         override suspend fun subscribe(taskId: String, workspacePath: String) {
+            onSubscribe(taskId) // M2: the ordering law's window — the hub must ALREADY hold it
             subscribed.add(taskId to workspacePath)
         }
+
+        /** A hook the ordering test uses to observe the hub at subscribe time. */
+        var onSubscribe: suspend (String) -> Unit = {}
 
         val orders = mutableListOf<Pair<String, String>>() // text to taskId
 
@@ -124,15 +128,34 @@ class TaskAttachTest {
         {"bot":{"id":"daemon-local","enabled":true},"context":null}
     """.trimIndent()
 
-    private fun commands(ops: FakeOps, history: TasksHistory = FakeHistory(rows)): BotCommands = BotCommands(
+    private fun commands(
+        ops: FakeOps,
+        history: TasksHistory = FakeHistory(rows),
+        hub: LiveHub = LiveHub(),
+    ): BotCommands = BotCommands(
         ops = ops,
-        hub = LiveHub(),
+        hub = hub,
         daemonReset = { "fake ladder" },
         ownerUserId = { OWNER },
         clock = { 1_000_000L },
         history = history,
         defaultWorkspacePath = "/Users/damian/.zcode/workspace/default",
     )
+
+    @Test
+    fun theHoldMovesBeforeTheSubscribeFlies() = runBlocking {
+        // M2: the fork answers a subscribe with a burst; the hub must ALREADY
+        // hold the new task when that frame flies, or the burst is dropped
+        // (the owner's first-frame loss). Observed from INSIDE the subscribe.
+        val hub = LiveHub()
+        var heldAtSubscribe: String? = null
+        val ops = FakeOps(draftStatus).apply {
+            answers["activeTaskIds"] = """[]"""
+            onSubscribe = { heldAtSubscribe = hub.peek()?.taskId }
+        }
+        commands(ops, hub = hub).onCallback("t:task-77", 5L, OWNER)!!
+        assertEquals("task-77", heldAtSubscribe, "the hub owned the new task BEFORE the frame flew")
+    }
 
     @Test
     fun tapAttachesThePipeOfARunningTaskThenBinds() = runBlocking {

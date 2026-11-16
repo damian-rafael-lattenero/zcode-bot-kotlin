@@ -98,7 +98,13 @@ sealed interface InboundAnswer {
 /** One live connection: serialized writes + the pending-request table, correlated by id. */
 private class Session(val transport: ChannelTransport) {
     val write = Mutex()
-    val pending = mutableMapOf<String, CompletableDeferred<ServerFrame>>()
+
+    /**
+     * The waiters, keyed by request id. CONCURRENT (M2): requests arrive
+     * from the poller, the publisher and the ping while the pump completes
+     * them from its own coroutine — a plain map was a real data race.
+     */
+    val pending = java.util.concurrent.ConcurrentHashMap<String, CompletableDeferred<ServerFrame>>()
 
     suspend fun request(frame: ClientFrame, id: String, timeout: Duration): ServerFrame {
         val deferred = CompletableDeferred<ServerFrame>()
