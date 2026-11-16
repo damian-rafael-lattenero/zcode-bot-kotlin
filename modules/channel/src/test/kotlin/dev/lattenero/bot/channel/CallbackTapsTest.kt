@@ -6,6 +6,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /** The bot's configured owner — the taps the suite sends come from him. */
@@ -58,9 +59,13 @@ class CallbackTapsTest {
          "context":{"workspacePath":"/Users/damian/Projects/app","activeTaskId":"task-77","mode":"task"}}
     """.trimIndent()
 
-    private fun commands(o: FakeOps, resets: suspend () -> String = { "ladder ok" }): BotCommands = BotCommands(
+    private fun commands(
+        o: FakeOps,
+        hub: LiveHub = LiveHub(),
+        resets: suspend () -> String = { "ladder ok" },
+    ): BotCommands = BotCommands(
         ops = o,
-        hub = LiveHub(),
+        hub = hub,
         daemonReset = resets,
         ownerUserId = { OWNER },
         clock = { 1_000_000L },
@@ -71,6 +76,25 @@ class CallbackTapsTest {
             override suspend fun taskAlive(sid: String) = true
         },
     )
+
+    /** A hub carrying one OPEN dispatch lane — the per-lane demote's target. */
+    private suspend fun hubWithLane(toolId: String): LiveHub {
+        val hub = LiveHub()
+        hub.apply(
+            ServerFrame.StreamEvent(
+                taskId = "task-77",
+                seq = 1,
+                at = 1_000_000L,
+                event = buildJsonObject {
+                    put("type", "tool_call")
+                    put("toolId", toolId)
+                    put("toolName", "Agent")
+                },
+            ),
+            1_000_000L,
+        )
+        return hub
+    }
 
     @Test
     fun theBlockTapRoutesToTheRegistryTheUnwiredAnswersHonestly() = runBlocking {
@@ -179,6 +203,51 @@ class CallbackTapsTest {
         val reply = commands(o).onCallback("bgd:task-77", 1L, OWNER)!!
         assertEquals(BotCommands.DEGRADED, reply.text)
         assertEquals(listOf<ChannelQuery>(ChannelQuery.BackgroundTurn("task-77")), o.queries)
+    }
+
+    @Test
+    fun theLaneBackgroundTapSendsTheToolCallDemote() = runBlocking {
+        // the 🌙 BESIDE a lane (bgc:): ONE Agent tool call goes to the
+        // background — the parent session plus the tool call's own id
+        val o = FakeOps().apply {
+            answers["backgroundToolCall"] = """{"backgrounded":["toolu_dispatch1"]}"""
+        }
+        val reply = commands(o, hubWithLane("toolu_dispatch1"))
+            .onCallback("bgc:toolu_dispatch1", 1L, OWNER)!!
+        assertEquals("🌙 «Agent» al fondo — sigue corriendo y el resultado llega al terminar.", reply.text)
+        assertEquals(
+            listOf<ChannelQuery>(ChannelQuery.BackgroundToolCall("task-77", "toolu_dispatch1")),
+            o.queries,
+            "the lane demote names the parent session AND the Agent tool call — nothing aborted",
+        )
+    }
+
+    @Test
+    fun theLaneBackgroundTapOnTheForksNoopAnswersHonestly() = runBlocking {
+        // guard.stopTargetChanged: the lane or its target moved under the
+        // tap — the fork's empty `backgrounded` is the honest «nothing»
+        val o = FakeOps().apply {
+            answers["backgroundToolCall"] = """{"backgrounded":[],"reasonCode":"guard.stopTargetChanged"}"""
+        }
+        val reply = commands(o, hubWithLane("toolu_dispatch1"))
+            .onCallback("bgc:toolu_dispatch1", 1L, OWNER)!!
+        assertEquals("🌙 Nada que pasar al fondo — «Agent» ya no corre en primer plano.", reply.text)
+    }
+
+    @Test
+    fun theLaneBackgroundTapWithoutARunningLaneIsHonestGone() = runBlocking {
+        val o = FakeOps()
+        val reply = commands(o).onCallback("bgc:toolu_gone", 1L, OWNER)!!
+        assertEquals("🌙 Ese agente ya no está corriendo en primer plano.", reply.text)
+        assertTrue(o.queries.isEmpty(), "no lane answers the tail — nothing flies to the channel")
+    }
+
+    @Test
+    fun theLaneBackgroundTapIsNeverDestructive() {
+        // the per-lane demote aborts nothing (the child keeps running and
+        // its result still arrives) — it stays OUT of the owner gate's
+        // destructive vocabulary, exactly like bgd:
+        assertFalse(isDestructiveTap("bgc:toolu_dispatch1"), "the lane demote is inert, not destructive")
     }
 
     @Test
