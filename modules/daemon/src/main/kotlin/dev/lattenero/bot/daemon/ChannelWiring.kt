@@ -396,6 +396,9 @@ internal fun wireChannel(
     val attachClock = AttachClock()
     // M2: the pump's effects as data — the callback EMITS, the worker runs.
     val streamEffects = StreamEffects()
+    // M3: the OPEN dispatch lanes → their child agentIds (toolCallId keyed),
+    // so a lane's close releases exactly its child's subscription.
+    val childLanes = java.util.concurrent.ConcurrentHashMap<String, String>()
     val client = ChannelClient(
         transportFactory = { UnixSocketTransport { socketFile } },
         tokenReader = { tokenFile.takeIf { it.exists() }?.readText() },
@@ -420,10 +423,21 @@ internal fun wireChannel(
                 // THE CHILD'S OWN STREAM (12/11): a dispatch lane's launch
                 // ACK carries `subagentAgentId` — the fork contract's own
                 // invite (the child session topic `sess_subagent_<id>`).
+                // M3: the lane's CLOSE (status completed/failed) releases the
+                // child's subscription — the remembered map only ever holds
+                // live work.
                 "tool_call", "tool_call_update" -> {
+                    val toolId = (frame.event["toolCallId"] as? JsonPrimitive)?.content
                     val agentId = (frame.event["subagentAgentId"] as? JsonPrimitive)?.content
                     if (!agentId.isNullOrBlank()) {
+                        if (toolId != null) childLanes[toolId] = agentId
                         streamEffects.emit(StreamEffect.SubscribeChild(frame.taskId, agentId))
+                    }
+                    val status = (frame.event["status"] as? JsonPrimitive)?.content
+                    if ((status == "completed" || status == "failed") && toolId != null) {
+                        childLanes.remove(toolId)?.let { closed ->
+                            streamEffects.emit(StreamEffect.UnsubscribeChild(closed))
+                        }
                     }
                 }
                 // THE SEAL LAW (measured live 31/10): task_complete does NOT
@@ -946,6 +960,7 @@ internal fun wireChannel(
             is StreamEffect.SealMirror -> mirrorRefresh?.seal(effect.taskId)
             StreamEffect.DrainQueue -> drainQueue()
             is StreamEffect.SubscribeChild -> childSubscribe(effect.parentTaskId, effect.agentId)
+            is StreamEffect.UnsubscribeChild -> client.unsubscribe(subagentSessionId(effect.agentId))
             is StreamEffect.RecoverAfterReconnect ->
                 recoverAfterReconnect(client, board, taskTitles, effect.taskId)
         }
@@ -1271,7 +1286,10 @@ private fun buildPoller(
                     // tap — the tap's own handling is timed by the handler
                     // metric; this one measures the wire's first answer.
                     attachClock.arm(taskId)
-                    client.subscribe(taskId, workspacePath)
+                    // M3: the FOCUS law — the task being left is unsubscribed
+                    // (the map stops growing with every tap; the reconnect
+                    // replays only live work). Child topics are not focus.
+                    client.subscribeFocus(taskId, workspacePath)
                 }
             },
         hub = hub,
