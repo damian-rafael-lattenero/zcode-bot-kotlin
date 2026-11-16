@@ -1,6 +1,7 @@
 package dev.lattenero.bot.daemon.notifications
 
 import dev.lattenero.bot.contracts.ShadowDecision
+import dev.lattenero.bot.daemon.db.typed
 import dev.lattenero.bot.daemon.send.SendLeg
 import dev.lattenero.bot.daemon.shadow.TimeIso
 import io.github.oshai.kotlinlogging.KotlinLogging
@@ -101,23 +102,18 @@ class SubagentNotifs(
         if (!db.exists()) return emptyList()
         return runCatching {
             DriverManager.getConnection("jdbc:sqlite:${db.absolutePath}", roProps()).use { conn ->
-                conn.prepareStatement(CHILDREN_QUERY).use { ps ->
-                    ps.setLong(1, nowMs - SubagentWatch.FRESH_WINDOW_MS)
-                    ps.executeQuery().use { rs ->
-                        val rows = mutableListOf<ChildSession>()
-                        while (rs.next()) {
-                            rows.add(
-                                ChildSession(
-                                    sid = rs.getString(ID_COL).orEmpty(),
-                                    title = rs.getString(TITLE_COL).orEmpty(),
-                                    outcome = rs.getString(OUTCOME_COL).orEmpty(),
-                                    startedMs = rs.getLong(CREATED_COL),
-                                    updatedMs = rs.getLong(UPDATED_COL),
-                                ),
+                conn.typed { bot ->
+                    bot.cliQueries.children(floor = nowMs - SubagentWatch.FRESH_WINDOW_MS)
+                        .executeAsList()
+                        .map { row ->
+                            ChildSession(
+                                sid = row.id,
+                                title = row.title.orEmpty(),
+                                outcome = row.outcome,
+                                startedMs = row.time_created,
+                                updatedMs = row.time_updated,
                             )
                         }
-                        rows
-                    }
                 }
             }
         }.getOrDefault(emptyList())
@@ -200,16 +196,5 @@ class SubagentNotifs(
         const val LOG_PREVIEW = 60
         const val MILLIS_PER_SECOND = 1000.0
         val HEARTBEAT_EVERY = 30.seconds
-
-        /** The one read: running children (the future's witnesses) + fresh ends. */
-        const val CHILDREN_QUERY =
-            "SELECT id, title, COALESCE(last_outcome,''), time_created, time_updated FROM session " +
-                "WHERE parent_id IS NOT NULL AND (COALESCE(last_outcome,'') = '' OR time_updated >= ?)"
-
-        const val ID_COL = 1
-        const val TITLE_COL = 2
-        const val OUTCOME_COL = 3
-        const val CREATED_COL = 4
-        const val UPDATED_COL = 5
     }
 }

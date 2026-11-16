@@ -5,13 +5,16 @@ import dev.lattenero.bot.channel.RunningSubagent
 import dev.lattenero.bot.channel.SubagentRow
 import dev.lattenero.bot.channel.TaskRow
 import dev.lattenero.bot.channel.TasksHistory
+import dev.lattenero.bot.daemon.db.typed
+import dev.lattenero.bot.daemon.sq.IndexRows
+import dev.lattenero.bot.daemon.sq.SubagentsTodayAll
+import dev.lattenero.bot.daemon.sq.SubagentsTodayOfParent
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.io.File
 import java.sql.DriverManager
-import java.sql.ResultSet
 import java.util.Properties
 
 /**
@@ -23,7 +26,8 @@ import java.util.Properties
  * sidebar order stays Python's SQL (pinned → updated_at desc, the loose
  * default-workspace rows last), plus each conversation's persisted model
  * selection. The same read-only pattern as the spectator: short-lived
- * xerial connections, mode=ro, zero writes.
+ * xerial connections, mode=ro, zero writes. The SQL itself now lives typed
+ * in `Cli.sq`/`Tasks.sq` (typing-only schema: both files belong to ZCode).
  *
  * THE NEWBORN LAW (the owner, 14/11: «las tasks nuevas del /run no
  * aparecen»): the app writes a /run-born conversation's tasks-index row
@@ -66,12 +70,8 @@ internal class TasksHistoryIo(
         if (!db.exists()) return null
         return runCatching {
             DriverManager.getConnection("jdbc:sqlite:${db.absolutePath}", roProps()).use { conn ->
-                conn.prepareStatement(SELECTION_QUERY).use { ps ->
-                    ps.setString(1, sid)
-                    ps.executeQuery().use { rs ->
-                        if (!rs.next()) null else selectionOf(rs.getString(1))
-                    }
-                }
+                conn.typed { bot -> bot.cliQueries.modelSelection(sessionId = sid).executeAsOneOrNull() }
+                    ?.let(::selectionOf)
             }
         }.getOrNull()
     }
@@ -82,21 +82,15 @@ internal class TasksHistoryIo(
         if (!index.exists()) return null
         return runCatching {
             DriverManager.getConnection("jdbc:sqlite:${index.absolutePath}", roProps()).use { conn ->
-                conn.prepareStatement(FRESHEST_QUERY).use { ps ->
-                    ps.setString(1, workspacePath)
-                    ps.executeQuery().use { rs ->
-                        if (!rs.next()) {
-                            null
-                        } else {
-                            TaskRow(
-                                sid = rs.getString(TID_COL),
-                                title = rs.getString(TITLE_COL).orEmpty(),
-                                ws = rs.getString(WS_COL).orEmpty(),
-                                whenMs = rs.getLong(UPD_COL),
-                            )
-                        }
+                conn.typed { bot -> bot.tasksQueries.freshest(workspacePath = workspacePath).executeAsOneOrNull() }
+                    ?.let {
+                        TaskRow(
+                            sid = it.task_id,
+                            title = it.title.orEmpty(),
+                            ws = it.workspace_path,
+                            whenMs = it.updated_at,
+                        )
                     }
-                }
             }
         }.getOrNull()
     }
@@ -107,10 +101,7 @@ internal class TasksHistoryIo(
         if (!index.exists()) return false
         return runCatching {
             DriverManager.getConnection("jdbc:sqlite:${index.absolutePath}", roProps()).use { conn ->
-                conn.prepareStatement(ALIVE_QUERY).use { ps ->
-                    ps.setString(1, sid)
-                    ps.executeQuery().use { rs -> rs.next() && rs.getLong(1) > 0 }
-                }
+                conn.typed { bot -> bot.tasksQueries.aliveCount(taskId = sid).executeAsOne() > 0 }
             }
         }.getOrDefault(false)
     }
@@ -126,31 +117,30 @@ internal class TasksHistoryIo(
     override suspend fun subagentsToday(parentSid: String?, dayStartMs: Long): List<SubagentRow> {
         val db = cliDb()
         if (!db.exists()) return emptyList()
-        val scoped = !parentSid.isNullOrEmpty()
-        val sql = if (scoped) SUBAGENTS_QUERY_PARENT else SUBAGENTS_QUERY_ALL
+        val parent = parentSid?.takeIf { it.isNotEmpty() }
         return runCatching {
             DriverManager.getConnection("jdbc:sqlite:${db.absolutePath}", roProps()).use { conn ->
-                conn.prepareStatement(sql).use { ps ->
-                    ps.setLong(1, dayStartMs)
-                    if (scoped) ps.setString(2, parentSid)
-                    ps.executeQuery().use { rs ->
-                        val rows = mutableListOf<SubagentRow>()
-                        while (rs.next()) {
-                            rows.add(
-                                SubagentRow(
-                                    title = rs.getString(SUB_TITLE_COL).orEmpty(),
-                                    outcome = rs.getString(SUB_OUTCOME_COL).orEmpty(),
-                                    startedMs = rs.getLong(SUB_CREATED_COL),
-                                    endedMs = rs.getLong(SUB_UPDATED_COL),
-                                ),
-                            )
-                        }
-                        rows
+                conn.typed { bot ->
+                    if (parent != null) {
+                        bot.cliQueries.subagentsTodayOfParent(dayStart = dayStartMs, parentId = parent)
+                            .executeAsList()
+                            .map(::subagentRowOf)
+                    } else {
+                        bot.cliQueries.subagentsTodayAll(dayStart = dayStartMs)
+                            .executeAsList()
+                            .map(::subagentRowOf)
                     }
                 }
             }
         }.getOrDefault(emptyList())
     }
+
+    /** One ended-subagent row, from either scope's generated row. */
+    private fun subagentRowOf(row: SubagentsTodayAll): SubagentRow =
+        SubagentRow(row.title.orEmpty(), row.last_outcome.orEmpty(), row.time_created, row.time_updated)
+
+    private fun subagentRowOf(row: SubagentsTodayOfParent): SubagentRow =
+        SubagentRow(row.title.orEmpty(), row.last_outcome.orEmpty(), row.time_created, row.time_updated)
 
     /**
      * The sa: attach's verification half: the RUNNING subagent session ids
@@ -164,14 +154,7 @@ internal class TasksHistoryIo(
         if (!db.exists()) return emptyList()
         return runCatching {
             DriverManager.getConnection("jdbc:sqlite:${db.absolutePath}", roProps()).use { conn ->
-                conn.prepareStatement(RUNNING_SUBS_QUERY).use { ps ->
-                    ps.setString(1, parentSid)
-                    ps.executeQuery().use { rs ->
-                        val ids = mutableListOf<String>()
-                        while (rs.next()) ids.add(rs.getString(RUNNING_SUB_ID_COL))
-                        ids
-                    }
-                }
+                conn.typed { bot -> bot.cliQueries.runningSubIds(parentId = parentSid).executeAsList() }
             }
         }.getOrDefault(emptyList())
     }
@@ -182,21 +165,10 @@ internal class TasksHistoryIo(
         if (!db.exists()) return emptyList()
         return runCatching {
             DriverManager.getConnection("jdbc:sqlite:${db.absolutePath}", roProps()).use { conn ->
-                conn.prepareStatement(RUNNING_SUBS_TITLED_QUERY).use { ps ->
-                    ps.setString(1, parentSid)
-                    ps.executeQuery().use { rs ->
-                        val rows = mutableListOf<RunningSubagent>()
-                        while (rs.next()) {
-                            rows.add(
-                                RunningSubagent(
-                                    sid = rs.getString(1).orEmpty(),
-                                    title = rs.getString(2).orEmpty(),
-                                    lastMs = rs.getLong(RUNNING_SUB_UPDATED_COL),
-                                ),
-                            )
-                        }
-                        rows
-                    }
+                conn.typed { bot ->
+                    bot.cliQueries.runningSubsTitled(parentId = parentSid)
+                        .executeAsList()
+                        .map { RunningSubagent(sid = it.id, title = it.title.orEmpty(), lastMs = it.time_updated) }
                 }
             }
         }.getOrDefault(emptyList())
@@ -230,24 +202,17 @@ internal class TasksHistoryIo(
         if (!db.exists()) return emptyList()
         return runCatching {
             DriverManager.getConnection("jdbc:sqlite:${db.absolutePath}", roProps()).use { conn ->
-                conn.prepareStatement(NEWBORN_QUERY).use { ps ->
-                    ps.setLong(1, cutoffMs)
-                    ps.executeQuery().use { rs ->
-                        val rows = mutableListOf<TaskRow>()
-                        while (rs.next()) {
-                            val u = usage[rs.getString(NB_ID_COL)]
-                            rows.add(
-                                TaskRow(
-                                    sid = rs.getString(NB_ID_COL),
-                                    title = rs.getString(NB_TITLE_COL).orEmpty(),
-                                    ws = rs.getString(NB_DIR_COL).orEmpty(),
-                                    ctx = u?.ctx ?: 0,
-                                    model = u?.model.orEmpty(),
-                                    whenMs = u?.whenMs ?: rs.getLong(NB_UPDATED_COL),
-                                ),
-                            )
-                        }
-                        rows
+                conn.typed { bot ->
+                    bot.cliQueries.newborns(cutoff = cutoffMs).executeAsList().map { row ->
+                        val u = usage[row.id]
+                        TaskRow(
+                            sid = row.id,
+                            title = row.title.orEmpty(),
+                            ws = row.directory.orEmpty(),
+                            ctx = u?.ctx ?: 0,
+                            model = u?.model.orEmpty(),
+                            whenMs = u?.whenMs ?: row.time_updated,
+                        )
                     }
                 }
             }
@@ -259,37 +224,38 @@ internal class TasksHistoryIo(
         if (!db.exists()) return emptyMap()
         return runCatching {
             DriverManager.getConnection("jdbc:sqlite:${db.absolutePath}", roProps()).use { conn ->
-                conn.prepareStatement(USAGE_QUERY).use { ps ->
-                    ps.executeQuery().use { rs ->
-                        val out = mutableMapOf<String, Usage>()
-                        while (rs.next()) {
-                            out[rs.getString(SESSION_COL)] = Usage(
-                                ctx = rs.getLong(IN_COL) + rs.getLong(OUT_COL),
-                                model = rs.getString(MODEL_COL).orEmpty(),
-                                whenMs = rs.getLong(WHEN_COL),
-                            )
-                        }
-                        out
+                conn.typed { bot ->
+                    bot.cliQueries.usageBySession().executeAsList().associate { row ->
+                        row.session_id to Usage(
+                            ctx = row.input_tokens + row.output_tokens,
+                            model = row.model_id.orEmpty(),
+                            whenMs = row.started_at,
+                        )
                     }
                 }
             }
         }.getOrDefault(emptyMap())
     }
 
-    /** The index walk: dedupe, usage filter, cap — Python's row loop. */
+    /**
+     * The index walk: dedupe, usage filter, cap — Python's row loop. The
+     * generated query has no LIMIT (the cap applies AFTER the dedupe, so a
+     * legacy duplicate never eats a slot); the rows materialize in the
+     * alive-index order and the walk stops at [limit], exactly like the
+     * cursor used to.
+     */
     private fun indexRows(index: File, usage: Map<String, Usage>, limit: Int): List<TaskRow> {
         if (!index.exists()) return emptyList()
         return runCatching {
             DriverManager.getConnection("jdbc:sqlite:${index.absolutePath}", roProps()).use { conn ->
-                conn.prepareStatement(INDEX_QUERY).use { ps ->
-                    ps.executeQuery().use { rs ->
-                        val rows = mutableListOf<TaskRow>()
-                        val seen = mutableSetOf<String>()
-                        while (rs.next() && rows.size < limit) {
-                            rowOf(rs, usage, seen)?.let(rows::add)
-                        }
-                        rows
+                conn.typed { bot ->
+                    val rows = mutableListOf<TaskRow>()
+                    val seen = mutableSetOf<String>()
+                    for (row in bot.tasksQueries.indexRows().executeAsList()) {
+                        if (rows.size >= limit) break
+                        rowOf(row, usage, seen)?.let(rows::add)
                     }
+                    rows
                 }
             }
         }.getOrDefault(emptyList())
@@ -305,13 +271,7 @@ internal class TasksHistoryIo(
         if (!index.exists()) return emptySet()
         return runCatching {
             DriverManager.getConnection("jdbc:sqlite:${index.absolutePath}", roProps()).use { conn ->
-                conn.prepareStatement(INDEX_SIDS_QUERY).use { ps ->
-                    ps.executeQuery().use { rs ->
-                        val sids = mutableSetOf<String>()
-                        while (rs.next()) sids.add(rs.getString(1))
-                        sids
-                    }
-                }
+                conn.typed { bot -> bot.tasksQueries.indexSids().executeAsList().toSet() }
             }
         }.getOrDefault(emptySet())
     }
@@ -325,17 +285,17 @@ internal class TasksHistoryIo(
      * rides honestly EMPTY: ctx 0, no model, the index's own updated_at.
      */
     @Suppress("ReturnCount") // one guard per skip, Python's contiguous ifs
-    private fun rowOf(rs: ResultSet, usage: Map<String, Usage>, seen: MutableSet<String>): TaskRow? {
-        val tid = rs.getString(TID_COL) ?: return null
+    private fun rowOf(row: IndexRows, usage: Map<String, Usage>, seen: MutableSet<String>): TaskRow? {
+        val tid = row.task_id
         if (!seen.add(tid)) return null // legacy row of the same task
         val u = usage[tid]
         return TaskRow(
             sid = tid,
-            title = rs.getString(TITLE_COL).orEmpty(),
-            ws = rs.getString(WS_COL).orEmpty(),
+            title = row.title.orEmpty(),
+            ws = row.workspace_path,
             ctx = u?.ctx ?: 0,
             model = u?.model.orEmpty(),
-            whenMs = u?.whenMs ?: rs.getLong(UPD_COL),
+            whenMs = u?.whenMs ?: row.updated_at,
         )
     }
 
@@ -360,91 +320,8 @@ internal class TasksHistoryIo(
 
     private companion object {
         const val SQLITE_READONLY = 0x00000001
-        const val SESSION_COL = 1
-        const val IN_COL = 2
-        const val OUT_COL = 3
-        const val MODEL_COL = 4
-        const val WHEN_COL = 5
-        const val TID_COL = 1
-        const val TITLE_COL = 2
-        const val WS_COL = 3
-        const val UPD_COL = 4
-
-        /** Python's frozen SQL — the app's sidebar order depends on it. */
-        const val USAGE_QUERY =
-            "SELECT m.session_id, m.input_tokens, m.output_tokens, m.model_id, m.started_at " +
-                "FROM model_usage m JOIN (SELECT session_id, MAX(started_at) ms FROM model_usage " +
-                "GROUP BY session_id) l ON l.session_id=m.session_id AND l.ms=m.started_at " +
-                "WHERE m.session_id NOT LIKE 'sess_subagent%'"
-
-        const val INDEX_QUERY =
-            "SELECT task_id, title, workspace_path, updated_at FROM tasks WHERE deleted=0 AND archived=0 " +
-                "ORDER BY (workspace_key = workspace_path) DESC, pinned DESC, updated_at DESC"
-
-        /** The anti-tombstone set: every sid the index holds, tombstoned ones included. */
-        const val INDEX_SIDS_QUERY = "SELECT DISTINCT task_id FROM tasks"
-
-        /** Python's model_selection: the newest runtime/model_selection row of the session. */
-        const val SELECTION_QUERY =
-            "SELECT data FROM session_entry WHERE session_id=? " +
-                "AND type='runtime/model_selection' ORDER BY time_created DESC LIMIT 1"
-
-        /** The router's target: the workspace's freshest alive conversation (updated_at = "in front"). */
-        const val FRESHEST_QUERY =
-            "SELECT task_id, title, workspace_path, updated_at FROM tasks " +
-                "WHERE deleted=0 AND archived=0 AND workspace_path=? " +
-                "ORDER BY updated_at DESC LIMIT 1"
-
-        /** The tombstone guard's count: alive ⇔ a row exists with deleted=0 AND archived=0. */
-        const val ALIVE_QUERY =
-            "SELECT COUNT(*) FROM tasks WHERE task_id=? AND deleted=0 AND archived=0"
-
-        /** /subagents «inactivos»: ENDED subagents (last_outcome ≠ ''), today's, newest first, 10. */
-        const val SUBAGENTS_QUERY_ALL =
-            "SELECT title, last_outcome, time_created, time_updated FROM session " +
-                "WHERE parent_id IS NOT NULL AND COALESCE(last_outcome,'') != '' " +
-                "AND time_updated >= ? " +
-                "ORDER BY time_updated DESC LIMIT 10"
-
-        /** The watched-conversation scope of the same read (parent_id = the task). */
-        const val SUBAGENTS_QUERY_PARENT =
-            "SELECT title, last_outcome, time_created, time_updated FROM session " +
-                "WHERE parent_id IS NOT NULL AND COALESCE(last_outcome,'') != '' " +
-                "AND time_updated >= ? AND parent_id = ? " +
-                "ORDER BY time_updated DESC LIMIT 10"
-
-        /** The subagents row's column positions (the read's own naming, MagicNumber's law). */
-        const val SUB_TITLE_COL = 1
-        const val SUB_OUTCOME_COL = 2
-        const val SUB_CREATED_COL = 3
-        const val SUB_UPDATED_COL = 4
-
-        /** The tap's verification read: the parent's RUNNING children (empty outcome). */
-        const val RUNNING_SUBS_QUERY =
-            "SELECT id FROM session WHERE parent_id = ? AND COALESCE(last_outcome,'') = ''"
-        const val RUNNING_SUB_ID_COL = 1
-        const val RUNNING_SUB_TITLE_COL = 2
-        const val RUNNING_SUB_UPDATED_COL = 3
-
-        /** The ACTIVE view's titled read: the same running children, with the prompt's first words. */
-        const val RUNNING_SUBS_TITLED_QUERY =
-            "SELECT id, title, time_updated FROM session WHERE parent_id = ? AND COALESCE(last_outcome,'') = '' " +
-                "ORDER BY time_created DESC LIMIT 10"
 
         /** The newborns' window: long enough for any first turn to end and flush its index row. */
         const val NEWBORN_WINDOW_MS = 2 * 60 * 60 * 1000L
-
-        /** The newborns: interactive parent sessions born since the cutoff, newest first. */
-        const val NEWBORN_QUERY =
-            "SELECT id, title, directory, time_updated FROM session " +
-                "WHERE parent_id IS NULL AND task_type = 'interactive' " +
-                "AND time_deleted IS NULL AND time_archived IS NULL AND time_created >= ? " +
-                "ORDER BY time_created DESC"
-
-        /** The newborn read's column positions (the read's own naming, MagicNumber's law). */
-        const val NB_ID_COL = 1
-        const val NB_TITLE_COL = 2
-        const val NB_DIR_COL = 3
-        const val NB_UPDATED_COL = 4
     }
 }

@@ -3,6 +3,7 @@ package dev.lattenero.bot.daemon.notifications
 import dev.lattenero.bot.channel.PendingQuestion
 import dev.lattenero.bot.channel.QuestionBoard
 import dev.lattenero.bot.channel.ServerFrame
+import dev.lattenero.bot.daemon.db.typed
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kap.Kap
 import kap.Process
@@ -155,27 +156,14 @@ class InterventionsNotifs(
         val floor = if (boot) 0L else nowMs - InterventionsWatch.ACTIVE_WINDOW_MS
         return runCatching {
             DriverManager.getConnection("jdbc:sqlite:${index.absolutePath}", roProps()).use { conn ->
-                conn.prepareStatement(ROWS_QUERY).use { ps ->
-                    ps.setLong(1, floor)
-                    ps.setInt(2, limit)
-                    ps.executeQuery().use { rs ->
-                        val rows = mutableListOf<WatchRow>()
-                        while (rs.next()) {
-                            val taskId = rs.getString(ID_COL).orEmpty().ifBlank { null }
-                            val ws = rs.getString(WS_COL).orEmpty().ifBlank { null }
-                            if (taskId != null && ws != null) {
-                                rows.add(
-                                    WatchRow(
-                                        taskId = taskId,
-                                        workspacePath = ws,
-                                        title = rs.getString(TITLE_COL).orEmpty(),
-                                        updatedMs = rs.getLong(UPDATED_COL),
-                                    ),
-                                )
-                            }
+                conn.typed { bot ->
+                    bot.tasksQueries.interventionRows(floor = floor, lim = limit.toLong())
+                        .executeAsList()
+                        .mapNotNull { row ->
+                            val taskId = row.task_id.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                            val ws = row.workspace_path.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                            WatchRow(taskId = taskId, workspacePath = ws, title = row.t, updatedMs = row.u)
                         }
-                        rows
-                    }
                 }
             }
         }.getOrElse { error ->
@@ -211,24 +199,6 @@ class InterventionsNotifs(
         const val PROCESS_NAME = "interventions-watch"
         const val TASK_TAIL = 8
         const val LOG_PREVIEW = 50
-        const val ID_COL = 1
-        const val WS_COL = 2
-        const val TITLE_COL = 3
-        const val UPDATED_COL = 4
         val HEARTBEAT_EVERY = 30.seconds
-
-        /**
-         * The candidate rows: not deleted/archived, with a real update stamp
-         * at or after the floor. The title follows the index's own override
-         * law (`title_overridden` wins over the CLI's title).
-         */
-        const val ROWS_QUERY =
-            "SELECT task_id, workspace_path, " +
-                "COALESCE(NULLIF(CASE WHEN title_overridden=1 THEN title " +
-                "ELSE COALESCE(cli_title, title) END,''), '') AS t, " +
-                "COALESCE(cli_updated_at, updated_at) AS u FROM tasks " +
-                "WHERE deleted=0 AND COALESCE(cli_deleted,0)=0 AND archived=0 " +
-                "AND COALESCE(cli_updated_at, updated_at) >= ? " +
-                "ORDER BY u DESC LIMIT ?"
     }
 }

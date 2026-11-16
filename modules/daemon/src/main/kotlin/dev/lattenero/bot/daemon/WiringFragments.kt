@@ -7,6 +7,7 @@ import dev.lattenero.bot.channel.QueryAnswer
 import dev.lattenero.bot.contracts.PyText
 import dev.lattenero.bot.channel.ToolLive
 import dev.lattenero.bot.channel.ToolOutputPages
+import dev.lattenero.bot.daemon.db.typed
 import dev.lattenero.bot.daemon.spectator.ToolBox
 import kotlinx.coroutines.delay
 import kotlinx.serialization.json.Json
@@ -216,10 +217,8 @@ internal fun workspacePathOf(baseDir: File, sid: String): String? {
     if (!index.exists()) return null
     return runCatching {
         DriverManager.getConnection("jdbc:sqlite:${index.absolutePath}", indexRoProps()).use { conn ->
-            conn.prepareStatement("SELECT workspace_path FROM tasks WHERE task_id=?").use { ps ->
-                ps.setString(1, sid)
-                ps.executeQuery().use { rs -> if (rs.next()) rs.getString(1)?.takeIf { it.isNotBlank() } else null }
-            }
+            conn.typed { bot -> bot.tasksQueries.workspacePath(taskId = sid).executeAsOneOrNull() }
+                ?.takeIf { it.isNotBlank() }
         }
     }.getOrNull()
 }

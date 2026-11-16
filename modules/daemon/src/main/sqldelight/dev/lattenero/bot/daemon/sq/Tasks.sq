@@ -1,0 +1,43 @@
+-- Queries over the app's tasks index (typing-only schema in Schema.sq).
+-- Python's frozen SQL — the app's sidebar order depends on it.
+indexRows:
+SELECT task_id, title, workspace_path, updated_at FROM tasks
+WHERE deleted = 0 AND archived = 0
+ORDER BY (workspace_key = workspace_path) DESC, pinned DESC, updated_at DESC;
+
+-- The anti-tombstone set: every sid the index holds, tombstoned ones included.
+indexSids:
+SELECT DISTINCT task_id FROM tasks;
+
+-- The router's target: the workspace's freshest alive conversation.
+freshest:
+SELECT task_id, title, workspace_path, updated_at FROM tasks
+WHERE deleted = 0 AND archived = 0 AND workspace_path = :workspacePath
+ORDER BY updated_at DESC LIMIT 1;
+
+-- The tombstone guard's count: alive <=> a row exists with deleted=0 AND archived=0.
+aliveCount:
+SELECT COUNT(*) AS n FROM tasks
+WHERE task_id = :taskId AND deleted = 0 AND archived = 0;
+
+-- The candidate rows of the any-task watcher: not deleted/archived, with a
+-- real update stamp at or after the floor. The title follows the index's own
+-- override law (title_overridden wins over the CLI's title).
+interventionRows:
+SELECT task_id, workspace_path,
+       COALESCE(NULLIF(CASE WHEN title_overridden = 1 THEN title
+                            ELSE COALESCE(cli_title, title) END, ''), '') AS t,
+       COALESCE(cli_updated_at, updated_at) AS u
+FROM tasks
+WHERE deleted = 0 AND COALESCE(cli_deleted, 0) = 0 AND archived = 0
+  AND COALESCE(cli_updated_at, updated_at) >= :floor
+ORDER BY u DESC LIMIT :lim;
+
+-- task_label: the three columns the spectator's label falls back through.
+taskLabelRow:
+SELECT title, workspace_path, root_path FROM tasks
+WHERE task_id = :taskId AND deleted = 0 LIMIT 1;
+
+-- The index's own workspace for a task.
+workspacePath:
+SELECT workspace_path FROM tasks WHERE task_id = :taskId;
