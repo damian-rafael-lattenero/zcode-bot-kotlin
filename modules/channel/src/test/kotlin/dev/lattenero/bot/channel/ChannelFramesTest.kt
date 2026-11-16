@@ -62,6 +62,17 @@ class ChannelFramesTest {
     }
 
     @Test
+    fun backgroundToolCallEncodesTaskIdAndToolCallId() {
+        // the LANE demote (finer than backgroundTurn): the parent session
+        // and the Agent tool call it owns — nothing is aborted
+        val line = encodeClient(ClientFrame.Query("q8", ChannelQuery.BackgroundToolCall("task-77", "toolu_9")))
+        assertEquals(
+            """{"type":"query","id":"q8","query":{"kind":"backgroundToolCall","taskId":"task-77","toolCallId":"toolu_9"}}""",
+            line,
+        )
+    }
+
+    @Test
     fun taskListCarriesScopesAndLimit() {
         val query = ChannelQuery.TaskList(
             listKind = "timeline",
@@ -190,6 +201,7 @@ class ChannelFramesTest {
         assertEquals("botStatus", queryKind(ChannelQuery.BotStatus))
         assertEquals("stop", queryKind(ChannelQuery.Stop("t")))
         assertEquals("backgroundTurn", queryKind(ChannelQuery.BackgroundTurn("t")))
+        assertEquals("backgroundToolCall", queryKind(ChannelQuery.BackgroundToolCall("t", "toolu_1")))
         assertEquals("stopAll", queryKind(ChannelQuery.StopAll()))
         assertEquals("compact", queryKind(ChannelQuery.Compact("t")))
     }
