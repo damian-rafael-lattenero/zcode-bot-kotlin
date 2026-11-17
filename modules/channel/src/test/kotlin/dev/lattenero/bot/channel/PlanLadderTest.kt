@@ -43,8 +43,14 @@ class PlanLadderTest {
         ),
     )
 
-    private fun seen(vararg pcts: Int?): PlanQuota.Mark =
-        PlanQuota.Mark.Seen(pcts.map { PlanQuota.Window("⏱", it) })
+    private fun seen(vararg pcts: Int?, rule: PlanQuota.Rule = PlanQuota.Rule.GATES): PlanQuota.Mark =
+        PlanQuota.Mark.Seen(pcts.map { PlanQuota.Window("⏱", it) }, rule)
+
+    private fun gates(vararg windows: Pair<String, Int?>): PlanQuota.Mark =
+        PlanQuota.Mark.Seen(
+            windows.map { (glyph, pct) -> PlanQuota.Window(glyph, pct) },
+            PlanQuota.Rule.GATES,
+        )
 
     @Test
     fun theFirstPlanWithTokensWinsInHisExactOrder() {
@@ -74,14 +80,32 @@ class PlanLadderTest {
     }
 
     @Test
-    fun oneWindowWithTokensKeepsThePlanUsable() {
-        // the 5h pool dry but the weekly alive — the plan still works
+    fun oneAliveLaneKeepsTheStartPlanUsable() {
+        // the Start Plan's buckets are LANES: one empty model pool, another alive — the plan works
         val quota = mapOf(
-            "account:zai-start-plan" to seen(0, 45),
+            "account:zai-start-plan" to seen(0, 45, rule = PlanQuota.Rule.LANES),
             "account:zai-individual-coding-plan" to seen(0),
             "opencode-go-chat" to seen(0),
         )
         assertEquals("account:zai-start-plan", PlanLadder.pick(catalog(), quota).pick!!.plan.providerId)
+    }
+
+    @Test
+    fun aClosedGateSkipsThePlanEvenWithTokensInTheSiblingWindow() {
+        // measured 17/11: the coding plan's 5h window held 98% while the WEEKLY was at zero —
+        // the provider answered 1310 on every call, and the old all-windows rule kept picking it
+        val quota = mapOf(
+            "account:zai-start-plan" to seen(0, 0, rule = PlanQuota.Rule.LANES),
+            "account:zai-individual-coding-plan" to gates("⏱" to 98, "📅" to 0),
+            "opencode-go-chat" to gates("⏱" to 88, "📅" to 78, "🗓" to 35),
+        )
+        val verdict = PlanLadder.pick(catalog(), quota)
+        assertEquals("opencode-go-chat", verdict.pick!!.plan.providerId, "the first plan with EVERY gate open")
+        assertEquals("deepseek-v4.1-flash", verdict.pick.model.id)
+        assertTrue(
+            verdict.notes.any { "la ventana 📅 está agotada" in it },
+            verdict.notes.toString(),
+        )
     }
 
     @Test

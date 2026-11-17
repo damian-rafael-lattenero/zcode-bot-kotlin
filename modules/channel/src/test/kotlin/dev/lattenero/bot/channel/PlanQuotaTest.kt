@@ -101,6 +101,76 @@ class PlanQuotaTest {
         assertEquals("🗓", mark.windows[2].glyph, "monthly")
     }
 
+    // ── the window rules (measured 17/11: a weekly GATE at zero blocks every call) ──
+
+    @Test
+    fun aClosedCreditLimitGateProvesThePlanTokenless() {
+        // the live answer that fooled the ladder: 5h at 2% used, weekly at 100% used
+        val json = """
+        {"quota":{"limits":[
+            {"type":"CREDIT_LIMIT","number":5,"percentage":2,"nextResetTime":1794963705630},
+            {"type":"CREDIT_LIMIT","number":1,"percentage":100,"nextResetTime":1795039724983}
+        ]}}
+        """.trimIndent()
+        val mark = PlanQuota.fromChannel(json) as PlanQuota.Mark.Seen
+        assertEquals(PlanQuota.Rule.GATES, mark.rule, "CREDIT_LIMIT windows are the plan's gates")
+        assertEquals(98, mark.windows[0].remainingPct)
+        assertEquals(0, mark.windows[1].remainingPct)
+        assertTrue(PlanQuota.exhausted(mark), "one closed gate blocks every call — the plan IS tokenless")
+        assertFalse(PlanQuota.usable(mark), "the ladder must skip it")
+    }
+
+    @Test
+    fun onlyTheStartPlansBucketsAreLanes() {
+        val json = """
+        {"quota":{"limits":[
+            {"unit":1000,"usage":1000,"period":"5 hours"},
+            {"unit":1000,"usage":320,"period":"daily"}
+        ]}}
+        """.trimIndent()
+        val mark = PlanQuota.fromChannel(json) as PlanQuota.Mark.Seen
+        assertEquals(PlanQuota.Rule.LANES, mark.rule, "per-model buckets are independent pools")
+        assertFalse(PlanQuota.exhausted(mark), "one alive lane keeps the plan usable")
+        assertTrue(PlanQuota.usable(mark))
+    }
+
+    @Test
+    fun bothDirectRungsAreGates() {
+        val oc = PlanQuota.fromOpencode(
+            OpencodeQuota.parse(
+                """{"usage":{"rolling":{"status":"ok","percent":12},
+                           "monthly":{"status":"ok","percent":100}}}""",
+            )!!,
+        ) as PlanQuota.Mark.Seen
+        assertEquals(PlanQuota.Rule.GATES, oc.rule)
+        assertTrue(PlanQuota.exhausted(oc), "a drained monthly window blocks the plan")
+        val zai = PlanQuota.fromZai(
+            QuotaDirect.parseQuotaResponse(
+                """{"data":{"level":"pro","limits":[
+                    {"type":"CREDIT_LIMIT","number":5,"currentValue":316,"usage":12000,"percentage":2},
+                    {"type":"CREDIT_LIMIT","number":1,"currentValue":60004,"usage":60000,"percentage":100}
+                ]}}""",
+            )!!,
+        ) as PlanQuota.Mark.Seen
+        assertEquals(PlanQuota.Rule.GATES, zai.rule)
+        assertTrue(PlanQuota.exhausted(zai))
+    }
+
+    @Test
+    fun theBlockedNoteNamesTheEvidence() {
+        val gate = PlanQuota.Mark.Seen(
+            listOf(PlanQuota.Window("⏱", 98), PlanQuota.Window("📅", 0)),
+        )
+        assertEquals("la ventana 📅 está agotada", PlanQuota.blockedNote(gate))
+        val both = PlanQuota.Mark.Seen(listOf(PlanQuota.Window("⏱", 0), PlanQuota.Window("📅", 0)))
+        assertEquals("las ventanas ⏱ 📅 están agotadas", PlanQuota.blockedNote(both))
+        val lanes = PlanQuota.Mark.Seen(
+            listOf(PlanQuota.Window("⏱", 0), PlanQuota.Window("📅", 0)),
+            PlanQuota.Rule.LANES,
+        )
+        assertEquals("todas las ventanas agotadas", PlanQuota.blockedNote(lanes))
+    }
+
     @Test
     fun zaiMonitorWindowsMapToTheSameVocabulary() {
         val snapshot = QuotaDirect.parseQuotaResponse(
