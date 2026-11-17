@@ -22,6 +22,8 @@ class CotBlocks(
     /** The in-place edit (the publisher's telegram leg, cooldown-gated). */
     private val edit: suspend (messageId: Long, text: String, markup: JsonObject?) -> Boolean,
 ) {
+    /** The no-opaque-types law: the LRU's Int key is the registry id a tap carries back (nested alias, Kotlin 2.2+). */
+    typealias RegistryId = Int
 
     private class Entry(
         val messageId: Long,
@@ -33,8 +35,9 @@ class CotBlocks(
         var expanded: Boolean = false
     }
 
-    private val entries = object : LinkedHashMap<Int, Entry>(16, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Int, Entry>): Boolean =
+    // The no-opaque-types law: the LRU's Int key is the registry id a tap carries.
+    private val entries = object : LinkedHashMap<RegistryId, Entry>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<RegistryId, Entry>): Boolean =
             size > MAX_ENTRIES
     }
 
@@ -65,7 +68,7 @@ class CotBlocks(
      * untouched). A throttled tap flips NOTHING: the message keeps its
      * button and the owner retries.
      */
-    suspend fun toggle(registryId: Int): String? {
+    suspend fun toggle(registryId: RegistryId): String? {
         val entry = entries[registryId] ?: return MISS
         val expanded = !entry.expanded
         val text = if (expanded) {
