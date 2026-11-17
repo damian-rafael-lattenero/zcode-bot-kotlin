@@ -368,41 +368,25 @@ object Keyboards {
     }
 
     /**
-     * 🌙 Go to background — the live card's demote row (the owner asked for
-     * the SAME name ZCode's own button wears): ONE row, ONE button, the
-     * tap demotes the running turn to background — the turn keeps running
-     * and its result still arrives; nothing is aborted. The demote is
-     * INERT by design (never a destructive tap): a tap on an idle card is
-     * an honest noop, never a kill.
-     */
-    fun backgroundTurn(sid: String): JsonObject = buildJsonObject {
-        putJsonArray("inline_keyboard") {
-            add(
-                buildJsonArray {
-                    add(button(BG_TURN_LABEL, "bgd:$sid"))
-                },
-            )
-        }
-    }
-
-    /**
-     * THE LIVE CARD's keyboard while a turn runs: the turn's own 🌙 demote
-     * row FIRST (`bgd:<sid>`), then ONE 🌙 row per open dispatch lane
-     * (`bgc:<toolId tail>`) — the same granularity split the fork's two
-     * queries speak: `backgroundTurn` demotes the turn, `backgroundToolCall`
-     * demotes a single Agent tool call, which keeps running and still
-     * delivers its result at seal. Only OPEN lanes belong here (the caller
-     * passes dispatch lanes, open by definition; the status gate is the
-     * defensive second lock). Blank sid = no card = no keyboard at all.
+     * THE LIVE CARD's keyboard while a turn runs: ONE 🌙 row per open
+     * dispatch lane (`bgc:<toolId tail>`), and that is ALL — the owner's
+     * verdict: the GENERAL turn demote (`bgd:`) is dangerous from the
+     * phone and is never rendered again; only the per-lane demote
+     * survives, so the card can demote ONE Agent tool call while the rest
+     * of the turn stays in the foreground. The lane keeps running and
+     * still delivers its result at seal. THE DEAD-TARGET LAW: only OPEN
+     * lanes earn a row (the caller passes dispatch lanes, open by
+     * definition; the status gate is the defensive second lock). Blank sid
+     * = no card = no keyboard at all, and no open lanes = no keyboard at
+     * all (an empty keyboard is decoration, not an honest tap surface).
      * Every data rides the shared LANE_TAIL law, well under 64 bytes.
      */
     fun liveCard(sid: String, lanes: List<ToolLive>): JsonObject? {
-        if (sid.isBlank()) return null
+        val open = lanes.filter { it.status == null }
+        if (sid.isBlank() || open.isEmpty()) return null
         return buildJsonObject {
             putJsonArray("inline_keyboard") {
-                add(buildJsonArray { add(button(BG_TURN_LABEL, "bgd:$sid")) })
-                lanes.forEach { lane ->
-                    if (lane.status != null) return@forEach
+                open.forEach { lane ->
                     add(
                         buildJsonArray {
                             add(
@@ -606,9 +590,8 @@ object Keyboards {
     /** The stop tap's own button — the ⏹️ beside the ▶️/✍️, the action it names. */
     private const val STOP_BUTTON = "⏹️"
 
-    /** The background demote's mark and the turn row's label (ZCode's own words). */
+    /** The background demote's mark — the per-lane 🌙 rows only (no turn row). */
     private const val BG_MARK = "🌙"
-    private const val BG_TURN_LABEL = "🌙 Go to background"
 
     private const val TITLE_CAP = 34
 
