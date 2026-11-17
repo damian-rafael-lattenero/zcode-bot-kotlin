@@ -1055,14 +1055,15 @@ class LivePublisher(
     }
 
     /**
-     * THE LIVE CARD'S OWN BUTTONS (🌙): the turn's own demote FIRST, then
-     * one per running dispatch lane — the birth and the edit-in-place both
-     * carry them while the turn is actually running. THE DEAD-TARGET LAW:
-     * a dead thing earns no buttons — only Thinking/Writing show them
-     * (never Idle, never Done), only OPEN lanes get a row (dispatchLanes is
-     * open by definition) — and the seal's own null-markup edits take the
-     * keyboard off the moment the turn ends (editMessageText without
-     * reply_markup clears it).
+     * THE LIVE CARD'S OWN BUTTONS (🌙): one per running dispatch lane —
+     * the owner's verdict removed the GENERAL turn demote from the phone
+     * (only the per-lane demote survives). The birth and the edit-in-place
+     * both carry them while the turn is actually running. THE DEAD-TARGET
+     * LAW: a dead thing earns no buttons — only Thinking/Writing show
+     * them (never Idle, never Done), only OPEN lanes get a row
+     * (dispatchLanes is open by definition) — and the seal's own
+     * null-markup edits take the keyboard off the moment the turn ends
+     * (editMessageText without reply_markup clears it).
      */
     private fun cardMarkup(state: TurnLive): JsonObject? =
         if (state.phase is TurnPhase.Thinking || state.phase is TurnPhase.Writing) {
