@@ -10,6 +10,28 @@ import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
 import java.util.concurrent.atomic.AtomicInteger
 
+/** The no-opaque-types law: the answers map's Int key is the 0-based question index. */
+typealias QuestionIndex = Int
+
+/** The no-opaque-types law: a bare String here is the owner's typed answer for one question. */
+typealias AnswerValue = String
+
+/** The collected answers, keyed by the question's 0-based index — a record, not a bare map. */
+data class QuestionAnswers(val byIndex: Map<QuestionIndex, AnswerValue>) {
+    val isEmpty: Boolean get() = byIndex.isEmpty()
+
+    /** The answer for one question's index, null when that question is still open. */
+    operator fun get(index: QuestionIndex): AnswerValue? = byIndex[index]
+
+    /** One more answer: an immutable copy-with, keyed by the question's index. */
+    fun plus(index: QuestionIndex, value: AnswerValue): QuestionAnswers =
+        QuestionAnswers(byIndex + (index to value))
+
+    companion object {
+        val EMPTY = QuestionAnswers(emptyMap())
+    }
+}
+
 /**
  * THE QUESTION, end to end (the owner's phone answers everything — 30/10):
  * the stream carries `permission_request` / `elicitation_request` events;
@@ -107,7 +129,7 @@ data class PendingQuestion(
     /** The question currently on screen (0-based). */
     val questionIndex: Int = 0,
     /** The answers collected so far: question index → the answer's value. */
-    val answers: Map<Int, String> = emptyMap(),
+    val answers: QuestionAnswers = QuestionAnswers.EMPTY,
     /**
      * THE TASK'S OWN TITLE (14/11, the any-task law): a question may arrive
      * from a conversation the owner is NOT reading — the card must say
@@ -500,7 +522,7 @@ class QuestionBoard(
         val step = synchronized(lock) {
             val current = byShortId[shortId] ?: return null
             if (current.kind != "elicitation") return null
-            val answers = current.answers + (current.questionIndex to value)
+            val answers = current.answers.plus(current.questionIndex, value)
             val next = current.questions.getOrNull(current.questionIndex + 1)
             if (next == null) {
                 AnswerStep.Flies(current.copy(answers = answers))

@@ -185,7 +185,7 @@ class QuestionsTest {
             listOf("¿qué base?" to "", "¿qué runtime?" to ""),
             q.answerEntries(), // nothing answered yet — the honest blanks
         )
-        val completed = q.copy(answers = mapOf(0 to "main", 1 to "node"))
+        val completed = q.copy(answers = QuestionAnswers(mapOf(0 to "main", 1 to "node")))
         assertEquals(listOf("¿qué base?" to "main", "¿qué runtime?" to "node"), completed.answerEntries())
     }
 
@@ -439,7 +439,7 @@ class QuestionsTest {
         // the flight owns the LAST answer: the stored entry keeps q1's answer but
         // not q2's — an Unavailable retry re-answers only the last question
         val stored = board.byShortId("q1")!!
-        assertEquals(mapOf(0 to "main"), stored.answers)
+        assertEquals(mapOf(0 to "main"), stored.answers.byIndex)
         assertEquals(1, stored.questionIndex)
         assertEquals(
             Json.parseToJsonElement(
