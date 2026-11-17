@@ -161,12 +161,29 @@ object PlanMenu {
     ): MenuRender = MenuRender(
         text = buildString {
             append(statusLine(v, title))
+            defaultWarning(v, quota)?.let { append("\n").append(it) }
             append("\n\n<b>Quota por plan</b> — «tiene tokens o no», al lado de cada nombre:")
             v.plans.forEach { p -> append("\n").append(PlanQuota.line(p.label, quota[p.providerId], nowMs, zone)) }
             append("\n\nModelo: /model · Effort: /effort")
         },
         markup = planKeyboard(v, quota),
     )
+
+    /**
+     * The stale app default's honest flag (the owner's 17/11 «que avise que
+     * no tiene»): the default's plan is PROVEN tokenless — the ⭐ tap fixes
+     * it. Null when there is no default or it still holds tokens.
+     */
+    private fun defaultWarning(v: Views, quota: Map<String, PlanQuota.Mark>): String? {
+        val plan = v.defaultPlan
+        return if (plan != null && PlanQuota.exhausted(quota[plan])) {
+            val label = PyText.esc(v.planLabel(plan) ?: plan)
+            "⚠️ El default de la app (<b>$label</b>) está sin tokens — " +
+                "tocá ⭐ para pasarlo al primero con tokens"
+        } else {
+            null
+        }
+    }
 
     /**
      * /model's card: the models of the plan in force (the app default's

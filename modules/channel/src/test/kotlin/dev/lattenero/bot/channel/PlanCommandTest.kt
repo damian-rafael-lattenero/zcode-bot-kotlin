@@ -28,6 +28,9 @@ class PlanCommandTest {
 
         /** When set, ONLY the setModelSelection write fails with THIS code (the timeout drill's hook). */
         var failSetModelWith: String? = null
+
+        /** When set, ONLY the app-default write (scope="default") fails with THIS code. */
+        var failDefaultWith: String? = null
         val queries = mutableListOf<ChannelQuery>()
         val answers = mutableMapOf<String, String>()
 
@@ -41,6 +44,9 @@ class PlanCommandTest {
             if (!available) return QueryAnswer.Unavailable
             if (query is ChannelQuery.SetModelSelection) {
                 failSetModelWith?.let { return QueryAnswer.Failed(it, "simulated") }
+                if (query.scope == "default") {
+                    failDefaultWith?.let { return QueryAnswer.Failed(it, "simulated") }
+                }
             }
             if (query is ChannelQuery.Quota) {
                 return query.providerId?.let { pid -> quotaAnswers[pid]?.let { QueryAnswer.Ok(it) } }
@@ -81,12 +87,20 @@ class PlanCommandTest {
     private val app = "/Users/damian/Projects/app"
     private val rows = listOf(TaskRow(sid = "task-77", title = "arreglá el login", ws = app))
 
-    /** The owner's REAL catalog (the three plans, the fork's own ids + labels). */
-    private fun catalogJson(plan: String = "account:zai-start-plan", model: String = "GLM-5.3-Flash") = """
+    /** The owner's REAL catalog (the three plans, the fork's own ids + labels); `default` = the app default's plan. */
+    private fun catalogJson(
+        plan: String = "account:zai-start-plan",
+        model: String = "GLM-5.3-Flash",
+        default: String? = null,
+    ): String {
+        val defaultJson = default
+            ?.let { """{"providerId": "$it", "modelId": "GLM-5.3-Flash", "reasoningLevel": "max"}""" }
+            ?: "null"
+        return """
     {
       "scope": "conversation",
       "selection": {"providerId": "$plan", "modelId": "$model", "reasoningLevel": "max"},
-      "default": null,
+      "default": $defaultJson,
       "plans": [
         {"providerId": "account:zai-start-plan", "label": "Start Plan",
          "models": [{"id": "GLM-5.3-Flash", "label": "GLM-5.3-Flash", "reasoningLevels": ["low", "high", "max"]}]},
@@ -97,7 +111,8 @@ class PlanCommandTest {
                     {"id": "kimi-k2", "label": "kimi-k2"}]}
       ]
     }
-    """.trimIndent()
+        """.trimIndent()
+    }
 
     private val boundStatus = """
         {"bot":{"id":"daemon-local","enabled":true},
@@ -359,15 +374,21 @@ class PlanCommandTest {
 
     @Test
     fun theLadderAppliesTheFirstPlanWithTokens() = runBlocking {
-        // the conversation rides OpenCode Go: the ladder's pick (rung 1, 32% left) DIFFERS → the write flies
+        // the conversation rides OpenCode Go: the ladder's pick (rung 1, 32% left) DIFFERS → both writes fly
         val o = quotaOps().apply { answers["modelSelection"] = catalogJson(plan = "opencode-go-chat", model = "kimi-k2") }
         val reply = commands(o).onCallback("pdef:", 8L, OWNER)!!
-        val set = o.queries.filterIsInstance<ChannelQuery.SetModelSelection>().single()
-        // the owner's rung 1: Start Plan · GLM-5.3-Flash · max
+        val writes = o.queries.filterIsInstance<ChannelQuery.SetModelSelection>()
+        // the owner's rung 1: Start Plan · GLM-5.3-Flash · max — the conversation AND the app default
+        val set = writes.single { it.scope == "conversation" }
         assertEquals("account:zai-start-plan", set.plan)
         assertEquals("GLM-5.3-Flash", set.model)
         assertEquals("max", set.effort)
+        val def = writes.single { it.scope == "default" }
+        assertEquals("account:zai-start-plan", def.plan)
+        assertEquals("GLM-5.3-Flash", def.model)
+        assertEquals("max", def.effort)
         assertTrue("⭐ Default aplicado: Start Plan · GLM-5.3-Flash · max" in reply.text, reply.text)
+        assertTrue("• Default de la app: Start Plan · GLM-5.3-Flash · max" in reply.text, reply.text)
     }
 
     @Test
@@ -375,7 +396,7 @@ class PlanCommandTest {
         // rung 1 exhausted (every window at 0) → rung 2 (Z.ai) carries tokens
         val o = quotaOps(startPlan = startPlanJson(0))
         val reply = commands(o).onCallback("pdef:", 9L, OWNER)!!
-        val set = o.queries.filterIsInstance<ChannelQuery.SetModelSelection>().single()
+        val set = o.queries.filterIsInstance<ChannelQuery.SetModelSelection>().single { it.scope == "conversation" }
         assertEquals("account:zai-individual-coding-plan", set.plan)
         assertEquals("GLM-5.3-Flash", set.model)
         assertEquals("max", set.effort)
@@ -394,7 +415,7 @@ class PlanCommandTest {
                 )
         }
         val reply = commands(o).onCallback("pdef:", 10L, OWNER)!!
-        val set = o.queries.filterIsInstance<ChannelQuery.SetModelSelection>().single()
+        val set = o.queries.filterIsInstance<ChannelQuery.SetModelSelection>().single { it.scope == "conversation" }
         assertEquals("account:zai-start-plan", set.plan, "the plan still has tokens")
         assertEquals("glm-next", set.model, "the plan's OWN first model")
         assertEquals("high", set.effort, "the model's HIGHEST published tier")
@@ -412,7 +433,7 @@ class PlanCommandTest {
             quotaAnswers["account:zai-individual-coding-plan"] = """{"quota":{"limits":[]}}"""
         }
         val reply = commands(o).onCallback("pdef:", 11L, OWNER)!!
-        val set = o.queries.filterIsInstance<ChannelQuery.SetModelSelection>().single()
+        val set = o.queries.filterIsInstance<ChannelQuery.SetModelSelection>().single { it.scope == "conversation" }
         assertEquals("account:zai-start-plan", set.plan)
         assertTrue("quota desconocida — elegido por el orden del dueño" in reply.text, reply.text)
     }
@@ -443,12 +464,63 @@ class PlanCommandTest {
         val o = quotaOps().apply { answers["modelSelection"] = catalogJson(plan = "opencode-go-chat", model = "kimi-k2") }
         val bc = commands(o)
         val first = bc.onCallback("pdef:", 13L, OWNER)!!
-        o.answers["modelSelection"] = catalogJson() // the write LANDED: start-plan is in force now
+        // the writes LANDED: both the conversation and the app default ride start-plan now
+        o.answers["modelSelection"] = catalogJson(default = "account:zai-start-plan")
         val writes = o.queries.filterIsInstance<ChannelQuery.SetModelSelection>().size
         val second = bc.onCallback("pdef:", 14L, OWNER)!!
         assertEquals(writes, o.queries.filterIsInstance<ChannelQuery.SetModelSelection>().size, "no second write")
         assertTrue("⭐ Default ya vigente" in second.text, second.text)
         assertTrue("⭐ Default aplicado" in first.text, first.text)
+    }
+
+    @Test
+    fun theLadderFixesAStaleAppDefaultEvenWhenTheConversationHasTokens() = runBlocking {
+        // the conversation already rides rung 1, the APP DEFAULT still points at the tokenless Z.ai →
+        // only the default is written, and the report says it (the owner's 17/11 «resolvelo siempre»)
+        val o = quotaOps().apply {
+            answers["modelSelection"] = catalogJson(default = "account:zai-individual-coding-plan")
+            quotaAnswers["account:zai-individual-coding-plan"] = creditLimitJson(pct5h = 2, pctWeek = 100)
+        }
+        val reply = commands(o).onCallback("pdef:", 17L, OWNER)!!
+        val writes = o.queries.filterIsInstance<ChannelQuery.SetModelSelection>()
+        assertEquals(1, writes.size, "only the default needed the write")
+        assertEquals("default", writes.single().scope)
+        assertEquals("account:zai-start-plan", writes.single().plan)
+        assertTrue("⭐ Default ya vigente: Start Plan · GLM-5.3-Flash · max" in reply.text, reply.text)
+        assertTrue("• Default de la app: Start Plan · GLM-5.3-Flash · max" in reply.text, reply.text)
+    }
+
+    @Test
+    fun aRefusedAppDefaultWriteIsSaidHonestly() = runBlocking {
+        val o = quotaOps().apply {
+            answers["modelSelection"] = catalogJson(plan = "opencode-go-chat", model = "kimi-k2")
+            failDefaultWith = "timeout"
+        }
+        val reply = commands(o).onCallback("pdef:", 18L, OWNER)!!
+        val writes = o.queries.filterIsInstance<ChannelQuery.SetModelSelection>()
+        assertTrue(
+            writes.any { it.scope == "conversation" && it.plan == "account:zai-start-plan" },
+            "the conversation still got its write",
+        )
+        assertTrue("⚠️ Default de la app sin cambios (timeout)" in reply.text, reply.text)
+    }
+
+    @Test
+    fun theCardFlagsAnAppDefaultWithoutTokens() = runBlocking {
+        val o = quotaOps().apply {
+            answers["modelSelection"] = catalogJson(default = "account:zai-individual-coding-plan")
+            quotaAnswers["account:zai-individual-coding-plan"] = creditLimitJson(pct5h = 2, pctWeek = 100)
+        }
+        val reply = commands(o).handle("/plan", 1L)!!
+        assertTrue("El default de la app (<b>Z.ai</b>) está sin tokens" in reply.text, reply.text)
+        assertTrue("tocá ⭐" in reply.text, reply.text)
+    }
+
+    @Test
+    fun theCardSaysNothingWhenTheAppDefaultHasTokens() = runBlocking {
+        val o = quotaOps().apply { answers["modelSelection"] = catalogJson(default = "account:zai-start-plan") }
+        val reply = commands(o).handle("/plan", 1L)!!
+        assertTrue("sin tokens" !in reply.text, reply.text)
     }
 
     // ── the retired mega-menu's verbs ─────────────────────────────────────
@@ -476,8 +548,8 @@ class PlanCommandTest {
         val outcome = bc.applyDefaultLadder()
         assertTrue(outcome.speak, "a real change is spoken")
         assertTrue("⭐ Default aplicado" in outcome.text, outcome.text)
-        // a second run: the applied selection is now IN FORCE (the mock reflects the write) → silent
-        o.answers["modelSelection"] = catalogJson()
+        // a second run: the applied selection is now IN FORCE (the mock reflects both writes) → silent
+        o.answers["modelSelection"] = catalogJson(default = "account:zai-start-plan")
         val second = bc.applyDefaultLadder()
         assertTrue(!second.speak, "no change → no announcement")
     }

@@ -744,14 +744,42 @@ class BotCommands(
     }
 
     /**
-     * THE DEFAULT LADDER (the owner's 11/11): the ⭐ tap and the boot-time
-     * apply share ONE path — [PlanLadder.pick] against the live catalog +
-     * the per-plan quota, the write SKIPPED when the pick IS the selection
-     * in force, the whole triple in one frame when it is not.
+     * THE DEFAULT LADDER (the owner's 11/11 + his 17/11 «resolvelo siempre,
+     * al iniciar el bot y en mitad de una conversación»): the ⭐ tap and the
+     * boot-time apply share ONE path — [PlanLadder.pick] against the live
+     * catalog + the per-plan quota, then BOTH writes: the conversation's
+     * selection and the APP DEFAULT (new conversations inherit the default
+     * — leaving it on a tokenless plan is the bug he reported). Each write
+     * is skipped when it already IS the pick; a refused one is said
+     * honestly, never swallowed.
      */
     data class LadderOutcome(val speak: Boolean, val text: String)
 
-    @Suppress("ReturnCount") // one guard per honest state (no context, degraded, exhausted, no-op, the write)
+    /** One selection write's fate — the ladder writes two, each reported on its own. */
+    private sealed interface Write {
+        data object Ok : Write
+        data object Unavailable : Write
+        data class Failed(val answer: QueryAnswer.Failed) : Write
+    }
+
+    private suspend fun writeSelection(ws: String?, scope: String, pick: PlanLadder.Pick): Write =
+        when (
+            val set = ops.query(
+                ChannelQuery.SetModelSelection(
+                    scope = scope,
+                    plan = pick.plan.providerId,
+                    model = pick.model.id,
+                    effort = pick.effort,
+                    workspacePath = ws,
+                ),
+            )
+        ) {
+            is QueryAnswer.Ok -> Write.Ok
+            is QueryAnswer.Unavailable -> Write.Unavailable
+            is QueryAnswer.Failed -> Write.Failed(set)
+        }
+
+    @Suppress("ReturnCount") // one guard per honest state (no context, degraded, exhausted, both in force)
     private suspend fun ladderOutcome(): LadderOutcome {
         val ctx = contextAnswer()
         if (ctx is ContextAnswer.None) return LadderOutcome(false, LADDER_NO_CONTEXT)
@@ -762,33 +790,60 @@ class BotCommands(
             speak = true,
             text = "$LADDER_EXHAUSTED\n${verdict.notes.joinToString("\n")}",
         )
-        val summary = "${pick.plan.label} · ${pick.model.label}${pick.effort?.let { " · $it" } ?: ""}"
-        if (pick.plan.providerId == v.plan && pick.model.id == v.model && pick.effort == v.effort) {
-            return LadderOutcome(speak = false, text = "⭐ Default ya vigente: $summary")
+        val conversationInForce = pick.plan.providerId == v.plan && pick.model.id == v.model &&
+            pick.effort == v.effort
+        val defaultInForce = pick.plan.providerId == v.defaultPlan && pick.model.id == v.defaultModel &&
+            pick.effort == v.defaultEffort
+        if (conversationInForce && defaultInForce) {
+            return LadderOutcome(speak = false, text = "⭐ Default ya vigente: ${triple(pick)}")
         }
-        return when (
-            val set = ops.query(
-                ChannelQuery.SetModelSelection(
-                    scope = "conversation",
-                    plan = pick.plan.providerId,
-                    model = pick.model.id,
-                    effort = pick.effort,
-                    workspacePath = value.workspacePath,
-                ),
-            )
-        ) {
-            is QueryAnswer.Ok -> LadderOutcome(
-                speak = true,
-                text = "⭐ Default aplicado: $summary${notesBlock(verdict.notes)}",
-            )
+        val conversation =
+            if (conversationInForce) Write.Ok else writeSelection(value.workspacePath, "conversation", pick)
+        val appDefault = if (defaultInForce) Write.Ok else writeSelection(value.workspacePath, "default", pick)
+        return LadderOutcome(
+            speak = true,
+            text = ladderText(pick, verdict.notes, conversation, conversationInForce, appDefault, defaultInForce),
+        )
+    }
 
-            is QueryAnswer.Unavailable -> LadderOutcome(
-                speak = true,
-                text = "$DEGRADED\nEl default automático no pudo aplicar: $summary",
-            )
+    /** The pick's one-line identity: plan · model · effort. */
+    private fun triple(pick: PlanLadder.Pick): String =
+        "${pick.plan.label} · ${pick.model.label}${pick.effort?.let { " · $it" } ?: ""}"
 
-            is QueryAnswer.Failed -> LadderOutcome(speak = true, text = writeFailure(set))
+    /** The ladder's honest report: what was applied, why, and the app default's own fate. */
+    private fun ladderText(
+        pick: PlanLadder.Pick,
+        notes: List<String>,
+        conversation: Write,
+        conversationInForce: Boolean,
+        appDefault: Write,
+        defaultInForce: Boolean,
+    ): String {
+        val summary = triple(pick)
+        val head = when (conversation) {
+            is Write.Ok -> if (conversationInForce) "⭐ Default ya vigente: $summary" else "⭐ Default aplicado: $summary"
+            is Write.Unavailable -> "$DEGRADED\nEl default automático no pudo aplicar: $summary"
+            is Write.Failed -> writeFailure(conversation.answer)
         }
+        val notesText = if (conversation is Write.Ok && !conversationInForce) notesBlock(notes) else ""
+        val defaultText = when (appDefault) {
+            // the channel is down for BOTH writes — the DEGRADED head already says it
+            is Write.Unavailable -> if (conversation is Write.Unavailable) {
+                ""
+            } else {
+                "\n• ⚠️ Default de la app sin cambios: el canal no respondió"
+            }
+
+            is Write.Ok -> if (defaultInForce) {
+                "\n• Default de la app: ya estaba en $summary"
+            } else {
+                "\n• Default de la app: $summary"
+            }
+            is Write.Failed ->
+                "\n• ⚠️ Default de la app sin cambios (${appDefault.answer.code}): " +
+                    "${PyText.esc(appDefault.answer.message ?: "?")}"
+        }
+        return "$head$notesText$defaultText"
     }
 
     /** The ⭐ tap: the ladder's outcome with the fresh /plan card underneath. */
