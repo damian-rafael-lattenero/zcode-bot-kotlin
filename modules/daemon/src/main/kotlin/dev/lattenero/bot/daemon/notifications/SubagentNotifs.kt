@@ -57,12 +57,13 @@ class SubagentNotifs(
      * own degrade): a missing db or an unreadable state file is silence,
      * never a crash — the KAP Process restarts only the BUGS.
      */
-    fun pass(): List<SubagentDone> {
+    fun pass(): SubagentFold {
         val nowMs = clockMs()
         val seen = loadSeen()
-        val fold = SubagentWatch.pass(seen, readChildren(nowMs), nowMs)
+        // M4: starts speak too — a fresh running child first seen is a start
+        val fold = SubagentWatch.pass(seen, readChildren(nowMs), nowMs, announceStarts = true)
         if (fold.seen != seen) saveSeen(fold.seen)
-        return fold.announce
+        return fold
     }
 
     /**
@@ -71,9 +72,22 @@ class SubagentNotifs(
      * knob's mode names (shadow logs nothing, dry-run composes, LIVE
      * posts with the shared cooldown/outbox/last-ph).
      */
-    suspend fun speak(done: List<SubagentDone>) {
+    suspend fun speak(fold: SubagentFold) {
         val now = clockMs() / MILLIS_PER_SECOND
-        done.forEach { d ->
+        fold.started.forEach { started ->
+            leg.deliver(
+                ShadowDecision(
+                    ts = now,
+                    tsIso = TimeIso.format(now),
+                    watcher = NotifText.WATCHER,
+                    decision = DECISION_STARTED,
+                    text = NotifText.subagentStarted(started),
+                ),
+                loud = true,
+            )
+            logger.info { "notification: subagent STARTED «${started.title.take(LOG_PREVIEW)}»" }
+        }
+        fold.announce.forEach { d ->
             leg.deliver(
                 ShadowDecision(
                     ts = now,
@@ -191,6 +205,7 @@ class SubagentNotifs(
         const val STATE_FILE = "subagent-notifs.json"
         const val TMP_SUFFIX = ".tmp"
         const val DECISION = "subagent_done"
+        const val DECISION_STARTED = "subagent_started"
         const val PROCESS_NAME = "subagent-notifs"
         const val SQLITE_READONLY = 0x00000001
         const val LOG_PREVIEW = 60

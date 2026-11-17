@@ -35,10 +35,12 @@ object NotificationsWire {
     /** The no-op tap — the OFF wiring's shape. */
     val noSeal: suspend (SealFacts) -> Unit = {}
 
-    /** The feature's two taps, one value. */
+    /** The feature's taps, one value. */
     class NotifTaps(
         val watcher: SubagentNotifs,
         val onSeal: suspend (SealFacts) -> Unit,
+        /** M4: the global task notifier — any task's end, subscribed or not. */
+        val global: GlobalNoticesIo,
     )
 
     fun build(
@@ -50,15 +52,20 @@ object NotificationsWire {
     ): NotifTaps? {
         if (!on) return null
         val watcher = SubagentNotifs(cfg.baseDir, File(cfg.homeDir, "state"), send.leg)
+        val global = GlobalNoticesIo(cfg.baseDir, File(cfg.homeDir, "state"), send.leg)
         val gate = SealGate(clockMs = clockMs)
-        return NotifTaps(watcher) { facts ->
-            guard {
-                val text = NotifText.turnSealed(facts)
-                if (text != null && gate.tryAnnounce(facts.taskId)) {
-                    deliverSeal(send, text)
+        return NotifTaps(
+            watcher = watcher,
+            onSeal = { facts ->
+                guard {
+                    val text = NotifText.turnSealed(facts)
+                    if (text != null && gate.tryAnnounce(facts.taskId)) {
+                        deliverSeal(send, text)
+                    }
                 }
-            }
-        }
+            },
+            global = global,
+        )
     }
 
     /** MOMENT 2's send: the COMMANDS lane (the shared throat), loud, one decision. */

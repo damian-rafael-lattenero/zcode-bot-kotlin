@@ -1,6 +1,13 @@
 package dev.lattenero.bot.daemon.metrics
 
 /**
+ * The stall line: a pump callback longer than this held the channel's only
+ * reader while real work waited behind it. One second is already felt on
+ * the phone; the stabilization target is zero of these.
+ */
+const val STALL_LINE_MS: Long = 1_000L
+
+/**
  * E2's typed metrics facade — the ONLY metrics surface the rest of the
  * daemon sees. Counters and gauges are explicit methods, never a Map of
  * strings: the compiler owns the inventory, and every method's KDoc names
@@ -69,6 +76,39 @@ interface Metrics {
     /** A button tap accepted through the poller. */
     fun pollerCallback()
 
+    // ── the stream pump + the tap's latency (the stabilization baseline) ──
+
+    /**
+     * One `onStreamEvent` callback's own duration: how long the ONE reader
+     * of the channel was held by a frame. The owner's freezes are this
+     * number; nothing else moves while it grows.
+     */
+    fun streamCallback(durationMs: Long)
+
+    /**
+     * A pump callback that held the reader past the stall line
+     * ([STALL_LINE_MS]): the freeze is REAL, not a slow frame — the one
+     * counter the stabilization work must drive to zero.
+     */
+    fun streamStall()
+
+    /**
+     * Tap → the FIRST stream frame folded for that very task: the attach's
+     * honest latency (a subscription with no burst never records — nothing
+     * invented).
+     */
+    fun attachFirstFrame(durationMs: Long)
+
+    /** One dispatched Telegram update's handler duration, tagged by verb (`/tasks`, `t:`, `text`, `attachment`). */
+    fun handler(verb: String, durationMs: Long)
+
+    /**
+     * The channel's remembered subscriptions, read at scrape time. The main
+     * view never unsubscribed the task it left (measured in the audit) —
+     * this gauge is the leak's witness.
+     */
+    fun subscriptions(size: () -> Int)
+
     // ── the outbox + cooldown (LIVE mode's two throats) ──────────────────
 
     /** The lane's parked depth, read at scrape time from the outbox file itself. */
@@ -124,6 +164,16 @@ object NoopMetrics : Metrics {
     override fun pollerInbound() {}
 
     override fun pollerCallback() {}
+
+    override fun streamCallback(durationMs: Long) {}
+
+    override fun streamStall() {}
+
+    override fun attachFirstFrame(durationMs: Long) {}
+
+    override fun handler(verb: String, durationMs: Long) {}
+
+    override fun subscriptions(size: () -> Int) {}
 
     override fun outboxDepth(lane: Lane, depth: () -> Int) {}
 

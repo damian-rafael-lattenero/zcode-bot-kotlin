@@ -57,6 +57,11 @@ commands throat, `lane="firehose"` the render throat.
 | `bot_cooldown_active{lane}` | gauge (1/0) | the lane's 429 cooldown window active at scrape (the shared `tg-cooldown` mtime) |
 | `bot_zconn_transitions_total{direction="down"\|"up"}` | counter | the episode machine's SPOKEN transitions — the same ⚠️/✅ notices the chat receives |
 | `bot_zconn_down` | gauge (1/0) | the persisted episode machine's `down`, read at scrape (`state/zconn.json`) |
+| `bot_stream_callback_seconds_count/_sum/_max` | timer | one `onStreamEvent` callback's own duration — how long the channel's ONE reader was held by a frame (M0's stabilization baseline) |
+| `bot_stream_stalls_total` | counter | a pump callback that held the reader past 1 s (`STALL_LINE_MS`) — the freeze the owner feels; M2's effect-worker targets zero here |
+| `bot_attach_first_frame_seconds_count/_sum/_max` | timer | a subscribe frame → the FIRST folded frame of that very task (a subscription with no burst never records) |
+| `bot_handler_duration_seconds_*{verb}` | timer | one dispatched Telegram update's handler, tagged by verb (`/tasks`, `t:`, `text`, `attachment`) — the serial poller's queue is this number's sum |
+| `bot_channel_subscriptions` | gauge | the channel's remembered subscriptions at scrape — M3's focus law keeps it bounded by live work, not by taps |
 
 Families appear only when their surface exists: the bus gauges need
 `event_bus` ON, the memory taps need `memory_inject` ON, the poller

@@ -3,6 +3,7 @@ package dev.lattenero.bot.channel
 import dev.lattenero.bot.contracts.PyText
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -13,6 +14,8 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.seconds
 
 private val logger = KotlinLogging.logger {}
 
@@ -160,6 +163,13 @@ interface ChannelOps {
     suspend fun queueTake(messageId: String): QueuedText? = null
 
     suspend fun subscribe(taskId: String, workspacePath: String)
+
+    /**
+     * M5: a CHILD session's own stream — NEVER a focus change. The parent's
+     * subscription must survive while the owner watches a subagent (the
+     * focus law would have dropped it). Default = the plain subscribe.
+     */
+    suspend fun subscribeChild(taskId: String, workspacePath: String) = subscribe(taskId, workspacePath)
 }
 
 /**
@@ -189,6 +199,13 @@ class BotCommands(
     private val history: TasksHistory = noHistory,
     /** Python's config.DEFAULT_WS — the loose-tasks workspace the /tasks scope excludes. */
     private val defaultWorkspacePath: String = "",
+    /**
+     * M1's usage tap: called with the CANONICAL palette name of every
+     * dispatched command (aliases folded), never for free text or unknown
+     * verbs. The daemon feeds the owner's own ranking so Telegram's «/»
+     * menu lists the commands he actually uses first. Default no-op.
+     */
+    private val onCommand: (String) -> Unit = {},
     /**
      * The transcript feed's level (the /verbosity knob): WRITTEN here,
      * read PER TICK by the publisher — the daemon injects ONE shared
@@ -294,6 +311,9 @@ class BotCommands(
     @Suppress("CyclomaticComplexMethod") // one branch per command — the dispatcher's own shape
     suspend fun handle(text: String, updateId: Long): BotReply? {
         val (base, rest) = parseCommand(text) ?: return route(text, updateId)
+        // M1: count the command the owner actually used — the canonical
+        // palette name (aliases fold), never free text or an unknown verb.
+        CommandUsage.paletteNameOf(base, PALETTE_NAMES)?.let(onCommand)
         val reply: BotReply = when (base) {
             // THE BARE LAW (owner, 15/11 — the command goes out argument-free):
             // the lists take NO parameters — any typed rest is ignored and the
@@ -1804,7 +1824,13 @@ class BotCommands(
 
     /** The active task has a live turn (sessions-index's non-terminal phases). */
     private suspend fun isRunning(taskId: String, workspacePath: String): Boolean =
-        when (val answer = ops.query(ChannelQuery.ActiveTaskIds(workspacePath))) {
+        when (
+            // M2: the tap's budget — a degraded channel answers FALSE in
+            // 1.5 s instead of freezing the tap behind the query's 15 s ACK.
+            val answer = withTimeoutOrNull(QUERY_BUDGET) {
+                ops.query(ChannelQuery.ActiveTaskIds(workspacePath))
+            }
+        ) {
             is QueryAnswer.Ok -> taskId in parseStrings(answer.resultJson)
             else -> false // degraded guess: fire — the channel's own «task running» reply still speaks
         }
@@ -2081,14 +2107,19 @@ class BotCommands(
             logger.info { "callback 🟢 t: attach refused: $sid is in no known index/context" }
             return BotReply("🤷 No encuentro esa task en el índice — /tasks para ver las que hay.")
         }
-        val live = isRunning(sid, ws)
-        ops.subscribe(sid, ws)
+        // M2: THE SWITCH'S ORDER — the hub OWNS the new task BEFORE the
+        // subscribe flies. The fork answers a subscribe with a burst; if the
+        // hold still named the old task, the hub dropped that burst (the
+        // first-frame loss the owner felt). Hold first, then subscribe.
         hub.unpin() // a task attach is the WHOLE world — any pin or lane scope dies here
         hub.watchTask()
         // THE ATTACH'S INSTANT SWITCH (4/11): an idle task never streams, so
         // without this the card AND the 🎯 stayed on the previous turn until
         // its next event — the owner's «no me la deja marcada».
         hub.watchTaskId(sid, clock())
+        ops.subscribe(sid, ws)
+        hub.requestTick() // M2: the card is born NOW, not on the next 3s tick
+        val live = isRunning(sid, ws)
         logger.info { "callback 🟢 t: pipe ATTACHED to $sid (running=$live) — bind attempt rides along" }
         val title = row?.title?.takeIf { it.isNotEmpty() } ?: sid.takeLast(SID_TAIL)
         val watchLine = if (live) {
@@ -2614,12 +2645,13 @@ class BotCommands(
                                 "no hay stream que mostrar. Su resultado: 📄 /last o /tasks.",
                         )
                     }
-                    ops.subscribe(sess, ws)
+                    ops.subscribeChild(sess, ws)
                     hub.pin(sess)
                     // THE INSTANT SWITCH (4/11): the fold must BE the child
                     // NOW — a quiet child never streams first, and without
                     // this the card stayed the parent's until its next event.
                     hub.watchTaskId(sess, clock())
+                    hub.requestTick() // M2/M5: the child card is born NOW
                     logger.info { "callback 🔵 sa: STORED session ATTACHED $sess — pinned" }
                     return BotReply("👁 Subagente attachado — su turno completo fluye acá; se sella cuando cierra.")
                 }
@@ -2635,8 +2667,13 @@ class BotCommands(
         if (agentId != null && ws != null) {
             val sessId = "$SUBAGENT_SESSION_PREFIX$agentId"
             if (sessId in history.subagentSessionIds(hub.peek()?.taskId ?: "")) {
-                ops.subscribe(sessId, ws)
+                // M5: the child's OWN stream — the parent's focus is untouched
+                ops.subscribeChild(sessId, ws)
                 hub.pin(sessId)
+                // M5's instant switch: a quiet child's card must be the child
+                // NOW (the stored-session path's own law, applied here too)
+                hub.watchTaskId(sessId, clock())
+                hub.requestTick()
                 logger.info {
                     "callback 🔵 sa: SESSION ATTACHED $sessId (${lane.name}) — the card IS the subagent's turn"
                 }
@@ -2648,6 +2685,7 @@ class BotCommands(
             logger.info { "callback 🔵 sa: $sessId not in the running store — honest lane-scope fallback" }
         }
         hub.attachLane(lane.toolId)
+        hub.requestTick() // M5: the lane-scoped card speaks NOW
         logger.info { "callback 🔵 sa: lane ATTACHED ${lane.toolId} (${lane.name}) — the card speaks only its stream" }
         return BotReply(
             "👁 Subagente «${PyText.esc(lane.name)}» en vivo — la misma carta que una task, " +
@@ -3434,7 +3472,11 @@ class BotCommands(
     }
 
     /** The bot's context: workspace + the active task (botStatus query). */
-    private suspend fun contextAnswer(): ContextAnswer = when (val answer = ops.query(ChannelQuery.BotStatus)) {
+    private suspend fun contextAnswer(): ContextAnswer = when (
+        // M2: the tap's budget — a dead channel answers DEGRADED in 2 s
+        // instead of freezing every later tap behind the 15 s ACK.
+        val answer = withTimeoutOrNull(CONTEXT_BUDGET) { ops.query(ChannelQuery.BotStatus) }
+    ) {
         is QueryAnswer.Ok -> {
             val root = parse(answer.resultJson) ?: return ContextAnswer.Degraded
             val bot = root.obj("bot")
@@ -3453,6 +3495,7 @@ class BotCommands(
 
         QueryAnswer.Unavailable -> ContextAnswer.Degraded
         is QueryAnswer.Failed -> ContextAnswer.Degraded
+        null -> ContextAnswer.Degraded // the budget ran out — honest degradation
     }
 
     /** After an inbound fires, watch the conversation it lands in (the stream's own subscription). */
@@ -3615,32 +3658,35 @@ class BotCommands(
          * owner, 29/10: «la lista de commands no corresponde con la lista
          * real»). Descriptions in Python's menu_desc tone.
          */
-        val MENU = listOf(
-            "tasks" to "conversations by project — tap a row to watch it live",
-            "all_tasks" to "all conversations, loose ones included",
-            "status" to "what is running + the active conversation",
-            "plan" to "elige el plan — cada uno con su quota restante al lado",
-            "model" to "los modelos del plan vigente",
-            "effort" to "los niveles de effort del plan y modelo vigentes",
-            "mode" to "the conversation's mode — yolo · build · edit · guarded",
-            "plan_mode" to "Plan mode ON/OFF — the separate toggle (/mode no longer offers plan)",
-            "last" to "re-sends the active conversation's last answer",
-            "compact" to "shrinks the active conversation's context",
-            "context_window" to "context window used — tokens, model window and percent",
-            "queue" to "the parked texts — launch or discard",
-            "run" to "opens a NEW conversation in the active project and sends the prompt — /run «prompt»",
-            "steer" to "steers the RUNNING turn — the text enters the live turn",
-            "stop" to "stops the active task's turn",
-            "nuclear" to "emergency: stops EVERYTHING and resets the bot",
-            "quota" to "the active plan's limits — z.ai pools or OpenCode Go windows",
-            "usage" to "token usage of the active conversation — real, cumulative",
-            "ctx" to "context % per conversation — the real meter list",
-            "subagents" to "the active subagents · «inactivos» shows today's ended",
-            "verbosity" to "cuánto habla el feed en vivo — summary / normal / verbose",
-            "brain" to "pregunta al RAG de agent-brain — /brain status para el pulso",
-            "memory" to "recuerdos del brain — /memory «texto» · recent [k] · status",
-            "help" to "all commands",
+        val MENU: List<MenuCommand> = listOf(
+            MenuCommand("tasks", "conversations by project — tap a row to watch it live"),
+            MenuCommand("all_tasks", "all conversations, loose ones included"),
+            MenuCommand("status", "what is running + the active conversation"),
+            MenuCommand("plan", "elige el plan — cada uno con su quota restante al lado"),
+            MenuCommand("model", "los modelos del plan vigente"),
+            MenuCommand("effort", "los niveles de effort del plan y modelo vigentes"),
+            MenuCommand("mode", "the conversation's mode — yolo · build · edit · guarded"),
+            MenuCommand("plan_mode", "Plan mode ON/OFF — the separate toggle (/mode no longer offers plan)"),
+            MenuCommand("last", "re-sends the active conversation's last answer"),
+            MenuCommand("compact", "shrinks the active conversation's context"),
+            MenuCommand("context_window", "context window used — tokens, model window and percent"),
+            MenuCommand("queue", "the parked texts — launch or discard"),
+            MenuCommand("run", "opens a NEW conversation in the active project and sends the prompt — /run «prompt»"),
+            MenuCommand("steer", "steers the RUNNING turn — the text enters the live turn"),
+            MenuCommand("stop", "stops the active task's turn"),
+            MenuCommand("nuclear", "emergency: stops EVERYTHING and resets the bot"),
+            MenuCommand("quota", "the active plan's limits — z.ai pools or OpenCode Go windows"),
+            MenuCommand("usage", "token usage of the active conversation — real, cumulative"),
+            MenuCommand("ctx", "context % per conversation — the real meter list"),
+            MenuCommand("subagents", "the active subagents · «inactivos» shows today's ended"),
+            MenuCommand("verbosity", "cuánto habla el feed en vivo — summary / normal / verbose"),
+            MenuCommand("brain", "pregunta al RAG de agent-brain — /brain status para el pulso"),
+            MenuCommand("memory", "recuerdos del brain — /memory «texto» · recent [k] · status"),
+            MenuCommand("help", "all commands"),
         )
+
+        /** The palette's own names — the usage tap's gate (aliases fold into these). */
+        internal val PALETTE_NAMES: PaletteNames = PaletteNames.of(MENU)
 
         internal val HELP = (listOf(
             "📖 <b>The ${MENU.size}</b> (the owner's MVP — the rest is hot-fix territory):",
@@ -3867,6 +3913,15 @@ class BotCommands(
 
         /** The inactive row's title cap — the prompt head, one phone line. */
         private const val SUBAGENT_TITLE_CAP = 64
+
+        /**
+         * M2's per-tap budgets: a chatty answer is better than a frozen
+         * phone. The context read (workspace + active task) and the running
+         * check each own a short window; the channel's own 15 s ACK is no
+         * longer the tap's worst case.
+         */
+        private val CONTEXT_BUDGET = 2.seconds
+        private val QUERY_BUDGET = 1_500.milliseconds
 
         /** The discard's one-line preview of what was thrown away. */
         private const val DISCARD_PREVIEW = 40

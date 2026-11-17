@@ -41,3 +41,18 @@ WHERE task_id = :taskId AND deleted = 0 LIMIT 1;
 -- The index's own workspace for a task.
 workspacePath:
 SELECT workspace_path FROM tasks WHERE task_id = :taskId;
+
+-- M4's global notifier: the lifecycle rows at or after the floor — the same
+-- title override law as interventionRows, plus the status facts that say
+-- whether a task is still running, finished or failed.
+notifyRows:
+SELECT task_id, workspace_path,
+       COALESCE(NULLIF(CASE WHEN title_overridden = 1 THEN title
+                            ELSE COALESCE(cli_title, title) END, ''), '') AS t,
+       COALESCE(task_status, '') AS task_status,
+       COALESCE(cli_last_outcome, '') AS cli_last_outcome,
+       COALESCE(cli_updated_at, updated_at) AS u
+FROM tasks
+WHERE deleted = 0 AND COALESCE(cli_deleted, 0) = 0 AND archived = 0
+  AND COALESCE(cli_updated_at, updated_at) >= :floor
+ORDER BY u DESC LIMIT :lim;

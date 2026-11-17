@@ -252,6 +252,23 @@ class ChannelClientTest {
         assertEquals(1, events.size)
     }
 
+    @Test
+    fun theFocusSwitchDropsThePreviousTask() = runTest {
+        // M3: the main view watches ONE task — the previous focus leaves the
+        // remembered map (the leak the subscriptions gauge witnesses).
+        val transport = FakeTransport { line -> if (line.contains("\"hello\"")) helloOk(line) else emptyList() }
+        val client = ChannelClient({ transport }, { token }, {})
+        client.subscribeFocus("task-a", "/ws")
+        assertEquals(1, client.subscriptionCount)
+        client.subscribeFocus("task-b", "/ws")
+        assertEquals(1, client.subscriptionCount)
+        assertEquals(null, client.subscriptionWs("task-a"), "the task left behind is forgotten")
+        assertEquals("/ws", client.subscriptionWs("task-b"))
+        // re-attaching the SAME task never grows the map
+        client.subscribeFocus("task-b", "/ws")
+        assertEquals(1, client.subscriptionCount)
+    }
+
     private fun idOf(line: String): String =
         Regex(""""id":"([^"]+)"""").find(line)?.groupValues?.get(1) ?: ""
 
