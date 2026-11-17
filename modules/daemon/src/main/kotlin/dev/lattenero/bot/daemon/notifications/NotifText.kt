@@ -62,6 +62,37 @@ object NotifText {
         return head + answer
     }
 
+    /**
+     * 🔔 MOMENT 1b — the subagent's START (owner, 16/11): a child began its
+     * turn. The title and its own start stamp; nothing invented.
+     */
+    fun subagentStarted(started: SubagentStarted): String =
+        "🚀 <b>Subagente arrancó</b>\n" +
+            "«${PyText.esc(titleOf(started.title, started.sid))}»"
+
+    /**
+     * 🏁 M4 — ANY task's end, subscribed or not (owner, 16/11): the task's
+     * title, the workspace it belongs to, and the fork's own verdict word.
+     */
+    fun taskFinished(task: TaskSignal): String =
+        "🏁 <b>«${PyText.esc(titleOf(task.title, task.taskId))}» — terminó</b>\n" +
+            PyText.esc(workspaceLabel(task.workspacePath)) + outcomeLine(task.lastOutcome)
+
+    /** ❌ M4 — ANY task's failure, subscribed or not. */
+    fun taskFailed(task: TaskSignal): String =
+        "❌ <b>«${PyText.esc(titleOf(task.title, task.taskId))}» — falló</b>\n" +
+            PyText.esc(workspaceLabel(task.workspacePath))
+
+    /** The workspace's own name (its last path segment) — the phone's context line. */
+    private fun workspaceLabel(workspacePath: String): String =
+        workspacePath.substringAfterLast('/').ifBlank { workspacePath }
+
+    /** The CLI's verdict word, when it is more than the plain completed. */
+    private fun outcomeLine(lastOutcome: String): String =
+        lastOutcome.takeIf { it.isNotBlank() && it != "completed" }
+            ?.let { " · " + PyText.esc(it) }
+            .orEmpty()
+
     private fun titleOf(title: String, sid: String): String =
         title.takeIf { it.isNotBlank() } ?: sid.takeLast(SID_TAIL)
 }

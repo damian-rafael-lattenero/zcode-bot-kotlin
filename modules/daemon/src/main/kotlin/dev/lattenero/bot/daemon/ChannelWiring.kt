@@ -36,6 +36,7 @@ import dev.lattenero.bot.channel.QuotaDirect
 import dev.lattenero.bot.channel.QueryAnswer
 import dev.lattenero.bot.channel.SealFacts
 import dev.lattenero.bot.channel.ServerFrame
+import dev.lattenero.bot.channel.isSubagentSession
 import dev.lattenero.bot.channel.subagentSessionId
 import dev.lattenero.bot.channel.TasksHistory
 import dev.lattenero.bot.channel.ToolLive
@@ -54,13 +55,20 @@ import dev.lattenero.bot.daemon.brain.brainGateway
 import dev.lattenero.bot.daemon.history.LIVE_VERBS
 import dev.lattenero.bot.daemon.history.SEQUENCE_LINE_DIFFER
 import dev.lattenero.bot.daemon.history.TasksHistoryIo
+import dev.lattenero.bot.daemon.effects.StreamEffect
+import dev.lattenero.bot.daemon.effects.StreamEffects
+import dev.lattenero.bot.daemon.metrics.AttachClock
+import dev.lattenero.bot.daemon.metrics.HandlerVerb
 import dev.lattenero.bot.daemon.metrics.Metrics
 import dev.lattenero.bot.daemon.metrics.NoopMetrics
+import dev.lattenero.bot.daemon.metrics.STALL_LINE_MS
 import dev.lattenero.bot.daemon.metrics.TurnMetricsTap
 import dev.lattenero.bot.daemon.otel.TurnSpanTracker
 import dev.lattenero.bot.daemon.notifications.InterventionsNotifs
+import dev.lattenero.bot.daemon.notifications.InterventionsWatch
 import dev.lattenero.bot.daemon.notifications.NotificationsWire
 import dev.lattenero.bot.daemon.notifications.SubagentNotifs
+import dev.lattenero.bot.daemon.palette.PaletteStore
 import dev.lattenero.bot.daemon.notifications.WatchOps
 import dev.lattenero.bot.daemon.nuclear.MacProcessEdge
 import dev.lattenero.bot.daemon.nuclear.NuclearLadder
@@ -78,6 +86,7 @@ import dev.lattenero.bot.transport.TgConfig
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -98,8 +107,8 @@ internal class ChannelStack(
     val hub: LiveHub,
     /** U1b's producer — null with the `event_bus` knob off (zero I/O). */
     val bus: BusProducer? = null,
-    /** 🔔 the subagent watcher — null with the `notifications` knob off (zero I/O). */
-    val notifs: SubagentNotifs? = null,
+    /** 🔔 the notifications bundle (subagent watcher + global task notifier) — null with the knob off. */
+    val notifs: NotificationsWire.NotifTaps? = null,
     /**
      * THE BOOT DEFAULT LADDER (the owner's 11/11): ONE run at boot — the
      * first plan WITH tokens in HIS order applies itself to the
@@ -110,6 +119,12 @@ internal class ChannelStack(
     val bootLadder: suspend () -> Unit = {},
     /** 🧭 the any-task watcher (14/11) — null without a live send (nothing to deliver). */
     val interventions: Interventions? = null,
+    /** M1: the palette's persisted ledger + registered order (Main's boot and refresher read it). */
+    val palette: PaletteStore,
+    /** M2: the pump's bounded effect mailbox — Main runs its worker. */
+    val streamEffects: StreamEffects,
+    /** M2: the effects' interpreter (the wiring's closures) — the worker's only body. */
+    val runStreamEffect: suspend (StreamEffect) -> Unit,
 )
 
 /**
@@ -244,7 +259,14 @@ private val OPENCODE_HEADERS = mapOf(
  * the only thing that flips it). The final render rides the spectator's
  * own renderer, INJECTED so the channel module never depends on daemon.
  */
-@Suppress("LongMethod", "CyclomaticComplexMethod") // wiring breadth: the stack's every piece, one home
+@Suppress(
+    "LongMethod",
+    "CyclomaticComplexMethod",
+    // the stream callback's tracer rethrows EVERY exception (the session's
+    // restart policy owns the recovery — M0 only makes the failure visible)
+    "TooGenericExceptionCaught",
+    "ThrowsCount",
+) // wiring breadth: the stack's every piece, one home
 internal fun wireChannel(
     cfg: DaemonConfig,
     send: DaemonSend,
@@ -259,6 +281,8 @@ internal fun wireChannel(
     notificationsOn: Boolean = false,
     /** E3: the span tracker — null with the `otel` knob off (zero cost, byte-identical daemon). */
     otel: TurnSpanTracker? = null,
+    /** M1: the palette's own store — the command tap's counter and the registered order. */
+    palette: PaletteStore = PaletteStore(File(cfg.homeDir, "command-usage.json")),
 ): ChannelStack {
     val hub = LiveHub()
     val tokenFile = File(cfg.baseDir, ChannelSpec.TOKEN_FILENAME)
@@ -368,11 +392,23 @@ internal fun wireChannel(
     // subscriptions' traffic for lost events (the pump serializes its
     // callbacks: no lock, one reader).
     val connSeqFloor = ConnSeqFloor()
+    // M0's attach clock: armed by a subscribe, fired by the FIRST folded
+    // frame of that very task (a subscription with no burst never records).
+    val attachClock = AttachClock()
+    // M2: the pump's effects as data — the callback EMITS, the worker runs.
+    val streamEffects = StreamEffects()
+    // M3: the OPEN dispatch lanes → their child agentIds (toolCallId keyed),
+    // so a lane's close releases exactly its child's subscription.
+    val childLanes = java.util.concurrent.ConcurrentHashMap<String, String>()
     val client = ChannelClient(
         transportFactory = { UnixSocketTransport { socketFile } },
         tokenReader = { tokenFile.takeIf { it.exists() }?.readText() },
         onStreamEvent = { frame ->
-            feedAndResync(hub, connSeqFloor, frame, System.currentTimeMillis())
+            // M0: the pump's own clock — how long this callback holds the ONE
+            // reader; the stall counter is the freeze the owner feels.
+            val startedAt = System.nanoTime()
+            try {
+                feedAndResync(hub, connSeqFloor, frame, System.currentTimeMillis())
             // ADR-019: the turn's lifecycle rides the same frames the live
             // view folds — the tap never changes what the bot says or does
             busTaps?.onFrame(frame)
@@ -380,59 +416,71 @@ internal fun wireChannel(
             // E3: the span tree derives from the SAME real events — one
             // owner per tap point, the channel module never sees a span
             otel?.onFrame(frame)
-            // THE ANSWER ROUND-TRIP: the stream carries the questions AND
-            // their resolutions — the board messages the owner on the
-            // former (dedupe inside), seals honestly on the latter (the
-            // tap, the app's own answer, or the turn's own end). The task
-            // title rides the card when the index already knows it.
-            board.onStreamEvent(frame, taskTitles[frame.taskId])
+            // THE ANSWER ROUND-TRIP rides the EFFECT lane (M2): the board's
+            // sends and seals never hold the reader — the frame still folds
+            // here, the effects run in their own supervised worker.
+            streamEffects.emit(StreamEffect.RegisterQuestion(frame, taskTitles[frame.taskId]))
             when ((frame.event["type"] as? JsonPrimitive)?.content) {
                 // THE CHILD'S OWN STREAM (12/11): a dispatch lane's launch
                 // ACK carries `subagentAgentId` — the fork contract's own
                 // invite (the child session topic `sess_subagent_<id>`).
-                // Subscribe it ONCE per (parent, child); the client's map
-                // replays it on every reconnect, and the hub's routing
-                // drops the late frames of a closed lane, so a stale replay
-                // is silence. There is no unsubscribe on the wire; the
-                // /nuclear reset clears the map whole.
+                // M3: the lane's CLOSE (status completed/failed) releases the
+                // child's subscription — the remembered map only ever holds
+                // live work.
                 "tool_call", "tool_call_update" -> {
+                    val toolId = (frame.event["toolCallId"] as? JsonPrimitive)?.content
                     val agentId = (frame.event["subagentAgentId"] as? JsonPrimitive)?.content
-                    if (!agentId.isNullOrBlank()) childSubscribe(frame.taskId, agentId)
+                    if (!agentId.isNullOrBlank()) {
+                        if (toolId != null) childLanes[toolId] = agentId
+                        streamEffects.emit(StreamEffect.SubscribeChild(frame.taskId, agentId))
+                    }
+                    val status = (frame.event["status"] as? JsonPrimitive)?.content
+                    if ((status == "completed" || status == "failed") && toolId != null) {
+                        childLanes.remove(toolId)?.let { closed ->
+                            streamEffects.emit(StreamEffect.UnsubscribeChild(closed))
+                        }
+                    }
                 }
-                // LA LEY DEL SELLO (medida en vivo 31/10): task_complete NO mata
-                // preguntas — un turno cancelado/moved-on deja la interacción
-                // VIVA en el broker del CLI (la pregunta del dueño se respondió
-                // por la app DESPUÉS del cancel), y el elicitation_response que
-                // llega al resolverse sella solo. task_error SÍ: el broker murió
-                // con el turno.
+                // THE SEAL LAW (measured live 31/10): task_complete does NOT
+                // kill questions — a cancelled/moved-on turn leaves the
+                // interaction ALIVE in the CLI broker (the owner's question
+                // was answered by the app AFTER the cancel), and the
+                // elicitation_response that lands when it resolves seals on
+                // its own. task_error DOES kill it: the broker died with the
+                // turn.
                 "task_complete" -> {
-                    drainQueue()
+                    streamEffects.emit(StreamEffect.DrainQueue)
                     // the turn's seal is the mirror's second expiry: the open
                     // menu of THIS task dies with it (the TTL is the first)
-                    mirrorRefresh?.seal(frame.taskId)
+                    streamEffects.emit(StreamEffect.SealMirror(frame.taskId))
                 }
 
                 "task_error" ->
-                    board.resolveTask(frame.taskId, "⌛ El turno terminó — la pregunta quedó sin responder.")
+                    streamEffects.emit(
+                        StreamEffect.ResolveTask(frame.taskId, "⌛ El turno terminó — la pregunta quedó sin responder."),
+                    )
 
                 // THE DEFAULT-MODE ENFORCEMENT (4/11): a turn starting for a
                 // watched task is the moment the default (Full access) is
-                // WRITTEN when the conversation never chose one — the same
-                // snapshot read the /mode card uses, fired once per task
-                "task_run_started" -> enforceDefaultMode(frame.taskId)
+                // WRITTEN when the conversation never chose one.
+                // M5: NEVER for a CHILD session — the child follows its
+                // parent's mode; a SetMode aimed at sess_subagent_<id> would
+                // be a write to a session that has no mode of its own.
+                "task_run_started" ->
+                    if (!isSubagentSession(frame.taskId)) {
+                        streamEffects.emit(StreamEffect.EnforceMode(frame.taskId))
+                    }
 
                 "permission_response", "elicitation_response" ->
                     (frame.event["requestId"] as? JsonPrimitive)?.content?.let {
-                        board.resolveByRequestId(it, "✅ Respondido desde la app.")
+                        streamEffects.emit(StreamEffect.ResolveRequest(it, "✅ Respondido desde la app."))
                     }
 
                 // EL ESPEJO DE LOS MENUS (the fork's config_option_update,
-                // additive — it does not exist on the wire until the fork
-                // deploy ships it): a config write ANYWHERE (the Mac, another
-                // tap) is the open /mode or /plan_model_effort menu's refresh
-                // trigger. The payload is only the trigger — the fresh state
-                // is re-READ live; a foreign shape is IGNORED (one log line,
-                // the additive rule).
+                // additive): a config write ANYWHERE is the open menu's
+                // refresh trigger. The payload is only the trigger — the
+                // fresh state is re-READ live by the worker; a foreign shape
+                // is IGNORED (one log line, the additive rule).
                 ConfigOptionsUpdate.TYPE -> {
                     val options = ConfigOptionsUpdate.parse(frame.event)
                     if (options == null) {
@@ -440,9 +488,26 @@ internal fun wireChannel(
                             "config_option_update ${frame.taskId.takeLast(SID_TAIL)}: foreign shape — ignored"
                         }
                     } else {
-                        mirrorRefresh?.onConfigUpdate(frame.taskId, options)
+                        streamEffects.emit(StreamEffect.RefreshMenu(frame.taskId, options))
                     }
                 }
+            }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e // cancellation is the process's own — never logged as a frame failure
+            } catch (e: Exception) {
+                // M0 keeps the old policy (the pump's caller restarts the session)
+                // but the failure must LEAVE A TRACE — a silent throw here was
+                // exactly the kind of hole the stabilization is closing.
+                logger.warn(e) {
+                    "stream callback FAILED on ${frame.taskId.takeLast(SID_TAIL)} — propagating " +
+                        "(the session's restart policy owns the recovery)"
+                }
+                throw e
+            } finally {
+                val elapsedMs = (System.nanoTime() - startedAt) / NANOS_PER_MS
+                metrics.streamCallback(elapsedMs)
+                if (elapsedMs > STALL_LINE_MS) metrics.streamStall()
+                attachClock.fire(frame.taskId)?.let { latencyMs -> metrics.attachFirstFrame(latencyMs) }
             }
         },
         onInboundResult = { result ->
@@ -455,6 +520,10 @@ internal fun wireChannel(
         onResubscribed = { taskId ->
             logger.info { "channel resync after reconnect: $taskId re-baselined (lost events stay lost)" }
             hub.resync(taskId)
+            // M2: the stream never replays — re-read the already-pending
+            // interactions ONCE from the snapshot (the board's dedupe makes
+            // a double delivery harmless) instead of waiting for a re-ask.
+            streamEffects.emit(StreamEffect.RecoverAfterReconnect(taskId))
         },
         // THE HEARTBEAT'S SEQ ACCOUNTING: the keepalive consumes the
         // connection's counter — without this every quiet stretch reads as
@@ -469,6 +538,11 @@ internal fun wireChannel(
             hub.keepalive(frame.taskId, frame.seq)
         },
     )
+
+    // M0: the subscriptions gauge — the leak's witness, read at scrape time
+    // (the main view never unsubscribed the task it left; the number must
+    // stay bounded by the watcher's caps, not grow with every tap).
+    metrics.subscriptions { client.subscriptionCount }
 
     // THE DEFAULT-MODE ENFORCEMENT's body (the late bind — the callback above
     // captured the holder): the same snapshot read the /mode card uses, the
@@ -866,6 +940,7 @@ internal fun wireChannel(
         promptTap = promptTap,
         brain = brain,
         metrics = metrics,
+        attachClock = attachClock,
         mirror = mirrorRefresh,
         fileTaps = fileMenu,
         // THE AUTH SENTINEL's marker (12/11): the owner's «already attended»
@@ -874,17 +949,71 @@ internal fun wireChannel(
         authDismiss = { pid ->
             File(File(cfg.homeDir, "state"), AUTH_DISMISSED_FILE).writeText(pid)
         },
+        // M1: every dispatched command lands in the palette's ledger (the
+        // refresher re-registers only when the resulting order moves).
+        onCommand = palette::record,
     )
+
+    // M2: the worker's interpreter — the ONLY runner of the pump's effects.
+    // Everything it calls may take time (Telegram sends, channel queries,
+    // the one-second drain); NONE of it touches the reader anymore.
+    val runStreamEffect: suspend (StreamEffect) -> Unit = { effect ->
+        when (effect) {
+            is StreamEffect.EnforceMode -> enforceDefaultMode(effect.taskId)
+            is StreamEffect.RefreshMenu -> mirrorRefresh?.onConfigUpdate(effect.taskId, effect.options)
+            is StreamEffect.RegisterQuestion -> board.onStreamEvent(effect.frame, effect.title)
+            is StreamEffect.ResolveTask -> board.resolveTask(effect.taskId, effect.note)
+            is StreamEffect.ResolveRequest -> board.resolveByRequestId(effect.requestId, effect.note)
+            is StreamEffect.SealMirror -> mirrorRefresh?.seal(effect.taskId)
+            StreamEffect.DrainQueue -> drainQueue()
+            is StreamEffect.SubscribeChild -> childSubscribe(effect.parentTaskId, effect.agentId)
+            is StreamEffect.UnsubscribeChild -> client.unsubscribe(subagentSessionId(effect.agentId))
+            is StreamEffect.RecoverAfterReconnect ->
+                recoverAfterReconnect(client, board, taskTitles, effect.taskId)
+        }
+    }
     return ChannelStack(
         client,
         liveView,
         wired?.poller,
         hub,
         busTaps,
-        notifs?.watcher,
+        notifs,
         wired?.bootLadder ?: {},
         interventions,
+        palette,
+        streamEffects,
+        runStreamEffect,
     )
+}
+
+/**
+ * M2's reconnect recovery: the stream never replays, so the ALREADY-pending
+ * interactions are re-read once from the snapshot and handed to the same
+ * board — the very shapes the stream would deliver (dedupe by requestId
+ * makes a double delivery harmless). A dead channel or a torn answer is
+ * silence: the live stream still owns the next ask.
+ */
+private suspend fun recoverAfterReconnect(
+    client: ChannelClient,
+    board: QuestionBoard,
+    titles: Map<String, String>,
+    taskId: String,
+) {
+    val workspacePath = client.subscriptionWs(taskId) ?: return
+    val answer = withTimeoutOrNull(SNAPSHOT_BUDGET) {
+        client.query(ChannelQuery.TaskSnapshot(taskId, workspacePath, messageLimit = 1))
+    }
+    val resultJson = (answer as? QueryAnswer.Ok)?.resultJson ?: return
+    InterventionsWatch.pendingQuestionEvents(resultJson).forEach { event ->
+        val frame = ServerFrame.StreamEvent(
+            taskId = taskId,
+            seq = 0,
+            at = System.currentTimeMillis(),
+            event = event,
+        )
+        board.onStreamEvent(frame, titles[taskId])
+    }
 }
 
 private const val QUEUE_FILE = "inbound-queue.json"
@@ -1005,7 +1134,13 @@ private fun buildLiveView(
 }
 
 /** The single reader — knob-gated (retire-python.nu turns it on). */
-@Suppress("LongMethod", "CyclomaticComplexMethod") // wiring breadth: the reader's every piece, one home
+@Suppress(
+    "LongMethod",
+    "CyclomaticComplexMethod",
+    // the handler tracer rethrows EVERY exception (the poller moves on with
+    // its own catch — M0 only makes the failing verb visible)
+    "TooGenericExceptionCaught",
+) // wiring breadth: the reader's every piece, one home
 private fun buildPoller(
     cfg: DaemonConfig,
     api: TgApi?,
@@ -1040,6 +1175,9 @@ private fun buildPoller(
     // E2: the metrics facade (the no-op when off) — the poller's cycles and
     // the owner's accepted updates, counted at the wiring
     metrics: Metrics = NoopMetrics,
+    // M0: the attach clock — armed here (a subscribe), fired by the client's
+    // stream callback (the first folded frame of that very task)
+    attachClock: AttachClock = AttachClock(),
     // THE OPEN MENU MIRROR (null when the live api is missing): the dispatch
     // registers the born /mode and /plan_model_effort menus into it
     mirror: MenuMirrorRefresher? = null,
@@ -1049,6 +1187,9 @@ private fun buildPoller(
     // THE AUTH SENTINEL's marker (12/11): the auth: tap's verdict, written
     // to the state dir the sentinel polls — default no-op for unwired tests
     authDismiss: (String) -> Unit = {},
+    // M1: the usage tap — every dispatched command's canonical palette name
+    // (the wiring binds it to the palette store's ledger)
+    onCommand: (String) -> Unit = {},
 ): PollerWiring? {
     if (!pollOn) return null
     val liveApi = api ?: TgApi({ TgConfig.load(remote) })
@@ -1148,6 +1289,21 @@ private fun buildPoller(
                     // task's subscribe rebases nothing (an unborn turn's
                     // windows do not exist).
                     hub.rebase(taskId)
+                    // M0: the attach's clock starts at the FRAME, not at the
+                    // tap — the tap's own handling is timed by the handler
+                    // metric; this one measures the wire's first answer.
+                    attachClock.arm(taskId)
+                    // M3: the FOCUS law — the task being left is unsubscribed
+                    // (the map stops growing with every tap; the reconnect
+                    // replays only live work). Child topics are not focus.
+                    client.subscribeFocus(taskId, workspacePath)
+                }
+
+                override suspend fun subscribeChild(taskId: String, workspacePath: String) {
+                    // M5: the child's topic — a PLAIN subscribe: the parent's
+                    // focus keeps its own subscription (the owner watches a
+                    // child while the parent's card stays fed).
+                    attachClock.arm(taskId)
                     client.subscribe(taskId, workspacePath)
                 }
             },
@@ -1173,6 +1329,8 @@ private fun buildPoller(
         // Python's ctx_tasks + model_selection — the same two sqlite files the spectator reads
         history = history,
         defaultWorkspacePath = File(File(cfg.baseDir, "workspace"), "default").absolutePath,
+        // M1: the palette's ledger tap — the SAME store the refresher reads
+        onCommand = onCommand,
         verbosity = verbosity,
         board = board,
         quotaDirect = quotaDirectRung(cfg),
@@ -1237,42 +1395,79 @@ private fun buildPoller(
         dispatch = { cfg, update ->
             // the buttons' dispatch: a tap is answered (the toast) and runs
             // as the owner's typed words; a message is the words themselves
-            when (update) {
-                is InboundUpdate.Message -> {
-                    metrics.pollerInbound()
-                    // F23: 👀 the second the words are in, ✅ once handled —
-                    // feedback on the owner's own message, zero new messages
-                    Ack.react(liveApi, cfg, update.messageId, Ack.RECEIVED)
-                    // FILES OUT + /diff (30/10): the two commands that need
-                    // the wiring's own throats (the multipart upload; the
-                    // snapshot query + the mini-diff render) — intercepted
-                    // BEFORE the text dispatcher, which never sees them.
-                    // B6: /deploy joins the pattern — the anti-suicide door
-                    // lives HERE, never in the free-text router.
-                    dispatchMessage(liveApi, cfg, client, history, commands, speak, deployFlow, mirror, update)
-                    Ack.react(liveApi, cfg, update.messageId, Ack.HANDLED)
-                }
+            // M0: the handler clock — the poller is ONE consumer, so this
+            // duration is the time every later tap waits behind.
+            val handlerStartedAt = System.nanoTime()
+            val verb = when (update) {
+                is InboundUpdate.Message -> HandlerVerb.ofText(update.text)
+                is InboundUpdate.Attachment -> HandlerVerb.ATTACHMENT
+                is InboundUpdate.Callback -> HandlerVerb.ofCallback(update.data)
+            }
+            try {
+                when (update) {
+                    is InboundUpdate.Message -> {
+                        metrics.pollerInbound()
+                        // F23: 👀 the second the words are in, ✅ once handled —
+                        // feedback on the owner's own message, zero new messages
+                        Ack.react(liveApi, cfg, update.messageId, Ack.RECEIVED)
+                        // FILES OUT + /diff (30/10): the two commands that need
+                        // the wiring's own throats (the multipart upload; the
+                        // snapshot query + the mini-diff render) — intercepted
+                        // BEFORE the text dispatcher, which never sees them.
+                        // B6: /deploy joins the pattern — the anti-suicide door
+                        // lives HERE, never in the free-text router.
+                        dispatchMessage(
+                            liveApi,
+                            cfg,
+                            client,
+                            history,
+                            commands,
+                            speak,
+                            deployFlow,
+                            mirror,
+                            update,
+                        )
+                        Ack.react(liveApi, cfg, update.messageId, Ack.HANDLED)
+                    }
 
-                is InboundUpdate.Attachment -> {
-                    metrics.pollerInbound()
-                    dispatchAttachment(liveApi, cfg, pythonState, client, speak, prompts = promptTap, update = update)
-                }
+                    is InboundUpdate.Attachment -> {
+                        metrics.pollerInbound()
+                        dispatchAttachment(
+                            liveApi,
+                            cfg,
+                            pythonState,
+                            client,
+                            speak,
+                            prompts = promptTap,
+                            update = update,
+                        )
+                    }
 
-                is InboundUpdate.Callback -> {
-                    metrics.pollerCallback()
-                    answerCallback(liveApi, update.callbackId)
-                    when {
-                        // B6 — the deploy taps: intercepted BEFORE the
-                        // callback fallback (the sst: law: a stray data must
-                        // never ride to the agent as the owner's own words —
-                        // «/deploy go» launching a build would be the graver bug)
-                        update.data.startsWith("dep:") ->
-                            deployFlow.onTap(update.data.removePrefix("dep:"), update.fromId)
+                    is InboundUpdate.Callback -> {
+                        metrics.pollerCallback()
+                        answerCallback(liveApi, update.callbackId)
+                        when {
+                            // B6 — the deploy taps: intercepted BEFORE the
+                            // callback fallback (the sst: law: a stray data must
+                            // never ride to the agent as the owner's own words —
+                            // «/deploy go» launching a build would be the graver bug)
+                            update.data.startsWith("dep:") ->
+                                deployFlow.onTap(update.data.removePrefix("dep:"), update.fromId)
 
-                        else -> commands.onCallback(update.data, update.updateId, update.fromId)
-                            ?.let { reply -> speakReply(mirror, cfg.chatId, reply, speak) }
+                            else -> commands.onCallback(update.data, update.updateId, update.fromId)
+                                ?.let { reply -> speakReply(mirror, cfg.chatId, reply, speak) }
+                        }
                     }
                 }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e // cancellation is the daemon's own — never logged as a handler failure
+            } catch (e: Exception) {
+                // the poller already moves on (its own catch) — the TRACE is
+                // this line: verb + update id name the exact handler that died
+                logger.warn(e) { "handler $verb FAILED on update ${update.updateId} — propagating" }
+                throw e
+            } finally {
+                metrics.handler(verb, (System.nanoTime() - handlerStartedAt) / NANOS_PER_MS)
             }
         },
         ),
@@ -1366,6 +1561,12 @@ private suspend fun dispatchAttachment(
 /** The nuclear gate's file (mtime = the last start) and its double-trigger window. */
 private const val NUCLEAR_GATE = "nuclear-last"
 private const val NUCLEAR_DEBOUNCE_MS = 180_000L
+
+/** The pump clock's unit step (M0): nanoTime is monotonic, the metric speaks ms. */
+private const val NANOS_PER_MS = 1_000_000L
+
+/** M2's reconnect snapshot read: light (one message), bounded — a dead channel is silence. */
+private val SNAPSHOT_BUDGET = 3.seconds
 
 /**
  * THE MIRROR'S REGISTRATION LEG: speak the reply and, when it carries the
@@ -1495,18 +1696,26 @@ private const val SID_TAIL = 8
 @Suppress("TooGenericExceptionCaught") // Python's bare except: a failed toast never fails the tap
 private suspend fun answerCallback(api: TgApi, callbackId: String, text: String? = null) {
     try {
-        api.call(
-            "answerCallbackQuery",
-            buildJsonObject {
-                put("callback_query_id", callbackId)
-                if (text != null) put("text", text)
-            },
-        )
+        // M2: the toast's own budget — a dead Telegram costs 2 s, never the
+        // request's 35 s, and the tap's action has already run.
+        val sent = withTimeoutOrNull(TOAST_BUDGET) {
+            api.call(
+                "answerCallbackQuery",
+                buildJsonObject {
+                    put("callback_query_id", callbackId)
+                    if (text != null) put("text", text)
+                },
+            )
+        }
+        if (sent == null) logger.warn { "answerCallbackQuery exceeded $TOAST_BUDGET (the tap's action still ran)" }
     } catch (e: CancellationException) {
         throw e // cancellation is not a toast failure — the cancelled job keeps cancelling
     } catch (e: Exception) {
         logger.warn(e) { "answerCallbackQuery failed (the tap's action still ran): ${e.message}" }
     }
 }
+
+/** M2's toast budget: the tap's feedback must never hold the single poller. */
+private val TOAST_BUDGET = 2.seconds
 
 /** stopAll's answer → how many runs it stopped (the ladder's step-1 evidence). */

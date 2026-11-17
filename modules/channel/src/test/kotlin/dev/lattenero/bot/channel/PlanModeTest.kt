@@ -191,7 +191,7 @@ class PlanModeTest {
 
     @Test
     fun planModeSitsRightAfterModeOnTheMenu() {
-        val names = BotCommands.MENU.map { it.first }
+        val names = BotCommands.MENU.map { it.name }
         assertEquals(names.indexOf("mode") + 1, names.indexOf("plan_mode"), "the toggle lives beside /mode")
         assertTrue("/plan_mode — Plan mode ON/OFF" in BotCommands.HELP)
     }

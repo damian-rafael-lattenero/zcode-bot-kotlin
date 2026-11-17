@@ -40,11 +40,18 @@ data class SubagentDone(
     val endedMs: Long,
 )
 
+/** One STARTED child to announce (M4's owner order): a fresh '' row just born. */
+data class SubagentStarted(val sid: String, val title: String, val startedMs: Long)
+
 /** What the fold last recorded for a sid — the state file's row. */
 data class SeenOutcome(val outcome: String, val atMs: Long)
 
 /** One pass's fold: the next memory + the transitions to announce. */
-data class SubagentFold(val seen: Map<String, SeenOutcome>, val announce: List<SubagentDone>)
+data class SubagentFold(
+    val seen: Map<String, SeenOutcome>,
+    val announce: List<SubagentDone>,
+    val started: List<SubagentStarted> = emptyList(),
+)
 
 object SubagentWatch {
 
@@ -68,9 +75,16 @@ object SubagentWatch {
      * transitions to announce. PURE — `nowMs` is injected, the store is
      * the caller's read.
      */
-    fun pass(seen: Map<String, SeenOutcome>, rows: List<ChildSession>, nowMs: Long): SubagentFold {
+    fun pass(
+        seen: Map<String, SeenOutcome>,
+        rows: List<ChildSession>,
+        nowMs: Long,
+        /** M4: announce a FRESH first sighting of a running child (the start). */
+        announceStarts: Boolean = false,
+    ): SubagentFold {
         val next = HashMap<String, SeenOutcome>(seen)
         val announce = ArrayList<SubagentDone>()
+        val started = ArrayList<SubagentStarted>()
         for (row in rows) {
             val prev = seen[row.sid]
             val outcome = row.outcome
@@ -79,6 +93,11 @@ object SubagentWatch {
                 // gap or undoes a recorded end (an honest mirror of the store)
                 if (prev == null || prev.outcome.isNotBlank()) {
                     next[row.sid] = SeenOutcome("", nowMs)
+                }
+                // M4: a running child FIRST seen inside the freshness window
+                // is a START — the owner hears the spawn too.
+                if (prev == null && announceStarts && nowMs - row.startedMs in 0 until FRESH_WINDOW_MS) {
+                    started += SubagentStarted(row.sid, row.title, row.startedMs)
                 }
                 continue
             }
@@ -93,7 +112,7 @@ object SubagentWatch {
                 announce += SubagentDone(row.sid, row.title, outcome, row.startedMs, row.updatedMs)
             }
         }
-        return SubagentFold(prune(next, nowMs), announce)
+        return SubagentFold(prune(next, nowMs), announce, started)
     }
 
     /** The memory stays small: a day-old entry dies, then the cap keeps the newest. */

@@ -116,7 +116,7 @@ class VerbosityCommandTest {
 
     @Test
     fun theCommandRidesTheMenuAndHelp() {
-        assertTrue(BotCommands.MENU.any { it.first == "verbosity" }, "the 15th command is on the menu")
+        assertTrue(BotCommands.MENU.any { it.name == "verbosity" }, "the 15th command is on the menu")
         assertTrue("/verbosity" in BotCommands.HELP)
     }
 }

@@ -74,15 +74,19 @@ class SubagentNotifsTest {
         setUpFixture()
         insert("sess_subagent_a", "", now - 2_000L)
         val first = build()
-        assertTrue(first.pass().isEmpty(), "running speaks nothing")
+        val firstFold = first.pass()
+        assertEquals(1, firstFold.started.size, "M4: a fresh running child speaks its START")
+        assertTrue(firstFold.announce.isEmpty(), "running is not an end")
         // the child ends; every NEW instance (a restart re-loading the
         // state file) must still announce the transition exactly ONCE
         insert("sess_subagent_a", "completed", now - 1_000L)
         val second = build()
-        val announced = second.pass()
-        second.speak(announced)
-        assertEquals(1, announced.size, "the transition announces exactly once")
-        assertEquals(0, build().pass().size, "the persisted memory dedupes across restarts")
+        val fold = second.pass()
+        second.speak(fold)
+        assertEquals(1, fold.announce.size, "the transition announces exactly once")
+        val restarted = build().pass()
+        assertEquals(0, restarted.announce.size, "the persisted memory dedupes across restarts")
+        assertEquals(0, restarted.started.size, "the START never repeats either")
         assertEquals(1, sent.size)
         val (decision, loud) = sent[0]
         assertEquals(NotifText.WATCHER, decision.watcher)
@@ -92,12 +96,21 @@ class SubagentNotifsTest {
     }
 
     @Test
+    fun theStartSpeaksOnceAndNeverForAGhost() {
+        setUpFixture()
+        insert("fresh-start", "", now - 2_000L, createdMs = now - 60_000L)
+        insert("ghost-start", "", now - 2_000L, createdMs = now - SubagentWatch.FRESH_WINDOW_MS * 2)
+        val fold = build().pass()
+        assertEquals(listOf("fresh-start"), fold.started.map { it.sid }, "only a fresh spawn speaks")
+    }
+
+    @Test
     fun aFreshNeverSeenEndAnnouncesAStaleOneDoesNot() {
         setUpFixture()
         insert("fresh", "completed", now - 1_000L)
         insert("ghost", "interrupted", now - SubagentWatch.FRESH_WINDOW_MS * 4)
-        val announced = build().pass()
-        assertEquals(listOf("fresh"), announced.map { it.sid }, "the ghost earns silence")
+        val fold = build().pass()
+        assertEquals(listOf("fresh"), fold.announce.map { it.sid }, "the ghost earns silence")
     }
 
     @Test
@@ -105,11 +118,13 @@ class SubagentNotifsTest {
         setUpFixture()
         val dbDir = File(base, "cli/db").apply { deleteRecursively() }
         assertTrue(!dbDir.exists())
-        assertTrue(build().pass().isEmpty())
+        val missing = build().pass()
+        assertTrue(missing.announce.isEmpty() && missing.started.isEmpty())
         // a broken store degrades to emptiness too — the fold never sees garbage
         dbDir.mkdirs()
         File(dbDir, "db.sqlite").writeText("this is not a database")
-        assertTrue(build().pass().isEmpty())
+        val broken = build().pass()
+        assertTrue(broken.announce.isEmpty() && broken.started.isEmpty())
     }
 
     @Test
@@ -117,7 +132,7 @@ class SubagentNotifsTest {
         setUpFixture()
         stateFile().writeText("{{{ not json")
         insert("fresh", "completed", now - 1_000L)
-        assertEquals(1, build().pass().size, "a broken memory is no memory: the fresh end speaks")
+        assertEquals(1, build().pass().announce.size, "a broken memory is no memory: the fresh end speaks")
     }
 
     @Test

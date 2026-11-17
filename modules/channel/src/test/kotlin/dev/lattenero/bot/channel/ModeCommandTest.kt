@@ -280,7 +280,7 @@ class ModeCommandTest {
 
     @Test
     fun modeSitsRightAfterPlanOnTheMenu() {
-        val names = BotCommands.MENU.map { it.first }
+        val names = BotCommands.MENU.map { it.name }
         // the plan picker's three commands (the 11/11 split) sit right before /mode
         assertEquals(names.indexOf("effort") + 1, names.indexOf("mode"))
         assertTrue("/mode — the conversation's mode" in BotCommands.HELP)
