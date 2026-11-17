@@ -403,21 +403,17 @@ class PlanCommandTest {
 
     @Test
     fun anUnknownQuotaIsTheLaddersLastResort() = runBlocking {
-        // The direct OpenCode meter is absent (quotaAnswers does NOT drive it —
-        // BotCommands routes opencode* through directQuotaMark, here null →
-        // Missing) and the two zai rungs are unreadable: the FIRST unknown rung
-        // wins (the bot must work), and the pick DIFFERS from the selection in
-        // force — the conversation rides opencode/kimi, the ladder applies
-        // opencode/deepseek (the 17/11 default).
+        // rung 1 + 2 unreadable, rung 3 PROVEN empty → the unknown rung 1 wins (the bot must work);
+        // the conversation rides OpenCode Go so the last resort's pick DIFFERS from the selection in force
         val o = quotaOps().apply {
             answers["modelSelection"] = catalogJson(plan = "opencode-go-chat", model = "kimi-k2")
+            quotaAnswers["opencode-go-chat"] = creditLimitJson(pct5h = 0, pctWeek = 0)
             quotaAnswers["account:zai-start-plan"] = """{"quota":{"limits":[]}}"""
             quotaAnswers["account:zai-individual-coding-plan"] = """{"quota":{"limits":[]}}"""
         }
         val reply = commands(o).onCallback("pdef:", 11L, OWNER)!!
         val set = o.queries.filterIsInstance<ChannelQuery.SetModelSelection>().single()
-        assertEquals("opencode-go-chat", set.plan)
-        assertEquals("deepseek-v4.1-flash", set.model)
+        assertEquals("account:zai-start-plan", set.plan)
         assertTrue("quota desconocida — elegido por el orden del dueño" in reply.text, reply.text)
     }
 

@@ -1,15 +1,15 @@
 package dev.lattenero.bot.channel
 
 /**
- * THE DEFAULT LADDER (the owner's order — 11/11 rungs, REORDERED 17/11):
- * one priority list that keeps the bot on a plan WITH tokens — «si la 1 no
- * tiene tokens, va a la 2, y si esa tampoco, va a la 3, y si esa tampoco,
- * error - quota limit reached for all… en ese orden».
+ * THE DEFAULT LADDER (the owner's 11/11 order): one priority list that
+ * keeps the bot on a plan WITH tokens — «si la 1 no tiene tokens, va a la
+ * 2, y si esa tampoco, va a la 3, y si esa tampoco, error - quota limit
+ * reached for all… en ese orden, si la 1 no tiene tokens, va a la 2».
  *
- * THE ORDER IS THE OWNER'S, verbatim (17/11):
- *   1) OpenCode Go   — deepseek-v4.1-flash — Max   (the default)
- *   2) Start Plan    — GLM-5.3-Flash    — Max
- *   3) Z.ai          — GLM-5.3-Flash    — Max
+ * THE ORDER IS THE OWNER'S, verbatim:
+ *   1) Start Plan    — GLM-5.3-Flash    — Max
+ *   2) Z.ai          — GLM-5.3-Flash    — Max
+ *   3) OpenCode Go   — deepseek-v4.1-flash — Max
  *
  * A rung resolves against the LIVE catalog (never invented): the named
  * model must be exposed by the plan (else that plan's own first model,
@@ -31,11 +31,11 @@ object PlanLadder {
     /** The ladder's answer: the pick (null = EVERY rung exhausted) + the tiny notes. */
     data class Verdict(val pick: Pick?, val notes: List<String>)
 
-    /** The owner's priority, in his exact order (deepseek first — 17/11). */
+    /** The owner's priority, in his exact order. */
     val DEFAULT: List<Rung> = listOf(
-        Rung("opencode-go-chat", "deepseek-v4.1-flash", "max"),
         Rung("account:zai-start-plan", "GLM-5.3-Flash", "max"),
         Rung("account:zai-individual-coding-plan", "GLM-5.3-Flash", "max"),
+        Rung("opencode-go-chat", "deepseek-v4.1-flash", "max"),
     )
 
     /**
