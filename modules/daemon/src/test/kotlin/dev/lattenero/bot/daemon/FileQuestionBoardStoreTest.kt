@@ -1,6 +1,7 @@
 package dev.lattenero.bot.daemon
 
 import dev.lattenero.bot.channel.PendingQuestion
+import dev.lattenero.bot.channel.QuestionAnswers
 import dev.lattenero.bot.channel.QuestionItem
 import dev.lattenero.bot.channel.QuestionOption
 import kotlinx.serialization.json.buildJsonObject
@@ -54,7 +55,7 @@ class FileQuestionBoardStoreTest {
                     QuestionItem("Notas", "¿notas?", emptyList()),
                 ),
                 questionIndex = 1,
-                answers = mapOf(0 to "main"),
+                answers = QuestionAnswers(mapOf(0 to "main")),
                 taskTitle = "kap — the detekt laws",
                 originLabel = "general-purpose · audit the migrations",
             ),

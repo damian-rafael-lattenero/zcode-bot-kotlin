@@ -50,7 +50,7 @@ fun PendingQuestion.storeEntry(shortId: String): JsonObject = buildJsonObject {
     putJsonArray("questions") { questions.forEach { add(it.storeJson()) } }
     put("questionIndex", JsonPrimitive(questionIndex))
     putJsonObject("answers") {
-        answers.forEach { (index, value) -> put(index.toString(), JsonPrimitive(value)) }
+        answers.byIndex.forEach { (index, value) -> put(index.toString(), JsonPrimitive(value)) }
     }
 }
 
@@ -76,10 +76,12 @@ fun pendingQuestionOf(entry: JsonObject): PendingQuestion? {
         questionCount = entry.int("questionCount") ?: 1,
         questions = entry.array("questions").mapNotNull { it as? JsonObject }.map { itemOf(it) },
         questionIndex = entry.int("questionIndex") ?: 0,
-        answers = (entry["answers"] as? JsonObject).orEmpty()
-            .mapNotNull { (index, value) ->
-                index.toIntOrNull()?.let { it to (value as? JsonPrimitive)?.content.orEmpty() }
-            }.toMap(),
+        answers = QuestionAnswers(
+            (entry["answers"] as? JsonObject).orEmpty()
+                .mapNotNull { (index, value) ->
+                    index.toIntOrNull()?.let { it to (value as? JsonPrimitive)?.content.orEmpty() }
+                }.toMap(),
+        ),
         taskTitle = entry.str("taskTitle"),
         originLabel = entry.str("originLabel"),
     )
