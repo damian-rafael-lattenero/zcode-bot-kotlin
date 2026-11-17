@@ -1,0 +1,151 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>ClassNaming:Model_usage.kt:Model_usage</ID>
+    <ID>ClassNaming:Session_entry.kt:Session_entry</ID>
+    <ID>ConstructorParameterNaming:Children.kt:Children$public val time_created: Long</ID>
+    <ID>ConstructorParameterNaming:Children.kt:Children$public val time_updated: Long</ID>
+    <ID>ConstructorParameterNaming:Freshest.kt:Freshest$public val task_id: String</ID>
+    <ID>ConstructorParameterNaming:Freshest.kt:Freshest$public val updated_at: Long</ID>
+    <ID>ConstructorParameterNaming:Freshest.kt:Freshest$public val workspace_path: String</ID>
+    <ID>ConstructorParameterNaming:IndexRows.kt:IndexRows$public val task_id: String</ID>
+    <ID>ConstructorParameterNaming:IndexRows.kt:IndexRows$public val updated_at: Long</ID>
+    <ID>ConstructorParameterNaming:IndexRows.kt:IndexRows$public val workspace_path: String</ID>
+    <ID>ConstructorParameterNaming:InterventionRows.kt:InterventionRows$public val task_id: String</ID>
+    <ID>ConstructorParameterNaming:InterventionRows.kt:InterventionRows$public val workspace_path: String</ID>
+    <ID>ConstructorParameterNaming:Model_usage.kt:Model_usage$public val input_tokens: Long</ID>
+    <ID>ConstructorParameterNaming:Model_usage.kt:Model_usage$public val model_id: String?</ID>
+    <ID>ConstructorParameterNaming:Model_usage.kt:Model_usage$public val output_tokens: Long</ID>
+    <ID>ConstructorParameterNaming:Model_usage.kt:Model_usage$public val session_id: String</ID>
+    <ID>ConstructorParameterNaming:Model_usage.kt:Model_usage$public val started_at: Long</ID>
+    <ID>ConstructorParameterNaming:Newborns.kt:Newborns$public val time_updated: Long</ID>
+    <ID>ConstructorParameterNaming:NotifyRows.kt:NotifyRows$public val cli_last_outcome: String</ID>
+    <ID>ConstructorParameterNaming:NotifyRows.kt:NotifyRows$public val task_id: String</ID>
+    <ID>ConstructorParameterNaming:NotifyRows.kt:NotifyRows$public val task_status: String</ID>
+    <ID>ConstructorParameterNaming:NotifyRows.kt:NotifyRows$public val workspace_path: String</ID>
+    <ID>ConstructorParameterNaming:RunningSubsTitled.kt:RunningSubsTitled$public val time_updated: Long</ID>
+    <ID>ConstructorParameterNaming:Session.kt:Session$public val last_outcome: String?</ID>
+    <ID>ConstructorParameterNaming:Session.kt:Session$public val parent_id: String?</ID>
+    <ID>ConstructorParameterNaming:Session.kt:Session$public val task_type: String?</ID>
+    <ID>ConstructorParameterNaming:Session.kt:Session$public val time_archived: Long?</ID>
+    <ID>ConstructorParameterNaming:Session.kt:Session$public val time_created: Long</ID>
+    <ID>ConstructorParameterNaming:Session.kt:Session$public val time_deleted: Long?</ID>
+    <ID>ConstructorParameterNaming:Session.kt:Session$public val time_updated: Long</ID>
+    <ID>ConstructorParameterNaming:Session_entry.kt:Session_entry$public val data_: String</ID>
+    <ID>ConstructorParameterNaming:Session_entry.kt:Session_entry$public val session_id: String</ID>
+    <ID>ConstructorParameterNaming:Session_entry.kt:Session_entry$public val time_created: Long</ID>
+    <ID>ConstructorParameterNaming:SubagentsTodayAll.kt:SubagentsTodayAll$public val last_outcome: String?</ID>
+    <ID>ConstructorParameterNaming:SubagentsTodayAll.kt:SubagentsTodayAll$public val time_created: Long</ID>
+    <ID>ConstructorParameterNaming:SubagentsTodayAll.kt:SubagentsTodayAll$public val time_updated: Long</ID>
+    <ID>ConstructorParameterNaming:SubagentsTodayOfParent.kt:SubagentsTodayOfParent$public val last_outcome: String?</ID>
+    <ID>ConstructorParameterNaming:SubagentsTodayOfParent.kt:SubagentsTodayOfParent$public val time_created: Long</ID>
+    <ID>ConstructorParameterNaming:SubagentsTodayOfParent.kt:SubagentsTodayOfParent$public val time_updated: Long</ID>
+    <ID>ConstructorParameterNaming:TaskLabelRow.kt:TaskLabelRow$public val root_path: String?</ID>
+    <ID>ConstructorParameterNaming:TaskLabelRow.kt:TaskLabelRow$public val workspace_path: String</ID>
+    <ID>ConstructorParameterNaming:Tasks.kt:Tasks$public val cli_deleted: Long?</ID>
+    <ID>ConstructorParameterNaming:Tasks.kt:Tasks$public val cli_last_outcome: String?</ID>
+    <ID>ConstructorParameterNaming:Tasks.kt:Tasks$public val cli_title: String?</ID>
+    <ID>ConstructorParameterNaming:Tasks.kt:Tasks$public val cli_updated_at: Long?</ID>
+    <ID>ConstructorParameterNaming:Tasks.kt:Tasks$public val root_path: String?</ID>
+    <ID>ConstructorParameterNaming:Tasks.kt:Tasks$public val task_id: String</ID>
+    <ID>ConstructorParameterNaming:Tasks.kt:Tasks$public val task_status: String?</ID>
+    <ID>ConstructorParameterNaming:Tasks.kt:Tasks$public val title_overridden: Long?</ID>
+    <ID>ConstructorParameterNaming:Tasks.kt:Tasks$public val updated_at: Long</ID>
+    <ID>ConstructorParameterNaming:Tasks.kt:Tasks$public val workspace_key: String</ID>
+    <ID>ConstructorParameterNaming:Tasks.kt:Tasks$public val workspace_path: String</ID>
+    <ID>ConstructorParameterNaming:UsageBySession.kt:UsageBySession$public val input_tokens: Long</ID>
+    <ID>ConstructorParameterNaming:UsageBySession.kt:UsageBySession$public val model_id: String?</ID>
+    <ID>ConstructorParameterNaming:UsageBySession.kt:UsageBySession$public val output_tokens: Long</ID>
+    <ID>ConstructorParameterNaming:UsageBySession.kt:UsageBySession$public val session_id: String</ID>
+    <ID>ConstructorParameterNaming:UsageBySession.kt:UsageBySession$public val started_at: Long</ID>
+    <ID>DoubleMutabilityForCollection:SequenceMatcher.kt:SequenceMatcher$var codes = opcodes().toMutableList()</ID>
+    <ID>DoubleMutabilityForCollection:SequenceMatcher.kt:SequenceMatcher$var group = mutableListOf&lt;Opcode&gt;()</ID>
+    <ID>ImplicitDefaultLocale:ZconnText.kt:ZconnText$"%dm %02ds".format(seconds / SECONDS_PER_MINUTE, seconds % SECONDS_PER_MINUTE)</ID>
+    <ID>InjectDispatcher:GlobalNoticesIo.kt:GlobalNoticesIo$IO</ID>
+    <ID>InjectDispatcher:TasksHistoryIo.kt:TasksHistoryIo$IO</ID>
+    <ID>LongParameterList:BrainFetch.kt:@Suppress("TooGenericExceptionCaught", "SwallowedException") private suspend fun brainCallRaw: BrainReply</ID>
+    <ID>LongParameterList:BrainFetch.kt:internal suspend fun brainCall: BrainReply</ID>
+    <ID>LongParameterList:BusProducer.kt:BusProducer.TurnState</ID>
+    <ID>LongParameterList:ChannelWiring.kt:@Suppress( "LongMethod", "CyclomaticComplexMethod", // the handler tracer rethrows EVERY exception (the poller moves on with // its own catch — M0 only makes the failing verb visible) "TooGenericExceptionCaught", ) // wiring breadth: the reader's every piece, one home private fun buildPoller: PollerWiring?</ID>
+    <ID>LongParameterList:ChannelWiring.kt:@Suppress( "LongMethod", "CyclomaticComplexMethod", // the stream callback's tracer rethrows EVERY exception (the session's // restart policy owns the recovery — M0 only makes the failure visible) "TooGenericExceptionCaught", "ThrowsCount", ) // wiring breadth: the stack's every piece, one home internal fun wireChannel: ChannelStack</ID>
+    <ID>LongParameterList:ChannelWiring.kt:@Suppress("TooGenericExceptionCaught") // the download leg: any failure speaks honestly, never crashes the poller private suspend fun dispatchAttachment</ID>
+    <ID>LongParameterList:ChannelWiring.kt:ChannelStack</ID>
+    <ID>LongParameterList:ChannelWiring.kt:private fun buildLiveView: LivePublisher?</ID>
+    <ID>LongParameterList:DeploySpawn.kt:DeploySpawn</ID>
+    <ID>LongParameterList:Lanes.kt:SendLanes</ID>
+    <ID>LongParameterList:Lanes.kt:private fun splitLanes: SendLanes</ID>
+    <ID>MagicNumber:CliQueries.kt:CliQueries$1_909_841_968</ID>
+    <ID>MagicNumber:CliQueries.kt:CliQueries$3</ID>
+    <ID>MagicNumber:CliQueries.kt:CliQueries$4</ID>
+    <ID>MagicNumber:CliQueries.kt:CliQueries.ChildrenQuery$1_712_184_849</ID>
+    <ID>MagicNumber:CliQueries.kt:CliQueries.ModelSelectionQuery$683_130_613</ID>
+    <ID>MagicNumber:CliQueries.kt:CliQueries.NewbornsQuery$1_432_619_196</ID>
+    <ID>MagicNumber:CliQueries.kt:CliQueries.SubagentsTodayAllQuery$83_453_244</ID>
+    <ID>MagicNumber:TasksQueries.kt:TasksQueries$3</ID>
+    <ID>MagicNumber:TasksQueries.kt:TasksQueries$4</ID>
+    <ID>MagicNumber:TasksQueries.kt:TasksQueries$5</ID>
+    <ID>MagicNumber:TasksQueries.kt:TasksQueries$994_718_027</ID>
+    <ID>MagicNumber:TasksQueries.kt:TasksQueries$994_741_463</ID>
+    <ID>MagicNumber:TasksQueries.kt:TasksQueries.AliveCountQuery$862_460_734</ID>
+    <ID>MagicNumber:TasksQueries.kt:TasksQueries.FreshestQuery$81_207_784</ID>
+    <ID>MagicNumber:TasksQueries.kt:TasksQueries.InterventionRowsQuery$494_348_848</ID>
+    <ID>MagicNumber:TasksQueries.kt:TasksQueries.NotifyRowsQuery$1_128_503_998</ID>
+    <ID>MagicNumber:TasksQueries.kt:TasksQueries.TaskLabelRowQuery$1_432_794_987</ID>
+    <ID>MagicNumber:TasksQueries.kt:TasksQueries.WorkspacePathQuery$1_840_676_314</ID>
+    <ID>MaxLineLength:CliQueries.kt:CliQueries$public fun runningSubsTitled: Query&lt;RunningSubsTitled&gt;</ID>
+    <ID>MaxLineLength:CliQueries.kt:CliQueries$public fun subagentsTodayAll: Query&lt;SubagentsTodayAll&gt;</ID>
+    <ID>MaxLineLength:CliQueries.kt:CliQueries$public fun subagentsTodayOfParent: Query&lt;SubagentsTodayOfParent&gt;</ID>
+    <ID>MaxLineLength:TasksQueries.kt:TasksQueries$public</ID>
+    <ID>MaxLineLength:TasksQueries.kt:TasksQueries$public fun interventionRows: Query&lt;InterventionRows&gt;</ID>
+    <ID>MaxLineLength:TasksQueries.kt:TasksQueries.WorkspacePathQuery$override</ID>
+    <ID>NoNameShadowing:ChannelWiring.kt:cfg</ID>
+    <ID>NoNameShadowing:DeploySpawn.kt:DeploySpawn$args</ID>
+    <ID>ObjectLiteralToLambda:SendLeg.kt:SendLegs$object : SendLeg { override suspend fun deliver(decision: ShadowDecision, loud: Boolean) { // silent BY DESIGN: the shadow leg is the no-op the comparator diffs against } }</ID>
+    <ID>RedundantSuspendModifier:PromptTap.kt:PromptTap$suspend</ID>
+    <ID>TooManyFunctions:CliQueries.kt:CliQueries : TransacterImpl</ID>
+    <ID>TooManyFunctions:TasksQueries.kt:TasksQueries : TransacterImpl</ID>
+    <ID>UnnecessaryNotNullOperator:Main.kt:lanes.live!!</ID>
+    <ID>UnsafeCallOnNullableType:CliQueries.kt:CliQueries$cursor.getLong(1)!!</ID>
+    <ID>UnsafeCallOnNullableType:CliQueries.kt:CliQueries$cursor.getLong(2)!!</ID>
+    <ID>UnsafeCallOnNullableType:CliQueries.kt:CliQueries$cursor.getLong(3)!!</ID>
+    <ID>UnsafeCallOnNullableType:CliQueries.kt:CliQueries$cursor.getLong(4)!!</ID>
+    <ID>UnsafeCallOnNullableType:CliQueries.kt:CliQueries$cursor.getString(0)!!</ID>
+    <ID>UnsafeCallOnNullableType:CliQueries.kt:CliQueries$cursor.getString(2)!!</ID>
+    <ID>UnsafeCallOnNullableType:TasksQueries.kt:TasksQueries$cursor.getLong(0)!!</ID>
+    <ID>UnsafeCallOnNullableType:TasksQueries.kt:TasksQueries$cursor.getLong(3)!!</ID>
+    <ID>UnsafeCallOnNullableType:TasksQueries.kt:TasksQueries$cursor.getLong(5)!!</ID>
+    <ID>UnsafeCallOnNullableType:TasksQueries.kt:TasksQueries$cursor.getString(0)!!</ID>
+    <ID>UnsafeCallOnNullableType:TasksQueries.kt:TasksQueries$cursor.getString(1)!!</ID>
+    <ID>UnsafeCallOnNullableType:TasksQueries.kt:TasksQueries$cursor.getString(2)!!</ID>
+    <ID>UnsafeCallOnNullableType:TasksQueries.kt:TasksQueries$cursor.getString(3)!!</ID>
+    <ID>UnsafeCallOnNullableType:TasksQueries.kt:TasksQueries$cursor.getString(4)!!</ID>
+    <ID>UnusedPrivateProperty:SpectatorWatch.kt:SpectatorOrchestrator$private val logger = KotlinLogging.logger {}</ID>
+    <ID>UnusedVariable:Main.kt:leg</ID>
+    <ID>UnusedVariable:Main.kt:val globalHandle = stack.notifs ?.global ?.asProcess(GLOBAL_NOTICE_EVERY, onHeartbeat = { touch(File(stateDir, HB_GLOBAL)) }) ?.startIn(this)</ID>
+    <ID>UnusedVariable:Main.kt:val livePingHandle = stack.liveView ?.pingProcess(onHeartbeat = { touch(File(stateDir, HB_LIVE_VIEW)) }) ?.startIn(this)</ID>
+    <ID>UnusedVariable:NuclearLadder.kt:MacProcessEdge$code</ID>
+    <ID>UnusedVariable:NuclearLadder.kt:NuclearLadder$poll</ID>
+    <ID>UseCheckOrError:ChannelWiring.kt:throw IllegalStateException( "deploy(ALL) must be split by the flow (fork first) — the wiring only spawns atomic targets", )</ID>
+    <ID>UseCheckOrError:DeploySpawn.kt:DeploySpawn$throw IllegalStateException("launchctl bootstrap $label failed: ${out.text.trim()}")</ID>
+    <ID>UseCheckOrError:DeploySpawn.kt:DeploySpawn$throw IllegalStateException(busyMessage())</ID>
+    <ID>UseOrEmpty:BusProducer.kt:BusProducer$(event["content"] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: ""</ID>
+    <ID>UseOrEmpty:BusProducer.kt:BusProducer$entry.sidHint ?: ""</ID>
+    <ID>UseOrEmpty:BusProducer.kt:BusProducer$reply ?: ""</ID>
+    <ID>UseOrEmpty:BusProducer.kt:BusProducer$str(event, "toolCallId") ?: ""</ID>
+    <ID>UseOrEmpty:BusProducer.kt:BusProducer$str(event, "toolName") ?: ""</ID>
+    <ID>UseOrEmpty:CliLogs.kt:CliLogParser$(obj["sessionId"] as? JsonPrimitive)?.content ?: ""</ID>
+    <ID>UseOrEmpty:FilesCommands.kt:MiniDiff$beforeLines ?: emptyList()</ID>
+    <ID>UseOrEmpty:SequenceMatcher.kt:SequenceMatcher$b2j[a[i]] ?: emptyList()</ID>
+    <ID>UseOrEmpty:SpectatorCore.kt:SpectatorCore$resp["toolCalls"] as? JsonArray ?: emptyList()</ID>
+    <ID>UseOrEmpty:SpectatorIo.kt:SpectatorIo$title ?: ""</ID>
+    <ID>UseOrEmpty:SpectatorIo.kt:SpectatorIo$workspacePath ?: rootPath ?: ""</ID>
+    <ID>UseOrEmpty:TurnSpanTracker.kt:TurnSpanTracker$(event["content"] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: ""</ID>
+    <ID>UseOrEmpty:TurnSpanTracker.kt:TurnSpanTracker$str(event, "toolName") ?: ""</ID>
+    <ID>UseOrEmpty:ZconnShadow.kt:(context?.get("statusMessage") as? JsonPrimitive)?.content ?: ""</ID>
+    <ID>VarCouldBeVal:NuclearLadder.kt:NuclearLadder$var survivors = escalate(pids)</ID>
+    <ID>VarCouldBeVal:SequenceMatcher.kt:SequenceMatcher$var codes = opcodes().toMutableList()</ID>
+    <ID>VolatileReadModifyWrite:BusSink.kt:BusSink$failures += 1</ID>
+    <ID>VolatileReadModifyWrite:BusSink.kt:BusSink$written += 1</ID>
+  </CurrentIssues>
+</SmellBaseline>
