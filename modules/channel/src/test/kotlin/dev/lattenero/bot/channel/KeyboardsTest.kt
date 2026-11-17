@@ -151,26 +151,11 @@ class KeyboardsTest {
     }
 
     @Test
-    fun backgroundTurnIsTheOneMoonRow() {
-        // the 🌙 row IS the demote: the SAME name ZCode's own button wears,
-        // ONE row, ONE button, the sid rides the data
-        val row = Keyboards.backgroundTurn("ses_0f84de0cf002474fe596446e627129dc")
-            .jsonObject["inline_keyboard"]!!.jsonArray[0].jsonArray
-        assertEquals(1, row.size, "one row, one button — the demote needs no confirm")
-        assertEquals("🌙 Go to background", row[0].jsonObject["text"]!!.jsonPrimitive.content)
-        assertEquals("bgd:ses_0f84de0cf002474fe596446e627129dc", row[0].jsonObject["callback_data"]!!.jsonPrimitive.content)
-        // "bgd:" (4) + the worst sid rides the 64-byte law with room to spare
-        assertTrue(
-            Keyboards.callbackDataValid("bgd:ses_0f84de0cf002474fe596446e627129dc"),
-            "the demote's data must pass the 64-byte check",
-        )
-    }
-
-    @Test
-    fun liveCardLeadsWithTheTurnRowThenOneMoonPerOpenLane() {
-        // THE LIVE CARD: the turn's own 🌙 first, then ONE row per running
-        // dispatch lane — the per-lane demote (bgc:) rides the toolId's
-        // shared tail; a CLOSED lane earns no row (nothing left to demote)
+    fun liveCardIsOnlyOneMoonPerOpenLane() {
+        // THE LIVE CARD: ONE 🌙 row per running dispatch lane — the
+        // per-lane demote (bgc:) rides the toolId's shared tail; a CLOSED
+        // lane earns no row (nothing left to demote). The owner's verdict:
+        // the GENERAL turn demote (bgd:) is gone from the card for good.
         val open = ToolLive(
             toolId = "toolu_open1234567890",
             name = "Task",
@@ -186,21 +171,38 @@ class KeyboardsTest {
             status = "completed",
         )
         val rows = rowsOf(Keyboards.liveCard("ses_live", listOf(open, closed))!!)
-        assertEquals(2, rows.size, "the turn row + the one OPEN lane; the closed lane is no row at all")
-        assertEquals(listOf("🌙 Go to background" to "bgd:ses_live"), rows[0], "the turn's demote leads")
+        assertEquals(1, rows.size, "only the OPEN lane; the closed lane is no row at all")
         assertEquals(
             listOf("🌙 root-cause hunter" to "bgc:" + open.toolId.takeLast(Keyboards.LANE_TAIL)),
-            rows[1],
+            rows[0],
             "one 🌙 per open lane, the toolId tail as the address",
         )
+        assertTrue(
+            buttons(Keyboards.liveCard("ses_live", listOf(open))!!).none { it.second.startsWith("bgd:") },
+            "the general turn demote is never rendered again",
+        )
         // the lane's data is tiny — the 64-byte law never even breathes
-        assertTrue(Keyboards.callbackDataValid(rows[1].single().second))
+        assertTrue(Keyboards.callbackDataValid(rows[0].single().second))
     }
 
     @Test
     fun liveCardOfABlankSidIsNoKeyboardAtAll() {
         assertNull(Keyboards.liveCard("", emptyList()))
         assertNull(Keyboards.liveCard("   ", listOf(ToolLive(toolId = "toolu_x", name = "Agent", openedAtMs = 1))))
+    }
+
+    @Test
+    fun liveCardWithoutOpenLanesIsNoKeyboardAtAll() {
+        // no open lanes → no keyboard at all (an empty keyboard is
+        // decoration, not an honest tap surface); a closed lane alone is
+        // the same silence — nothing is left to demote
+        assertNull(Keyboards.liveCard("ses_live", emptyList()))
+        assertNull(
+            Keyboards.liveCard(
+                "ses_live",
+                listOf(ToolLive(toolId = "toolu_closed", name = "Agent", openedAtMs = 1, status = "completed")),
+            ),
+        )
     }
 
     @Test
@@ -293,7 +295,6 @@ class KeyboardsTest {
             Keyboards.cotToggle(7, expanded = false),
             Keyboards.cotToggle(7, expanded = true),
             Keyboards.interruptQuestion("ses_0f84de0cf002474fe596446e627129dc"),
-            Keyboards.backgroundTurn("ses_0f84de0cf002474fe596446e627129dc"),
             Keyboards.liveCard("ses_0f84de0cf002474fe596446e627129dc", lanes)!!,
             Keyboards.nuclearConfirm(),
             Keyboards.stopConfirm(),
