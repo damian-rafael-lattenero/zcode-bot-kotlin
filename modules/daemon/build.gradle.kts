@@ -22,6 +22,8 @@ dependencies {
     implementation(libs.kotlinx.coroutines.slf4j)
     implementation(libs.kap.core)
     implementation(libs.kap.resilience)
+    // kap-stream since the dogfooding: KapProcess (the effect mailbox)
+    implementation(libs.kap.stream)
     implementation(libs.kotlin.logging)
     implementation(libs.ktor.client.core)
     implementation(libs.ktor.client.cio)

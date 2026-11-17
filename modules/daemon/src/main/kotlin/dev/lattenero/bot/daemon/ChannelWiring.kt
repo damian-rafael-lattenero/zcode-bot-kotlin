@@ -56,7 +56,9 @@ import dev.lattenero.bot.daemon.history.LIVE_VERBS
 import dev.lattenero.bot.daemon.history.SEQUENCE_LINE_DIFFER
 import dev.lattenero.bot.daemon.history.TasksHistoryIo
 import dev.lattenero.bot.daemon.effects.StreamEffect
-import dev.lattenero.bot.daemon.effects.StreamEffects
+import kap.Backpressure
+import kap.KapProcess
+import kap.MailboxEvent
 import dev.lattenero.bot.daemon.metrics.AttachClock
 import dev.lattenero.bot.daemon.metrics.HandlerVerb
 import dev.lattenero.bot.daemon.metrics.Metrics
@@ -122,7 +124,7 @@ internal class ChannelStack(
     /** M1: the palette's persisted ledger + registered order (Main's boot and refresher read it). */
     val palette: PaletteStore,
     /** M2: the pump's bounded effect mailbox — Main runs its worker. */
-    val streamEffects: StreamEffects,
+    val streamEffects: KapProcess<StreamEffect>,
     /** M2: the effects' interpreter (the wiring's closures) — the worker's only body. */
     val runStreamEffect: suspend (StreamEffect) -> Unit,
 )
@@ -395,8 +397,17 @@ internal fun wireChannel(
     // M0's attach clock: armed by a subscribe, fired by the FIRST folded
     // frame of that very task (a subscription with no burst never records).
     val attachClock = AttachClock()
-    // M2: the pump's effects as data — the callback EMITS, the worker runs.
-    val streamEffects = StreamEffects()
+    // M2: the pump's effects as data — the callback OFFERS, the worker runs.
+    // The mailbox is kap 5.4.0's KapProcess (the dogfooding: the bot's
+    // hand-rolled StreamEffects is gone): the named strategy IS the old
+    // trySend law — DropLatest keeps the buffered effects and drops the
+    // INCOMING one on overflow, counted; 45 s per item; failures isolated.
+    val streamEffects = KapProcess<StreamEffect>(
+        name = "stream-effects",
+        backpressure = Backpressure.DropLatest(STREAM_EFFECT_SLOTS),
+        itemBudget = STREAM_EFFECT_BUDGET,
+        observe = ::logStreamEffectEvent,
+    )
     // M3: the OPEN dispatch lanes → their child agentIds (toolCallId keyed),
     // so a lane's close releases exactly its child's subscription.
     val childLanes = java.util.concurrent.ConcurrentHashMap<String, String>()
@@ -419,7 +430,7 @@ internal fun wireChannel(
             // THE ANSWER ROUND-TRIP rides the EFFECT lane (M2): the board's
             // sends and seals never hold the reader — the frame still folds
             // here, the effects run in their own supervised worker.
-            streamEffects.emit(StreamEffect.RegisterQuestion(frame, taskTitles[frame.taskId]))
+            streamEffects.offer(StreamEffect.RegisterQuestion(frame, taskTitles[frame.taskId]))
             when ((frame.event["type"] as? JsonPrimitive)?.content) {
                 // THE CHILD'S OWN STREAM (12/11): a dispatch lane's launch
                 // ACK carries `subagentAgentId` — the fork contract's own
@@ -432,12 +443,12 @@ internal fun wireChannel(
                     val agentId = (frame.event["subagentAgentId"] as? JsonPrimitive)?.content
                     if (!agentId.isNullOrBlank()) {
                         if (toolId != null) childLanes[toolId] = agentId
-                        streamEffects.emit(StreamEffect.SubscribeChild(frame.taskId, agentId))
+                        streamEffects.offer(StreamEffect.SubscribeChild(frame.taskId, agentId))
                     }
                     val status = (frame.event["status"] as? JsonPrimitive)?.content
                     if ((status == "completed" || status == "failed") && toolId != null) {
                         childLanes.remove(toolId)?.let { closed ->
-                            streamEffects.emit(StreamEffect.UnsubscribeChild(closed))
+                            streamEffects.offer(StreamEffect.UnsubscribeChild(closed))
                         }
                     }
                 }
@@ -449,14 +460,14 @@ internal fun wireChannel(
                 // its own. task_error DOES kill it: the broker died with the
                 // turn.
                 "task_complete" -> {
-                    streamEffects.emit(StreamEffect.DrainQueue)
+                    streamEffects.offer(StreamEffect.DrainQueue)
                     // the turn's seal is the mirror's second expiry: the open
                     // menu of THIS task dies with it (the TTL is the first)
-                    streamEffects.emit(StreamEffect.SealMirror(frame.taskId))
+                    streamEffects.offer(StreamEffect.SealMirror(frame.taskId))
                 }
 
                 "task_error" ->
-                    streamEffects.emit(
+                    streamEffects.offer(
                         StreamEffect.ResolveTask(frame.taskId, "⌛ El turno terminó — la pregunta quedó sin responder."),
                     )
 
@@ -468,12 +479,12 @@ internal fun wireChannel(
                 // be a write to a session that has no mode of its own.
                 "task_run_started" ->
                     if (!isSubagentSession(frame.taskId)) {
-                        streamEffects.emit(StreamEffect.EnforceMode(frame.taskId))
+                        streamEffects.offer(StreamEffect.EnforceMode(frame.taskId))
                     }
 
                 "permission_response", "elicitation_response" ->
                     (frame.event["requestId"] as? JsonPrimitive)?.content?.let {
-                        streamEffects.emit(StreamEffect.ResolveRequest(it, "✅ Respondido desde la app."))
+                        streamEffects.offer(StreamEffect.ResolveRequest(it, "✅ Respondido desde la app."))
                     }
 
                 // EL ESPEJO DE LOS MENUS (the fork's config_option_update,
@@ -488,7 +499,7 @@ internal fun wireChannel(
                             "config_option_update ${frame.taskId.takeLast(SID_TAIL)}: foreign shape — ignored"
                         }
                     } else {
-                        streamEffects.emit(StreamEffect.RefreshMenu(frame.taskId, options))
+                        streamEffects.offer(StreamEffect.RefreshMenu(frame.taskId, options))
                     }
                 }
             }
@@ -523,7 +534,7 @@ internal fun wireChannel(
             // M2: the stream never replays — re-read the already-pending
             // interactions ONCE from the snapshot (the board's dedupe makes
             // a double delivery harmless) instead of waiting for a re-ask.
-            streamEffects.emit(StreamEffect.RecoverAfterReconnect(taskId))
+            streamEffects.offer(StreamEffect.RecoverAfterReconnect(taskId))
         },
         // THE HEARTBEAT'S SEQ ACCOUNTING: the keepalive consumes the
         // connection's counter — without this every quiet stretch reads as
@@ -1567,6 +1578,27 @@ private const val NANOS_PER_MS = 1_000_000L
 
 /** M2's reconnect snapshot read: light (one message), bounded — a dead channel is silence. */
 private val SNAPSHOT_BUDGET = 3.seconds
+
+/** M2's mailbox: the retired StreamEffects' exact shape — 256 slots, 45 s per item. */
+private const val STREAM_EFFECT_SLOTS = 256
+private val STREAM_EFFECT_BUDGET = 45.seconds
+
+/** The mailbox's observer: drops, failures and timeouts as data (kap's MailboxEvent). */
+private fun logStreamEffectEvent(event: MailboxEvent<StreamEffect>) {
+    when (event) {
+        is MailboxEvent.Dropped -> logger.warn {
+            "effect ${event.item::class.simpleName} DROPPED (queue full, ${event.drops} total) — the pump keeps reading"
+        }
+
+        is MailboxEvent.Failed -> logger.warn(event.error) {
+            "effect ${event.item::class.simpleName} FAILED — the pump is unaffected"
+        }
+
+        is MailboxEvent.TimedOut -> logger.warn {
+            "effect ${event.item::class.simpleName} exceeded ${event.budget} — abandoned"
+        }
+    }
+}
 
 /**
  * THE MIRROR'S REGISTRATION LEG: speak the reply and, when it carries the

@@ -7,6 +7,7 @@ import kap.Kap
 import kap.Process
 import kap.RestartPolicy
 import kap.Schedule
+import kap.Signal
 import kap.process
 import kap.repeat
 import kotlinx.coroutines.CancellationException
@@ -39,18 +40,19 @@ class LiveHub {
     /**
      * M2's TICK NUDGE: an attach asks for a draw NOW instead of waiting out
      * the 3s cadence (the owner's first frame must not depend on a clock).
-     * CONFLATED — a burst of taps is one draw.
+     * kap 5.4.0's [Signal] since the dogfooding: one conflated wake, no
+     * hand-rolled channel; a burst of taps is one draw.
      */
-    private val beat = kotlinx.coroutines.channels.Channel<Unit>(kotlinx.coroutines.channels.Channel.CONFLATED)
+    private val beat = Signal()
 
     /** The card moved (a tap, an attach): draw on the next loop turn. */
     fun requestTick() {
-        beat.trySend(Unit)
+        beat.send()
     }
 
     /** The publisher's beat: a nudge, or [every] of silence — whichever comes first. */
     suspend fun awaitBeat(every: Duration) {
-        kotlinx.coroutines.withTimeoutOrNull(every) { beat.receive() }
+        beat.awaitOr(Schedule.spaced(every))
     }
 
     /** THE SCAN'S ACCUMULATOR — the fold's state, held. Written ONLY by [fold]. */

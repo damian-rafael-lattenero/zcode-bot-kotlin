@@ -257,9 +257,15 @@ fun main(args: Array<String>) {
             ?.asProcess(cfg.interval, onHeartbeat = { touch(File(stateDir, HB_INTERVENTIONS)) })
             ?.startIn(this)
         // M2: the pump's effect worker — the ONLY place a frame's Telegram
-        // send, channel query or queue drain can block; the reader never does
+        // send, channel query or queue drain can block; the reader never does.
+        // kap 5.4.0's KapProcess owns the drain (handler + budget + isolation).
         stack.streamEffects
-            .asProcess(stack.runStreamEffect, onHeartbeat = { touch(File(stateDir, HB_EFFECTS)) })
+            .asProcess(
+                handler = stack.runStreamEffect,
+                restart = RestartPolicy.exponential(base = 1.seconds),
+                heartbeatEvery = DEFAULT_HEARTBEAT_EVERY,
+                onHeartbeat = { touch(File(stateDir, HB_EFFECTS)) },
+            )
             .startIn(this)
         logger.info {
             val view = if (liveHandle != null) "on" else "off"
