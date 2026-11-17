@@ -30,7 +30,7 @@ subprojects {
             // The doctrine's own rules (CE-arm, ManualWaitLoop, VolatileRMW) run
             // on this repo — the audit 17/11 P2: built+published, never
             // self-applied anywhere.
-            "detektPlugins"("io.github.damian-rafael-lattenero:kap-detekt-rules:5.4.0")
+            "detektPlugins"("io.github.damian-rafael-lattenero:kap-detekt-rules:5.5.0")
         }
         configure<DetektExtension> {
             buildUponDefaultConfig = true

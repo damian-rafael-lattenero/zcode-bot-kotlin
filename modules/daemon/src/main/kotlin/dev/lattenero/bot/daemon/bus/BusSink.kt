@@ -1,5 +1,6 @@
 package dev.lattenero.bot.daemon.bus
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.io.File
@@ -34,12 +35,16 @@ class BusSink(private val file: File, private val log: (String) -> Unit = {}) {
 
     private val lock = Mutex()
 
-    /** Appends that failed — the in-process counter Python kept (`bus.failures`). */
+    /** Appends that failed — the in-process counter Python kept (`bus.failures`).
+     *  Every write happens inside [lock].withLock — the RMW cannot race. */
+    @Suppress("VolatileReadModifyWrite")
     @Volatile
     var failures: Long = 0
         private set
 
-    /** Appends that landed (one per event). */
+    /** Appends that landed (one per event). Every write happens inside
+     *  [lock].withLock — the RMW cannot race (suppression carries the reason). */
+    @Suppress("VolatileReadModifyWrite")
     @Volatile
     var written: Long = 0
         private set
@@ -62,6 +67,8 @@ class BusSink(private val file: File, private val log: (String) -> Unit = {}) {
                 }
                 written += 1
                 true
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 failures += 1
                 rollbackTo(before)

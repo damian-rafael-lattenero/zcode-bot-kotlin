@@ -232,6 +232,7 @@ class Poller(
     }
 
     /** The owner's one honest line about the dropped backlog; cancellation is not ours to swallow. */
+    @Suppress("TooGenericExceptionCaught") // the notice is a courtesy; ANY failure must keep the cycle going
     private suspend fun notifyCursorLost(dropped: Int) {
         try {
             onCursorLost(dropped)

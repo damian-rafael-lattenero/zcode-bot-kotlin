@@ -725,20 +725,22 @@ internal fun wireChannel(
             api = lanes.api,
             cooldown = Cooldown(readFile = { File(pythonState, LaneFiles.COOLDOWN).takeIf { it.exists() } }),
         )
+        // A failed title lookup degrades the mirror text to the bare menu —
+        // the swallowed exception IS the honest degrade, not a lost cause.
+        @Suppress("SwallowedException")
+        suspend fun titleOrNull(taskId: String): String? = try {
+            history.ctxTasks(BotCommands.SCOPE_FOR_PICK).firstOrNull { r -> r.sid == taskId }?.title
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            null
+        }
         mirrorRefresh = MenuMirrorRefresher.create(
             readMode = { taskId, ws ->
                 (client.query(ChannelQuery.TaskSnapshot(taskId, ws, messageLimit = 1)) as? QueryAnswer.Ok)
                     ?.let { ModeMenu.currentFrom(it.resultJson) }
             },
-            titleOf = { taskId ->
-                try {
-                    history.ctxTasks(BotCommands.SCOPE_FOR_PICK).firstOrNull { r -> r.sid == taskId }?.title
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    null
-                }?.takeIf { it.isNotEmpty() }
-            },
+            titleOf = { taskId -> titleOrNull(taskId)?.takeIf { it.isNotEmpty() } },
             edit = { _, messageId, text, markup ->
                 // the mirror's chat IS the bot's own chat (cfg.chatId — the
                 // recorded chatId is the registry's data; this throat has one)
@@ -1708,6 +1710,9 @@ private suspend fun diffNow(client: ChannelClient, history: TasksHistory, rest: 
         is QueryAnswer.Ok -> {
             val all = rest.trim().equals("all", ignoreCase = true)
             val files = FilesCommands.changedFilesOf(answer.resultJson, all)
+            // A failed title lookup falls back to the sid tail — the degrade IS
+            // the answer (the diff below is what matters).
+            @Suppress("SwallowedException", "TooGenericExceptionCaught")
             val title = try {
                 history.ctxTasks(BotCommands.SCOPE_FOR_PICK)
             } catch (e: CancellationException) {
