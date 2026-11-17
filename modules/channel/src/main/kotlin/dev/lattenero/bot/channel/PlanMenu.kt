@@ -29,6 +29,12 @@ import java.time.ZoneId
 @Suppress("TooManyFunctions") // parse + three cards + their keyboards — the picker's whole pure half
 object PlanMenu {
 
+    /** One Telegram inline button: the visible label and the callback payload (no-opaque-types law, nested per Kotlin 2.2+). */
+    private data class KeyboardButton(val label: String, val data: String)
+
+    /** A Telegram inline keyboard row: buttons left to right. */
+    private typealias KeyboardRow = List<KeyboardButton>
+
     /** The pre-reasoningLevels trio — DISPLAY fallback only, descending on purpose. */
     private val LEGACY_EFFORTS = listOf("high", "medium", "low")
 
@@ -225,9 +231,9 @@ object PlanMenu {
     fun planKeyboard(v: Views, quota: Map<String, PlanQuota.Mark>): JsonObject {
         val rows = v.plans.map { plan ->
             val mark = if (plan.providerId == v.plan) "🎯" else "🟢"
-            listOf("$mark ${plan.label}${PlanQuota.compact(quota[plan.providerId])}" to "pl:${plan.providerId}")
+            listOf(KeyboardButton("$mark ${plan.label}${PlanQuota.compact(quota[plan.providerId])}", "pl:${plan.providerId}"))
         } + listOf(
-            listOf("⭐ Default — el primer plan con tokens" to "pdef:"),
+            listOf(KeyboardButton("⭐ Default — el primer plan con tokens", "pdef:")),
         ) + defaultRow(v)
         return keyboard(rows)
     }
@@ -237,7 +243,7 @@ object PlanMenu {
         keyboard(
             plan.models.map { model ->
                 val mark = if (model.id == current) "🎯" else "▪️"
-                listOf("$mark ${model.label}" to "pm:${model.id}")
+                listOf(KeyboardButton("$mark ${model.label}", "pm:${model.id}"))
             },
         )
 
@@ -246,17 +252,17 @@ object PlanMenu {
         keyboard(
             levels.map { level ->
                 val mark = if (level == current) "🎯" else "▪️"
-                listOf("$mark effort $level" to "pe:$level")
+                listOf(KeyboardButton("$mark effort $level", "pe:$level"))
             },
         )
 
-    private fun defaultRow(v: Views): List<List<Pair<String, String>>> =
-        if (v.plan == null) emptyList() else listOf(listOf("📌 dejar como default de la app" to "pd:"))
+    private fun defaultRow(v: Views): List<KeyboardRow> =
+        if (v.plan == null) emptyList() else listOf(listOf(KeyboardButton("📌 dejar como default de la app", "pd:")))
 
-    private fun keyboard(rows: List<List<Pair<String, String>>>): JsonObject = buildJsonObject {
+    private fun keyboard(rows: List<KeyboardRow>): JsonObject = buildJsonObject {
         putJsonArray("inline_keyboard") {
             rows.forEach { row ->
-                add(buildJsonArray { row.forEach { (label, data) -> add(Keyboards.button(label, data)) } })
+                add(buildJsonArray { row.forEach { add(Keyboards.button(it.label, it.data)) } })
             }
         }
     }
