@@ -1,5 +1,6 @@
 package dev.lattenero.bot.transport
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
@@ -28,6 +29,8 @@ class Selftest(private val api: TgApi) {
         } else {
             Result(ok = false, error = "getMe answered without a bot id")
         }
+    } catch (e: CancellationException) {
+        throw e
     } catch (e: Exception) {
         Result(ok = false, error = e.message)
     }

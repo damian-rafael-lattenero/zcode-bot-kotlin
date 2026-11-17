@@ -3,6 +3,7 @@ package dev.lattenero.bot.channel
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kap.Ref
 import kap.evalGraph
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -176,10 +177,15 @@ class MenuMirrorRefresher private constructor(
             MenuMirror.Kind.EFFORT -> renderEffort(entry.ws, titleOf(taskId))
         } ?: return // the live read answered nothing — the message keeps what it shows (honest)
         if (!MenuMirror.shouldEdit(entry.lastRenderedText, fresh.text)) return // unchanged: never re-edited
-        val landed = runCatching {
+        // ANY Telegram edit failure degrades to "the mirror keeps what it
+        // shows" — the Convert-to-value border, CE excluded (it rethrows).
+        @Suppress("TooGenericExceptionCaught")
+        val landed = try {
             edit(entry.chatId, entry.messageId, fresh.text, fresh.markup)
-        }.getOrElse {
-            logger.warn(it) { "menu mirror: edit crashed — one line, never a turn's death" }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            logger.warn(e) { "menu mirror: edit crashed — one line, never a turn's death" }
             false
         }
         if (landed) {

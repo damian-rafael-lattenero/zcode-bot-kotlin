@@ -185,8 +185,7 @@ class Poller(
                     "dispatching: a replay would re-run old commands (U9/F1); the cursor moves to $next"
             }
             saveCursor(next) // POST-consumption: the backlog dies HERE, never in the dispatcher
-            runCatching { onCursorLost(messages.size) }
-                .onFailure { logger.warn(it) { "cursor-lost notice failed (the drop stands)" } }
+            notifyCursorLost(messages.size)
             return PollOutcome(next, 0, cursorLost = true)
         }
         for (message in messages) {
@@ -229,6 +228,17 @@ class Poller(
             logger.error(e) {
                 "tg-offset SAVE FAILED at $next — the in-memory floor keeps this process from re-dispatching"
             }
+        }
+    }
+
+    /** The owner's one honest line about the dropped backlog; cancellation is not ours to swallow. */
+    private suspend fun notifyCursorLost(dropped: Int) {
+        try {
+            onCursorLost(dropped)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            logger.warn(e) { "cursor-lost notice failed (the drop stands)" }
         }
     }
 
