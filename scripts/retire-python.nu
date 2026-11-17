@@ -102,7 +102,7 @@ def main []: nothing -> nothing {
 
     for hb in ["hb-channel" "hb-poller"] {
         let path = ($data | path join "state" $hb)
-        if (($path | path type) != "") {
+        if (($path | path type) == "file") {
             log $"($hb) beating (^stat -f '%Sm' $path | str trim)"
         } else {
             print $"· ($hb) not present yet \(the poller writes it on its first beat\)"

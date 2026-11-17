@@ -731,9 +731,13 @@ internal fun wireChannel(
                     ?.let { ModeMenu.currentFrom(it.resultJson) }
             },
             titleOf = { taskId ->
-                runCatching {
+                try {
                     history.ctxTasks(BotCommands.SCOPE_FOR_PICK).firstOrNull { r -> r.sid == taskId }?.title
-                }.getOrNull()?.takeIf { it.isNotEmpty() }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    null
+                }?.takeIf { it.isNotEmpty() }
             },
             edit = { _, messageId, text, markup ->
                 // the mirror's chat IS the bot's own chat (cfg.chatId — the
@@ -1704,8 +1708,13 @@ private suspend fun diffNow(client: ChannelClient, history: TasksHistory, rest: 
         is QueryAnswer.Ok -> {
             val all = rest.trim().equals("all", ignoreCase = true)
             val files = FilesCommands.changedFilesOf(answer.resultJson, all)
-            val title = runCatching { history.ctxTasks(BotCommands.SCOPE_FOR_PICK) }.getOrDefault(emptyList())
-                .firstOrNull { it.sid == taskId }?.title?.takeIf { it.isNotEmpty() }
+            val title = try {
+                history.ctxTasks(BotCommands.SCOPE_FOR_PICK)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                emptyList()
+            }.firstOrNull { it.sid == taskId }?.title?.takeIf { it.isNotEmpty() }
                 ?: taskId.takeLast(SID_TAIL)
             "📄 «$title»\n" + FilesCommands.renderDiff(files, all, DIFF_REPLY_CAP)
         }
