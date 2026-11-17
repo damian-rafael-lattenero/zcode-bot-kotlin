@@ -6,10 +6,10 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
- * THE DEFAULT LADDER (the owner's 11/11 order, verbatim):
- *   1) Start Plan — GLM-5.3-Flash — Max
- *   2) Z.ai — GLM-5.3-Flash — Max
- *   3) OpenCode Go — deepseek-v4.1-flash — Max
+ * THE DEFAULT LADDER (the owner's 17/11 order, verbatim):
+ *   1) OpenCode Go — deepseek-v4.1-flash — Max   (the default)
+ *   2) Start Plan — GLM-5.3-Flash — Max
+ *   3) Z.ai — GLM-5.3-Flash — Max
  * First plan with tokens wins; a proven-empty plan is skipped; an
  * unknown-quota plan is the last resort; nothing usable = the exhausted
  * verdict. The rungs resolve against the LIVE catalog — never invented.
@@ -25,7 +25,7 @@ class PlanLadderTest {
             PlanMenu.Model("GLM-5.3-Flash", "GLM-5.3-Flash", listOf("low", "high", "max")),
         ),
         goModels: List<PlanMenu.Model> = listOf(
-            PlanMenu.Model("deepseek-v4.1-flash", "deepseek-v4.1-flash", listOf("low", "high")),
+            PlanMenu.Model("deepseek-v4.1-flash", "deepseek-v4.1-flash", listOf("low", "high", "max")),
             PlanMenu.Model("kimi-k2", "kimi-k2"),
         ),
     ) = PlanMenu.Views(
@@ -55,8 +55,8 @@ class PlanLadderTest {
         )
         val verdict = PlanLadder.pick(catalog(), quota)
         val pick = verdict.pick!!
-        assertEquals("account:zai-start-plan", pick.plan.providerId)
-        assertEquals("GLM-5.3-Flash", pick.model.id)
+        assertEquals("opencode-go-chat", pick.plan.providerId, "deepseek first — the 17/11 default")
+        assertEquals("deepseek-v4.1-flash", pick.model.id)
         assertEquals("max", pick.effort, "the owner's named tier, published by the model")
         assertTrue(verdict.notes.isEmpty(), "a clean rung needs no notes: ${verdict.notes}")
     }
@@ -86,10 +86,12 @@ class PlanLadderTest {
 
     @Test
     fun aMissingModelFallsToThePlansOwnFirstModelWithANote() {
+        // the earlier rungs (deepseek first now) are proven dry, so the start
+        // plan is the effective first rung under test
         val quota = mapOf(
             "account:zai-start-plan" to seen(32),
-            "account:zai-individual-coding-plan" to seen(90),
-            "opencode-go-chat" to seen(100),
+            "account:zai-individual-coding-plan" to seen(0),
+            "opencode-go-chat" to seen(0),
         )
         val verdict = PlanLadder.pick(
             catalog(startModels = listOf(PlanMenu.Model("glm-next", "GLM Next", listOf("low", "high")))),
@@ -169,9 +171,9 @@ class PlanLadderTest {
     fun theLadderOrderIsTheOwnersVerbatim() {
         assertEquals(
             listOf(
+                "opencode-go-chat" to "deepseek-v4.1-flash",
                 "account:zai-start-plan" to "GLM-5.3-Flash",
                 "account:zai-individual-coding-plan" to "GLM-5.3-Flash",
-                "opencode-go-chat" to "deepseek-v4.1-flash",
             ),
             PlanLadder.DEFAULT.map { it.providerId to it.modelId },
         )
