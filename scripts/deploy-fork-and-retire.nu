@@ -513,7 +513,8 @@ def smoke-hello [st: RunState]: nothing -> PhaseResult {
         return {state: $st, outcome: {ok: false, note: $note}}
     }
     let py = 'import socket, sys
-sock_path, token = sys.argv[1], sys.argv[2]
+sock_path = sys.argv[1]
+token = sys.stdin.read().strip()
 s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
 s.settimeout(10)
 try:
@@ -524,8 +525,8 @@ except Exception as e:
     print("smoke error: %s" % e)
     sys.exit(1)
 '
-    let tool = "python3 AF_UNIX (handshake de la spec §5 con timeout propio — nu no tiene sockets crudos, ver header)"
-    let r = (do { ^/usr/bin/python3 -c $py $st.sock $token } | complete)
+    let tool = "python3 AF_UNIX (handshake de la spec §5 con timeout propio — nu no tiene sockets crudos, ver header; token por stdin)"
+    let r = (do { $token | ^/usr/bin/python3 -c $py $st.sock } | complete)
     let out = ($r.stdout | str trim)
     log $st $"smoke vía ($tool)"
     let shown = if ($out | is-empty) { "(sin respuesta)" } else { $out }

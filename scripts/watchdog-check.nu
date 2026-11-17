@@ -9,9 +9,9 @@
 # zcode-watchdog repo. Runbook: docs/beacon-runbook.md.
 #
 # Usage (manual):
-#   export WATCHDOG_BOT_TOKEN=... WATCHDOG_CHAT_ID=...
 #   nu scripts/watchdog-check.nu --simulate-stale-minutes 20   # circuit test
 #   nu scripts/watchdog-check.nu --loop-seconds 240            # gist watch
+# (token/chat read from ~/.zcode/telegram-remote.json — never env, never argv)
 #
 # It talks to Telegram DIRECTLY via sendMessage — stateless, it never
 # fights the Mac's getUpdates monopoly (bot ADR-001). Stable-Nushell
@@ -19,6 +19,7 @@
 
 const GIST_ID: string = "d61ac1dd354d8d69579a2df683db1688"
 const GIST_RAW: string = "https://gist.githubusercontent.com/damian-rafael-lattenero/d61ac1dd354d8d69579a2df683db1688/raw/beacon.json"
+const TELEGRAM_CFG: string = "~/.zcode/telegram-remote.json"
 const STALE_AFTER_S: int = 150
 const POLL_EVERY_S: int = 30
 
@@ -29,19 +30,28 @@ def now_epoch []: nothing -> int {
 def send [text: string]: nothing -> bool {
     # Missing config is a broken setup, not a transient failure: say it
     # clearly and return false so the caller can decide what to do.
-    if ($env.WATCHDOG_BOT_TOKEN? | is-empty) {
-        print "send ERROR: WATCHDOG_BOT_TOKEN is not set"
+    # Token/chat come from the shared config file; the token NEVER rides
+    # argv or env — curl reads the URL from its config on stdin (the
+    # beacon pattern; fleet audit 17/11: credentials off argv).
+    let cfgPath: string = ($TELEGRAM_CFG | path expand)
+    if not ($cfgPath | path exists) {
+        print $"send ERROR: no telegram config at ($cfgPath)"
         return false
     }
-    if ($env.WATCHDOG_CHAT_ID? | is-empty) {
-        print "send ERROR: WATCHDOG_CHAT_ID is not set"
+    let cfg: any = (try { open --raw $cfgPath | from json } catch { null })
+    if $cfg == null {
+        print "send ERROR: telegram config is not valid JSON"
+        return false
+    }
+    let chat: string = ($cfg | get --optional chat_id | default "")
+    let token: string = ($cfg | get --optional token | default "")
+    if ($token | is-empty) or ($chat | is-empty) {
+        print "send ERROR: telegram config is missing token/chat_id"
         return false
     }
 
-    let url: string = $"https://api.telegram.org/bot($env.WATCHDOG_BOT_TOKEN)/sendMessage"
-    # Explicit JSON: the runner's stable nu does not auto-serialize
-    # records in http post (accepted types there: binary, string).
-    let body: string = ({chat_id: ($env.WATCHDOG_CHAT_ID | into string), text: $text} | to json)
+    let payload: string = ({chat_id: $chat, text: $text} | to json)
+    let curlCfg: string = $"url = \"https://api.telegram.org/bot($token)/sendMessage\"\n"
 
     let max_retries: int = 3
     let backoff_s: int = 5
@@ -54,13 +64,14 @@ def send [text: string]: nothing -> bool {
         # The catch closure may not capture mutable vars, so it only
         # builds a value; all mutation happens outside it.
         let outcome: record = (try {
-            {kind: 'response', resp: (http post --content-type "application/json" $url $body)}
+            {kind: 'response', resp: ($curlCfg | ^curl -sS --config - --max-time 8 --header "Content-Type: application/json" --data $payload | complete)}
         } catch {|err|
             {kind: 'network', error: ($err.msg | str substring 0..200)}
         })
 
         if ($outcome.kind == 'response') {
-            let resp: record = $outcome.resp
+            let res: record = $outcome.resp
+            let resp: any = (try { $res.stdout | from json } catch { {} })
             if ($resp.ok? == true) {
                 print $"sent: ($text | str substring 0..60)..."
                 $delivered = true
