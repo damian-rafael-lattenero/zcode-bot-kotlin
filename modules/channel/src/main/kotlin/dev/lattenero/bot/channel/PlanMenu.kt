@@ -29,7 +29,7 @@ import java.time.ZoneId
 @Suppress("TooManyFunctions") // parse + three cards + their keyboards — the picker's whole pure half
 object PlanMenu {
 
-    /** One Telegram inline button: the visible label and the callback payload (no-opaque-types law, nested per Kotlin 2.2+). */
+    /** One Telegram inline button: the visible label and the callback payload (nested alias, Kotlin 2.2+). */
     private data class KeyboardButton(val label: String, val data: String)
 
     /** A Telegram inline keyboard row: buttons left to right. */
@@ -231,7 +231,8 @@ object PlanMenu {
     fun planKeyboard(v: Views, quota: Map<String, PlanQuota.Mark>): JsonObject {
         val rows = v.plans.map { plan ->
             val mark = if (plan.providerId == v.plan) "🎯" else "🟢"
-            listOf(KeyboardButton("$mark ${plan.label}${PlanQuota.compact(quota[plan.providerId])}", "pl:${plan.providerId}"))
+            val label = "$mark ${plan.label}${PlanQuota.compact(quota[plan.providerId])}"
+            listOf(KeyboardButton(label, "pl:${plan.providerId}"))
         } + listOf(
             listOf(KeyboardButton("⭐ Default — el primer plan con tokens", "pdef:")),
         ) + defaultRow(v)
