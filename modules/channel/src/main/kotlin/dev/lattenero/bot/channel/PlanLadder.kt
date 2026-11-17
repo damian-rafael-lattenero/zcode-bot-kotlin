@@ -93,7 +93,8 @@ object PlanLadder {
             ?: return Step.Missing("• ${rung.providerId} no está en el catálogo de la app")
         val mark = quota[rung.providerId]
         return when {
-            PlanQuota.exhausted(mark) -> Step.Exhausted("• ${plan.label}: ⛔ sin tokens — todas las ventanas agotadas")
+            PlanQuota.exhausted(mark) ->
+                Step.Exhausted("• ${plan.label}: ⛔ sin tokens — ${PlanQuota.blockedNote(mark)}")
             mark is PlanQuota.Mark.Seen && PlanQuota.usable(mark) -> Step.Usable(plan, rung)
             else -> Step.Unknown(plan, rung) // the quota could not be read — the LAST resort, never the first
         }

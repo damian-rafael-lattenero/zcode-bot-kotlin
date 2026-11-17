@@ -34,22 +34,64 @@ object PlanQuota {
     /** One metered window of a plan: its glyph, the REMAINING percent, its reset. */
     data class Window(val glyph: String, val remainingPct: Int?, val resetMs: Long? = null)
 
-    /** The plan's quota read: real windows, or the honest miss (the reason rides the line). */
+    /**
+     * How a plan's windows decide «tiene tokens» (measured 17/11 against a
+     * coding plan the bot kept choosing with its weekly window at zero):
+     *  - [GATES]: every window must be open — ONE window at zero blocks
+     *    EVERY call (the provider answers 1310/429 while that gate is dry,
+     *    however much the sibling window holds). The coding plan's 5h/
+     *    weekly pools and OpenCode's rolling/weekly/monthly are gates.
+     *  - [LANES]: the windows are independent pools — the plan still works
+     *    while ONE lane has tokens (Start Plan's per-model buckets).
+     * GATES is the default: skipping a usable plan is recoverable, picking
+     * a blocked one burns the turn on a 1310.
+     */
+    enum class Rule { GATES, LANES }
+
+    /** The plan's quota read: real windows (+ how they decide), or the honest miss. */
     sealed interface Mark {
-        data class Seen(val windows: List<Window>) : Mark
+        data class Seen(val windows: List<Window>, val rule: Rule = Rule.GATES) : Mark
         data class Missing(val reason: String) : Mark
     }
 
     /** Any window with tokens left? Unknown counts as left (never refuse an unreadable window). */
     fun usable(mark: Mark?): Boolean = when (mark) {
-        is Mark.Seen -> mark.windows.any { it.remainingPct == null || it.remainingPct > 0 }
+        is Mark.Seen -> when (mark.rule) {
+            // one closed gate blocks every call: only a plan with NO closed gate is usable
+            Rule.GATES -> mark.windows.isNotEmpty() && !exhausted(mark)
+            Rule.LANES -> mark.windows.any { it.remainingPct == null || it.remainingPct > 0 }
+        }
         else -> true // unknown is not «empty»: the ladder's last resort, the honest ❔
     }
 
-    /** The plan is PROVEN tokenless: every window read, every window at zero. */
+    /**
+     * The plan is PROVEN tokenless: a GATE closed (it blocks every call on
+     * its own) or EVERY lane empty (independent pools, all dry).
+     */
     fun exhausted(mark: Mark?): Boolean = when (mark) {
-        is Mark.Seen -> mark.windows.isNotEmpty() && mark.windows.all { (it.remainingPct ?: 1) <= 0 }
+        is Mark.Seen -> mark.windows.isNotEmpty() && when (mark.rule) {
+            Rule.GATES -> mark.windows.any { (it.remainingPct ?: 1) <= 0 }
+            Rule.LANES -> mark.windows.all { (it.remainingPct ?: 1) <= 0 }
+        }
         else -> false
+    }
+
+    /**
+     * The exhausted mark's evidence for the ladder's note: the closed gate
+     * (one window is enough to block), or «every window» for independent
+     * lanes — the owner reads WHY the plan was skipped, never a vague ⛔.
+     */
+    fun blockedNote(mark: Mark?): String = when (mark) {
+        is Mark.Seen -> {
+            val closed = mark.windows.filter { (it.remainingPct ?: 1) <= 0 }
+            when {
+                mark.rule == Rule.LANES || closed.isEmpty() -> "todas las ventanas agotadas"
+                closed.size == 1 -> "la ventana ${closed.single().glyph} está agotada"
+                else -> "las ventanas ${closed.joinToString(" ") { it.glyph }} están agotadas"
+            }
+        }
+
+        else -> "todas las ventanas agotadas"
     }
 
     /**
@@ -61,14 +103,15 @@ object PlanQuota {
     fun compact(mark: Mark?): String = when (mark) {
         null -> " — ❔"
         is Mark.Missing -> " — ❔"
-        is Mark.Seen -> compactSeen(mark.windows)
+        is Mark.Seen -> compactSeen(mark)
     }
 
-    private fun compactSeen(windows: List<Window>): String {
+    private fun compactSeen(mark: Mark.Seen): String {
+        val windows = mark.windows
         if (windows.isEmpty()) return " ❔"
         val parts = windows.joinToString(" · ") { w -> "${w.glyph} ${w.remainingPct?.toString() ?: "?"}%" }
         val flag = when {
-            exhausted(Mark.Seen(windows)) -> "⛔ "
+            exhausted(mark) -> "⛔ "
             (windows.minOfOrNull { it.remainingPct ?: 100 } ?: 100) < ALERT_REMAINING_PCT -> "⚠️ "
             else -> ""
         }
@@ -89,20 +132,21 @@ object PlanQuota {
     ): String = when (mark) {
         null -> missingLine(label, "quota no leída")
         is Mark.Missing -> missingLine(label, mark.reason)
-        is Mark.Seen -> seenLine(label, mark.windows, nowMs, zone)
+        is Mark.Seen -> seenLine(label, mark, nowMs, zone)
     }
 
     private fun missingLine(label: String, reason: String): String =
         "<b>${PyText.esc(label)}</b> — ❔ sin datos ($reason) — reintentá /plan más tarde"
 
-    private fun seenLine(label: String, windows: List<Window>, nowMs: Long, zone: ZoneId): String {
+    private fun seenLine(label: String, mark: Mark.Seen, nowMs: Long, zone: ZoneId): String {
+        val windows = mark.windows
         if (windows.isEmpty()) return missingLine(label, "el plan no publica ventanas")
         val body = windows.joinToString(" · ") { w ->
             "${w.glyph} ${w.remainingPct?.toString() ?: "?"}% libre" +
                 (w.resetMs?.takeIf { it != 0L }?.let { " · resets ${fmtReset(it, nowMs, zone)}" } ?: "")
         }
         val flag = when {
-            exhausted(Mark.Seen(windows)) -> "⛔ "
+            exhausted(mark) -> "⛔ "
             (windows.minOfOrNull { it.remainingPct ?: 100 } ?: 100) < ALERT_REMAINING_PCT -> "⚠️ "
             else -> ""
         }
@@ -151,7 +195,9 @@ object PlanQuota {
             }
         }
         if (windows.isEmpty()) return null
-        return Mark.Seen(windows)
+        // CREDIT_LIMIT rows are the coding plan's GATES; unit/usage rows are the Start Plan's LANES
+        val rule = if (limits.any { it.str("type") == "CREDIT_LIMIT" }) Rule.GATES else Rule.LANES
+        return Mark.Seen(windows, rule)
     }
 
     /** OpenCode Go's direct rung — the /usage windows' used-percents, inverted once here. */
@@ -163,9 +209,10 @@ object PlanQuota {
                 resetMs = w.resetMs,
             )
         },
+        Rule.GATES, // rolling/weekly/monthly are the provider's gates — one dry blocks the call
     )
 
-    /** z.ai's monitor endpoint (the direct rung's typed parse) — same inversion. */
+    /** z.ai's monitor endpoint (the direct rung's typed parse) — same inversion, same gates. */
     fun fromZai(snapshot: QuotaDirect.QuotaSnapshot): Mark = Mark.Seen(
         snapshot.windows.map { w ->
             Window(
@@ -174,6 +221,7 @@ object PlanQuota {
                 resetMs = w.resetMs,
             )
         },
+        Rule.GATES,
     )
 
     // ── the glyphs: one vocabulary across every source ────────────────────
