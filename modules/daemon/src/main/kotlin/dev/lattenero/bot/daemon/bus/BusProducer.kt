@@ -15,6 +15,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -59,6 +60,12 @@ class BusProducer(
     private val newId: () -> String = BusWire::newId,
     /** taskSnapshot → the turn's organized voice (the live view's own source); its conclusion rides the bus. */
     private val finalTurn: suspend (String) -> TurnVoice? = { null },
+    /**
+     * The model in force for a task (audit: per-turn cost ledger). The stream
+     * does not carry it; the wiring answers with the same selection query the
+     * plan card reads. Null is honest — the brain records the row unpriced.
+     */
+    private val modelOf: suspend (String) -> String? = { null },
     private val log: (String) -> Unit = {},
 ) : AutoCloseable {
 
@@ -84,6 +91,12 @@ class BusProducer(
         val calls = HashSet<String>()
         val results = HashSet<String>()
         var cotChars = 0
+
+        /** The turn's own usage, captured from ANY frame that carries it (last wins). */
+        var tokensIn: Long? = null
+        var tokensOut: Long? = null
+        var usageTokens: Long? = null
+        var stopReason: String? = null
     }
 
     /** A turn this producer already sealed — the burst's replay of its frames must publish nothing. */
@@ -134,6 +147,7 @@ class BusProducer(
 
     /** One stream frame — the six kinds' whole lifecycle. */
     suspend fun onFrame(frame: ServerFrame.StreamEvent) = guard("frame") {
+        captureCounters(frame)
         when (str(frame.event, "type")) {
             RUN_STARTED -> onRunStarted(frame)
             TOOL_CALL -> onToolCall(frame)
@@ -142,6 +156,29 @@ class BusProducer(
             COMPLETE -> onCompleted(frame)
             ERROR -> onFailed(frame)
             else -> Unit // the rest of the union is not bus material (additive rule)
+        }
+    }
+
+    /**
+     * The turn's usage and stop reason ride ANY frame that carries them
+     * (`usage.{input,output,total}Tokens`, `stopReason`) — captured here, on
+     * the same read loop, so the seal publishes the real numbers and the
+     * brain can price the turn (audit: the per-turn cost ledger).
+     */
+    private suspend fun captureCounters(frame: ServerFrame.StreamEvent) {
+        val usage = frame.event["usage"] as? JsonObject
+        val stop = str(frame.event, "stopReason")
+        if (usage == null && stop == null) return
+        mutex.withLock {
+            turns[frame.taskId]?.let { state ->
+                if (usage != null) {
+                    state.tokensIn = long(usage, "inputTokens")
+                    state.tokensOut = long(usage, "outputTokens")
+                    state.usageTokens = long(usage, "totalTokens")
+                        ?: state.tokensIn?.plus(state.tokensOut ?: 0L)
+                }
+                if (stop != null) state.stopReason = stop
+            }
         }
     }
 
@@ -269,9 +306,19 @@ class BusProducer(
                     put("reply_chars", PyText.cpLength(reply ?: ""))
                     put("reply", BusWire.clip(reply ?: ""))
                     put("cot_chars", state.cotChars)
+                    counters(state)
+                    modelOf(frame.taskId)?.takeIf { it.isNotBlank() }?.let { put("model", it) }
                 },
             )
         }
+    }
+
+    /** The counters' payload keys — present only when the frames carried them (never invented). */
+    private fun JsonObjectBuilder.counters(state: TurnState) {
+        state.tokensIn?.let { put("tokens_in", it) }
+        state.tokensOut?.let { put("tokens_out", it) }
+        state.usageTokens?.let { put("tokens_total", it) }
+        state.stopReason?.let { put("stop_reason", it) }
     }
 
     private suspend fun onFailed(frame: ServerFrame.StreamEvent) {
@@ -283,6 +330,8 @@ class BusProducer(
             payload = buildJsonObject {
                 put("error", BusWire.clip(str(frame.event, "error") ?: "task error"))
                 put("duration_s", seconds(state.startedAtMs, sealAt(frame)))
+                counters(state)
+                modelOf(frame.taskId)?.takeIf { it.isNotBlank() }?.let { put("model", it) }
             },
         )
     }
