@@ -145,6 +145,23 @@ class BusProducer(
         mutex.withLock { pending.removeAll { it.token == token } }
     }
 
+    /**
+     * The owner's 👍/👎 on the LAST turn this producer sealed on [sid]
+     * (audit: the first preference data). The seal marks are the authority:
+     * a tap after a daemon restart finds no mark and says `turn=""` — the
+     * brain still records the signal in a skeleton row, honestly.
+     */
+    suspend fun feedback(sid: String, signal: String) = guard("feedback") {
+        if (sid.isBlank() || (signal != "up" && signal != "down")) return@guard
+        val turnId = mutex.withLock { lastSeal[sid]?.turnId } ?: ""
+        emit(
+            kind = KIND_TURN_FEEDBACK,
+            sid = sid,
+            turn = turnId,
+            payload = buildJsonObject { put("signal", signal) },
+        )
+    }
+
     /** One stream frame — the six kinds' whole lifecycle. */
     suspend fun onFrame(frame: ServerFrame.StreamEvent) = guard("frame") {
         captureCounters(frame)
@@ -416,6 +433,9 @@ class BusProducer(
         const val KIND_TOOL_RESULT = "tool.result"
         const val KIND_TURN_COMPLETED = "turn.completed"
         const val KIND_TURN_FAILED = "turn.failed"
+
+        /** The owner's 👍/👎 (audit: the first preference data). */
+        const val KIND_TURN_FEEDBACK = "turn.feedback"
 
         const val RUN_STARTED = "task_run_started"
         const val TOOL_CALL = "tool_call"

@@ -1001,9 +1001,13 @@ class LivePublisher(
         // back to the parked speak lane — the words arrive, even degraded.
         // richVoice=false keeps the escaped plain pages.
         voice?.let { v ->
-            TurnDigest.pages(v).forEach { page ->
-                val violet = if (richVoice) telegram.sendRich(cfg, TurnDigest.wire(page)) else null
-                if (violet == null) speak(PyText.esc(TurnDigest.pageText(page)), null)
+            val pages = TurnDigest.pages(v)
+            pages.forEachIndexed { index, page ->
+                // the LAST page carries the owner's 👍/👎 row (audit: the first
+                // preference data) — one tap, no extra message in the chat
+                val markup = if (index == pages.lastIndex) Keyboards.feedbackRow(state.taskId) else null
+                val violet = if (richVoice) telegram.sendRich(cfg, TurnDigest.wire(page), markup) else null
+                if (violet == null) speak(PyText.esc(TurnDigest.pageText(page)), markup)
             }
         }
         val answer = voice?.conclusion

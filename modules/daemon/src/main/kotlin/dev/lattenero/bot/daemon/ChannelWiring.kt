@@ -965,6 +965,9 @@ internal fun wireChannel(
         board = board,
         liveView = liveView,
         promptTap = promptTap,
+        // THE 👍/👎 TAP (audit: the first preference data): the producer
+        // resolves the turn it sealed on that sid and appends turn.feedback.
+        onFeedback = { sid, signal -> busTaps?.feedback(sid, signal) },
         brain = brain,
         metrics = metrics,
         attachClock = attachClock,
@@ -1197,6 +1200,8 @@ private fun buildPoller(
     liveView: LivePublisher? = null,
     // U1b: the free-text prompt seam (ADR-019) — a no-op with the bus off
     promptTap: PromptTap = PromptTap(null),
+    // the seal's 👍/👎 (fb: taps) — the bus producer appends turn.feedback
+    onFeedback: (suspend (String, String) -> Unit)? = null,
     // U2: /brain + /memory (the brain's HTTP door). Null = the honest unwired reply.
     brain: BrainCommands? = null,
     // E2: the metrics facade (the no-op when off) — the poller's cycles and
@@ -1374,6 +1379,9 @@ private fun buildPoller(
         // (`TgConfig.load(remote).ownerUserId`): the destructive taps'
         // second lock reads the config at the tap, one truth, no copy.
         ownerUserId = { TgConfig.load(remote).ownerUserId },
+        // THE 👍/👎 TAP (audit: the first preference data): the strike is
+        // handed to the wiring's bus producer (a no-op when the bus is off).
+        onFeedback = onFeedback,
     )
     // THE MIRROR'S RENDERERS (the late bind — the refresher was born
     // before the commands): the commands own the ONE render path per menu,

@@ -245,6 +245,13 @@ class BotCommands(
      */
     private val directQuotaMark: (suspend (String?) -> PlanQuota.Mark?)? = null,
     /**
+     * THE OWNER'S 👍/👎 (audit: the first preference data): the seal's LAST
+     * digest page carries the row and the tap hands (sid, signal) to the
+     * wiring, which appends the bus's `turn.feedback`. Null (unwired) = the
+     * tap answers the generic toast and nothing is recorded.
+     */
+    private val onFeedback: (suspend (String, String) -> Unit)? = null,
+    /**
      * The collapsed CoT blocks' taps (the cb: buttons): the publisher's
      * registry — expand/fold IN PLACE on the block's own message. Null
      * (unwired) = a stale cb: tap answers the honest retired note.
@@ -421,6 +428,11 @@ class BotCommands(
         data.startsWith("odq:") -> resolvePending(push = false)
 
         data.startsWith("sst:") -> subagentStop(data.removePrefix("sst:"))
+
+        // the seal's 👍/👎 (fb:<up|down>:<sid>): the signal rides the bus to
+        // the brain — the tap toast is the whole answer, the digest's text
+        // is never touched
+        data.startsWith("fb:") -> feedbackTap(data)
 
         // LA PREGUNTA's taps (the answer round-trip): qa:<sid>:<i> answers
         // the option; qf:<sid> arms the next line as the free-text answer.
@@ -1275,6 +1287,27 @@ class BotCommands(
                     PyText.esc(answer.message ?: "?"),
             )
         }
+    }
+
+    /**
+     * The seal's 👍/👎 (`fb:<up|down>:<sid>`, audit: the first preference
+     * data): the wiring hands the signal to the bus producer, which resolves
+     * the turn it sealed on that sid. The tap toast is the whole answer —
+     * returning null keeps the digest's text untouched.
+     */
+    @Suppress("ReturnCount") // one guard per malformed part (signal, sid) + the toast's null answer
+    private suspend fun feedbackTap(data: String): BotReply? {
+        val parts = data.split(":", limit = FEEDBACK_TAP_PARTS)
+        // the wire's compact "dn" rides to the brain as the full "down"
+        val signal = when (parts.getOrNull(1)) {
+            "up" -> "up"
+            "dn" -> "down"
+            else -> return null
+        }
+        val sid = parts.getOrNull(2)?.takeIf { it.isNotBlank() } ?: return null
+        onFeedback?.invoke(sid, signal)
+        logger.info { "feedback: $signal for $sid" }
+        return null
     }
 
     /**
@@ -3623,6 +3656,9 @@ class BotCommands(
     companion object {
         /** The ms-per-minute the ghost law computes with ([Keyboards.SUB_STALE_MIN] is in minutes). */
         private const val MS_PER_MINUTE = 60_000L
+
+        /** `fb:<up|down>:<sid>` — the seal's feedback tap's three parts. */
+        private const val FEEDBACK_TAP_PARTS = 3
 
         /** Lazy: MENU.size can never drift from the dispatcher's real vocabulary. */
         internal val UNKNOWN: String
