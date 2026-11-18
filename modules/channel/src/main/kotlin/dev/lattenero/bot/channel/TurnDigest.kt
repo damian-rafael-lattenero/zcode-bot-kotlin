@@ -30,6 +30,22 @@ data class TurnVoice(val segments: List<TurnProse>) {
 }
 
 /**
+ * One block of the turn's voice — TYPED (audit wave 4, the no-opaque-types
+ * law): the core builds values, [TurnDigest.wire] renders the wire's JSON at
+ * the Telegram edge only.
+ */
+sealed interface VoiceBlock {
+    /** The block's words, verbatim (a chunk that concatenates to the whole). */
+    val text: String
+
+    /** Prose — the pullquote look. */
+    data class Prose(override val text: String) : VoiceBlock
+
+    /** Fenced code — the `pre` look; [language] names the fence when it had one. */
+    data class Code(override val text: String, val language: String?) : VoiceBlock
+}
+
+/**
  * THE TURN'S ORGANIZED DIGEST (the owner, 16/11: «si esto estuviera
  * organizado y con contexto valdría bastante, pero no lo está»): the seal
  * stops shipping the turn's raw concatenated prose and speaks STEPS instead
@@ -142,8 +158,8 @@ object TurnDigest {
      * own tiny pullquote, the code follows clean. A single-step turn renders
      * bare — the voice alone, exactly today's shape.
      */
-    fun pages(voice: TurnVoice): List<List<JsonObject>> {
-        val blocks = mutableListOf<JsonObject>()
+    fun pages(voice: TurnVoice): List<List<VoiceBlock>> {
+        val blocks = mutableListOf<VoiceBlock>()
         val total = voice.segments.size
         voice.segments.forEachIndexed { index, segment ->
             val label = labelOf(index, total, segment.afterTool)
@@ -152,18 +168,7 @@ object TurnDigest {
                 var rest = chunk.trim('\n')
                 while (rest.isNotEmpty()) {
                     val piece = takeChunk(rest, preferLines = !isCode)
-                    blocks += if (isCode) {
-                        buildJsonObject {
-                            put("type", "pre")
-                            put("text", piece)
-                            language?.let { put("language", it) }
-                        }
-                    } else {
-                        buildJsonObject {
-                            put("type", "pullquote")
-                            put("text", piece)
-                        }
-                    }
+                    blocks += if (isCode) VoiceBlock.Code(piece, language) else VoiceBlock.Prose(piece)
                     rest = rest.substring(piece.length)
                 }
             }
@@ -172,8 +177,24 @@ object TurnDigest {
     }
 
     /** The page's plain shape — the degraded speak leg's text (escaping happens at the leg). */
-    fun pageText(page: List<JsonObject>): String = page.joinToString("\n\n") { block ->
-        (block["text"] as? JsonPrimitive)?.content ?: ""
+    fun pageText(page: List<VoiceBlock>): String = page.joinToString("\n\n") { it.text }
+
+    /**
+     * THE WIRE EDGE: one page → the rich message's block params (`pre` with
+     * its language, `pullquote` for prose) — the ONLY place the JSON shape
+     * exists in this file.
+     */
+    fun wire(page: List<VoiceBlock>): List<JsonObject> = page.map { block ->
+        buildJsonObject {
+            when (block) {
+                is VoiceBlock.Prose -> put("type", "pullquote")
+                is VoiceBlock.Code -> {
+                    put("type", "pre")
+                    block.language?.let { put("language", it) }
+                }
+            }
+            put("text", block.text)
+        }
     }
 
     /**
@@ -197,13 +218,13 @@ object TurnDigest {
     }
 
     /** Greedy packing: blocks share a page while the page stays under [RichVoice.BLOCK_CP]. */
-    private fun pack(blocks: List<JsonObject>): List<List<JsonObject>> {
+    private fun pack(blocks: List<VoiceBlock>): List<List<VoiceBlock>> {
         if (blocks.isEmpty()) return emptyList()
-        val pages = mutableListOf<List<JsonObject>>()
-        var page = mutableListOf<JsonObject>()
+        val pages = mutableListOf<List<VoiceBlock>>()
+        var page = mutableListOf<VoiceBlock>()
         var total = 0
         for (block in blocks) {
-            val size = PyText.cpLength((block["text"] as? JsonPrimitive)?.content ?: "")
+            val size = PyText.cpLength(block.text)
             if (page.isNotEmpty() && total + size > RichVoice.BLOCK_CP) {
                 pages += page
                 page = mutableListOf()

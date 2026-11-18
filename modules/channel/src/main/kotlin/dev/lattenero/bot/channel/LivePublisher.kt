@@ -1002,7 +1002,7 @@ class LivePublisher(
         // richVoice=false keeps the escaped plain pages.
         voice?.let { v ->
             TurnDigest.pages(v).forEach { page ->
-                val violet = if (richVoice) telegram.sendRich(cfg, page) else null
+                val violet = if (richVoice) telegram.sendRich(cfg, TurnDigest.wire(page)) else null
                 if (violet == null) speak(PyText.esc(TurnDigest.pageText(page)), null)
             }
         }
