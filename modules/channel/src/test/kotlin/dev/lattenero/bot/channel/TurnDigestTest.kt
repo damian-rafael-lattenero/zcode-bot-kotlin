@@ -13,9 +13,6 @@ class TurnDigestTest {
     private fun snapshotOf(parts: String, tools: String = "[]"): String =
         """{"messages":[{"role":"assistant","tools":$tools,"parts":$parts}]}"""
 
-    private fun textOf(block: kotlinx.serialization.json.JsonObject): String =
-        block["text"]!!.jsonPrimitive.content
-
     @Test
     fun theMergedTurnParsesIntoStepsLabeledByTheToolTheyFollowed() {
         val json = snapshotOf(
@@ -94,8 +91,11 @@ class TurnDigestTest {
         val pages = TurnDigest.pages(TurnVoice(listOf(TurnProse("solo la respuesta"))))
         assertEquals(1, pages.size)
         assertEquals(1, pages[0].size)
-        assertEquals("pullquote", pages[0][0]["type"]!!.jsonPrimitive.content)
-        assertEquals("solo la respuesta", textOf(pages[0][0]))
+        assertEquals(VoiceBlock.Prose("solo la respuesta"), pages[0][0], "the pure core stays typed")
+        // the wire edge speaks the same block: pullquote, verbatim words
+        val wire = TurnDigest.wire(pages[0]).single()
+        assertEquals("pullquote", wire["type"]!!.jsonPrimitive.content)
+        assertEquals("solo la respuesta", wire["text"]!!.jsonPrimitive.content)
     }
 
     @Test
@@ -107,7 +107,7 @@ class TurnDigestTest {
                 TurnProse("el final"),
             ),
         )
-        val texts = TurnDigest.pages(voice).flatten().map(::textOf)
+        val texts = TurnDigest.pages(voice).flatten().map { it.text }
         assertTrue(texts[0].startsWith("Paso 1") && "hablo primero" in texts[0])
         assertTrue(texts.any { it.startsWith("Paso 2 · tras 🔧 Bash") && "hablo tras la tool" in it })
         assertTrue(texts.last().startsWith("✅ Respuesta") && texts.last().endsWith("el final"))
@@ -119,8 +119,11 @@ class TurnDigestTest {
             TurnVoice(listOf(TurnProse("mira:\n```kotlin\nval x = 1\n```\nfin"))),
         )
         val page = pages.single()
-        assertEquals(listOf("pullquote", "pre", "pullquote"), page.map { it["type"]!!.jsonPrimitive.content })
-        assertEquals("kotlin", page[1]["language"]!!.jsonPrimitive.content)
+        assertEquals(
+            listOf("pullquote", "pre", "pullquote"),
+            TurnDigest.wire(page).map { it["type"]!!.jsonPrimitive.content },
+        )
+        assertEquals("kotlin", (page[1] as VoiceBlock.Code).language)
     }
 
     @Test
@@ -128,8 +131,8 @@ class TurnDigestTest {
         val text = "palabra ".repeat(1500)
         val pages = TurnDigest.pages(TurnVoice(listOf(TurnProse(text))))
         val blocks = pages.flatten()
-        assertTrue(blocks.all { PyText.cpLength(textOf(it)) <= RichVoice.BLOCK_CP })
-        assertEquals(text.trim('\n'), blocks.joinToString("") { textOf(it) })
+        assertTrue(blocks.all { PyText.cpLength(it.text) <= RichVoice.BLOCK_CP })
+        assertEquals(text.trim('\n'), blocks.joinToString("") { it.text })
     }
 
     @Test
