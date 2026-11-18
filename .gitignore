@@ -5,3 +5,6 @@ build/
 local.properties
 .zcode/
 .worktrees/
+# eval run artifacts (audit wave 6): every run writes JSON/MD here — evidence
+# useful on the machine, noise in git (nothing under evals/ is source).
+evals/
