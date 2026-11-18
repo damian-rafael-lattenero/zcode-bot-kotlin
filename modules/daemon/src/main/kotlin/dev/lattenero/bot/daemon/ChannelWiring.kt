@@ -97,6 +97,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.put
 import java.io.File
+import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 
 private val logger = KotlinLogging.logger {}
@@ -127,6 +128,8 @@ internal class ChannelStack(
     val streamEffects: KapProcess<StreamEffect>,
     /** M2: the effects' interpreter (the wiring's closures) — the worker's only body. */
     val runStreamEffect: suspend (StreamEffect) -> Unit,
+    /** 🔋 the quota watcher (audit item 5) — null with the `quota_watch` knob off. */
+    val quotaWatch: QuotaWatch? = null,
 )
 
 /**
@@ -237,6 +240,26 @@ private val OPENCODE_CONFIG_FILES = listOf("v2/provider_config.json", "hooks/bot
 
 /** z.ai's coding-plan key lives in the hook's snapshot; the live config is the fallback. */
 private val ZAI_CONFIG_FILES = listOf("hooks/bot-provider.json", "v2/provider_config.json")
+
+/**
+ * The provider's OWN last refusal (audit item 5's 1310/429 leg): the zconn
+ * tracker records the reason that took the connection down; only a
+ * LIMIT-shaped reason is quota news (a socket error is not the provider
+ * saying «no»). A missing/corrupt file is silence, never an invented alert.
+ */
+private fun providerLimitReason(stateDir: File): () -> String? = {
+    runCatching {
+        val file = File(stateDir, "zconn.json")
+        if (!file.exists()) return@runCatching null
+        val root = Json.parseToJsonElement(file.readText()) as? JsonObject ?: return@runCatching null
+        val reason = (root["reason"] as? JsonPrimitive)?.content?.takeIf { it.isNotBlank() }
+            ?: return@runCatching null
+        val lower = reason.lowercase()
+        reason.takeIf {
+            lower.contains("1310") || lower.contains("429") || lower.contains("quota") || lower.contains("limit")
+        }
+    }.getOrNull()
+}
 
 /**
  * OpenCode's edge sits behind Cloudflare (error 1010 without a
@@ -1014,6 +1037,7 @@ internal fun wireChannel(
         palette,
         streamEffects,
         runStreamEffect,
+        quotaWatch = wired?.quotaWatch,
     )
 }
 
@@ -1414,6 +1438,24 @@ private fun buildPoller(
             }
         }
     }
+    // THE QUOTA WATCHER (audit item 5): one read-only pass every
+    // `quota_watch_min`, its hysteresis state in its own file, every alert
+    // LOUD on the commands lane. The knob is read at boot like the others;
+    // OFF means the object is never constructed (the event_bus law).
+    val quotaKnob = QuotaWatchKnob.load(File(cfg.homeDir, SendKnob.FILE_NAME))
+    if (quotaKnob.warning != null) logger.warn { "quota watcher: ${quotaKnob.warning}" }
+    val quotaWatch = if (!quotaKnob.on) {
+        null
+    } else {
+        QuotaWatch(
+            snapshot = { commands.quotaSnapshot() },
+            providerLimit = providerLimitReason(File(cfg.homeDir, "state")),
+            deliver = { text -> speak(text, true, null) },
+            stateFile = File(File(cfg.homeDir, "state"), "quota-alerts.json"),
+            thresholdPct = quotaKnob.thresholdPct,
+            every = quotaKnob.everyMinutes.minutes,
+        )
+    }
     return PollerWiring(
         poller = Poller(
         api = liveApi,
@@ -1507,11 +1549,19 @@ private fun buildPoller(
         },
         ),
         bootLadder = bootLadder,
+        // THE QUOTA WATCHER (audit item 5): the knob decides whether it
+        // exists at all (OFF = not even constructed, the event_bus law).
+        quotaWatch = quotaWatch,
     )
 }
 
 /** What [buildPoller] answers: the poller AND the boot default ladder (the commands live inside). */
-internal data class PollerWiring(val poller: Poller, val bootLadder: suspend () -> Unit)
+internal data class PollerWiring(
+    val poller: Poller,
+    val bootLadder: suspend () -> Unit,
+    /** The quota watcher (audit item 5) — null with the `quota_watch` knob off. */
+    val quotaWatch: QuotaWatch? = null,
+)
 
 /**
  * ATTACHMENTS IN (30/10): the owner's photo/document — downloaded with the

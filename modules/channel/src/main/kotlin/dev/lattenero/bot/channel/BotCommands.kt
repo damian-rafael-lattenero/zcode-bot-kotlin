@@ -920,6 +920,22 @@ class BotCommands(
 
     // ── THE MIRROR'S ONE RENDER PATH (the byte-identical law) ─────────────
 
+    /**
+     * THE QUOTA WATCHER's snapshot (audit item 5): every plan's mark + the
+     * selection in force, READ-ONLY — the daemon's watcher decides on it and
+     * never writes. Null when the channel cannot answer (an honest silence,
+     * not an invented empty map).
+     */
+    suspend fun quotaSnapshot(): QuotaSnapshot? {
+        val v = planViews(null) ?: return null
+        return QuotaSnapshot(
+            marks = quotaMarks(v),
+            labels = v.plans.associate { p -> p.providerId to p.label },
+            plan = v.plan,
+            model = v.model,
+        )
+    }
+
     /** /plan's fresh render for the mirror — the SAME bytes the command speaks. */
     suspend fun planMenuRender(ws: String?, title: String?): MenuRender? =
         planViews(ws)?.let { v -> PlanMenu.planCard(v, title, quotaMarks(v), clock()) }

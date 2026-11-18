@@ -256,6 +256,11 @@ fun main(args: Array<String>) {
             ?.notifs
             ?.asProcess(cfg.interval, onHeartbeat = { touch(File(stateDir, HB_INTERVENTIONS)) })
             ?.startIn(this)
+        // 🔋 the QUOTA WATCHER (audit item 5): its own cadence (the knob's
+        // minutes), its own heartbeat; null with the `quota_watch` knob off.
+        stack.quotaWatch
+            ?.asProcess(onHeartbeat = { touch(File(stateDir, HB_QUOTA)) })
+            ?.startIn(this)
         // M2: the pump's effect worker — the ONLY place a frame's Telegram
         // send, channel query or queue drain can block; the reader never does.
         // kap 5.4.0's KapProcess owns the drain (handler + budget + isolation).
@@ -508,6 +513,7 @@ private const val HB_INTERVENTIONS = "hb-interventions"
 private const val HB_PALETTE = "hb-palette"
 private const val HB_EFFECTS = "hb-stream-effects"
 private const val HB_GLOBAL = "hb-global-notices"
+private const val HB_QUOTA = "hb-quota-watch"
 private const val COMPONENT_KEY = "component"
 private val DEFAULT_HEARTBEAT_EVERY = 30.seconds
 private val SPECTATOR_SCAN = 2.seconds
