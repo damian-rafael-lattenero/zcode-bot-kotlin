@@ -370,15 +370,21 @@ object Keyboards {
     /**
      * The F17 question (the owner's words, 30/10: «que me pregunte
      * interrumpir o encolar») — the parked text is ALREADY in the queue:
-     * ⚡ stops the turn (the drain then fires the text by itself), ⏳
-     * keeps the natural wait. The question is an OFFER, never a gate.
+     * ⚡ stops the turn (the drain then fires the text by itself), ⏳ IS
+     * ZCode's enqueue (the owner's 18/11 law): a soft steer — the text
+     * rides the steer frame INTO the running turn and is injected at the
+     * next tool boundary (the current execution's end), never a command
+     * waiting for the whole turn. The ⏳ data carries the parked text's
+     * identity (sid + updateId — the queue's own key) so the tap steers
+     * THAT text and not a stranger's. The question is an OFFER, never a
+     * gate: no tap and the drain still fires it at turn end.
      */
-    fun interruptQuestion(sid: String): JsonObject = buildJsonObject {
+    fun interruptQuestion(sid: String, updateId: Long): JsonObject = buildJsonObject {
         putJsonArray("inline_keyboard") {
             add(
                 buildJsonArray {
                     add(button("⚡ Empujar e interrumpir", "intr:$sid"))
-                    add(button("⏳ Dejar encolado", "qgo:$sid"))
+                    add(button("⏳ Encolar (steer suave)", "qgo:$sid:$updateId"))
                 },
             )
         }

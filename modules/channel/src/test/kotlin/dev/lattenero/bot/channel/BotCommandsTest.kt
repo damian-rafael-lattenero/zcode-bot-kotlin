@@ -502,12 +502,14 @@ class BotCommandsTest {
         val reply = full.text
         assertTrue("⏳ The Mac is busy with «arreglá el login»" in reply)
         assertTrue("stayed in the queue (1 waiting)" in reply)
+        assertTrue("soft steer" in reply, "the card speaks the enqueue's new meaning: ZCode's soft steer")
         // 30/10: the park ASKS — push-or-enqueue (the owner's «que me
         // pregunte interrumpir o encolar»), the buttons replace the old
-        // /stop hint line
+        // /stop hint line. 18/11: the ⏳ data carries the parked text's
+        // identity (sid:updateId) — the tap steers THAT text
         val datas = full.markup.toString()
         assertTrue("intr:" in datas, "the ⚡ push button is there")
-        assertTrue("qgo:" in datas, "the ⏳ keep-queued button is there")
+        assertTrue("qgo:task-77:" in datas, "the ⏳ enqueue button carries the parked text's identity")
         assertTrue(o.inbound.isEmpty()) // parked, not fired
         assertEquals(listOf(Triple("y ahora esto", "tg-5", 1_000_000L)), o.queued)
     }

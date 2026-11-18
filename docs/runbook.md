@@ -948,7 +948,7 @@ gate "F1", while Python's F1 was "one single source per concept").
 | F4d | the live view is OPTIONAL — a failure never breaks anything | `LiveTelegram.kt` | carried as a law |
 | F8 / F83 | the **shared cooldown window**: Telegram's 429 names it, its mtime is the expiry, `send()` pre-checks it before spending an attempt, and parking beats burning attempts | `Cooldown.kt`, `Sender.kt` | merged (Python's F8 was the warm worker — retired) |
 | F15 | ONE getUpdates reader **and** only the focused task gets a spectator | `SpectatorWatch.kt`, `SpectatorIo.kt` | carried |
-| F17 | the explicit park queue — a busy Mac parks, never drops; `/stop`/`/queue` own it | `Routing.kt`, `BotCommands.kt`, `InboundQueue.kt` | carried |
+| F17 | the explicit park queue — a busy Mac parks, never drops; ⏳ Encolar = ZCode's soft steer (the tap rides the steer frame into the running turn, next tool boundary); `/stop`/`/queue` own it | `Routing.kt`, `BotCommands.kt`, `InboundQueue.kt` | carried, 18/11 soft-steer tap |
 | F20 | turnId correlation rebuilt on the CLI-log path | `SpectatorCore.kt` | carried |
 | F22 | `/run`'s store contract: every fired prompt is `/retry`'s ammo; model/mode survive a switch | `BotCommands.kt`, `LastPrompt.kt` | carried |
 | F23 | 👀 on receipt, ✅ on handled — reactions answer THE message, zero new messages | `Ack.kt`, `Poller.kt` | carried |

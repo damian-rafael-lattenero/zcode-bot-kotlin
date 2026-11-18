@@ -294,7 +294,7 @@ class KeyboardsTest {
             Keyboards.verbosityPicker(FeedVerbosity.NORMAL),
             Keyboards.cotToggle(7, expanded = false),
             Keyboards.cotToggle(7, expanded = true),
-            Keyboards.interruptQuestion("ses_0f84de0cf002474fe596446e627129dc"),
+            Keyboards.interruptQuestion("ses_0f84de0cf002474fe596446e627129dc", 42L),
             Keyboards.liveCard("ses_0f84de0cf002474fe596446e627129dc", lanes)!!,
             Keyboards.nuclearConfirm(),
             Keyboards.stopConfirm(),

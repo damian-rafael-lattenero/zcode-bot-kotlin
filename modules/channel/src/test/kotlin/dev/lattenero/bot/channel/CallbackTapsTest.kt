@@ -49,7 +49,23 @@ class CallbackTapsTest {
             bindTaskId: String?,
         ) = InboundAnswer.Answered(duplicate = false, replies = emptyList())
 
-        override suspend fun enqueueInbound(text: String, messageId: String, receivedAt: Long) = 0
+        /** A tiny real queue: the tap's take/re-enqueue law is pinned on real entries. */
+        val queue = mutableListOf<QueuedText>()
+        val steered = mutableListOf<Pair<String, String>>()
+        var steerAnswer: SteerAnswer = SteerAnswer.Delivered
+
+        override suspend fun enqueueInbound(text: String, messageId: String, receivedAt: Long): Int {
+            queue.add(QueuedText(text, messageId, receivedAt))
+            return queue.size
+        }
+
+        override suspend fun queueTake(messageId: String): QueuedText? =
+            queue.firstOrNull { it.messageId == messageId }?.also { queue.remove(it) }
+
+        override suspend fun steer(taskId: String, text: String): SteerAnswer {
+            steered.add(taskId to text)
+            return steerAnswer
+        }
 
         override suspend fun subscribe(taskId: String, workspacePath: String) {}
     }
@@ -169,11 +185,44 @@ class CallbackTapsTest {
     }
 
     @Test
-    fun theKeepQueuedTapSpeaksWithoutTouchingTheChannel() = runBlocking {
+    fun theEnqueueTapSteersTheParkedTextIntoTheRunningTurn() = runBlocking {
         val o = FakeOps().apply { answers["botStatus"] = status }
+        o.enqueueInbound("probá redis", "tg-3", 1_000L)
+        val reply = commands(o).onCallback("qgo:task-77:3", 3L, OWNER)!!
+        assertTrue("Encolado como steer" in reply.text, reply.text)
+        assertEquals(listOf("task-77" to "probá redis"), o.steered, "the tap IS the steer frame")
+        assertTrue(o.queue.isEmpty(), "the text LEFT the queue — the fork holds it now")
+    }
+
+    @Test
+    fun theEnqueueTapOnADownChannelPutsTheTextBack() = runBlocking {
+        val o = FakeOps().apply {
+            answers["botStatus"] = status
+            steerAnswer = SteerAnswer.Unavailable
+        }
+        o.enqueueInbound("probá redis", "tg-3", 1_000L)
+        val reply = commands(o).onCallback("qgo:task-77:3", 3L, OWNER)!!
+        assertTrue("📡" in reply.text, reply.text)
+        assertTrue("volvió a la cola" in reply.text, reply.text)
+        assertEquals(1, o.queue.size, "a tap never loses the text — it went back to the queue")
+        assertTrue(o.steered.isNotEmpty(), "the steer was attempted before the honest degrade")
+    }
+
+    @Test
+    fun theEnqueueTapOnADrainedTextAnswersHonestly() = runBlocking {
+        val o = FakeOps().apply { answers["botStatus"] = status }
+        val reply = commands(o).onCallback("qgo:task-77:3", 3L, OWNER)!!
+        assertTrue("Ya no está" in reply.text, reply.text)
+        assertTrue(o.steered.isEmpty(), "nothing to steer — the drain took the text first")
+    }
+
+    @Test
+    fun anOldShapeEnqueueTapAsksForANewMessage() = runBlocking {
+        val o = FakeOps().apply { answers["botStatus"] = status }
+        // a card printed before the soft-steer law: data without the parked id
         val reply = commands(o).onCallback("qgo:task-77", 3L, OWNER)!!
-        assertEquals("📬 Queda encolado — entra cuando el turno termine.", reply.text)
-        assertTrue(o.queries.isEmpty(), "the natural wait is a no-op by design")
+        assertTrue("versión anterior" in reply.text, reply.text)
+        assertTrue(o.steered.isEmpty(), "nothing flies without the text's identity")
     }
 
     @Test
