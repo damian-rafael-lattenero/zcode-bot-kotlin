@@ -5,6 +5,11 @@
 # the interpreter: ~/.local/bin/nu-nightly (0.116.2-nightly.28 at the time
 # of the migration). `nu-check --debug` is the gate.
 
+# The announce rung lives in nushell-fp (single source, audit wave 6): the
+# 10/11 lesson (a null param is a PARSE error) and the silent-by-design law
+# ride that module. Imported here so `announce` keeps the same call.
+use ~/Projects/nushell-fp/mods/telegram.nu send-telegram
+
 export def log [msg: string]: nothing -> nothing {
     print $"[deploy] ($msg)"
 }
@@ -28,30 +33,6 @@ export def announce [text: string]: nothing -> nothing {
 # failure) cannot be skimmed past in the chat. Same never-breaks contract.
 export def announce-loud [html: string]: nothing -> nothing {
     send-telegram --html $html
-}
-
-# THE FLAG, NOT THE NULL (the owner's 10/11 triple silence): the previous
-# shape passed `null` into a string-typed param and nu-nightly REJECTS that
-# call AT PARSE — every script died at import, before its first print, and
-# launchd only showed exit 1 with a lost buffer. A long flag carries the
-# parse-mode; no null crosses any signature.
-def send-telegram [text: string, --html]: nothing -> nothing {
-    let cfg_path: string = ($nu.home-dir | path join ".zcode/telegram-remote.json")
-    if not ($cfg_path | path exists) { return }
-    try {
-        let cfg: any = (open $cfg_path)
-        let token: string = ($cfg.token? | default "")
-        let chat: any = ($cfg.chat_id? | default "")
-        if ($token | is-empty) or ($chat | is-empty) { return }
-        let body: string = if $html {
-            ({chat_id: $chat, text: $text, parse_mode: "HTML"} | to json)
-        } else {
-            ({chat_id: $chat, text: $text} | to json)
-        }
-        do -i {
-            http post -m 10sec -t application/json $"https://api.telegram.org/bot($token)/sendMessage" $body -r | ignore
-        }
-    } catch {|_e| }
 }
 
 export def die [msg: string]: nothing -> nothing {
