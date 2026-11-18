@@ -3,6 +3,7 @@ package dev.lattenero.bot.daemon
 import dev.lattenero.bot.channel.BotCommands
 import dev.lattenero.bot.channel.ChannelQuery
 import dev.lattenero.bot.channel.ModeMenu
+import dev.lattenero.bot.channel.PlanMenu
 import dev.lattenero.bot.channel.QueryAnswer
 import dev.lattenero.bot.channel.TurnDigest
 import dev.lattenero.bot.channel.TurnVoice
@@ -163,6 +164,29 @@ internal suspend fun finalTurnOf(
         if (attemptNo < FINAL_ANSWER_ATTEMPTS) delayMs(FINAL_ANSWER_RETRY_MS)
     }
     return null
+}
+
+/**
+ * THE TURN'S MODEL, for the bus (audit: per-turn cost ledger): the SAME
+ * selection query the /plan card reads, asked with the task's own workspace.
+ * The stream never carries the model, so this is the honest source — and a
+ * dead channel or an old fork answers null, which the brain records as an
+ * UNPRICED row instead of inventing a model.
+ */
+internal suspend fun modelInForceOf(
+    taskId: String,
+    query: suspend (ChannelQuery) -> QueryAnswer,
+    workspaceOf: suspend (String) -> String?,
+    log: (String) -> Unit,
+): String? {
+    val ws = runCatching { workspaceOf(taskId) }.getOrNull()
+    return when (val answer = query(ChannelQuery.ModelSelection(workspacePath = ws))) {
+        is QueryAnswer.Ok -> PlanMenu.parse(answer.resultJson)?.model
+        else -> {
+            log("modelSelection($taskId) answered $answer — the turn rides the bus without a model")
+            null
+        }
+    }
 }
 
 /**

@@ -612,6 +612,16 @@ internal fun wireChannel(
                     log = { message -> logger.warn { message } },
                 )
             },
+            // the per-turn cost ledger's model: the same selection the /plan
+            // card reads, asked once per sealed turn (null = unpriced, honest)
+            modelOf = { taskId ->
+                modelInForceOf(
+                    taskId,
+                    query = { q -> client.query(q) },
+                    workspaceOf = { sid -> workspacePathOf(cfg.baseDir, sid) },
+                    log = { message -> logger.warn { message } },
+                )
+            },
             log = { message -> logger.warn { message } },
         )
         logger.info { "event_bus ON — appending to ${File(File(cfg.baseDir, "agent-brain"), BUS_FILE)}" }
