@@ -28,6 +28,23 @@ object Keyboards {
     }
 
     /**
+     * The owner's 👍/👎 row under the seal's LAST digest page (audit: the
+     * first preference data). The callback carries the conversation's sid —
+     * the producer resolves the sealed turn id (it keeps the seal marks) —
+     * and stays under the 64-byte limit: `fb:up:<sid>` at 43 bytes worst case.
+     */
+    fun feedbackRow(sid: String): JsonObject = buildJsonObject {
+        putJsonArray("inline_keyboard") {
+            add(
+                buildJsonArray {
+                    add(button("👍", "fb:up:$sid"))
+                    add(button("👎", "fb:dn:$sid"))
+                },
+            )
+        }
+    }
+
+    /**
      * A URL button (Telegram's own shape): the tap OPENS the link in the
      * user's browser — no callback, nothing for the bot to answer.
      */
