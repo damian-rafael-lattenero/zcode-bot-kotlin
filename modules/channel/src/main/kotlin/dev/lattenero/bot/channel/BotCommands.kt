@@ -369,7 +369,8 @@ class BotCommands(
      * mid-turn, even while another task owns the conversation). The F17
      * pair is the owner's push-or-enqueue («que me pregunte interrumpir o
      * encolar»): ⚡ stops the busy turn (the queued text then fires on its
-     * own), ⏳ confirms the natural wait. The tap's toast
+     * own), ⏳ IS ZCode's enqueue — a soft steer into the running turn
+     * (queueSteer); no tap and the natural wait stands. The tap's toast
      * (answerCallbackQuery) is the wiring's effect, not ours.
      *
      * THE SECOND LOCK ([fromId], U9's defense-in-depth): every
@@ -440,10 +441,7 @@ class BotCommands(
 
         data.startsWith("qf:") -> answerArm(data.removePrefix("qf:"))
 
-        data.startsWith("qgo:") -> {
-            logger.info { "callback ⏳ qgo: the parked text keeps its natural wait" }
-            BotReply("📬 Queda encolado — entra cuando el turno termine.")
-        }
+        data.startsWith("qgo:") -> queueSteer(data.removePrefix("qgo:"), updateId)
 
         data.startsWith("ql:") -> queueLaunch(data.removePrefix("ql:"), updateId)
 
@@ -1954,8 +1952,9 @@ class BotCommands(
         }
         return BotReply(
             "⏳ The Mac is busy with «${PyText.esc(title)}» — your message stayed in the " +
-                "queue ($n waiting). It runs when the turn finishes.",
-            markup = Keyboards.interruptQuestion(active),
+                "queue ($n waiting). ⏳ Encolar = soft steer: it enters the RUNNING turn when " +
+                "the current execution ends; no tap and it runs when the whole turn finishes.",
+            markup = Keyboards.interruptQuestion(active, updateId),
         )
     }
 
@@ -3222,6 +3221,57 @@ class BotCommands(
         val left = ops.queueEntries().size
         logger.info { "queue: $messageId DISCARDED by hand (update=$updateId) — $left left" }
         return BotReply("🗑 Discarded («${PyText.esc(dropped.text.take(DISCARD_PREVIEW))}…») — $left left.")
+    }
+
+    /**
+     * ⏳ qgo — THE OWNER'S 18/11 LAW: encolar is ZCode's enqueue, a SOFT
+     * STEER — never a command waiting for the whole turn. The tap takes
+     * the parked text OUT of the F17 queue and rides the steer frame to
+     * the conversation it was parked for: a RUNNING turn injects it at
+     * the next tool boundary (the current execution's end), an idle one
+     * starts a normal turn with the same text — the frame's own contract,
+     * stated, not guessed. Every miss puts the text BACK in the queue (a
+     * tap never loses it — queueLaunch's law) and the turn-end drain
+     * still owns it then. The no-tap path keeps the natural wait (the
+     * offer, never a gate).
+     */
+    @Suppress("ReturnCount") // the version card, the drained text, the flight — one exit each
+    private suspend fun queueSteer(arg: String, updateId: Long): BotReply {
+        val sid = arg.substringBefore(':')
+        val parkedId = arg.substringAfter(':', "")
+        if (sid.isBlank() || parkedId.isBlank()) {
+            return BotReply("🤷 Esa pregunta es de una versión anterior — mandá el mensaje de nuevo.")
+        }
+        val item = ops.queueTake("tg-$parkedId")
+            ?: return BotReply("🤷 Ya no está — el drenaje del turno se la llevó (o se descartó antes).")
+        val title = history.ctxTasks(SCOPE_FOR_PICK).firstOrNull { it.sid == sid }
+            ?.title?.takeIf { it.isNotEmpty() } ?: sid.takeLast(SID_TAIL)
+        return when (val answer = ops.steer(sid, item.text)) {
+            SteerAnswer.Delivered -> {
+                logger.info { "callback ⏳ qgo: parked text steered to $sid (update=$updateId)" }
+                BotReply(
+                    "⏳ Encolado como steer — «${PyText.esc(title)}» lo lee al terminar la ejecución " +
+                        "actual (se inyecta DENTRO del turno que corre; si ya terminó, arrancó uno normal).",
+                )
+            }
+
+            is SteerAnswer.Failed -> {
+                ops.enqueueInbound(item.text, item.messageId, item.receivedAt)
+                if (answer.code == UNKNOWN_REQUEST_CODE) {
+                    BotReply("$STEER_OLD_FORK\n📬 El texto volvió a la cola — corre al terminar el turno.")
+                } else {
+                    BotReply(
+                        "⚠️ No pude encolar como steer (${answer.code}): ${PyText.esc(answer.message ?: "?")}" +
+                            " — el texto volvió a la cola.",
+                    )
+                }
+            }
+
+            SteerAnswer.Unavailable -> {
+                ops.enqueueInbound(item.text, item.messageId, item.receivedAt)
+                BotReply("$DEGRADED\n📬 El texto volvió a la cola.")
+            }
+        }
     }
 
     /**
