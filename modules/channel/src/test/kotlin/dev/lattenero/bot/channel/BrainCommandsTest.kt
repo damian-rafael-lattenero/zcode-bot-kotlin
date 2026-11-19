@@ -78,6 +78,8 @@ class BrainCommandsTest {
         var search: BrainReply = BrainReply.Response(200, """{"memories":[]}""")
         var recent: BrainReply = BrainReply.Response(200, "[]")
         var memory: BrainReply = BrainReply.Response(200, "{}")
+        var evals: BrainReply = BrainReply.Response(200, "[]")
+        var costs: BrainReply = BrainReply.Response(200, "{}")
         val calls = mutableListOf<String>()
 
         fun gateway(): BrainGateway = BrainGateway(
@@ -88,6 +90,8 @@ class BrainCommandsTest {
             memorySearch = { q, k -> calls += "search:$q:$k"; search },
             memoryRecent = { limit -> calls += "recent:$limit"; recent },
             memoryStatus = { calls += "memoryStatus"; memory },
+            evalLatest = { suite, limit -> calls += "evals:$suite:$limit"; evals },
+            costsToday = { calls += "costs"; costs },
         )
     }
 
