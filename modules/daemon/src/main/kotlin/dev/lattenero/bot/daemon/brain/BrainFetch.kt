@@ -172,6 +172,16 @@ internal fun brainGateway(
         brainCall(endpoint.url, HttpMethod.Get, "/memory/recent?limit=$limit", engine = engine, metrics = metrics)
     },
     memoryStatus = { brainCall(endpoint.url, HttpMethod.Get, "/memory/status", engine = engine, metrics = metrics) },
+    evalLatest = { suite, limit ->
+        val path = buildList {
+            add("limit=$limit")
+            suite?.takeIf { it.isNotBlank() }?.let {
+                add("suite=${java.net.URLEncoder.encode(it, Charsets.UTF_8)}")
+            }
+        }.joinToString("&")
+        brainCall(endpoint.url, HttpMethod.Get, "/eval/latest?$path", engine = engine, metrics = metrics)
+    },
+    costsToday = { brainCall(endpoint.url, HttpMethod.Get, "/costs/today", engine = engine, metrics = metrics) },
 )
 
 /** The two POST bodies share the same {query, k} shape (agent-brain's request types). */
