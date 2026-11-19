@@ -351,6 +351,7 @@ class BotCommands(
             "verbosity" -> verbosityCmd(rest)
             "brain" -> BotReply(brain?.brain(rest) ?: BrainTexts.UNWIRED)
             "memory" -> BotReply(brain?.memory(rest) ?: BrainTexts.UNWIRED)
+            "learn" -> BotReply(brain?.learn(rest) ?: BrainTexts.UNWIRED)
             else -> BotReply(UNKNOWN)
         }
         logger.info {
@@ -3839,6 +3840,7 @@ class BotCommands(
             MenuCommand("verbosity", "cuánto habla el feed en vivo — summary / normal / verbose"),
             MenuCommand("brain", "pregunta al RAG de agent-brain — /brain status para el pulso"),
             MenuCommand("memory", "recuerdos del brain — /memory «texto» · recent [k] · status"),
+            MenuCommand("learn", "aprendizaje de 7 días — memorias, evals y costos del brain"),
             MenuCommand("help", "all commands"),
         )
 

@@ -39,6 +39,10 @@ class BrainGateway(
     val memorySearch: suspend (query: String, k: Int) -> BrainReply,
     val memoryRecent: suspend (limit: Int) -> BrainReply,
     val memoryStatus: suspend () -> BrainReply,
+    /** GET /eval/latest (suite filter optional) — /learn's quality rows. */
+    val evalLatest: suspend (suite: String?, limit: Int) -> BrainReply,
+    /** GET /costs/today — /learn's cost line. */
+    val costsToday: suspend () -> BrainReply,
 )
 
 /** One RAG hit — the citation is uri + heading, as agent-brain's QueryResponse has it. */
@@ -82,6 +86,20 @@ internal data class BrainMemoryStatus(
     val chatModel: String,
     val embedModel: String,
 )
+
+/** One /eval/latest row (agent-brain's StoredRun, the fields /learn reads). */
+internal data class BrainEvalRow(
+    val suite: String,
+    val model: String,
+    val passed: Int,
+    val total: Int,
+    val gate: Double,
+    val ok: Boolean,
+    val ts: String?,
+)
+
+/** /costs/today's rollup. */
+internal data class BrainCostsToday(val turns: Long, val usd: Double, val unpriced: Long)
 
 /**
  * The JSON PARSERS — pure, fixture-pinned against agent-brain's own shapes
@@ -184,6 +202,35 @@ internal object BrainJson {
         return root.str("error") ?: body.take(ERROR_HEAD).takeIf { it.isNotBlank() }
     }
 
+    /** GET /eval/latest's top-level array (StoredRun rows, the fields /learn reads). */
+    fun evalLatest(body: String): List<BrainEvalRow>? {
+        val array = runCatching { json.parseToJsonElement(body) as? JsonArray }.getOrNull() ?: return null
+        return array.mapNotNull { element ->
+            val o = element as? JsonObject ?: return@mapNotNull null
+            val suite = o.str("suite") ?: return@mapNotNull null
+            BrainEvalRow(
+                suite = suite,
+                model = o.str("model") ?: "?",
+                passed = o.long("passed")?.toInt() ?: 0,
+                total = o.long("total")?.toInt() ?: 0,
+                gate = o.double("gate") ?: 0.0,
+                ok = o.bool("ok") ?: false,
+                ts = o.str("ts"),
+            )
+        }
+    }
+
+    /** /costs/today: {turns, usd, unpriced} — the cost line /learn speaks. */
+    fun costsToday(body: String): BrainCostsToday? {
+        val root = root(body) ?: return null
+        val turns = root.long("turns") ?: return null
+        return BrainCostsToday(
+            turns = turns,
+            usd = root.double("usd") ?: 0.0,
+            unpriced = root.long("unpriced") ?: 0,
+        )
+    }
+
     private fun memoryOf(element: JsonElement): BrainMemory? {
         val o = element as? JsonObject ?: return null
         val content = o.str("content") ?: return null
@@ -220,6 +267,7 @@ internal object BrainTexts {
 
     private const val HITS_SHOWN = 8
     private const val ITEM_CHARS = 240
+    private const val LEARN_ITEM_CHARS = 160
 
     private const val BYTES_PER_KB = 1024
     private const val BYTES_PER_MB = BYTES_PER_KB * BYTES_PER_KB
@@ -232,6 +280,9 @@ internal object BrainTexts {
         "🧠 /memory «texto» — busca recuerdos (semántico).\n" +
             "/memory recent [k] — los últimos k (default $RECENT_DEFAULT).\n" +
             "/memory status — turnos, recuerdos y breaker."
+
+    const val LEARN_USAGE =
+        "🧠 /learn — la tarjeta de aprendizaje de los últimos 7 días (memorias, evals y costos). Sin argumentos."
 
     const val UNWIRED =
         "⚠️ /brain y /memory no están cableados en este daemon (sin cliente HTTP de agent-brain)."
@@ -375,6 +426,65 @@ internal object BrainTexts {
 
     private fun score(value: Double): String = String.format(Locale.ROOT, "%.2f", value)
 
+    /**
+     * /learn — the week's learning card (plan v2 T3): the memories the last
+     * 7 days produced, the latest eval rows and today's cost. Legs degrade
+     * honestly per leg (📡/⚠️), never a silent hole.
+     */
+    const val LEARN_WINDOW_DAYS = 7
+    const val LEARN_PER_KIND = 4
+
+    fun learn(
+        memories: List<BrainMemory>,
+        evals: List<BrainEvalRow>,
+        costs: BrainCostsToday?,
+        now: java.time.Instant,
+    ): String {
+        val cutoff = now.minus(java.time.Duration.ofDays(LEARN_WINDOW_DAYS.toLong()))
+        val week = memories.filter { memory ->
+            memory.createdAt?.let { created ->
+                runCatching { java.time.Instant.parse(created).isAfter(cutoff) }.getOrDefault(false)
+            } ?: false
+        }
+        val byKind = week.groupBy { it.kind }
+        val memoryBlock = buildString {
+            append("\n📝 hechos ${byKind["fact"]?.size ?: 0} · 🎯 decisiones ${byKind["decision"]?.size ?: 0}")
+            append(" · ⭐ preferencias ${byKind["preference"]?.size ?: 0}")
+            for (kind in listOf("decision", "fact", "preference")) {
+                val items = byKind[kind].orEmpty().take(LEARN_PER_KIND)
+                if (items.isEmpty()) continue
+                append("\n\n<b>$kind</b>")
+                items.forEach { memory ->
+                    append("\n• ${PyText.esc(PyText.take(memory.content.trim(), LEARN_ITEM_CHARS))}")
+                }
+            }
+            if (week.isEmpty()) append("\n\n📭 sin recuerdos nuevos esta semana")
+        }
+        val evalBlock = evalLeg(evals)
+        val costLine = costs?.let { "hoy: ${it.turns} turnos · $${String.format(Locale.ROOT, "%.2f", it.usd)}" }
+            ?: "hoy: 📡 caído"
+        return buildString {
+            append("🧠 <b>aprendizaje de $LEARN_WINDOW_DAYS días</b>")
+            append(memoryBlock)
+            append(evalBlock)
+            append("\n\n💰 ")
+            append(costLine)
+        }
+    }
+
+    /** The eval leg: the newest run per suite, one honest row each. */
+    private fun evalLeg(evals: List<BrainEvalRow>): String = if (evals.isEmpty()) {
+        "\n\n📊 evals: 📭 sin corridas"
+    } else {
+        buildString {
+            append("\n\n📊 <b>evals</b> (última corrida)")
+            evals.forEach { row ->
+                val mark = if (row.ok) "✅" else "❌"
+                append("\n• ${PyText.esc(row.suite)} ${row.passed}/${row.total} $mark (gate ${row.gate})")
+            }
+        }
+    }
+
     private fun bytes(value: Long): String = when {
         value < BYTES_PER_KB -> "$value B"
         value < BYTES_PER_MB -> String.format(Locale.ROOT, "%.1f KB", value / BYTES_PER_KB.toDouble())
@@ -418,6 +528,38 @@ class BrainCommands(private val brain: BrainGateway) {
             arg.isEmpty() -> BrainTexts.MEMORY_USAGE
             arg.equals("status", ignoreCase = true) -> memoryStatus()
             else -> memoryArg(arg)
+        }
+    }
+
+    /**
+     * `/learn` — the week's learning card (plan v2 T3): memories + evals +
+     * today's cost, each leg honestly degraded. No args; everything else is
+     * the usage line.
+     */
+    suspend fun learn(rest: String): String {
+        if (rest.isNotBlank()) return BrainTexts.LEARN_USAGE
+        val recent = brain.memoryRecent(60)
+        val evals = brain.evalLatest(null, 12)
+        val costs = brain.costsToday()
+        // Each leg degrades alone; the card assembles whatever answered. All
+        // three down = the one honest «caído».
+        val allDown = listOf(recent, evals, costs).all { it is BrainReply.Down }
+        val memoryList: List<BrainMemory> = when (recent) {
+            is BrainReply.Response ->
+                if (recent.status in HTTP_SUCCESS) BrainJson.memoryRecent(recent.body).orEmpty() else emptyList()
+            else -> emptyList()
+        }
+        val evalRows: List<BrainEvalRow> = when (evals) {
+            is BrainReply.Response ->
+                if (evals.status in HTTP_SUCCESS) BrainJson.evalLatest(evals.body).orEmpty() else emptyList()
+            else -> emptyList()
+        }
+        val costsToday: BrainCostsToday? = (costs as? BrainReply.Response)
+            ?.takeIf { it.status in HTTP_SUCCESS }
+            ?.let { BrainJson.costsToday(it.body) }
+        return when {
+            allDown -> BrainTexts.down(brain.url)
+            else -> BrainTexts.learn(memoryList, evalRows, costsToday, java.time.Instant.now())
         }
     }
 
