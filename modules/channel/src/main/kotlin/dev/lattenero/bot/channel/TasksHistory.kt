@@ -97,9 +97,16 @@ data class TaskRow(
 /** Python's _cur_sel shape: what /status's «🤖 model · 🧠 level» line renders. */
 data class ModelSel(val modelId: String, val reasoningLevel: String)
 
-/** Python's `_tasks_scope`: /tasks drops the DEFAULT workspace's loose tasks; /all_tasks keeps them. */
+/**
+ * Python's `_tasks_scope`: /tasks drops the DEFAULT workspace's loose tasks;
+ * /all_tasks keeps them. Measured 21/11: the fork's conversation list also
+ * carries UNTITLED loose sessions (subagent and scratch sessions — the ghost
+ * hash rows on the phone), and the desktop task list never shows them.
+ * /tasks drops those too — an untitled conversation is not a project —
+ * while /all_tasks keeps every row, loose and untitled included.
+ */
 fun scopeRows(rows: List<TaskRow>, all: Boolean, defaultWs: String): List<TaskRow> =
-    if (all) rows else rows.filter { it.ws != defaultWs }
+    if (all) rows else rows.filter { it.ws != defaultWs && it.title.isNotEmpty() }
 
 /**
  * The owner's 14/11 law: RUNNING conversations first, then the most

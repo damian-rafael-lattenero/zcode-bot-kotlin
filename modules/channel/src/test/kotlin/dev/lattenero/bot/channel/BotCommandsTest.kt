@@ -111,6 +111,7 @@ class BotCommandsTest {
         TaskRow(sid = "task-77", title = "arreglá el login", ws = app),
         TaskRow(sid = "task-02", title = "second", ws = botWs),
         TaskRow(sid = "task-03", title = "", ws = defaultWs),
+        TaskRow(sid = "sub-ghost-1", title = "", ws = "$app/Projects"),
     )
 
     private val boundStatus = """
@@ -836,8 +837,12 @@ class BotCommandsTest {
 
     @Test
     fun scopeRowsDropTheLooseDefaultWorkspace() {
+        // the 21/11 ghost rows: UNTITLED foreign-ws sessions (subagent
+        // sessions) drop from /tasks like the default-workspace loose ones —
+        // the desktop never showed them; /all_tasks keeps every row, ghosts
+        // included
         assertEquals(2, scopeRows(rows, all = false, defaultWs = defaultWs).size)
-        assertEquals(3, scopeRows(rows, all = true, defaultWs = defaultWs).size)
+        assertEquals(4, scopeRows(rows, all = true, defaultWs = defaultWs).size)
     }
 
     // ---- the audit's reply-contract gaps (30/10) ---------------------------
