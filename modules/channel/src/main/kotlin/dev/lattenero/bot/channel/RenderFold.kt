@@ -873,7 +873,8 @@ internal fun replayed(window: String, delta: String): Boolean {
 @Suppress("ReturnCount")
 internal fun restatedFresh(window: String, delta: String): String? {
     if (delta.length < REPLAY_GUARD_MIN_CP || window.isEmpty()) return null
-    if (delta.length < window.length || !delta.startsWith(window)) return null
+    // no whole-window gate here (22/11): the suffix-overlap seam re-states
+    // only the window's TAIL — [cutRestatedHead] decides whole-vs-overlap
     return cutRestatedHead(listOf(window), delta)
 }
 
@@ -904,11 +905,45 @@ private fun longestRestated(windows: List<String>, delta: String): String? =
  * owner read both, the model-io ground truth was CLEAN). The stream is
  * append-only: a window copy still standing at the remainder's head is a
  * seam, never new text — cut every copy, append only what follows.
+ *
+ * THE SUFFIX-OVERLAP SEAM (22/11, measured live: «TheThe old todo list…»
+ * in BOTH the CoT blocks and the talking): the recovery can re-state from
+ * a word start that sits INSIDE the window — the delta does not start
+ * with the whole window, it starts with the window's own TAIL
+ * («…tanda. The» + «The old todo…»). [largestWordOverlap] cuts that
+ * overlap; a normal append never matches it (it arrives mid-word or with
+ * its leading space, and the re-statement restarts a word cold).
  */
-private fun cutRestatedHead(windows: List<String>, delta: String): String =
-    longestRestated(windows, delta)
-        ?.let { cutRestatedHead(windows, delta.substring(it.length)) }
-        ?: delta
+private fun cutRestatedHead(windows: List<String>, delta: String): String {
+    val whole = longestRestated(windows, delta)
+    if (whole != null) return cutRestatedHead(windows, delta.substring(whole.length))
+    val overlap = largestWordOverlap(windows, delta)
+    return if (overlap != null) cutRestatedHead(windows, delta.substring(overlap)) else delta
+}
+
+/**
+ * The largest k whose delta-prefix a window ENDS with, WORD-ALIGNED: the
+ * delta must START a word (a letter — normal appends carry their leading
+ * space or arrive mid-word), and the overlapped text must begin at a word
+ * boundary inside the window. «ha ha» prose is safe: its second word
+ * arrives WITH the space; only a cold word-restart overlaps.
+ */
+private fun largestWordOverlap(windows: List<String>, delta: String): Int? {
+    if (delta.isEmpty() || !delta[0].isLetter()) return null
+    var best: Int? = null
+    for (window in windows) {
+        val maxK = minOf(window.length, delta.length - 1)
+        for (k in maxK downTo 2) {
+            if (window.endsWith(delta.substring(0, k)) &&
+                (k == window.length || !window[window.length - k - 1].isLetter())
+            ) {
+                if (best == null || k > best) best = k
+                break
+            }
+        }
+    }
+    return best
+}
 
 /**
  * [RenderEvent.Resync] for a CHILD session topic (14/11): the lane whose

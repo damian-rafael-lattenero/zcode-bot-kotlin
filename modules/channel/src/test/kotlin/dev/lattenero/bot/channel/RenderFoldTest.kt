@@ -449,6 +449,43 @@ class RenderFoldTest {
     }
 
     @Test
+    fun aSuffixOverlapRestatementNeverGluesTheFirstWord() {
+        // THE 22/11 SEAM (measured on Telegram: «TheThe old todo list…» in
+        // the CoT AND the talking): the recovery re-states from a word
+        // start INSIDE the window — the delta starts with the window's
+        // TAIL, not with the whole window
+        val first = "Revisando el plan que quedó de la tanda anterior. The"
+        var s = reduce(null, thought(first))!!
+        s = reduce(s, thought("The old todo list is stale. Update for the new tanda."))!!
+        assertTrue("TheThe" !in s.cotTail, "the overlapped word never doubles")
+        assertTrue(
+            s.cotTail.endsWith("anterior. The old todo list is stale. Update for the new tanda."),
+            "the remainder appends once, whole: ${s.cotTail}",
+        )
+    }
+
+    @Test
+    fun aLeadingSpaceAppendNeverCutsLegitProse() {
+        // the overlap's discriminator: a normal append arrives WITH its
+        // leading space (or mid-word) — «ha ha» prose never matches the
+        // cold word-restart, however long the delta
+        var s = reduce(null, thought("vamos bien ha"))!!
+        s = reduce(s, thought(" ha, seguimos con la próxima parte del plan de la tanda"))!!
+        assertEquals("vamos bien ha ha, seguimos con la próxima parte del plan de la tanda", s.cotTail)
+    }
+
+    @Test
+    fun theAnswersSuffixOverlapNeverGluesEither() {
+        // the talking's own seam (the owner read it in the violet prose):
+        // same law, same shared cut — restatedFresh no longer gates on the
+        // whole-window match
+        var s = reduce(null, answer("El plan sigue. The"))!!
+        s = reduce(s, answer("The next step is the E2 types work."))!!
+        assertTrue("TheThe" !in s.answerTail)
+        assertTrue(s.answerTail.endsWith("sigue. The next step is the E2 types work."))
+    }
+
+    @Test
     fun keepaliveAdvancesTheSeqAndNothingElse() {
         var state = reduce(null, thought("pensando"))
         val before = state!!
