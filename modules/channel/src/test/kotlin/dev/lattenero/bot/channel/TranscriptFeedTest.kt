@@ -217,7 +217,7 @@ class TranscriptFeedTest {
 
     @Test
     fun aFullBlockNeverChunksOneMessageByLaw() {
-        // a block is capped at COT_BLOCK_CP (3000) — it ALWAYS fits one
+        // a block is capped at the COT valve (3000) — it ALWAYS fits one
         // message; the old chunk shower is gone
         val long = "x".repeat(8000) // over the cap: what the reducer could never produce, but the law holds
         val msgs = TranscriptFeed.messages(

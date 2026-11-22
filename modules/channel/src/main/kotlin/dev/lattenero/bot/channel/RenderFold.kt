@@ -299,9 +299,9 @@ private fun reduceThought(state: RenderState, event: RenderEvent.Thought): Rende
         if (fresh.isEmpty()) return state
         val chars = state.thoughtChars + fresh.length
         // THE BLOCKS (Python's CotSealer.feed, reasoning.py): the pending
-        // block seals EXACTLY at COT_BLOCK_CP code points — the sealer owns
-        // the boundary law AND the block content keys (a re-stated burst's
-        // twin block is skipped, already spoken).
+        // block seals at COMPLETED sentence ends under the 1K target — the
+        // sealer owns the boundary law AND the block content keys (a
+        // re-stated burst's twin block is skipped, already spoken).
         val (blocks, keys, pending) = sealCotBlocks(state.cotBlocks, state.cotKeys, state.cotPending + fresh)
         state.copy(
             thoughtChars = chars,
@@ -327,15 +327,15 @@ private fun reduceThought(state: RenderState, event: RenderEvent.Thought): Rende
 }
 
 /**
- * THE 3K SEALER (Python's CotSealer.feed, reasoning.py): the pending seals
- * EXACTLY at [LiveTurn.COT_BLOCK_CP] code points — a delta may straddle the
- * boundary, so the block closes AT it and the remainder opens the next one.
- * CODE POINTS, not chars (PyText.cpLength is the house ruler);
- * offsetByCodePoints never splits a surrogate pair.
+ * THE SENTENCE SEALER (Python's CotSealer.feed, reasoning.py, re-lawed):
+ * the pending seals at COMPLETED sentence ends — [cotSealCut] owns the
+ * boundary law and answers per block; a delta may straddle everything, the
+ * loop just keeps asking. CODE POINTS, not chars (PyText.cpLength is the
+ * house ruler); offsetByCodePoints never splits a surrogate pair.
  *
  * THE BLOCK'S CONTENT KEY (11/11): a re-stated burst re-fills the pending
- * with ALREADY-SPOKEN thought — at 3K it would seal a twin block and the
- * feed would speak it again (the owner read the first sentence twice). The
+ * with ALREADY-SPOKEN thought — it would seal a twin block and the feed
+ * would speak it again (the owner read the first sentence twice). The
  * key says spoken: the block is skipped and the pending drains either way.
  */
 private fun sealCotBlocks(
@@ -346,8 +346,8 @@ private fun sealCotBlocks(
     var out = blocks
     var outKeys = keys
     var rest = pending
-    while (PyText.cpLength(rest) >= LiveTurn.COT_BLOCK_CP) {
-        val cut = rest.offsetByCodePoints(0, LiveTurn.COT_BLOCK_CP)
+    while (true) {
+        val cut = rest.offsetByCodePoints(0, cotSealCut(rest) ?: break)
         val block = rest.substring(0, cut)
         val key = proseKey(block)
         if (key !in outKeys) {
@@ -358,6 +358,102 @@ private fun sealCotBlocks(
     }
     return Triple(out, outKeys, rest)
 }
+
+/**
+ * THE SENTENCE-AWARE SEAL (the owner, 22/11: «máximo 1k pero que no corten
+ * en cualquier lado… completos, con punto final, y que el siguiente cot
+ * empiece en otra frase») — PURE: the pending's own text answers, nothing
+ * else. Returns the CODE POINT length of the next sealed block, or null
+ * when the pending must keep waiting.
+ *
+ * A BOUNDARY is a completed unit's end, CONFIRMED by the separator that
+ * already follows it in the pending (a trailing '.' can still grow into
+ * «3.14» — it is no boundary until a later char says the sentence closed):
+ * a sentence terminator (. ! ? … and their CJK twins, optionally wrapped
+ * in closing quotes/brackets) or a line's end (\n — a markdown list item
+ * without punctuation is a coherent unit too); each swallows its trailing
+ * separator run so the next block opens on the fresh word.
+ *
+ * The law: fill to [LiveTurn.COT_BLOCK_TARGET_CP]; seal at the LAST
+ * boundary under it, unless that boundary is a stub under
+ * [LiveTurn.COT_SEAL_MIN_CP] — then the sentence crossing the target
+ * seals WHOLE at its own end (past 1K, never mid-sentence). A boundary
+ * past the target seals there while it lands under the valve. The VALVE
+ * keeps the old exact law as the honest last resort: a run with no
+ * boundary in sight seals EXACTLY at [LiveTurn.COT_VALVE_CP] code points,
+ * so a block never outgrows the one Telegram message that expands it.
+ * Known cost, accepted: an abbreviation like «e.g.» reads as a
+ * terminator — the cut still lands on coherent prose.
+ */
+internal fun cotSealCut(pending: String): Int? {
+    val totalCp = PyText.cpLength(pending)
+    if (totalCp < LiveTurn.COT_BLOCK_TARGET_CP) return null
+    // one pass: the LAST boundary at-or-under the target (the greedy fill)
+    // and the FIRST past it (the crossing sentence's own end)
+    var low = 0
+    var high = 0
+    var cp = 0
+    var i = 0
+    while (i < pending.length) {
+        val end = boundaryEnd(pending, i)
+        val next = if (end > i) end else i + charStep(pending, i)
+        val spanCp = codePointsIn(pending, i, next)
+        if (end > i) {
+            val at = cp + spanCp
+            if (at <= LiveTurn.COT_BLOCK_TARGET_CP) low = at else if (high == 0) high = at
+        }
+        cp += spanCp
+        i = next
+    }
+    return when {
+        low >= LiveTurn.COT_SEAL_MIN_CP -> low
+        high in 1..LiveTurn.COT_VALVE_CP -> high
+        totalCp >= LiveTurn.COT_VALVE_CP -> LiveTurn.COT_VALVE_CP
+        else -> null // the sentence is still open — wait for its end
+    }
+}
+
+/** The boundary starting AT [i], if the char opens one: the char index
+ *  after the unit plus its trailing separator run, else -1. */
+private fun boundaryEnd(text: String, i: Int): Int = when {
+    text[i] == '\n' -> swallowSeparators(text, i + 1)
+    text[i] !in COT_TERMINATORS -> -1
+    else -> {
+        var j = i + 1
+        while (j < text.length && (text[j] in COT_TERMINATORS || text[j] in COT_WRAPPERS)) j++
+        if (j < text.length && isCotSeparator(text[j])) swallowSeparators(text, j + 1) else -1
+    }
+}
+
+/** The separator run's end — the spaces, tabs and newlines after a unit closed. */
+private fun swallowSeparators(text: String, from: Int): Int {
+    var j = from
+    while (j < text.length && isCotSeparator(text[j])) j++
+    return j
+}
+
+/** One code point's char step — a surrogate pair travels together, never split. */
+private fun charStep(text: String, i: Int): Int =
+    if (Character.isHighSurrogate(text[i]) && i + 1 < text.length && Character.isLowSurrogate(text[i + 1])) 2 else 1
+
+/** The code points in the char range — [charStep] is the ruler. */
+private fun codePointsIn(text: String, from: Int, until: Int): Int {
+    var n = 0
+    var k = from
+    while (k < until) {
+        k += charStep(text, k)
+        n++
+    }
+    return n
+}
+
+private fun isCotSeparator(c: Char): Boolean = c == ' ' || c == '\t' || c == '\r' || c == '\n'
+
+/** The sentence's end marks — ASCII and CJK twins; a run of them («?!») is one end. */
+private val COT_TERMINATORS = charArrayOf('.', '!', '?', '…', '。', '！', '？')
+
+/** The wrappers that may sit between a terminator and its separator — quotes and brackets. */
+private val COT_WRAPPERS = charArrayOf('"', '\'', '»', '”', '’', ')', ']', '}')
 
 /**
  * agent_message_chunk: the answer's chars grow AND its tail keeps the
@@ -452,10 +548,10 @@ private fun proseKey(text: String): String =
 private const val PROSE_KEY_CAP = 128
 
 /**
- * THE THINKING'S BOUNDARY (the owner, 10/11 — either the 3K cap or the
+ * THE THINKING'S BOUNDARY (the owner, 10/11 — either the seal or the
  * segment's end, never silence): a tool's arrival or the answer's first
  * word ends the current thinking segment — the pending tail (the block
- * UNDER the 3K seal) seals as a REAL block, the feed's diff speaks it
+ * UNDER the sentence seal) seals as a REAL block, the feed's diff speaks it
  * like any other sealed one (the «generado 2.7K» verdict, rich path
  * included). Blank pending = nothing to seal (a tool after a tool).
  * The seal's own [TranscriptFeed.pendingFlush] stays as the honest
@@ -479,8 +575,11 @@ internal fun flushCot(state: RenderState): RenderState {
     )
 }
 
-/** The CoT blocks' content keys' ceiling — a turn seals far fewer than this. */
-private const val COT_KEY_CAP = 128
+/**
+ * The CoT blocks' content keys' ceiling — sized for the 1K blocks (a
+ * 200K-cp turn seals ~200 of them; the keys cover it with headroom).
+ */
+private const val COT_KEY_CAP = 256
 
 /**
  * A ROUTED CHILD DELTA (12/11): the auto-subscribed child's own stream —

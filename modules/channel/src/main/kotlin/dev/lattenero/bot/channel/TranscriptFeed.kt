@@ -49,12 +49,14 @@ data class FeedMessage(
  * «separar bien el dato del proceso»): each tool CLOSE becomes its own
  * Telegram message with its real content (the bash command + output, the
  * edit's diff box), ordered, under the always-last process card. THE CoT
- * STOPS TRAVELING WHOLE: each sealed 3K block becomes a COLLAPSED message
- * — the header «📖 CoT N · 3K — tocar para leer» and a button; the tap
+ * STOPS TRAVELING WHOLE: each sealed ~1K block becomes a COLLAPSED message
+ * — the header «📖 CoT N · 1K — tocar para leer» and a button; the tap
  * expands the block WHOLE in place on that same message (the publisher's
  * edit), another tap re-collapses (the owner, 2/11: «yo decido si los leo
  * o no una vez que se llenó el botón de los 3k»). A block never chunks:
- * it is capped at [LiveTurn.COT_BLOCK_CP] (3000 cp), one message by law.
+ * it seals at sentence ends under [LiveTurn.COT_BLOCK_TARGET_CP] (a
+ * crossing sentence may run past it, the valve at [LiveTurn.COT_VALVE_CP]
+ * is the ceiling), one message by law.
  *
  * PURE: the feed is a diff between two consecutive turn snapshots —
  * nothing is emitted from a side queue, nothing is re-emitted after a

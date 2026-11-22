@@ -86,8 +86,12 @@ class CotBlocks(
     }
 
     private companion object {
-        /** The LRU cap — the last ~2 heavy turns' worth of blocks. */
-        const val MAX_ENTRIES = 240
+        /**
+         * The LRU cap — the last ~2 heavy turns' worth of blocks, sized
+         * for the 1K sentence seals (a 200K-cp turn seals ~200 of them;
+         * the TOTAL text held stays what the 3K blocks held).
+         */
+        const val MAX_ENTRIES = 720
 
         /** A tap on a block the registry no longer knows (an old turn, a bot restart). */
         const val MISS = "🤷 Ese CoT ya no está en el registro — el botón quedó de otro turno."

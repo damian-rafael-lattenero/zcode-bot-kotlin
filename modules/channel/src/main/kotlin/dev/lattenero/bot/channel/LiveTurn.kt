@@ -231,8 +231,9 @@ data class TurnLive(
     val answerTail: String = "",
     /**
      * The SEALED CoT blocks (Python's CotSealer boxes, reasoning.py): one
-     * per [LiveTurn.COT_BLOCK_CP] code points of REAL streamed thinking.
-     * The full accumulation lives here; a block's text is never
+     * per [LiveTurn.COT_BLOCK_TARGET_CP] code points of REAL streamed
+     * thinking, sealed at sentence ends ([RenderFold.cotSealCut]). The
+     * full accumulation lives here; a block's text is never
      * summarized, never invented. Each block travels as its own COLLAPSED
      * Telegram message (header + button — the owner decides whether to
      * read it, 2/11: «yo decido si los leo o no una vez que se llenó el
@@ -313,12 +314,13 @@ data class TurnLive(
     val proseSpent: List<String> = emptyList(),
     /**
      * THE COT BLOCKS' CONTENT KEYS (11/11): a SHA-256 per sealed block (the
-     * 3K seals AND the boundary-sealed tails) — the twin of [proseKeys]. A
-     * re-stated burst re-fills the pending with already-spoken thought; at
-     * 3K it would seal a TWIN block and the feed would speak it again (the
-     * owner read the first sentence twice). The key says spoken: the block
-     * is skipped, the pending drains either way. The keys survive the
-     * window re-baselines ON PURPOSE — they are the memory the windows lack.
+     * sentence seals AND the boundary-sealed tails) — the twin of
+     * [proseKeys]. A re-stated burst re-fills the pending with
+     * already-spoken thought; it would seal a TWIN block and the feed
+     * would speak it again (the owner read the first sentence twice). The
+     * key says spoken: the block is skipped, the pending drains either
+     * way. The keys survive the window re-baselines ON PURPOSE — they are
+     * the memory the windows lack.
      */
     val cotKeys: Set<String> = emptySet(),
     /**
@@ -559,12 +561,33 @@ object LiveTurn {
     const val ANSWER_TAIL_CP = 3200
 
     /**
-     * The CoT BLOCK's cap — Python's COT_BOX_CAP (reasoning.py, the
-     * owner's F43 model verbatim: «a box has a size; when the CoT reaches
-     * the cap the box is full and is sent with its number»). A block seals
-     * at 3000 CODE POINTS of streamed thinking and the feed speaks it.
+     * The CoT BLOCK's target — the owner's sentence law (22/11: «máximo 1k
+     * pero que no corten en cualquier lado… completos, con punto final»):
+     * a block fills to ~1K CODE POINTS and seals at the last COMPLETED
+     * sentence or paragraph end under it, so every block ends with its
+     * final punctuation and the next one opens on a fresh sentence. A
+     * sentence that crosses the target seals WHOLE — a block may run past
+     * 1K, never mid-sentence ([RenderFold.cotSealCut] owns the law).
      */
-    const val COT_BLOCK_CP = 3000
+    const val COT_BLOCK_TARGET_CP = 1000
+
+    /**
+     * The sentence seal's floor — a boundary smaller than this is a stub
+     * (the sentence after it crosses the target): it merges with that
+     * sentence's own end instead of sealing a noise block. Half the
+     * target, the owner's «mayores o menores» tolerance in numbers.
+     */
+    const val COT_SEAL_MIN_CP = 500
+
+    /**
+     * The CoT BLOCK's valve — Python's COT_BOX_CAP (reasoning.py, the
+     * owner's F43 model verbatim: «a box has a size; when the CoT reaches
+     * the cap the box is full and is sent with its number»), kept as the
+     * honest last resort: a run with NO sentence end in sight (code-ish
+     * thinking, URIs) seals EXACTLY here, mid-run — the old exact law,
+     * so a block never outgrows the one Telegram message that expands it.
+     */
+    const val COT_VALVE_CP = 3000
 
     /**
      * THE CHILD'S TAIL CAP (12/11): a routed child's live tail rides the
