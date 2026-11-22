@@ -495,6 +495,15 @@ class LivePublisher(
     /** The durable message id — the boot-time ORPHAN SEAL reads it (LiveOrphanStore). */
     private val orphanStore: LiveOrphanStore? = null,
     /**
+     * THE PRE-RESTART ORPHAN, captured at CONSTRUCTION (the 22/11 seal
+     * race, measured live: this process's own births OVERWRITE the pointer
+     * file as soon as the stream feeds — a boot landing mid-turn then
+     * sealed the LIVE card 30 s after its birth, killing the view). The
+     * capture happens before any birth can run; sealOrphan edits THIS
+     * record and never re-reads the store.
+     */
+    private val bootOrphan: LiveOrphanStore.Live? = orphanStore?.readLast(),
+    /**
      * The transcript feed's level — read PER TICK (the daemon injects the
      * file-backed store; tests and unwired daemons the in-memory default).
      */
@@ -570,12 +579,15 @@ class LivePublisher(
     private suspend fun sealOrphan(cfg: TgConfig) {
         if (orphanChecked) return
         orphanChecked = true
-        val orphan = orphanStore?.readLast()
+        // the CONSTRUCTION-TIME capture (see bootOrphan): births of this boot
+        // may have overwritten the store since — they are THIS process's live
+        // views, never orphans, and must not be sealed
+        val orphan = bootOrphan
         if (orphan == null) {
             orphanStore?.clear() // a stale unreadable pointer dies with the boot
             return
         }
-        orphanStore.clear()
+        orphanStore?.clear()
         if (telegram.edit(
                 cfg,
                 orphan.messageId,

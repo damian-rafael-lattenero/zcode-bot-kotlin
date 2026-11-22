@@ -104,9 +104,15 @@ data class ModelSel(val modelId: String, val reasoningLevel: String)
  * hash rows on the phone), and the desktop task list never shows them.
  * /tasks drops those too — an untitled conversation is not a project —
  * while /all_tasks keeps every row, loose and untitled included.
+ *
+ * THE RUNNING EXCEPTION (the 22/11 regression, measured live: a subagent
+ * the fork launched mid-turn inherited an UNTITLED session and /tasks hid
+ * it — the ghost filter conflated a DEAD scratch session with LIVE work).
+ * A row whose sid is in [running] survives the filter even untitled: real
+ * work in flight outranks the tidiness law.
  */
-fun scopeRows(rows: List<TaskRow>, all: Boolean, defaultWs: String): List<TaskRow> =
-    if (all) rows else rows.filter { it.ws != defaultWs && it.title.isNotEmpty() }
+fun scopeRows(rows: List<TaskRow>, all: Boolean, defaultWs: String, running: Set<String> = emptySet()): List<TaskRow> =
+    if (all) rows else rows.filter { (it.ws != defaultWs && it.title.isNotEmpty()) || it.sid in running }
 
 /**
  * The owner's 14/11 law: RUNNING conversations first, then the most

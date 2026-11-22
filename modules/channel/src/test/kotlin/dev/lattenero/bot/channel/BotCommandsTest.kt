@@ -845,6 +845,20 @@ class BotCommandsTest {
         assertEquals(4, scopeRows(rows, all = true, defaultWs = defaultWs).size)
     }
 
+    @Test
+    fun scopeRowsKeepsRunningUntitledRows() {
+        // the 22/11 regression (live): a subagent launched mid-turn inherited
+        // an UNTITLED session and /tasks hid it — the ghost filter conflated
+        // DEAD scratch sessions with LIVE work. A row in the running set
+        // survives the filter even untitled; dead ghosts still drop.
+        val kept = scopeRows(rows, all = false, defaultWs = defaultWs, running = setOf("sub-ghost-1"))
+        assertEquals(3, kept.size)
+        assertTrue(kept.any { it.sid == "sub-ghost-1" })
+        // the default-ws untitled row (task-03) stays hidden even when some
+        // OTHER sid runs — running is not a blanket amnesty
+        assertEquals(2, scopeRows(rows, all = false, defaultWs = defaultWs, running = setOf("task-77")).size)
+    }
+
     // ---- the audit's reply-contract gaps (30/10) ---------------------------
 
     @Test

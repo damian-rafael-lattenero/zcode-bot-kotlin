@@ -1542,4 +1542,38 @@ class LivePublisherTest {
         publisher.tick()
         assertEquals(2, seals, "the genuinely new turn seals normally")
     }
+
+    @Test
+    fun theBootSealEditsTheCapturedCardNotABirthOverwrite() = runTest {
+        // THE 22/11 SEAL RACE (measured live: a boot landing mid-turn sealed
+        // the LIVE card 30 s after its birth): births of THIS boot overwrite
+        // the pointer file before the seal's first tick — the old code
+        // re-read the store at tick time and sealed the freshest birth. The
+        // capture now happens at CONSTRUCTION: the seal edits the
+        // pre-restart record, never a this-boot birth's pointer.
+        val file = java.io.File(System.getProperty("java.io.tmpdir"), "orphan-seal-race-${System.nanoTime()}.json")
+        val store = LiveOrphanStore(file)
+        store.save(999L, "sess_preRestart") // A: the pre-restart card
+        val wire = Wire()
+        val publisher = LivePublisher(
+            hub = LiveHub(), // no frames: the first tick's only work is the seal
+            telegram = LiveTelegram(
+                api = TgApi({ cfg }, engineFactory = wire.factory),
+                cooldown = Cooldown(readFile = { null }),
+            ),
+            config = { cfg },
+            channelAlive = { true },
+            speak = { _, _ -> 777L },
+            toolBox = { "" },
+            finalTurn = { null },
+            clock = { TICK_MS },
+            orphanStore = store, // the construction captures 999
+        )
+        store.save(888L, "sess_thisBoot") // B: THIS boot's birth overwrote the pointer
+        publisher.tick()
+        val edits = wire.bodies.filter { it.second == "editMessageText" }
+        assertTrue(edits.any { "999" in it.first }, "the seal edits the CAPTURED pre-restart card")
+        assertTrue(edits.none { "888" in it.first }, "a this-boot birth's pointer is never sealed")
+        file.delete()
+    }
 }

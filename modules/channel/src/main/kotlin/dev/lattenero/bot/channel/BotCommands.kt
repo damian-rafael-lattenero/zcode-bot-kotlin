@@ -2122,11 +2122,31 @@ class BotCommands(
      * honestly at the tap, never buttonless at the list).
      */
     private suspend fun taskList(all: Boolean): BotReply {
-        val rows = scopeRows(history.ctxTasks(if (all) ALL_CAP else TASKS_CAP), all, defaultWorkspacePath)
         val watched = hub.peek()
         val lanes = dispatchLanes(watched)
-        return when (val ctx = contextAnswer()) {
-            ContextAnswer.Degraded -> BotReply(degraded("botStatus"))
+        val ctxAnswer = contextAnswer()
+        if (ctxAnswer == ContextAnswer.Degraded) return BotReply(degraded("botStatus"))
+        // the running set BEFORE the scope filter (the 22/11 regression: a
+        // RUNNING untitled subagent was hidden by the ghost filter) — the
+        // watched task plus, on a live context, every ActiveTaskId
+        val filterRunning = when (ctxAnswer) {
+            is ContextAnswer.Ctx -> when (
+                val answer = ops.query(ChannelQuery.ActiveTaskIds(ctxAnswer.value.workspacePath))
+            ) {
+                is QueryAnswer.Ok -> parseStrings(answer.resultJson).toSet()
+                else -> emptySet()
+            }
+            ContextAnswer.None -> watched?.taskId?.let { setOf(it) } ?: emptySet()
+            ContextAnswer.Degraded -> emptySet() // returned above — exhaustiveness
+        }
+        val rows = scopeRows(
+            history.ctxTasks(if (all) ALL_CAP else TASKS_CAP),
+            all,
+            defaultWorkspacePath,
+            filterRunning,
+        )
+        return when (val ctx = ctxAnswer) {
+            ContextAnswer.Degraded -> BotReply(degraded("botStatus")) // unreachable — returned above
             ContextAnswer.None -> taskListWithoutContext(rows, all, watched, lanes)
             is ContextAnswer.Ctx -> taskListWithContext(rows, all, ctx, watched, lanes)
         }
