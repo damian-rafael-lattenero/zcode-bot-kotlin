@@ -22,32 +22,38 @@ private const val OWNER = 7L
  */
 class BotCommandsTest {
 
-    /** The fake ops: canned answers by query kind + the recorder. */
-    private class FakeOps : ChannelOps {
-        val asked = mutableListOf<ChannelQuery>()
-        var botStatusJson: String? = null
-        var answers: MutableMap<String, String> = mutableMapOf()
-        var available = true
-        val inbound = mutableListOf<Pair<String, String>>()
-        val awaited = mutableListOf<Pair<String, String>>()
-        val queued = mutableListOf<Triple<String, String, Long>>()
-        val subscribed = mutableListOf<Pair<String, String>>()
+        /** The fake ops: canned answers by query kind + the recorder. */
+        private class FakeOps : ChannelOps {
+            val asked = mutableListOf<ChannelQuery>()
+            var botStatusJson: String? = null
+            var answers: MutableMap<String, String> = mutableMapOf()
 
-        /** The awaited bind's canned replies (taskRunning/taskMissing texts). */
-        var awaitReplies: List<String> = emptyList()
+            /** Per-workspace activeTaskIds answers — the running union's pin (ws-aware when present). */
+            var activeByWs: MutableMap<String, String> = mutableMapOf()
+            var available = true
+            val inbound = mutableListOf<Pair<String, String>>()
+            val awaited = mutableListOf<Pair<String, String>>()
+            val queued = mutableListOf<Triple<String, String, Long>>()
+            val subscribed = mutableListOf<Pair<String, String>>()
 
-        /** Per-command awaited replies (the /project → /task ladder needs both). */
-        var awaitReplyFor: (String) -> List<String> = { _ -> awaitReplies }
+            /** The awaited bind's canned replies (taskRunning/taskMissing texts). */
+            var awaitReplies: List<String> = emptyList()
 
-        /** Server-side effect of an inbound command (tests flip botStatus on /task). */
-        var onInbound: (String) -> Unit = {}
+            /** Per-command awaited replies (the /project → /task ladder needs both). */
+            var awaitReplyFor: (String) -> List<String> = { _ -> awaitReplies }
 
-        override suspend fun query(query: ChannelQuery): QueryAnswer {
-            asked.add(query)
-            if (!available) return QueryAnswer.Unavailable
-            val key = queryKind(query)
-            return answers[key]?.let { QueryAnswer.Ok(it) } ?: QueryAnswer.Failed("internal", "no canned answer")
-        }
+            /** Server-side effect of an inbound command (tests flip botStatus on /task). */
+            var onInbound: (String) -> Unit = {}
+
+            override suspend fun query(query: ChannelQuery): QueryAnswer {
+                asked.add(query)
+                if (!available) return QueryAnswer.Unavailable
+                if (query is ChannelQuery.ActiveTaskIds) {
+                    activeByWs[query.workspacePath]?.let { return QueryAnswer.Ok(it) }
+                }
+                val key = queryKind(query)
+                return answers[key]?.let { QueryAnswer.Ok(it) } ?: QueryAnswer.Failed("internal", "no canned answer")
+            }
 
         override suspend fun sendInbound(
             text: String,
@@ -213,6 +219,41 @@ class BotCommandsTest {
         val reply = bc.reply("/tasks", 1L)!!
         assertTrue("🔄 1. corriendo hace rato" in reply, "the running row is FIRST")
         assertTrue("· 2. recien tocada" in reply, "the idle row keeps its execution-time slot beneath")
+    }
+
+    @Test
+    fun runningSpansWorkspaces() = runBlocking {
+        // THE 22/11 BUG (measured live: four tasks running in four
+        // workspaces, none wore the 🔄): the fork's activeTaskIds is
+        // workspace-scoped and the list used to ask ONLY the context's —
+        // the union asks every DISTINCT row workspace
+        val o = ops().apply {
+            answers["activeTaskIds"] = """[]"""
+            activeByWs[app] = """[]"""
+            activeByWs[botWs] = """["task-02"]"""
+        }
+        val (bc, _) = commands(o)
+        val reply = bc.reply("/tasks", 1L)!!
+        assertTrue("🔄 1. second · 📁bot" in reply, "a running row in ANOTHER workspace wears the stamp")
+        assertTrue("🎯 2. arreglá el login" in reply)
+    }
+
+    @Test
+    fun aRunningRowOutsideTheDisplayCapFloatsIn() = runBlocking {
+        // THE CAP LAW (22/11): the cap used to cut at the HISTORY read — a
+        // running row outside the recency top never reached the sort. The
+        // pool reads wide now and the cap cuts AFTER running-first
+        val o = ops().apply {
+            answers["activeTaskIds"] = """[]"""
+            activeByWs[app] = """["task-old-run"]"""
+        }
+        val many = (1..15).map { n ->
+            TaskRow(sid = "idle-$n", title = "idle $n", ws = app, whenMs = 10_000L - n)
+        } + TaskRow(sid = "task-old-run", title = "vieja pero corriendo", ws = app, whenMs = 1L)
+        val (bc, _) = commands(o, FakeHistory(many))
+        val reply = bc.reply("/tasks", 1L)!!
+        assertTrue("🔄 1. vieja pero corriendo" in reply, "the running row floats in from outside the display cap")
+        assertTrue("idle 15" !in reply, "the display cap still holds — the oldest idles drop")
     }
 
     @Test

@@ -2126,30 +2126,47 @@ class BotCommands(
         val lanes = dispatchLanes(watched)
         val ctxAnswer = contextAnswer()
         if (ctxAnswer == ContextAnswer.Degraded) return BotReply(degraded("botStatus"))
-        // the running set BEFORE the scope filter (the 22/11 regression: a
-        // RUNNING untitled subagent was hidden by the ghost filter) — the
-        // watched task plus, on a live context, every ActiveTaskId
-        val filterRunning = when (ctxAnswer) {
-            is ContextAnswer.Ctx -> when (
-                val answer = ops.query(ChannelQuery.ActiveTaskIds(ctxAnswer.value.workspacePath))
-            ) {
-                is QueryAnswer.Ok -> parseStrings(answer.resultJson).toSet()
-                else -> emptySet()
-            }
-            ContextAnswer.None -> watched?.taskId?.let { setOf(it) } ?: emptySet()
-            ContextAnswer.Degraded -> emptySet() // returned above — exhaustiveness
-        }
-        val rows = scopeRows(
-            history.ctxTasks(if (all) ALL_CAP else TASKS_CAP),
-            all,
-            defaultWorkspacePath,
-            filterRunning,
-        )
+        // THE POOL (22/11): one generous read — the DISPLAY cap applies after
+        // the scope filter and the running sort, so a running row outside the
+        // recency top floats in instead of being cut at the source.
+        val pool = history.ctxTasks(ALL_CAP)
+        val displayCap = if (all) ALL_CAP else TASKS_CAP
         return when (val ctx = ctxAnswer) {
             ContextAnswer.Degraded -> BotReply(degraded("botStatus")) // unreachable — returned above
-            ContextAnswer.None -> taskListWithoutContext(rows, all, watched, lanes)
-            is ContextAnswer.Ctx -> taskListWithContext(rows, all, ctx, watched, lanes)
+            ContextAnswer.None -> {
+                // the channel's context is silent: the LOCAL truth still
+                // carries the buttons — the watched task alone is running
+                val running = watched?.taskId?.let { setOf(it) } ?: emptySet()
+                val rows = scopedSorted(pool, all, running).take(displayCap)
+                taskListWithoutContext(rows, all, watched, lanes, running)
+            }
+            is ContextAnswer.Ctx -> {
+                // THE RUNNING SET (22/11, measured live: four tasks ran in
+                // four workspaces and NONE wore the 🔄 — the fork's
+                // activeTaskIds is workspace-scoped and the list used to ask
+                // only the CONTEXT's): one query per DISTINCT row workspace,
+                // UNIONed — /tasks lists projects, its running truth must
+                // span them all. The watched task rides along unconditionally.
+                val running = runningUnionOver(pool, watched)
+                val rows = scopedSorted(pool, all, running).take(displayCap)
+                taskListWithContext(rows, all, ctx, watched, lanes, running)
+            }
         }
+    }
+
+    /** Scope-filter + the owner's running-first law — the display cap cuts AFTER this, never before. */
+    private fun scopedSorted(pool: List<TaskRow>, all: Boolean, running: Set<String>): List<TaskRow> =
+        scopeRows(pool, all, defaultWorkspacePath, running).runningFirst(running)
+
+    /** ActiveTaskIds per DISTINCT row workspace, UNIONed + the watched task — the list's running truth. */
+    private suspend fun runningUnionOver(pool: List<TaskRow>, watched: TurnLive?): Set<String> {
+        val ids = pool.map { it.ws }.filter { it.isNotEmpty() }.distinct().flatMap { ws ->
+            when (val answer = ops.query(ChannelQuery.ActiveTaskIds(ws))) {
+                is QueryAnswer.Ok -> parseStrings(answer.resultJson)
+                else -> emptyList()
+            }
+        }
+        return ids.toSet() + (watched?.taskId?.let { setOf(it) } ?: emptySet())
     }
 
     /** The None branch: the channel's context is silent — the LOCAL truth still carries the buttons. */
@@ -2158,13 +2175,12 @@ class BotCommands(
         all: Boolean,
         watched: TurnLive?,
         lanes: List<ToolLive>,
+        running: Set<String>,
     ): BotReply {
-        val running = watched?.taskId?.let { setOf(it) } ?: emptySet()
         val dbRunning = watched?.taskId?.let { history.subagentsRunning(it) }.orEmpty()
-        val sorted = rows.runningFirst(running)
         return BotReply(
-            text = renderTaskList(sorted, running, watched?.taskId, null, all, watchedSid = watched?.taskId),
-            markup = Keyboards.tasksKeyboard(sorted, running, watched?.taskId, lanes, dbRunning, clock()),
+            text = renderTaskList(rows, running, watched?.taskId, null, all, watchedSid = watched?.taskId),
+            markup = Keyboards.tasksKeyboard(rows, running, watched?.taskId, lanes, dbRunning, clock()),
         )
     }
 
@@ -2175,20 +2191,16 @@ class BotCommands(
         ctx: ContextAnswer.Ctx,
         watched: TurnLive?,
         lanes: List<ToolLive>,
+        running: Set<String>,
     ): BotReply {
-        val running = when (val answer = ops.query(ChannelQuery.ActiveTaskIds(ctx.value.workspacePath))) {
-            is QueryAnswer.Ok -> parseStrings(answer.resultJson).toSet()
-            else -> emptySet()
-        }
         val dbRunning = (watched?.taskId ?: ctx.value.activeTaskId)
             ?.let { history.subagentsRunning(it) }
             ?: emptyList()
-        // the owner's 14/11 law: the running conversations float to the top,
-        // the rest keeps the daemon's execution-time order beneath them
-        val sorted = rows.runningFirst(running)
+        // rows arrive scoped + running-first already (the owner's 14/11 law,
+        // applied once in [scopedSorted] — the display cap cut after it)
         return BotReply(
             text = renderTaskList(
-                sorted,
+                rows,
                 running,
                 ctx.value.activeTaskId,
                 ctx.value.workspacePath,
@@ -2196,7 +2208,7 @@ class BotCommands(
                 watchedSid = watched?.taskId,
             ),
             markup = Keyboards.tasksKeyboard(
-                rows = sorted,
+                rows = rows,
                 running = running,
                 // the 🎯 follows THE PIPE THE OWNER IS WATCHING (30/10:
                 // «me muestra siempre unificador» — the bind REFUSES to
