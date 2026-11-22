@@ -425,6 +425,14 @@ class LiveHub {
 }
 
 /**
+ * THE STALE HORIZON (22/11): past this silence a live turn's card seals as
+ * a corpse (the zombie's frozen-card lesson) — 15 min: far past the
+ * watchdog's resubscribe chances, far under any legitimate quiet stretch a
+ * working model produces.
+ */
+internal const val STALE_SEAL_MS = 900_000L
+
+/**
  * THE CARD IS THE PROCESS, THE FEED IS THE DATA (the owner's ley raíz,
  * 2/11: «separar bien el dato del proceso — el proceso debe estar siempre
  * visible, el dato debe mostrarse de forma ordenada»). THE CARD: one
@@ -655,7 +663,15 @@ class LivePublisher(
         // births its honest card («ningún turno corriendo ahora») — the old
         // law left the owner staring at NOTHING after every sa: attach to a
         // stored child whose turn was over
-        if (statusMessageId == null && (state.phase != TurnPhase.Idle || state.attachAwaited)) {
+        // the fold's own staleness (the Tick event reduced it) — the same
+        // clock the card renders with, held in state, not a side channel.
+        // Hoisted above the birth: THE STALE GATE (22/11) reads it too — a
+        // corpse past the stale seal never RE-BIRTHS its card while silent.
+        val silenceMs = state.staleMs ?: (now - (state.lastEventAtMs ?: 0))
+        // an unborn view births while a turn runs AND the silence sits under
+        // the stale horizon — a sealed corpse stays quiet until a real frame
+        val birthable = (state.phase != TurnPhase.Idle || state.attachAwaited) && silenceMs < STALE_SEAL_MS
+        if (statusMessageId == null && birthable) {
             // THE REAL TITLE (the owner's 30/10 verdict: «644150daf013» in
             // his card's head): ONE resolution attempt per turn, exactly at
             // the birth tick — the birth message and every render/seal then
@@ -680,9 +696,6 @@ class LivePublisher(
         // silence episode flushes a fresh burst and the card moves again; a
         // legitimately quiet stretch re-subscribes harmlessly (same task,
         // same stream); Done cards never bark.
-        // the fold's own staleness (the Tick event reduced it) — the same
-        // clock the card renders with, held in state, not a side channel
-        val silenceMs = state.staleMs ?: (now - (state.lastEventAtMs ?: 0))
         // an awaited attach (an idle session, no turn running) has no bus to
         // revive — its honest silence is the card's own words
         val barkable = state.phase !is TurnPhase.Done && !state.attachAwaited
@@ -701,6 +714,17 @@ class LivePublisher(
             }
         }
         val mid = statusMessageId ?: return
+        // THE STALE SEAL (22/11, the zombie's lesson): a live turn silent
+        // past the stale horizon is a corpse — the fork's budget (96e600fc)
+        // bounds the looping class at the source, THIS closes the frozen
+        // card the stream left behind: one honest edit, the view resets,
+        // and the birth gate above keeps the corpse quiet while it stays
+        // silent. A turn that genuinely resumes re-lights silence and the
+        // card is born again — the stop is honest, never final.
+        if (barkable && silenceMs >= STALE_SEAL_MS) {
+            sealStale(cfg, mid, state, silenceMs)
+            return
+        }
         // the hub replaces a watched turn with a new task's events: the old
         // status message would freeze with its last "thinking..." — a corpse
         // (measured 30/10: the owner watched a thinking tick while the app
@@ -733,6 +757,35 @@ class LivePublisher(
         titleResolvedFor = null // the new task's card resolves its own title
         feedSeen = null // the new turn's transcript starts clean — history is never replayed
         resetPacing() // the pings' counter dies with the replaced turn
+    }
+
+    /**
+     * THE STALE SEAL (22/11): the live turn went silent past
+     * [STALE_SEAL_MS] — the card speaks the honest close ONCE and the view
+     * resets. The fold is NOT touched (the turn is not Done — the card
+     * never lies about that): the birth gate's stale arm keeps the corpse
+     * from re-birthing while it stays silent, and a resumed turn's first
+     * frame re-opens the gate — the card is born again, self-healing.
+     */
+    private suspend fun sealStale(cfg: TgConfig, mid: Long, state: TurnLive, silenceMs: Long) {
+        val minutes = silenceMs / MS_PER_SEC / 60
+        telegram.edit(
+            cfg,
+            mid,
+            "🧊 turno en silencio hace $minutes min — sellado por inactividad. " +
+                "Si sigue corriendo en la app, /task lo re-ataca y la carta vuelve a nacer.",
+        )
+        logger.info {
+            "live view STALE-SEALED: taskId=${state.taskId} message_id=$mid — " +
+                "${silenceMs / MS_PER_SEC}s without a frame; the corpse never rebirths while silent"
+        }
+        statusMessageId = null
+        statusTaskId = null
+        lastText = ""
+        sealed = false
+        titleResolvedFor = null
+        feedSeen = null // a resumed turn's transcript starts clean — the lost window never replays
+        resetPacing()
     }
 
     /**

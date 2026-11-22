@@ -187,6 +187,36 @@ class LivePublisherTest {
     }
 
     @Test
+    fun aSilentCorpseSealsStaleAndNeverRebirthsWhileSilent() = runTest {
+        // THE ZOMBIE'S LESSON (22/11): the stream died without a completion —
+        // the card froze forever and the reclaim re-birthed it in a loop.
+        // Past the stale horizon the card seals ONCE (the honest 🧊) and the
+        // birth gate keeps the corpse quiet; a resumed turn's first frame
+        // re-opens the gate and the card is born again — self-healing.
+        val taskId = "sess_abcd644150daf013"
+        val hub = LiveHub()
+        var now = TICK_MS
+        val wire = Wire()
+        val publisher = publisher(wire, hub, clock = { now })
+        hub.apply(frame(taskId, "task_run_started", at = now), nowMs = now)
+        hub.apply(frame(taskId, "agent_thought_chunk", at = now, "content" to JsonPrimitive("pensando")), nowMs = now)
+        publisher.tick()
+        fun cardBirths(): Int = wire.bodies.count { it.second == "sendMessage" && "<b>" in it.first }
+        assertEquals(1, cardBirths(), "the live card is born")
+        now += STALE_SEAL_MS + 10_000L
+        publisher.tick() // the stale horizon trips
+        val edit = wire.bodies.last { it.second == "editMessageText" }.first
+        assertTrue("🧊" in edit && "sellado por inactividad" in edit, "the honest stale seal: $edit")
+        publisher.tick() // later ticks: the corpse does NOT rebirth
+        publisher.tick()
+        assertEquals(1, cardBirths(), "no rebirth while the corpse stays silent")
+        // the turn genuinely resumes: silence re-lights and the card is born again
+        hub.apply(frame(taskId, "agent_thought_chunk", at = now, "content" to JsonPrimitive("volvió")), nowMs = now)
+        publisher.tick()
+        assertEquals(2, cardBirths(), "the resumed turn re-births its card")
+    }
+
+    @Test
     fun anIdleTurnDoesNotBurnTheOneShotAttempt() = runTest {
         val taskId = "sess_abcd644150daf013"
         val hub = LiveHub()
