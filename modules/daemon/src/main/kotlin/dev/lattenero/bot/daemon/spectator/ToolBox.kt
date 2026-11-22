@@ -26,6 +26,12 @@ internal object ToolBox {
     private const val PATTERN_CAP = 60
     private const val WRITE_PREVIEW_LINES = 40
 
+    /** A todo line's own cap (the plan reads line per line, never a wall). */
+    private const val TODO_LINE_CP = 160
+
+    /** The plan's line ceiling — a real plan never gets near it; the tail counts the rest. */
+    internal const val TODO_LINES_MAX = 40
+
     /** No permanent box: step index + live box only (tools_box_filter 'action', the default). */
     private val IDX_ONLY = setOf(
         "Read", "View", "Grep", "Glob", "LS", "TodoWrite", "TodoRead",
@@ -89,7 +95,7 @@ internal object ToolBox {
     }
 
     fun box(name: String, inp: JsonObject): String {
-        val desc = shortDesc(inp)
+        val desc = if (name == "TodoWrite") todoProgress(inp) else shortDesc(inp)
         val head = "🔧 <b>${PyText.esc(name)}</b>" +
             if (desc.isNotEmpty()) " — <code>${PyText.esc(PyText.preview(desc, HEAD_DESC_CAP))}</code>" else ""
         val body = body(name, inp, desc)
@@ -106,8 +112,54 @@ internal object ToolBox {
 
             name in WRITE_TOOLS && PyText.truthy(inp["content"]) -> writeBody(inp)
             name in READ_TOOLS -> "<i>reading</i> <code>${PyText.esc(PyText.preview(desc, READ_DESC_CAP))}</code>"
-            else -> "<pre>${PyText.esc(PyText.htmlClip(PyText.jsonDumps(inp), CH_BOX))}</pre>"
+            name == "TodoWrite" -> todosBody(inp) ?: rawBody(inp)
+            else -> rawBody(inp)
         }
+    }
+
+    /** The no-todos fallback — the honest raw JSON (a malformed payload stays debuggable). */
+    private fun rawBody(inp: JsonObject): String =
+        "<pre>${PyText.esc(PyText.htmlClip(PyText.jsonDumps(inp), CH_BOX))}</pre>"
+
+    /**
+     * THE PLAN, READABLE (the owner, 22/11: «completamente criptico… sin
+     * formatear» — the raw JSON blob is out): one line per todo, its status
+     * as the color — ✅ done (struck through), 🔄 the active one (bold),
+     * ▫️ waiting — 🔺 marking high priority. The lines live OUTSIDE any
+     * <pre>: Telegram forbids inline entities inside one, and the colors
+     * ARE the point.
+     */
+    private fun todosBody(inp: JsonObject): String? =
+        ((inp["todos"] as? JsonArray)?.takeIf { it.isNotEmpty() })
+            ?.let { todos -> todos.mapNotNull { el -> todoLine(el as? JsonObject ?: return@mapNotNull null) } }
+            ?.takeIf { lines -> lines.isNotEmpty() }
+            ?.let { lines ->
+                val shown = lines.take(TODO_LINES_MAX)
+                val more = lines.size - shown.size
+                (shown + if (more > 0) listOf("… +$more más") else emptyList()).joinToString("\n")
+            }
+
+    /** One todo's line: the status color + the priority mark + the content, ONE line (preview flattens the rest). */
+    private fun todoLine(todo: JsonObject): String? {
+        val content = (todo["content"] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: return null
+        val esc = PyText.esc(PyText.preview(content, TODO_LINE_CP))
+        val pri = if ((todo["priority"] as? JsonPrimitive)?.content == "high") "🔺 " else ""
+        return when (todoStatusOf(todo)) {
+            "completed" -> "✅ $pri<s>$esc</s>"
+            "in_progress" -> "🔄 $pri<b>$esc</b>"
+            else -> "▫️ $pri$esc"
+        }
+    }
+
+    private fun todoStatusOf(todo: JsonObject): String =
+        (todo["status"] as? JsonPrimitive)?.content ?: "pending"
+
+    /** The head's own read: done/total, the active count only while one runs. */
+    private fun todoProgress(inp: JsonObject): String {
+        val todos = (inp["todos"] as? JsonArray)?.takeIf { it.isNotEmpty() } ?: return ""
+        val done = todos.count { it is JsonObject && todoStatusOf(it) == "completed" }
+        val active = todos.count { it is JsonObject && todoStatusOf(it) == "in_progress" }
+        return "$done/${todos.size}" + if (active > 0) " · 🔄 $active" else ""
     }
 
     /** The command, list items joined like the shell would (str(x) per item). */
