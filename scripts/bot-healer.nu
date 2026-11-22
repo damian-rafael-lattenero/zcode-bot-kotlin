@@ -30,6 +30,10 @@ const STALE_AFTER_S: int = 180
 const MIN_INTERVAL_S: int = 300
 const DEPLOY_GRACE_S: int = 900
 
+# The type aliases (the owner's 22/11 law): the shapes read once, the
+# signatures spell the name.
+type HealPlan = record<act: bool, why: string, action: string, quiet: bool>
+
 def expanded [p: string]: nothing -> string {
     $p | str replace --all "~" $nu.home-dir
 }
@@ -63,12 +67,14 @@ def read_last_heal [state: string]: nothing -> int {
 
 def log_line [log: string, message: string]: nothing -> nothing {
     let stamp: string = (date now | format date "%Y-%m-%dT%H:%M:%S%:z")
-    let parent = ($log | path dirname)
+    let parent: path = ($log | path dirname)
     mkdir $parent
     $"($stamp) ($message)\n" | save --append $log
 }
 
 # THE decision, pure: every input is a value, every output is a record.
+# Guard clauses by law (anti-pattern #4 — the happy path stays flat;
+# these are ordered preconditions, never a dispatch chain).
 # (Testable from the REPL without touching launchd.)
 def decide [
     hb_age: int,
@@ -76,18 +82,18 @@ def decide [
     since_last_heal: int,
     loaded: bool,
     force: bool,
-]: nothing -> record {
+]: nothing -> HealPlan {
     if (not $force) and $hb_age < $STALE_AFTER_S {
-        return {act: false, why: $"heartbeat fresca: ($hb_age)s", action: "none", quiet: true}
+        return {act: false, why: $"fresh heartbeat: ($hb_age)s", action: "none", quiet: true}
     }
     if (not $force) and $deploy_in_flight {
-        return {act: false, why: "deploy en vuelo — manos fuera", action: "none", quiet: false}
+        return {act: false, why: "deploy in flight — hands off", action: "none", quiet: false}
     }
     if (not $force) and $since_last_heal < $MIN_INTERVAL_S {
-        return {act: false, why: $"rate-limit: ($since_last_heal)s desde el último heal", action: "none", quiet: false}
+        return {act: false, why: $"rate-limit: ($since_last_heal)s since the last heal", action: "none", quiet: false}
     }
-    let action = if $loaded { "kickstart" } else { "bootstrap" }
-    {act: true, why: $"heartbeat mudo hace: ($hb_age)s", action: $action, quiet: false}
+    let action: string = if $loaded { "kickstart" } else { "bootstrap" }
+    {act: true, why: $"heartbeat mute for: ($hb_age)s", action: $action, quiet: false}
 }
 
 def notify [text: string]: nothing -> nothing {
@@ -122,7 +128,7 @@ def main [--dry-run, --force, --status]: nothing -> nothing {
     let deploy_in_flight: bool = ($marker_age < $DEPLOY_GRACE_S)
     let since_last: int = ($now - (read_last_heal $state))
     let loaded: bool = (agent_loaded $domain $label)
-    let plan: record = (decide $hb_age $deploy_in_flight $since_last $loaded $force)
+    let plan: HealPlan = (decide $hb_age $deploy_in_flight $since_last $loaded $force)
 
     if $status {
         print ({hb: $hb, hb_age_s: $hb_age, deploy_in_flight: $deploy_in_flight, loaded: $loaded, since_last_heal_s: $since_last, plan: $plan} | to json)

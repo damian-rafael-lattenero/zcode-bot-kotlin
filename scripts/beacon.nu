@@ -33,6 +33,8 @@ const TAIL_LINES: int = 400
 
 # The wire shape — one schema, writer and reader (the house rule).
 type Beacon = record<epoch: int, iso: string, daemon_log_age_s: int, poll_fail_recent: bool, beacon_version: int>
+# The poller-log event the classifier reduces to: the newest one wins.
+type PollEvent = record<ts: datetime, failed: bool>
 
 def expanded [path: string]: nothing -> string {
     $path | path expand
@@ -83,15 +85,15 @@ def poll_fail_recent [log: string]: nothing -> bool {
 def poller_failing [log: string, window: duration]: nothing -> bool {
     if not ($log | path exists) { return false }
     let cutoff: datetime = (date now) - $window
-    let events: list = (
+    let events: list<PollEvent> = (
         open --raw $log
         | lines
         | last $TAIL_LINES
         | each {|line|
             try {
-                let rec = ($line | from json)
-                let msg = ($rec | get message)
-                let ts = ($rec | get "@timestamp" | into datetime)
+                let rec: record = ($line | from json)
+                let msg: string = ($rec | get message)
+                let ts: datetime = ($rec | get "@timestamp" | into datetime)
                 if ($msg | str contains $POLL_FAIL_NEEDLE) {
                     {ts: $ts, failed: true}
                 } else if ($msg | str contains $POLL_RECOVERED_NEEDLE) {
@@ -104,7 +106,7 @@ def poller_failing [log: string, window: duration]: nothing -> bool {
         | where {|event| $event != null }
     )
     if ($events | is-empty) { return false }
-    let last: record = ($events | last)
+    let last: PollEvent = ($events | last)
     $last.failed and ($last.ts > $cutoff)
 }
 
@@ -125,12 +127,12 @@ def telegram_probe []: nothing -> string {
 }
 
 def log_line [message: string]: nothing -> nothing {
-    let stamp = (date now | format date "%Y-%m-%dT%H:%M:%S%:z")
+    let stamp: string = (date now | format date "%Y-%m-%dT%H:%M:%S%:z")
     $"($stamp) ($message)\n" | save --append (expanded $BEACON_LOG)
 }
 
 def heartbeat_url []: nothing -> string {
-    let path = (expanded $HEARTBEAT_URL_FILE)
+    let path: path = (expanded $HEARTBEAT_URL_FILE)
     if not ($path | path exists) { return "" }
     open --raw $path | str trim
 }

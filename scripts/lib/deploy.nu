@@ -109,7 +109,7 @@ export def wait-for-path [path: string, timeout_ms: int]: nothing -> bool {
         let dir: string = ($path | path dirname)
         let base: string = ($path | path basename)
         let p: string = $path
-        let watcher = (job spawn {
+        let watcher: int = (job spawn {
             watch $dir
             | each {|ev|
                 if (($ev.path | path basename) == $base) {
