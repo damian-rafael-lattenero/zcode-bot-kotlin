@@ -33,6 +33,13 @@ const WATCHED: list<string> = ["SecurityAgent", "UserNotificationCenter"]
 # processes that plausibly REQUEST an auth dialog (basename match)
 const ASKERS: list<string> = ["sudo", "security", "installer", "osascript", "codesign", "hdiutil", "diskutil", "spctl"]
 
+# The type aliases (the owner's 22/11 law): the shapes read once, the
+# signatures spell the name. The episode stays honest `record` — its
+# polymorphic empty/full lives keep the alias honest only where the shape
+# is exact.
+type Presence = record<alive: bool, pid: int, name: string>
+type SelfTestCase = record<name: string, got: any, want: any>
+
 def expanded [p: string]: nothing -> string {
     $p | str replace --all "~" $nu.home-dir
 }
@@ -54,7 +61,7 @@ def log_line [log: string, message: string]: nothing -> nothing {
 }
 
 # The dialog's host process, or the honest dead baseline.
-def detect []: nothing -> record {
+def detect []: nothing -> Presence {
     let hits: table = (ps | where name in $WATCHED | sort-by pid)
     if ($hits | is-empty) { return {alive: false, pid: 0, name: ""} }
     let first: record = ($hits | first)
@@ -85,7 +92,7 @@ def decide [episode: record, present: record, now: int]: nothing -> record {
         }
         return {action: "none", quiet: true, episode: $episode}
     }
-    let clock = (date now | format date "%H:%M")
+    let clock: string = (date now | format date "%H:%M")
     {action: "alert", quiet: false, episode: {
         open: true,
         pid: ($present.pid | into int),
@@ -175,7 +182,7 @@ def selftest []: nothing -> nothing {
     let dead: record = {alive: false, pid: 0, name: ""}
     let live: record = {alive: true, pid: 36747, name: "SecurityAgent"}
     let open_e: record = {open: true, pid: 36747, name: "SecurityAgent", started_s: 1000, started_clock: "10:21", notified: 1000, repinged: false, dismissed: false}
-    let cases: list<record> = [
+    let cases: list<SelfTestCase> = [
         {name: "idle", got: (decide {} $dead 2000 | get action), want: "none"},
         {name: "resolve-open", got: (decide $open_e $dead 2000 | get action), want: "resolve"},
         {name: "resolve-quiet-when-dismissed", got: (decide ($open_e | upsert dismissed true) $dead 2000 | get quiet), want: true},

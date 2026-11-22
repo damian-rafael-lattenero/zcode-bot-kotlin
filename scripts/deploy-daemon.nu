@@ -11,12 +11,17 @@ use lib/deploy.nu *
 
 const LABEL: string = "com.zcode.bot-daemon"
 
+# The arming predicate: a heartbeat NEWER than this deploy + zconn state
+# present. The files survive restarts, so mere existence false-passed a
+# daemon that never booted (measured 2026-11-02). One source for the
+# watcher and the catch-recheck (the 22/11 audit: it rode twice, verbatim).
+def armed? [hb: path, zconn: path, since: int]: nothing -> bool {
+    (($hb | path type) == "file") and ((^stat -f %m $hb | str trim | into int) >= $since) and (($zconn | path type) == "file")
+}
+
 # Event-driven arming wait (the waiting law): `watch` on the state dir wakes
 # us the moment hb-zconn-shadow is born or touched; `job recv --timeout` is
-# the deadline. The heartbeat must be NEWER than this deploy: the files
-# survive restarts, so mere existence false-passed a daemon that never
-# booted (measured 2026-11-02). zconn.json is state, not a clock: it only
-# has to exist. The catch re-checks one last time (covers the pre-watch
+# the deadline. The catch re-checks one last time (covers the pre-watch
 # race and a heartbeat landing just past the deadline). Basename filter in
 # the each — `--glob` matches the resolved absolute path and filters
 # everything out (measured 13/11).
@@ -27,7 +32,7 @@ def wait-armed [hb: path, zconn: path, since: int, deadline: duration]: nothing 
         watch $dir
         | each {|ev|
             if ($ev.path | path basename) == $base {
-                if (($hb | path type) == "file") and ((^stat -f %m $hb | str trim | into int) >= $since) and (($zconn | path type) == "file") {
+                if (armed? $hb $zconn $since) {
                     'armed' | job send 0
                 }
             }
@@ -38,7 +43,7 @@ def wait-armed [hb: path, zconn: path, since: int, deadline: duration]: nothing 
         job recv --timeout $deadline
         true
     } catch {
-        (($hb | path type) == "file") and ((^stat -f %m $hb | str trim | into int) >= $since) and (($zconn | path type) == "file")
+        armed? $hb $zconn $since
     })
     try { job kill $watcher } catch { }
     $ok
@@ -94,7 +99,7 @@ def main []: nothing -> nothing {
     announce "🚀 deploy Bot Kotlin espejo ZCode 4/4 — verification (heartbeat + estado armado, deadline 45 s)"
     let hb: path = ($data | path join "state/hb-zconn-shadow")
     let zconn: path = ($data | path join "state/zconn.json")
-    let ok = (wait-armed $hb $zconn $started 45sec)
+    let ok: bool = (wait-armed $hb $zconn $started 45sec)
     if not $ok {
         print -e "✗ daemon did not arm — last words:"
         let state: string = (do { ^launchctl print $"gui/(user-id)/($LABEL)" } | complete | get stdout)
