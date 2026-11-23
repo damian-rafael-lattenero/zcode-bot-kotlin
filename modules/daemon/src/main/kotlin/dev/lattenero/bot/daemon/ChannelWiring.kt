@@ -97,6 +97,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.put
 import java.io.File
+import java.util.concurrent.TimeUnit
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 
@@ -1456,6 +1457,11 @@ private fun buildPoller(
             every = quotaKnob.everyMinutes.minutes,
         )
     }
+    // /ram_clean's log home — captured BEFORE the dispatch closure: inside
+    // it, `cfg` is the poller's per-cycle TgConfig and shadows THIS cfg
+    // (the DaemonConfig that owns homeDir); a named val keeps the closure
+    // reading the right one.
+    val logsDir = File(cfg.homeDir, "logs")
     return PollerWiring(
         poller = Poller(
         api = liveApi,
@@ -1496,6 +1502,7 @@ private fun buildPoller(
                         dispatchMessage(
                             liveApi,
                             cfg,
+                            logsDir,
                             client,
                             history,
                             commands,
@@ -1695,17 +1702,18 @@ private suspend fun speakReply(
 }
 
 /**
- * The free-text dispatch: /deploy, /file and /diff take the wiring's own
- * throats (B6's anti-suicide door; the multipart upload; the snapshot
- * query + the mini-diff render) — everything else is the dispatcher's
- * (the commands, then the route). The deploy flow speaks through its OWN
- * say (the door's receipt is the announce's message id), so it returns
- * nothing here.
+ * The free-text dispatch: /deploy, /file, /diff and /ram_clean take the
+ * wiring's own throats (B6's anti-suicide door; the multipart upload; the
+ * snapshot query + the mini-diff render; the ram-clean subprocess) —
+ * everything else is the dispatcher's (the commands, then the route). The
+ * deploy flow speaks through its OWN say (the door's receipt is the
+ * announce's message id), so it returns nothing here.
  */
 @Suppress("LongParameterList") // the wiring's breadth: every throat the dispatch may need
 private suspend fun dispatchMessage(
     api: TgApi,
     cfg: TgConfig,
+    logsDir: File,
     client: ChannelClient,
     history: TasksHistory,
     commands: BotCommands,
@@ -1723,6 +1731,16 @@ private suspend fun dispatchMessage(
 
         update.text == "/diff" || update.text.startsWith("/diff ") ->
             speak(diffNow(client, history, update.text.removePrefix("/diff")), false, null)
+
+        // /ram_clean (22/11): the fleet's ram-clean run BY the daemon — the
+        // process edge needs the wiring's own throat (a subprocess with a
+        // budget), the plan/gate/render are RamCleanCommands' pure half
+        update.text == "/ram_clean" || update.text.startsWith("/ram_clean ") ->
+            speak(
+                ramCleanNow(update.text.removePrefix("/ram_clean"), update.fromId, cfg.ownerUserId, logsDir),
+                false,
+                null,
+            )
 
         else -> commands.handle(update.text, update.updateId)
             ?.let { reply -> speakReply(mirror, cfg.chatId, reply, speak) }
@@ -1754,6 +1772,49 @@ private suspend fun filesOut(api: TgApi, cfg: TgConfig, rest: String): String {
     } catch (e: Exception) {
         logger.warn(e) { "file OUT failed: ${file.absolutePath}: ${e.message}" }
         "⚠️ No pude mandar «${file.name}»: ${e.message}"
+    }
+}
+
+/**
+ * /ram_clean — the process edge: plan → owner gate → one subprocess with a
+ * budget → the phone render. The script's own ancestry protection walks
+ * ppid from the spawned nu, so THIS daemon rides the protect-set (the
+ * drill can clean around its own runner). The full output lands in the
+ * logs dir (last run = the whole truth; the ledger keeps the history),
+ * and a failure speaks honestly — the poller never dies for a cleaning.
+ */
+@Suppress("TooGenericExceptionCaught") // the subprocess leg: any failure speaks honestly, never crashes the poller
+private fun ramCleanNow(rest: String, fromId: Long?, owner: Long?, logsDir: File): String {
+    val plan = RamCleanCommands.gate(RamCleanCommands.plan(rest), fromId, owner)
+    if (plan is RamCleanCommands.Plan.Refused) return plan.reason
+    val logFile = File(logsDir, RamCleanCommands.LOG_FILE_NAME)
+    return try {
+        logFile.parentFile?.mkdirs()
+        val startedAt = System.nanoTime()
+        val process = ProcessBuilder(listOf(RamCleanCommands.NU, RamCleanCommands.SCRIPT) + plan.argv)
+            .redirectErrorStream(true)
+            .start()
+        // the poller is ONE consumer (the VoiceTranscribe law): the budget
+        // bounds the stall, a stuck script is destroyed and said
+        if (!process.waitFor(RamCleanCommands.BUDGET_SECONDS, TimeUnit.SECONDS)) {
+            process.destroyForcibly()
+            "⏱ ram-clean no terminó en ${RamCleanCommands.BUDGET_SECONDS}s — lo maté; " +
+                "algo lo trabó (¿purge lento?): probá de nuevo en un momento."
+        } else {
+            val out = process.inputStream.bufferedReader().readText()
+            val tookMs = (System.nanoTime() - startedAt) / NANOS_PER_MS
+            logFile.writeText(out)
+            RamCleanCommands.render(
+                clean = plan is RamCleanCommands.Plan.Clean,
+                exit = process.exitValue(),
+                tookMs = tookMs,
+                out = out,
+                logPath = logFile.absolutePath,
+            )
+        }
+    } catch (e: Exception) {
+        logger.warn(e) { "ram_clean: the subprocess failed — ${e.message}" }
+        "⚠️ ram-clean no pudo correr: ${e.message ?: e::class.simpleName} — el daemon sigue vivo."
     }
 }
 
