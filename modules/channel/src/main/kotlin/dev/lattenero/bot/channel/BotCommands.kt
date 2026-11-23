@@ -3870,6 +3870,7 @@ class BotCommands(
             MenuCommand("ctx", "context % per conversation — the real meter list"),
             MenuCommand("subagents", "the active subagents · «inactivos» shows today's ended"),
             MenuCommand("verbosity", "cuánto habla el feed en vivo — summary / normal / verbose"),
+            MenuCommand("ram_clean", "limpia la Mac ahora (idle islands + caches) · «report» = solo lectura"),
             MenuCommand("brain", "pregunta al RAG de agent-brain — /brain status para el pulso"),
             MenuCommand("memory", "recuerdos del brain — /memory «texto» · recent [k] · status"),
             MenuCommand("learn", "aprendizaje de 7 días — memorias, evals y costos del brain"),

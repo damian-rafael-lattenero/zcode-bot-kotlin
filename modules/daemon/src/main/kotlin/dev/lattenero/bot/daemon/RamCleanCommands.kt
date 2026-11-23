@@ -15,10 +15,12 @@ internal object RamCleanCommands {
 
     /**
      * The plan — the script's whole phone surface as one mode table: bare =
-     * the read-only report (leaks, swap, top citizens), `--clean` = the
-     * drill (idle islands die, receipts speak). Everything else refuses
-     * with the usage; the script's OTHER flags (`--trend`, the leak knobs)
-     * stay terminal-only on purpose — a phone types words, not ladders.
+     * THE DRILL (the owner's default, 22/11: clean comes first on the
+     * phone — idle islands die, receipts speak), `--clean`/`clean` ride as
+     * aliases, `report` = the explicit read-only leg (leaks, swap, top
+     * citizens). Everything else refuses with the usage; the script's OTHER
+     * flags (`--trend`, the leak knobs) stay terminal-only on purpose — a
+     * phone types words, not ladders.
      */
     internal sealed interface Plan {
         /** The script's argv for this plan (the edge runs it verbatim). */
@@ -38,17 +40,18 @@ internal object RamCleanCommands {
     }
 
     internal fun plan(rest: String): Plan = when (rest.trim()) {
-        "" -> Plan.Report
-        "--clean", "clean" -> Plan.Clean
+        "", "--clean", "clean" -> Plan.Clean
+        "report" -> Plan.Report
         else -> Plan.Refused(USAGE)
     }
 
     /**
-     * THE SECOND LOCK (U9's defense-in-depth, the /deploy law): `--clean`
-     * kills processes, so its plan re-checks the sender against the owner
-     * before the edge ever spawns. Fail-closed — a null sender or an
-     * unwired owner refuses; the report needs no lock (read-only, and the
-     * poller's own normalize already gates every update by owner).
+     * THE SECOND LOCK (U9's defense-in-depth, the /deploy law): the drill
+     * kills processes — and it IS the bare command now — so its plan
+     * re-checks the sender against the owner before the edge ever spawns.
+     * Fail-closed — a null sender or an unwired owner refuses; the report
+     * needs no lock (read-only, and the poller's own normalize already
+     * gates every update by owner).
      */
     internal fun gate(plan: Plan, fromId: Long?, owner: Long?): Plan = when {
         plan !is Plan.Clean -> plan
@@ -103,8 +106,8 @@ internal object RamCleanCommands {
     private const val HEAD_SHARE = 60
 
     internal const val USAGE =
-        "🧹 /ram_clean — el reporte de RAM/swap de la Mac (solo lectura).\n" +
-            "🧹 /ram_clean --clean — además mata las islas idle y purga caches (con receipts)."
+        "🧹 /ram_clean — limpia la Mac AHORA: mata islas idle, purga caches, receipts en la respuesta.\n" +
+            "🧹 /ram_clean report — solo lectura: leak suspects, swap, top citizens."
 
-    internal const val NOT_OWNER = "🚫 Solo el dueño corre el --clean."
+    internal const val NOT_OWNER = "🚫 Solo el dueño corre la limpieza."
 }

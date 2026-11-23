@@ -6,8 +6,9 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
- * /ram_clean's pure half: the plan's mode table (bare = report, --clean =
- * the drill, anything else = the usage), the second lock (clean is
+ * /ram_clean's pure half: the plan's mode table (bare = THE DRILL — the
+ * owner's default — with --clean/clean as aliases, `report` = the explicit
+ * read-only leg, anything else = the usage), the second lock (the drill is
  * owner-gated, fail-closed), and the render (escaped `<pre>`, the head+tail
  * cut with the log named — never a silent truncation).
  */
@@ -16,9 +17,19 @@ class RamCleanCommandsTest {
     // ---- the plan ------------------------------------------------------------
 
     @Test
-    fun bareRestPlansTheReport() {
-        assertEquals(RamCleanCommands.Plan.Report, RamCleanCommands.plan(""))
-        assertEquals(RamCleanCommands.Plan.Report, RamCleanCommands.plan("   "))
+    fun bareRestPlansTheDrillAndCarriesTheFlag() {
+        assertEquals(RamCleanCommands.Plan.Clean, RamCleanCommands.plan(""))
+        assertEquals(RamCleanCommands.Plan.Clean, RamCleanCommands.plan("   "))
+        assertEquals(listOf("--clean"), RamCleanCommands.plan("").argv)
+    }
+
+    @Test
+    fun theCleanAliasesAndTheReportWordPlanTheirOwn() {
+        assertEquals(RamCleanCommands.Plan.Clean, RamCleanCommands.plan("--clean"))
+        assertEquals(RamCleanCommands.Plan.Clean, RamCleanCommands.plan("clean"))
+        assertEquals(listOf("--clean"), RamCleanCommands.plan(" --clean ").argv)
+        assertEquals(RamCleanCommands.Plan.Report, RamCleanCommands.plan("report"))
+        assertEquals(emptyList(), RamCleanCommands.plan(" report ").argv)
     }
 
     @Test
