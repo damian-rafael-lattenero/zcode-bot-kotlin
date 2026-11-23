@@ -1,23 +1,20 @@
 package dev.lattenero.bot.daemon
 
-import dev.lattenero.bot.contracts.PyText
-
 /**
  * /ram_clean (22/11): the fleet's own `ram-clean` nushell command, run BY
  * the daemon on the Mac it lives in — the phone asks, the Mac answers. The
- * pure half lives here (the plan, the owner gate, the render); the process
- * edge is the wiring's throat (the FilesCommands shape: /file and /diff
- * split the same way). Zero invented content: the script's own words ride
- * escaped inside one `<pre>`, and when they do not fit, the head AND the
- * tail survive with the cut said — never a silent truncation.
+ * pure half lives here (the plan, the owner gate, the command's own
+ * words); the shared subprocess machinery is [NuScriptRunner]'s (the
+ * FilesCommands shape: pure half + wiring throat, split per command). The
+ * owner's ruling (22/11): bare IS the drill — clean comes first on the
+ * phone.
  */
 internal object RamCleanCommands {
 
     /**
      * The plan — the script's whole phone surface as one mode table: bare =
-     * THE DRILL (the owner's default, 22/11: clean comes first on the
-     * phone — idle islands die, receipts speak), `--clean`/`clean` ride as
-     * aliases, `report` = the explicit read-only leg (leaks, swap, top
+     * THE DRILL (idle islands die, receipts speak), `--clean`/`clean` ride
+     * as aliases, `report` = the explicit read-only leg (leaks, swap, top
      * citizens). Everything else refuses with the usage; the script's OTHER
      * flags (`--trend`, the leak knobs) stay terminal-only on purpose — a
      * phone types words, not ladders.
@@ -59,55 +56,23 @@ internal object RamCleanCommands {
         else -> plan
     }
 
-    /**
-     * The phone reply: one header line (mode · seconds, or the exit code
-     * when the script itself failed), the script's words in one `<pre>`,
-     * and — only when they do not fit — the cut said with the full log's
-     * path. Overlong output keeps the HEAD (the leak suspects, the swap
-     * line) and the TAIL (the --clean receipts, the after-Δ): the middle
-     * tables are what the log is for.
-     */
-    internal fun render(clean: Boolean, exit: Int, tookMs: Long, out: String, logPath: String): String {
-        val mode = if (clean) "clean" else "report"
-        val head = if (exit == 0) {
-            "🧹 <b>ram-clean</b> ($mode) · ${tookMs / 1000}s\n"
-        } else {
-            "⚠️ ram-clean ($mode) salió con código $exit — el log dice el resto:\n"
-        }
-        val body = PyText.esc(out.trimEnd())
-        if (PyText.cpLength(body) <= BODY_CAP) return head + "<pre>" + body + "</pre>"
-        val headPart = PyText.take(body, BODY_CAP * HEAD_SHARE / 100)
-        val tailPart = takeTail(body, BODY_CAP * (100 - HEAD_SHARE) / 100)
-        return head + "<pre>" + headPart + "\n…✂️…\n" + tailPart + "</pre>" +
-            "\n✂️ no entró entero — log completo: <code>" + PyText.esc(logPath) + "</code> (/file lo trae)"
-    }
-
-    /** The LAST [n] code points — the tail half of the capped render. */
-    private fun takeTail(s: String, n: Int): String {
-        val total = PyText.cpLength(s)
-        if (n >= total) return s
-        return s.substring(s.offsetByCodePoints(0, total - n))
-    }
-
-    /** The pinned interpreter and script — launchd's PATH is narrow (the VoiceTranscribe law). */
-    internal const val NU = "/opt/homebrew/bin/nu"
+    /** The pinned script path — the interpreter and budget live in [NuScriptRunner]. */
     internal const val SCRIPT = "/Users/lattenero/Scripts/ram-clean.nu"
 
     /** The last run's full words — one file per run (the ledger keeps the history). */
     internal const val LOG_FILE_NAME = "ram-clean.log"
-
-    /** The edge's hard ceiling: the dispatch loop is SERIAL — a stuck script never starves the feed. */
-    internal const val BUDGET_SECONDS = 90L
-
-    /** The `<pre>` body's HTML budget (DIFF_REPLY_CAP's law: the reply has a roof). */
-    private const val BODY_CAP = 3300
-
-    /** How the capped budget splits: the head earns more (leaks + swap), the tail keeps the receipts. */
-    private const val HEAD_SHARE = 60
 
     internal const val USAGE =
         "🧹 /ram_clean — limpia la Mac AHORA: mata islas idle, purga caches, receipts en la respuesta.\n" +
             "🧹 /ram_clean report — solo lectura: leak suspects, swap, top citizens."
 
     internal const val NOT_OWNER = "🚫 Solo el dueño corre la limpieza."
+
+    /** The drill's timeout words — the shared edge names the budget. */
+    internal fun timeout(budgetSeconds: Long): String =
+        "⏱ ram-clean no terminó en $budgetSeconds s — lo maté; " +
+            "algo lo trabó (¿purge lento?): probá de nuevo en un momento."
+
+    /** The drill's spawn-failure words. */
+    internal const val ERRORED = "⚠️ ram-clean no pudo correr — el daemon sigue vivo: "
 }

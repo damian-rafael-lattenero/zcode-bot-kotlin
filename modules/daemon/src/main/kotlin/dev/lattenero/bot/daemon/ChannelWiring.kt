@@ -97,7 +97,6 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.put
 import java.io.File
-import java.util.concurrent.TimeUnit
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 
@@ -1702,12 +1701,13 @@ private suspend fun speakReply(
 }
 
 /**
- * The free-text dispatch: /deploy, /file, /diff and /ram_clean take the
- * wiring's own throats (B6's anti-suicide door; the multipart upload; the
- * snapshot query + the mini-diff render; the ram-clean subprocess) —
- * everything else is the dispatcher's (the commands, then the route). The
- * deploy flow speaks through its OWN say (the door's receipt is the
- * announce's message id), so it returns nothing here.
+ * The free-text dispatch: /deploy, /file, /diff, /ram_clean and
+ * /fleet_healthcheck take the wiring's own throats (B6's anti-suicide
+ * door; the multipart upload; the snapshot query + the mini-diff render;
+ * the two machine commands' shared nu edge) — everything else is the
+ * dispatcher's (the commands, then the route). The deploy flow speaks
+ * through its OWN say (the door's receipt is the announce's message id),
+ * so it returns nothing here.
  */
 @Suppress("LongParameterList") // the wiring's breadth: every throat the dispatch may need
 private suspend fun dispatchMessage(
@@ -1738,6 +1738,16 @@ private suspend fun dispatchMessage(
         update.text == "/ram_clean" || update.text.startsWith("/ram_clean ") ->
             speak(
                 ramCleanNow(update.text.removePrefix("/ram_clean"), update.fromId, cfg.ownerUserId, logsDir),
+                false,
+                null,
+            )
+
+        // /fleet_healthcheck (22/11): the ecosystem battery on the phone —
+        // the same edge as /ram_clean, --fix by default (the owner's GO),
+        // `check` = the read-only word
+        update.text == "/fleet_healthcheck" || update.text.startsWith("/fleet_healthcheck ") ->
+            speak(
+                fleetCheckNow(update.text.removePrefix("/fleet_healthcheck"), update.fromId, cfg.ownerUserId, logsDir),
                 false,
                 null,
             )
@@ -1776,45 +1786,58 @@ private suspend fun filesOut(api: TgApi, cfg: TgConfig, rest: String): String {
 }
 
 /**
- * /ram_clean — the process edge: plan → owner gate → one subprocess with a
- * budget → the phone render. The script's own ancestry protection walks
- * ppid from the spawned nu, so THIS daemon rides the protect-set (the
- * drill can clean around its own runner). The full output lands in the
- * logs dir (last run = the whole truth; the ledger keeps the history),
- * and a failure speaks honestly — the poller never dies for a cleaning.
+ * /ram_clean — the process edge: plan → owner gate → [NuScriptRunner.run]
+ * → the phone render. The script's own ancestry protection walks ppid from
+ * the spawned nu, so THIS daemon rides the protect-set (the drill can
+ * clean around its own runner). The full output lands in the logs dir
+ * (last run = the whole truth; the ledger keeps the history), and a
+ * failure speaks honestly — the poller never dies for a cleaning.
  */
-@Suppress("TooGenericExceptionCaught") // the subprocess leg: any failure speaks honestly, never crashes the poller
 private fun ramCleanNow(rest: String, fromId: Long?, owner: Long?, logsDir: File): String {
     val plan = RamCleanCommands.gate(RamCleanCommands.plan(rest), fromId, owner)
     if (plan is RamCleanCommands.Plan.Refused) return plan.reason
     val logFile = File(logsDir, RamCleanCommands.LOG_FILE_NAME)
-    return try {
-        logFile.parentFile?.mkdirs()
-        val startedAt = System.nanoTime()
-        val process = ProcessBuilder(listOf(RamCleanCommands.NU, RamCleanCommands.SCRIPT) + plan.argv)
-            .redirectErrorStream(true)
-            .start()
-        // the poller is ONE consumer (the VoiceTranscribe law): the budget
-        // bounds the stall, a stuck script is destroyed and said
-        if (!process.waitFor(RamCleanCommands.BUDGET_SECONDS, TimeUnit.SECONDS)) {
-            process.destroyForcibly()
-            "⏱ ram-clean no terminó en ${RamCleanCommands.BUDGET_SECONDS}s — lo maté; " +
-                "algo lo trabó (¿purge lento?): probá de nuevo en un momento."
-        } else {
-            val out = process.inputStream.bufferedReader().readText()
-            val tookMs = (System.nanoTime() - startedAt) / NANOS_PER_MS
-            logFile.writeText(out)
-            RamCleanCommands.render(
-                clean = plan is RamCleanCommands.Plan.Clean,
-                exit = process.exitValue(),
-                tookMs = tookMs,
-                out = out,
-                logPath = logFile.absolutePath,
-            )
-        }
-    } catch (e: Exception) {
-        logger.warn(e) { "ram_clean: the subprocess failed — ${e.message}" }
-        "⚠️ ram-clean no pudo correr: ${e.message ?: e::class.simpleName} — el daemon sigue vivo."
+    return when (val run = NuScriptRunner.run(RamCleanCommands.SCRIPT, plan.argv, logFile)) {
+        is NuScriptRunner.Run.Ran -> NuScriptRunner.render(
+            emoji = "🧹",
+            label = "ram-clean",
+            mode = if (plan is RamCleanCommands.Plan.Clean) "clean" else "report",
+            exit = run.exit,
+            tookMs = run.tookMs,
+            out = run.out,
+            logPath = logFile.absolutePath,
+        )
+
+        is NuScriptRunner.Run.TimedOut -> RamCleanCommands.timeout(NuScriptRunner.BUDGET_SECONDS)
+        is NuScriptRunner.Run.Errored -> RamCleanCommands.ERRORED + run.reason
+    }
+}
+
+/**
+ * /fleet_healthcheck — the SAME edge, the battery's own words: the whole
+ * ecosystem's verdict table on the phone, `--fix` by default (the owner's
+ * ruling), `check` = the read-only word. The worst case measured is ~15 s
+ * (fixes fire + the 8 s settle + the re-run), well inside the shared
+ * budget; the verdict line sits at the END of the battery's output, which
+ * is exactly what the head+tail render keeps.
+ */
+private fun fleetCheckNow(rest: String, fromId: Long?, owner: Long?, logsDir: File): String {
+    val plan = FleetHealthcheckCommands.gate(FleetHealthcheckCommands.plan(rest), fromId, owner)
+    if (plan is FleetHealthcheckCommands.Plan.Refused) return plan.reason
+    val logFile = File(logsDir, FleetHealthcheckCommands.LOG_FILE_NAME)
+    return when (val run = NuScriptRunner.run(FleetHealthcheckCommands.SCRIPT, plan.argv, logFile)) {
+        is NuScriptRunner.Run.Ran -> NuScriptRunner.render(
+            emoji = "🩺",
+            label = "fleet-healthcheck",
+            mode = if (plan is FleetHealthcheckCommands.Plan.Fix) "fix" else "check",
+            exit = run.exit,
+            tookMs = run.tookMs,
+            out = run.out,
+            logPath = logFile.absolutePath,
+        )
+
+        is NuScriptRunner.Run.TimedOut -> FleetHealthcheckCommands.timeout(NuScriptRunner.BUDGET_SECONDS)
+        is NuScriptRunner.Run.Errored -> FleetHealthcheckCommands.ERRORED + run.reason
     }
 }
 
