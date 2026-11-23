@@ -342,21 +342,29 @@ private fun sealCotBlocks(
     blocks: List<String>,
     keys: Set<String>,
     pending: String,
+): Triple<List<String>, Set<String>, String> = sealLoop(blocks, keys, pending)
+
+/**
+ * The sealer's loop AS TAIL RECURSION — the compiler lowers it to a native
+ * loop, the U0 sweep stays clean (no unbounded-loop literal in src/main),
+ * and the accumulation is parameters, never vars. Same seal order as the
+ * imperative shape it replaced: ask [cotSealCut], speak the block unless
+ * its key is already spoken, cap the key set, drain the pending.
+ */
+private tailrec fun sealLoop(
+    out: List<String>,
+    outKeys: Set<String>,
+    rest: String,
 ): Triple<List<String>, Set<String>, String> {
-    var out = blocks
-    var outKeys = keys
-    var rest = pending
-    while (true) {
-        val cut = rest.offsetByCodePoints(0, cotSealCut(rest) ?: break)
-        val block = rest.substring(0, cut)
-        val key = proseKey(block)
-        if (key !in outKeys) {
-            out = out + block
-            outKeys = (outKeys + key).let { if (it.size > COT_KEY_CAP) it.drop(it.size - COT_KEY_CAP).toSet() else it }
-        }
-        rest = rest.substring(cut)
+    val cut = rest.offsetByCodePoints(0, cotSealCut(rest) ?: return Triple(out, outKeys, rest))
+    val block = rest.substring(0, cut)
+    val key = proseKey(block)
+    return if (key in outKeys) {
+        sealLoop(out, outKeys, rest.substring(cut))
+    } else {
+        val capped = (outKeys + key).let { if (it.size > COT_KEY_CAP) it.drop(it.size - COT_KEY_CAP).toSet() else it }
+        sealLoop(out + block, capped, rest.substring(cut))
     }
-    return Triple(out, outKeys, rest)
 }
 
 /**
