@@ -659,9 +659,9 @@ class BotCommandsTest {
         """.trimIndent()
         val text = BotCommands.renderQuota(json, nowMs = 0L)
         assertTrue("📊 <b>Coding plan</b>" in text)
-        assertTrue("⏱ 5 hours: 31/120 credits (26%)" in text) // 5h first, weekly after
-        assertTrue("📅 Weekly: 88,000/88,000 credits (90%)" in text) // the owner's law: separator, unit never moves
-        assertTrue("⚠️" in text) // ≥75% carries the alert
+        assertTrue("⏱ 5 hours: 31/120 credits (74% libre)" in text) // 5h first, weekly after
+        assertTrue("📅 Weekly: 88,000/88,000 credits (10% libre)" in text) // the owner's law: separator, unit never moves
+        assertTrue("⚠️" in text) // ≥75% used carries the alert
     }
 
     @Test
@@ -678,7 +678,7 @@ class BotCommandsTest {
                "percentage":26,"nextResetTime":$resetMs}]}}
             """.trimIndent(),
             nowMs = nowMs,
-        ).substringAfter("credits (26%) · ")
+        ).substringAfter("credits (74% libre) · ")
 
         val zone = ZoneId.systemDefault() // fmtReset's own (defaulted) zone
 
@@ -704,11 +704,11 @@ class BotCommandsTest {
     }
 
     @Test
-    fun quotaSpeaksTheStartPlanBucketsWithTheUsedPercent() {
+    fun quotaSpeaksTheStartPlanBucketsWithTheRemainingPercent() {
         // the owner's 30/10 order, with the 2/11 law v4: the API numbers are
         // RAW token counts — «300,000,000 → 300,000K → 300M» (the fork's
-        // builder carries usage/unit raw; its percentage is REMAINING-based,
-        // so the used % is computed here)
+        // builder carries usage/unit raw; the used % is computed here, then
+        // inverted once for the render — the owner's 23/11 order)
         val json = """
             {"authenticated":true,
              "provider":{"id":"account:zai-start-plan","name":"Start Plan"},
@@ -720,9 +720,9 @@ class BotCommandsTest {
         """.trimIndent()
         val text = BotCommands.renderQuota(json, nowMs = 0L)
         assertTrue("📊 <b>Start plan</b>" in text)
-        assertTrue("• 5 hours: 340M/500M usado 68%" in text)
-        assertTrue("• weekly: 900M/4,000M usado 22%" in text)
-        assertTrue("⚠️" !in text) // 68% and 22% are below the 75% alert
+        assertTrue("• 5 hours: 340M/500M usado · 32% libre" in text)
+        assertTrue("• weekly: 900M/4,000M usado · 78% libre" in text)
+        assertTrue("⚠️" !in text) // 68% and 22% used are below the 75% alert
     }
 
     @Test
@@ -736,7 +736,7 @@ class BotCommandsTest {
             }
         """.trimIndent()
         val text = BotCommands.renderQuota(json, nowMs = 0L)
-        assertTrue("• 5 hours: 850K/500M usado 0%" in text, "got: $text")
+        assertTrue("• 5 hours: 850K/500M usado · 100% libre" in text, "got: $text")
     }
 
     @Test
@@ -752,7 +752,7 @@ class BotCommandsTest {
             }
         """.trimIndent()
         val text = BotCommands.renderQuota(json, nowMs = 0L)
-        assertTrue("• one_time: 166.6M/300M usado 55%" in text, "got: $text")
+        assertTrue("• one_time: 166.6M/300M usado · 45% libre" in text, "got: $text")
     }
 
     @Test
@@ -764,7 +764,7 @@ class BotCommandsTest {
             }
         """.trimIndent()
         val text = BotCommands.renderQuota(json, nowMs = 0L)
-        assertTrue("340M/400M usado 85%" in text)
+        assertTrue("340M/400M usado · 15% libre" in text)
         assertTrue("⚠️" in text)
     }
 

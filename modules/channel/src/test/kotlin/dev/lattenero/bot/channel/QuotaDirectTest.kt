@@ -141,11 +141,11 @@ class QuotaDirectTest {
         assertEquals(
             """
             📊 <b>Coding plan</b>
-            ⏱ 5 hours: 31/120 credits (26%)
-            📅 Weekly: 88,000/88,000 credits (90%) ⚠️
+            ⏱ 5 hours: 31/120 credits (74% libre)
+            📅 Weekly: 88,000/88,000 credits (10% libre) ⚠️
             """.trimIndent(),
             text,
-            "the owner's separator law (2/11), the ⚠️ from 75%, 5h first",
+            "the owner's separator law (2/11), the ⚠️ from 75% used, 5h first",
         )
     }
 
@@ -157,10 +157,10 @@ class QuotaDirectTest {
                 windows = listOf(QuotaDirect.QuotaWindow(5, 1.0, 100.0, pct, null)),
             ),
         )
-        assertFalse("⚠️" in render(74.0), "74% stays calm")
-        assertTrue("⚠️" in render(75.0), "75% carries the alert (Python's ≥75)")
-        assertTrue("⚠️" in render(76.0), "76% carries the alert")
-        assertFalse("⚠️" in render(0.0), "0% stays calm")
+        assertFalse("⚠️" in render(74.0), "74% used (26% libre) stays calm")
+        assertTrue("⚠️" in render(75.0), "75% used carries the alert (Python's ≥75)")
+        assertTrue("⚠️" in render(76.0), "76% used carries the alert")
+        assertFalse("⚠️" in render(0.0), "0% used stays calm")
     }
 
     @Test
@@ -180,7 +180,7 @@ class QuotaDirectTest {
                 windows = listOf(QuotaDirect.QuotaWindow(1, 10.0, 100.0, 12.5, null)),
             ),
         )
-        assertTrue("(12.5%)" in fractionPct, "a fraction keeps its decimal")
+        assertTrue("(87.5% libre)" in fractionPct, "a fraction keeps its decimal (the free share)")
     }
 
     @Test
@@ -194,7 +194,7 @@ class QuotaDirectTest {
             ),
         )
         assertTrue(
-            "🔒 Limit: 9,999/10,000 credits (99.96%) ⚠️" in text,
+            "🔒 Limit: 9,999/10,000 credits (0.04% libre) ⚠️" in text,
             "🔒 for any other number — the owner's separator law, the unit never moves",
         )
     }
@@ -212,7 +212,7 @@ class QuotaDirectTest {
             ),
             nowMs = nowMs,
             zone = utc,
-        ).substringAfter("credits (26%) · ")
+        ).substringAfter("credits (74% libre) · ")
 
         // HH:MM branch: the reset is still the same UTC day as the injected now.
         assertEquals(
@@ -243,7 +243,7 @@ class QuotaDirectTest {
                 endpointJson
             },
         )!!
-        assertTrue("⏱ 5 hours: 31/120 credits (26%)" in text)
+        assertTrue("⏱ 5 hours: 31/120 credits (74% libre)" in text)
         assertEquals(QuotaDirect.ENDPOINT, fetchUrl)
         assertEquals("sk-fake-test-key", fetchToken, "the key rides the fetch's argument only")
     }
@@ -351,7 +351,7 @@ class QuotaDirectTest {
                 "quota" to """{"generatedAt":1,"unavailableReason":"not_configured"}""",
             )
         }
-        val bc = bot(o) { _ -> "📊 <b>Coding plan</b>\n⏱ 5 hours: 31/120 credits (26%)" }
+        val bc = bot(o) { _ -> "📊 <b>Coding plan</b>\n⏱ 5 hours: 31/120 credits (74% libre)" }
         val reply = bc.handle("/quota", 1L)!!.text
         assertTrue("31/120" in reply, "the fork's not_configured is NOT the final word — the coding-plan key still gets its shot")
     }

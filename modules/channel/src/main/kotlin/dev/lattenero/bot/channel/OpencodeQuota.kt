@@ -21,9 +21,10 @@ import java.time.format.DateTimeFormatter
  * provider key from the app's provider_config.json):
  * {"usage":{"rolling":{"status":"ok","percent":0,"resetsAt":"…Z"},
  *           "weekly":{…},"monthly":{…}}}
- * The percent IS the used share of that window — never inverted into
- * "remaining": the owner watches how much he burns, and a reset instant
- * rides every window.
+ * The endpoint's percent is the USED share of that window; it is rendered
+ * as the REMAINING share (the owner's 23/11 order — every /quota surface
+ * speaks «libre», one vocabulary), while the raw used percent still drives
+ * the ⚠️/⛔ thresholds, and a reset instant rides every window.
  *
  * Measured boundaries, kept honest:
  *  • only the GO family exposes /usage (zen/v1/usage = 404 on 3/11) —
@@ -51,6 +52,7 @@ object OpencodeQuota {
     private const val STATUS_OK = "ok"
     private const val ALERT_PCT = 75.0
     private const val FULL_PCT = 100.0
+    private const val PCT_SCALE = 100.0
 
     /** One metered window: its own name, used percent, status and reset instant. */
     data class Window(val name: String, val percent: Double?, val status: String?, val resetMs: Long?)
@@ -105,9 +107,11 @@ object OpencodeQuota {
 
     /**
      * The card: the plan header, then one line per window —
-     * `⏱ Rolling: 0% usado · resets 12:35`, `📅 Weekly`, `🗓 Monthly`,
-     * ⚠️ from 75% and ⛔ at 100% (the z.ai card's own thresholds — one
-     * vocabulary across /quota). A status other than «ok» is rendered
+     * `⏱ Rolling: 100% libre · resets 12:35`, `📅 Weekly`, `🗓 Monthly`,
+     * ⚠️ from 75% used and ⛔ at 100% used (the z.ai card's own thresholds —
+     * one vocabulary across /quota). The NUMBER is the REMAINING share
+     * (the owner's 23/11 order — supersedes the 3/11 «used» note: every
+     * /quota surface speaks free now). A status other than «ok» is rendered
      * VERBATIM (the provider's word, never a bot-invented «limited»), and
      * a window that reports no percent shows only that word (no invented
      * 0%). A missing reset prints nothing — never a fake instant.
@@ -122,7 +126,7 @@ object OpencodeQuota {
         usage.windows.forEach { w ->
             val statusText = w.status?.takeIf { it != STATUS_OK }
             val body = when {
-                w.percent != null -> "${fmtPct(w.percent)}% usado" +
+                w.percent != null -> "${fmtPct(remainingPct(w.percent))}% libre" +
                     (statusText?.let { " · ${PyText.esc(it)}" } ?: "")
                 statusText != null -> PyText.esc(statusText)
                 else -> "?"
@@ -231,6 +235,11 @@ object OpencodeQuota {
     /** JSON ints stay ints (44 → "44"), a fraction keeps its decimal (44.5). */
     private fun fmtPct(pct: Double): String =
         if (pct == pct.toLong().toDouble()) pct.toLong().toString() else pct.toString()
+
+    /** 100 − used, clamped, rounded to 2 decimals — Double subtraction grows
+     *  tails (100.0 − 99.96 = 0.0400000000009) that have no place on a card. */
+    private fun remainingPct(used: Double): Double =
+        Math.round((FULL_PCT - used).coerceIn(0.0, FULL_PCT) * PCT_SCALE) / PCT_SCALE
 
     /** HH:MM when the reset lands today, dd/MM HH:MM otherwise (local zone). */
     private fun fmtReset(epochMs: Long, nowMs: Long, zone: ZoneId): String {

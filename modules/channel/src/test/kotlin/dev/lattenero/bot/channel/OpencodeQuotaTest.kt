@@ -93,9 +93,9 @@ class OpencodeQuotaTest {
         assertEquals(
             """
             📊 <b>OpenCode Go</b>
-            ⏱ Rolling: 0% usado · resets 15:35
-            📅 Weekly: 44% usado · resets 09/11 00:00
-            🗓 Monthly: 22% usado · resets 02/12 13:14
+            ⏱ Rolling: 100% libre · resets 15:35
+            📅 Weekly: 56% libre · resets 09/11 00:00
+            🗓 Monthly: 78% libre · resets 02/12 13:14
             """.trimIndent(),
             text,
         )
@@ -108,9 +108,9 @@ class OpencodeQuotaTest {
                 OpencodeQuota.Usage(listOf(OpencodeQuota.Window("weekly", pct, "ok", null))),
                 nowMs = nowMs,
             )
-        assertFalse("⚠️" in line(74.0), "74% stays calm")
-        assertTrue("⚠️" in line(75.0), "75% carries the alert (the z.ai card's law)")
-        assertTrue("⛔" in line(100.0), "100% is the hard stop")
+        assertFalse("⚠️" in line(74.0), "74% used (26% libre) stays calm")
+        assertTrue("⚠️" in line(75.0), "75% used carries the alert (the z.ai card's law)")
+        assertTrue("⛔" in line(100.0), "100% used is the hard stop")
         assertFalse("⚠️" in line(100.0), "⛔ replaces ⚠️ instead of stacking")
     }
 
@@ -135,7 +135,7 @@ class OpencodeQuotaTest {
             ),
             nowMs = nowMs,
         )
-        assertTrue("🔒 Daily: 5.5% usado" in text, "a fraction keeps its decimal (the z.ai law)")
+        assertTrue("🔒 Daily: 94.5% libre" in text, "a fraction keeps its decimal (the z.ai law, the free share)")
         assertTrue("&lt;b&gt;bad&lt;/b&gt;" in text, "the provider's word is escaped — a raw tag poisons the outbox")
     }
 
@@ -197,7 +197,7 @@ class OpencodeQuotaTest {
             },
             nowMs = nowMs,
         )!!
-        assertTrue("📅 Weekly: 44% usado" in text)
+        assertTrue("📅 Weekly: 56% libre" in text)
         assertEquals("https://opencode.ai/zen/go/v1/usage", fetchUrl)
         assertEquals("sk-fake-open-code-key", fetchToken, "the key rides the fetch's argument only")
     }
@@ -288,11 +288,11 @@ class OpencodeQuotaTest {
         var seenProvider: String? = "<never>"
         val bc = commands(o) { provider ->
             seenProvider = provider
-            "📊 <b>OpenCode Go</b>\n📅 Weekly: 44% usado"
+            "📊 <b>OpenCode Go</b>\n📅 Weekly: 56% libre"
         }
         val reply = bc.handle("/quota", 1L)!!.text
         assertEquals("opencode-go-chat", seenProvider, "the rung must be told WHICH provider the conversation consumes")
-        assertTrue("44%" in reply, reply)
+        assertTrue("56%" in reply, reply)
     }
 
     @Test

@@ -105,8 +105,9 @@ object QuotaDirect {
     /**
      * Python's quota_report windows branch, byte-exact: 📊 Coding plan,
      * then one line per window — ⏱ 5 hours / 📅 Weekly (🔒 Limit for any
-     * other `number`), `used/limit credits`, the percentage, ` · resets
-     * HH:MM` (dd/MM HH:MM when the reset is not today) and ⚠️ from 75%.
+     * other `number`), `used/limit credits`, the REMAINING percentage (the
+     * owner's 23/11 order: the free share, worded «libre»), ` · resets
+     * HH:MM` (dd/MM HH:MM when the reset is not today) and ⚠️ from 75% used.
      * Python's trailing «Per-session detail: /usage» is left out on
      * purpose: this bot has no /usage — pointing at a dead command would
      * be a lie, and honesty beats parity. The clock rides in ([nowMs],
@@ -125,7 +126,9 @@ object QuotaDirect {
                 1 -> "📅 Weekly"
                 else -> "🔒 Limit"
             }
-            val pctText = w.pct?.let { " (${fmtPct(it)}%)" } ?: ""
+            // the owner's 23/11 order: the NUMBER is what REMAINS (the free
+            // share, one vocabulary with PlanQuota); the alert stays used-based
+            val pctText = w.pct?.let { " (${fmtPct(remainingPct(it))}% libre)" } ?: ""
             val alert = if ((w.pct ?: 0.0) >= ALERT_PCT) " ⚠️" else ""
             val reset = w.resetMs?.takeIf { it != 0L } // Python: falsy reset_ms → no text
                 ?.let { " · resets ${fmtReset(it, nowMs, zone)}" } ?: ""
@@ -185,6 +188,11 @@ object QuotaDirect {
     private fun fmtPct(pct: Double): String =
         if (pct == pct.toLong().toDouble()) pct.toLong().toString() else pct.toString()
 
+    /** 100 − used, clamped, rounded to 2 decimals — Double subtraction grows
+     *  tails (100.0 − 99.96 = 0.0400000000009) that have no place on a card. */
+    private fun remainingPct(used: Double): Double =
+        Math.round((REMAINING_FULL - used).coerceIn(0.0, REMAINING_FULL) * PCT_SCALE) / PCT_SCALE
+
     /** Python's datetime_dt: HH:MM when the reset lands on the INJECTED
      *  today's local date, dd/MM HH:MM otherwise — the same shape
      *  OpencodeQuota.fmtReset speaks; the wall clock never leaks in. */
@@ -196,6 +204,8 @@ object QuotaDirect {
     }
 
     private const val ALERT_PCT = 75.0
+    private const val REMAINING_FULL = 100.0
+    private const val PCT_SCALE = 100.0
     private const val GROUP_SIZE = 3
     private val TIME_FMT = DateTimeFormatter.ofPattern("HH:mm")
     private val DATE_TIME_FMT = DateTimeFormatter.ofPattern("dd/MM HH:mm")

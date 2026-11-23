@@ -4184,7 +4184,8 @@ class BotCommands(
 
         /**
          * quota → Python's quota_report when the snapshot carries the limits
-         * (⏱ 5 hours + 📅 Weekly, used/limit credits, resets, ⚠️ at ≥75%);
+         * (⏱ 5 hours + 📅 Weekly, used/limit credits, the REMAINING percent —
+         * the owner's 23/11 order — resets, ⚠️ at ≥75% used);
          * the remaining-only snapshot keeps the one-line fallback.
          */
         @Suppress("ReturnCount", "CyclomaticComplexMethod") // one guard per degrade / honesty tier
@@ -4222,7 +4223,8 @@ class BotCommands(
          * the 2/11 law v4: RAW token counts climb the ladder —
          * «300,000,000 → 300,000K → 300M»).
          * One line per REAL balance bucket: used/total through the owner's
-         * ladder with the USED percent and its own reset — the fork's
+         * ladder with the REMAINING percent (the owner's 23/11 order) and
+         * its own reset — the fork's
          * builder carries the
          * numbers raw (usage/unit/remaining), never a bot-invented window.
          */
@@ -4239,9 +4241,11 @@ class BotCommands(
                 val used = lim.num("usage") ?: 0.0
                 val label = lim.str("period") ?: lim.str("meter") ?: "cuota"
                 val body = when {
-                    total != null && total > 0 ->
-                        "${tokenRaw(used)}/${tokenRaw(total)} usado " +
-                            "${((used / total) * 100).toInt()}%"
+                    total != null && total > 0 -> {
+                        val usedPct = ((used / total) * 100).toInt()
+                        "${tokenRaw(used)}/${tokenRaw(total)} usado · " +
+                            "${(REMAINING_FULL - usedPct).coerceIn(0, REMAINING_FULL)}% libre"
+                    }
 
                     else -> "${tokenRaw(used)} usados"
                 }
@@ -4266,9 +4270,13 @@ class BotCommands(
                     1 -> "📅 Weekly"
                     else -> "🔒 Limit"
                 }
-                val pct = lim.int("percentage")
-                val pctText = pct?.let { " ($it%)" } ?: ""
-                val alert = if ((pct ?: 0) >= 75) " ⚠️" else ""
+                val usedPct = lim.int("percentage")
+                // the owner's 23/11 order: the NUMBER is what REMAINS (the free share),
+                // the alert stays used-based — one vocabulary with PlanQuota's «libre»
+                val pctText = usedPct
+                    ?.let { " (${(REMAINING_FULL - it).coerceIn(0, REMAINING_FULL)}% libre)" }
+                    ?: ""
+                val alert = if ((usedPct ?: 0) >= 75) " ⚠️" else ""
                 val reset = lim.long("nextResetTime")?.let { " · resets ${fmtReset(it, nowMs)}" } ?: ""
                 lines.add(
                     "$name: ${fmtNum(lim.num("currentValue"))}/${fmtNum(lim.num("usage"))}" +
@@ -4398,6 +4406,11 @@ class BotCommands(
         private const val STAMP_IDLE = "·"
         private const val SECS_MIN = 60L
         private const val SECS_HOUR = 3600L
+
+        /** The percent rendered as the FREE share — the owner's 23/11 order:
+         *  the number reads as what REMAINS, never the burned share (one
+         *  vocabulary with PlanQuota's «libre»). Alerts stay used-based. */
+        private const val REMAINING_FULL = 100
         private val TIME_FMT = DateTimeFormatter.ofPattern("HH:mm")
         private val DATE_TIME_FMT = DateTimeFormatter.ofPattern("dd/MM HH:mm")
     }
