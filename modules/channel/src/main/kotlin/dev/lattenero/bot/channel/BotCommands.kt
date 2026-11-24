@@ -341,6 +341,7 @@ class BotCommands(
             "effort" -> effortPicker() // the plan+model in force's tiers (the split's third step)
             "mode" -> mode(rest)
             "plan_mode" -> planMode(rest)
+            "watch" -> watchCmd()
             "last" -> BotReply(lastAnswer())
             "compact" -> compact()
             "context_window" -> contextWindow()
@@ -3740,6 +3741,49 @@ class BotCommands(
         null -> ContextAnswer.Degraded // the budget ran out — honest degradation
     }
 
+    /**
+     * /watch — THE STREAMING CABLE (the owner's 24/11 ask: a command or a
+     * lever to pull when the live card no longer connects). Fires BY HAND
+     * the exact arc the stream watchdog takes on its own: re-issue the
+     * subscription of what the card shows — the pinned child when one is
+     * attached, else the card's turn, else the bot's active conversation —
+     * hold it again and ask for a draw NOW. The fork's subscribe burst
+     * re-states the in-flight turn and the subscription map remembers it
+     * for the next (re)connect, so the cable lands even while the channel
+     * is down. Nothing is invented: with no card and no conversation, the
+     * honest line is the answer.
+     */
+    @Suppress("ReturnCount") // one guard per honest miss (nothing to watch, no workspace)
+    private suspend fun watchCmd(): BotReply {
+        val pin = hub.peekPin()
+        val card = hub.peek()?.taskId
+        val target = pin ?: card ?: (contextAnswer() as? ContextAnswer.Ctx)?.value?.activeTaskId
+            ?: return BotReply(WATCH_NOTHING)
+        val row = history.ctxTasks(SCOPE_FOR_PICK).firstOrNull { it.sid == target }
+        val ws = row?.ws?.takeIf { it.isNotEmpty() }
+            ?: (contextAnswer() as? ContextAnswer.Ctx)?.value?.workspacePath
+            ?: return BotReply(WATCH_NO_WORKSPACE)
+        val title = row?.title?.takeIf { it.isNotEmpty() } ?: target.takeLast(SID_TAIL)
+        logger.info {
+            "watch BY HAND: re-attaching $target (pin=${pin != null}, card=${card != null}) at $ws"
+        }
+        if (pin != null) {
+            ops.subscribeChild(target, ws) // the child's own topic: the parent's focus survives (M5)
+        } else {
+            hub.watchTask() // back to the whole-task world (a lane scope dies with the cable)
+            hub.watchTaskId(target, clock()) // the card's identity: THIS task
+            ops.subscribe(target, ws) // rebase + focus move happen inside (the wiring's law)
+        }
+        hub.requestTick() // the draw is NOW, not on the next 3s beat
+        val head = if (pin != null) "👁 Subagente" else "👁"
+        val outcome = if (card == null) {
+            "re-suscrito — su próximo turno abre la carta."
+        } else {
+            "re-enganchado — la próxima ráfaga re-lista la carta."
+        }
+        return BotReply("$head «${PyText.esc(title)}» — $outcome")
+    }
+
     /** After an inbound fires, watch the conversation it lands in (the stream's own subscription). */
     private suspend fun watchContext() {
         val ctx = contextAnswer() as? ContextAnswer.Ctx ?: return
@@ -3833,6 +3877,14 @@ class BotCommands(
             "🤔 Nada para relanzar — no hay prompt guardado. " +
                 "Todo texto que entra a una conversación queda guardado y /retry lo vuelve a lanzar."
 
+        /** /watch with no card and no active conversation: the cable needs a target. */
+        internal const val WATCH_NOTHING =
+            "🤷 /watch: no hay carta en vivo ni conversación activa que re-enganchar — /tasks y tocá una fila."
+
+        /** /watch's target exists but no workspace is known — the wire needs one to subscribe. */
+        internal const val WATCH_NO_WORKSPACE =
+            "🤷 No sé el workspace de esa tarea — tocá su fila en /tasks y probá /watch de nuevo."
+
         /** /run's usage (Python's line; the project tag honestly retired — /tasks new's law). */
         internal const val RUN_USAGE =
             "⚠️ /run «prompt» — abre una conversación NUEVA en el proyecto activo y manda el prompt. " +
@@ -3913,6 +3965,7 @@ class BotCommands(
             MenuCommand("mode", "the conversation's mode — yolo · build · edit · guarded"),
             MenuCommand("plan_mode", "Plan mode ON/OFF — the separate toggle (/mode no longer offers plan)"),
             MenuCommand("last", "re-sends the active conversation's last answer"),
+            MenuCommand("watch", "re-engancha el streaming de la carta en vivo — el cable cuando se queda muda"),
             MenuCommand("compact", "shrinks the active conversation's context"),
             MenuCommand("context_window", "context window used — tokens, model window and percent"),
             MenuCommand("queue", "the parked texts — launch or discard"),
