@@ -278,6 +278,13 @@ object TranscriptFeed {
                 else -> fileOf(lane.input)
             }.orEmpty()
             val start = if (read) offsetOf(lane.input) + 1 else 1
+            // the page's highlighter: a shell is bash; a read carries the
+            // FILE's own language (kt → kotlin, nu → nu) — the phone colors it
+            val language = when {
+                shell -> "bash"
+                read -> CodeLang.ofPath(fileOf(lane.input))
+                else -> null
+            }
             val kind = when {
                 shell -> "⚡ <b>${PyText.esc(lane.name)}</b>"
                 dispatch -> "🤖 <b>${PyText.esc(lane.name)}</b>"
@@ -291,10 +298,10 @@ object TranscriptFeed {
                     // THE FENCE LAW (v2 §7): a shell's command never rides
                     // inline — it IS the fenced bash block under the header
                     fence = commandOf(lane.input).takeIf { shell },
-                    language = if (shell) "bash" else null,
+                    language = language,
                 ),
                 pages = ToolOutputPages.pages(out, start),
-                language = if (shell) "bash" else null, // v2 §5: the shell's pages ride the bash fence
+                language = language, // v2 §5: shell pages ride bash; reads their file's language
             )
         }
     }

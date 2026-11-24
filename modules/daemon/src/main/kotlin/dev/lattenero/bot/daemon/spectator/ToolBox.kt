@@ -117,9 +117,11 @@ internal object ToolBox {
         }
     }
 
-    /** The no-todos fallback — the honest raw JSON (a malformed payload stays debuggable). */
+    /** The no-todos fallback — the honest raw JSON, highlighted as JSON. */
     private fun rawBody(inp: JsonObject): String =
-        "<pre>${PyText.esc(PyText.htmlClip(PyText.jsonDumps(inp), CH_BOX))}</pre>"
+        "<pre><code class=\"language-json\">" +
+            PyText.esc(PyText.htmlClip(PyText.jsonDumps(inp), CH_BOX)) +
+            "</code></pre>"
 
     /**
      * THE PLAN, READABLE (the owner, 22/11: «completamente criptico… sin
@@ -173,7 +175,9 @@ internal object ToolBox {
         val out = listOf("output", "result")
             .firstNotNullOfOrNull { k -> inp[k].takeIf { PyText.truthy(it) } }
             ?.let { it as? JsonPrimitive }?.takeIf { it.isString }?.content
-        val b = StringBuilder("<pre>${PyText.esc(PyText.htmlClip(cmd, CH_BOX))}</pre>")
+        val b = StringBuilder(
+            "<pre><code class=\"language-bash\">${PyText.esc(PyText.htmlClip(cmd, CH_BOX))}</code></pre>",
+        )
         if (out != null && PyText.strip(out).isNotEmpty()) {
             b.append("\n└ <pre>${PyText.esc(PyText.htmlClip(out, OUTPUT_CAP))}</pre>")
         }

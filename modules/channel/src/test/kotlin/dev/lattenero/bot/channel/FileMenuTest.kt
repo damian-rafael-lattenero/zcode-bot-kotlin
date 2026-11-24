@@ -58,6 +58,7 @@ class FileMenuTest {
         assertTrue("📄 <b>/w/Main.kt</b>" in text, "the path rides the header: $text")
         assertTrue("fresco al toque" in text, "the freshness law speaks in the header")
         assertTrue("   1│ a" in text, "the line-number law: $text")
+        assertTrue("class=\"language-kotlin\"" in text, "the viewer colors by the file's own language: $text")
         assertNotNull(pager)
         assertTrue("fvp:$id:0" in pager.toString(), "the pager's first page: $pager")
     }

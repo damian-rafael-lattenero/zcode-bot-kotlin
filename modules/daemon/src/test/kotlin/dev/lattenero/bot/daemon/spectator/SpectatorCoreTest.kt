@@ -105,8 +105,9 @@ class SpectatorCoreTest {
         assertEquals(
             listOf(
                 "🖥️ <b>«mi tarea»</b> — Mac turn live (spectator)",
-                "🔧 <b>Bash</b> — <code>pytest -q</code>\n<pre>pytest -q</pre> · <b>1</b>",
-                "🔧 <b>Bash</b> — <code>ls</code>\n<pre>ls</pre> · <b>2</b>",
+                "🔧 <b>Bash</b> — <code>pytest -q</code>\n" +
+                    "<pre><code class=\"language-bash\">pytest -q</code></pre> · <b>1</b>",
+                "🔧 <b>Bash</b> — <code>ls</code>\n<pre><code class=\"language-bash\">ls</code></pre> · <b>2</b>",
             ),
             msgs.map { it.text },
         )

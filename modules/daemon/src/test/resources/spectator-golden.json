@@ -736,7 +736,7 @@
    "command": "pytest -q",
    "output": "3 passed"
   },
-  "expected": "🔧 <b>Bash</b> — <code>pytest -q</code>\n<pre>pytest -q</pre>\n└ <pre>3 passed</pre>"
+  "expected": "🔧 <b>Bash</b> — <code>pytest -q</code>\n<pre><code class=\"language-bash\">pytest -q</code></pre>\n└ <pre>3 passed</pre>"
  },
  {
   "kind": "tool_box",
@@ -748,7 +748,7 @@
     "-la"
    ]
   },
-  "expected": "🔧 <b>Bash</b> — <code>ls -la</code>\n<pre>ls -la</pre>"
+  "expected": "🔧 <b>Bash</b> — <code>ls -la</code>\n<pre><code class=\"language-bash\">ls -la</code></pre>"
  },
  {
   "kind": "tool_box",
@@ -757,7 +757,7 @@
   "input": {
    "command": "make"
   },
-  "expected": "🔧 <b>Bash</b> — <code>make</code>\n<pre>make</pre>"
+  "expected": "🔧 <b>Bash</b> — <code>make</code>\n<pre><code class=\"language-bash\">make</code></pre>"
  },
  {
   "kind": "tool_box",
@@ -767,7 +767,7 @@
    "command": "make",
    "output": ""
   },
-  "expected": "🔧 <b>Bash</b> — <code>make</code>\n<pre>make</pre>"
+  "expected": "🔧 <b>Bash</b> — <code>make</code>\n<pre><code class=\"language-bash\">make</code></pre>"
  },
  {
   "kind": "tool_box",
@@ -833,7 +833,7 @@
   "input": {
    "query": "kap kotlin"
   },
-  "expected": "🔧 <b>WebSearch</b>\n<pre>{\"query\": \"kap kotlin\"}</pre>"
+  "expected": "🔧 <b>WebSearch</b>\n<pre><code class=\"language-json\">{\"query\": \"kap kotlin\"}</code></pre>"
  },
  {
   "kind": "tool_box",
@@ -842,13 +842,13 @@
   "input": {
    "pattern": "foo.*bar"
   },
-  "expected": "🔧 <b>Grep</b> — <code>pattern foo.*bar</code>\n<pre>{\"pattern\": \"foo.*bar\"}</pre>"
+  "expected": "🔧 <b>Grep</b> — <code>pattern foo.*bar</code>\n<pre><code class=\"language-json\">{\"pattern\": \"foo.*bar\"}</code></pre>"
  },
  {
   "kind": "tool_box",
   "name": "no-input",
   "tool": "ExitPlanMode",
   "input": {},
-  "expected": "🔧 <b>ExitPlanMode</b>\n<pre>{}</pre>"
+  "expected": "🔧 <b>ExitPlanMode</b>\n<pre><code class=\"language-json\">{}</code></pre>"
  }
 ]

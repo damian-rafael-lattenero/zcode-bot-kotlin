@@ -60,7 +60,8 @@ object RichVoice {
                 buildJsonObject {
                     put("type", "pre")
                     put("text", PyText.take(body, BLOCK_CP))
-                    language?.let { put("language", it) }
+                    // kt → kotlin, sh → bash…: the phone only highlights a name it knows
+                    CodeLang.normalize(language)?.let { put("language", it) }
                 },
             )
         } else {

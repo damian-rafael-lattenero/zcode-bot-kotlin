@@ -156,6 +156,19 @@ class TranscriptFeedTest {
     }
 
     @Test
+    fun aReadPageCarriesTheFilesOwnLanguage() {
+        val content = (1..100).joinToString("\n") { "fun f$it() = $it" }
+        val inp = buildJsonObject { put("file_path", "/w/Fleet.kt") }
+        val prev = turn(tools = listOf(closed("t1", name = "Read", status = null, input = inp)))
+        val curr = turn(tools = listOf(closed("t1", name = "Read", input = inp, output = content)))
+        val msgs = TranscriptFeed.messages(prev, curr, FeedVerbosity.NORMAL, { "BOX" }, verbs)
+        val pages = msgs[0].pages!!
+        assertEquals("kotlin", pages.language, "the read of a .kt page is Kotlin")
+        val opened = ToolOutputPages.renderPage(pages.header, pages.pages, 0, pages.language)
+        assertTrue("class=\"language-kotlin\"" in opened, opened)
+    }
+
+    @Test
     fun aShortReadStaysInline() {
         val inp = buildJsonObject { put("file_path", "/x/y.txt") }
         val prev = turn(tools = listOf(closed("t1", name = "Read", status = null, input = inp)))
