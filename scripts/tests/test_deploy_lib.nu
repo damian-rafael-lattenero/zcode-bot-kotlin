@@ -39,20 +39,24 @@ let t2: datetime = (date now)
 assert equal (wait-for-path $never 1000) false
 assert greater or equal ((date now) - $t2) 900ms
 
-# 5. armed?: the heartbeat must be NEWER than the deploy AND zconn present —
-#    the 2/11 bug was mere existence passing a daemon that never booted.
+# 5. fresh? / armed?: the file must be NEWER than the deploy (and zconn
+#    present for armed?) — the 2/11 bug was mere existence passing a daemon
+#    that never booted; the whatsapp 22/11 bug was a log from a past run.
 let hb: path = ($tmp | path join "hb-state")
 let zconn: path = ($tmp | path join "zconn.json")
 "1" | save -f --raw $hb
 "{}" | save -f --raw $zconn
 let mtime: int = (^stat -f %m $hb | str trim | into int)
+assert equal (fresh? $hb 0) true
+assert equal (fresh? $hb ($mtime + 60)) false               # stale file
+assert equal (fresh? ($tmp | path join "absent") 0) false
 assert equal (armed? $hb $zconn 0) true
 assert equal (armed? $hb $zconn ($mtime + 60)) false        # stale heartbeat
 assert equal (armed? $hb ($tmp | path join "no-zconn") 0) false
 assert equal (armed? ($tmp | path join "no-hb") $zconn 0) false
 
-# 6. wait-armed: the heartbeat landing mid-wait wakes the caller; a deploy
-#    that never arms answers false at the deadline.
+# 6. wait-armed / wait-fresh: the file landing mid-wait wakes the caller; a
+#    deploy that never arms/freshens answers false at the deadline.
 let hb2: string = ($tmp | path join "hb-late")
 let zc2: string = ($tmp | path join "zconn-late.json")
 job spawn { sleep 300ms; "1" | save -f --raw $hb2; "{}" | save -f --raw $zc2 } | ignore
@@ -62,6 +66,13 @@ assert less ((date now) - $t3) 3sec
 let hb3: string = ($tmp | path join "hb-never")
 let zc3: string = ($tmp | path join "zconn-never.json")
 assert equal (wait-armed $hb3 $zc3 0 1sec) false
+
+# 7. wait-fresh (the whatsapp log shape): a fresh log appears mid-wait ->
+#    true; never -> false at the deadline.
+let late_log: string = ($tmp | path join "daemon.log")
+job spawn { sleep 300ms; "started" | save -f --raw $late_log } | ignore
+assert equal (wait-fresh $late_log 0 3sec) true
+assert equal (wait-fresh ($tmp | path join "never.log") 0 1sec) false
 
 ^rm -rf $tmp
 print "test_deploy_lib ok"

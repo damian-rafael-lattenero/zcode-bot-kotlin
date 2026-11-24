@@ -133,11 +133,44 @@ export def tail-lines [path: string, count: int]: nothing -> list<string> {
     open --raw $path | lines | last $count
 }
 
-# The arming predicate: a heartbeat NEWER than this deploy + zconn state
-# present. The files survive restarts, so mere existence false-passed a
-# daemon that never booted (measured 2026-11-02).
+# The freshness predicate: the file exists AND its mtime is newer than the
+# deploy's start. Mere existence false-passed a daemon that never booted
+# (bot 2/11) and a log from a previous run (whatsapp 22/11) — freshness is
+# the whole question.
+export def fresh? [path: path, since: int]: nothing -> bool {
+    (($path | path type) == "file") and ((^stat -f %m $path | str trim | into int) >= $since)
+}
+
+# The arming predicate: a FRESH heartbeat + zconn state present.
 export def armed? [hb: path, zconn: path, since: int]: nothing -> bool {
-    (($hb | path type) == "file") and ((^stat -f %m $hb | str trim | into int) >= $since) and (($zconn | path type) == "file")
+    (fresh? $hb $since) and (($zconn | path type) == "file")
+}
+
+# Event-driven wait for ONE file to be fresh (the waiting law): `watch` on
+# the dir wakes us, `job recv --timeout` is the deadline, the catch re-checks
+# once (pre-watch race + a write landing just past the deadline). Basename
+# filter in the each — `--glob` matches the resolved absolute path and
+# filters everything out (measured 13/11).
+export def wait-fresh [path: path, since: int, deadline: duration]: nothing -> bool {
+    let dir: string = ($path | path dirname)
+    let base: string = ($path | path basename)
+    let watcher: int = (job spawn {
+        watch $dir
+        | each {|ev|
+            if (($ev.path | path basename) == $base) and (fresh? $path $since) {
+                'fresh' | job send 0
+            }
+        }
+        | ignore
+    })
+    let ok: bool = (try {
+        job recv --timeout $deadline
+        true
+    } catch {
+        fresh? $path $since
+    })
+    try { job kill $watcher } catch { }
+    $ok
 }
 
 # Event-driven arming wait (the waiting law): `watch` on the state dir wakes
