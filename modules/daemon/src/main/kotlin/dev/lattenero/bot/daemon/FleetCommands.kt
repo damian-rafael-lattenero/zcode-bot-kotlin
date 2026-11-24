@@ -165,6 +165,27 @@ internal object FleetCommands {
         "⏱ /fleet_${verb.replace('-', '_')} no terminó en $budgetSeconds s — lo maté; " +
             "algo lo trabó (¿red? ¿lock?): probá de nuevo en un momento."
 
+    /**
+     * Does this verb NEED an argument the phone did not send? The signature's
+     * required positionals are the ones rendered quoted (`"repo" <path>`);
+     * optional ones ride in brackets and a rest rides with `...`. Running a
+     * verb with a missing required argument earns a raw parse error the owner
+     * reads as silence — the usage line is the honest answer instead.
+     */
+    internal fun missingRequired(arguments: String, argv: List<String>): Boolean {
+        if (argv.isNotEmpty()) return false
+        return arguments.split(" · ").any { part ->
+            part.startsWith("\"") && !part.startsWith("[") && !part.startsWith("...")
+        }
+    }
+
+    /** The one-verb usage: what it takes and what it does. */
+    internal fun usageOf(v: Verb): String {
+        val takes = if (v.arguments == "-") "sin argumentos" else escapeHtml(v.arguments)
+        return "🧰 <b>/fleet_${v.name.replace('-', '_')}</b> — $takes\n${escapeHtml(v.description)}\n" +
+            "Tip: /fleet ${v.name} <args> también funciona."
+    }
+
     internal const val ERRORED = "⚠️ El comando no pudo correr — el daemon sigue vivo: "
 
     /** 4096 chars is Telegram's ceiling; 26 verbs × ~120 chars fit with air. */

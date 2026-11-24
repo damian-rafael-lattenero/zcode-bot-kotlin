@@ -1950,21 +1950,33 @@ private fun fleetRun(
 
 /** One verb's run: the hub's script, the owner's words, the shared render. */
 private fun runVerb(row: FleetCommands.Verb, argv: List<String>, logsDir: File): String {
+    if (FleetCommands.missingRequired(row.arguments, argv)) return FleetCommands.usageOf(row)
     val logFile = File(logsDir, FleetCommands.logFileFor(row.name))
     val mode = argv.joinToString(" ").ifEmpty { "-" }
     return when (val run = NuScriptRunner.run(row.script, argv, logFile)) {
-        is NuScriptRunner.Run.Ran -> NuScriptRunner.render(
-            emoji = "🧰",
-            label = "fleet " + row.name,
-            mode = mode,
-            exit = run.exit,
-            tookMs = run.tookMs,
-            out = run.out,
-            logPath = logFile.absolutePath,
-        )
+        is NuScriptRunner.Run.Ran -> {
+            // the dispatch's own line: the next "no anda" has an answer here
+            logger.info { "fleet ${row.name} [${mode}] -> exit ${run.exit} in ${run.tookMs}ms" }
+            NuScriptRunner.render(
+                emoji = "🧰",
+                label = "fleet " + row.name,
+                mode = mode,
+                exit = run.exit,
+                tookMs = run.tookMs,
+                out = run.out,
+                logPath = logFile.absolutePath,
+            )
+        }
 
-        is NuScriptRunner.Run.TimedOut -> FleetCommands.timeout(row.name, NuScriptRunner.BUDGET_SECONDS)
-        is NuScriptRunner.Run.Errored -> FleetCommands.ERRORED + run.reason
+        is NuScriptRunner.Run.TimedOut -> {
+            logger.warn { "fleet ${row.name} [${mode}] TIMED OUT after ${NuScriptRunner.BUDGET_SECONDS}s" }
+            FleetCommands.timeout(row.name, NuScriptRunner.BUDGET_SECONDS)
+        }
+
+        is NuScriptRunner.Run.Errored -> {
+            logger.warn { "fleet ${row.name} [${mode}] could not spawn: ${run.reason}" }
+            FleetCommands.ERRORED + run.reason
+        }
     }
 }
 

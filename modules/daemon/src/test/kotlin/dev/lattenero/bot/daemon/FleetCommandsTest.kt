@@ -175,4 +175,26 @@ class FleetCommandsTest {
         assertEquals("fleet-ram-clean.log", FleetCommands.logFileFor("ram-clean"))
         assertTrue(FleetCommands.DISCOVERY_LOG != FleetCommands.logFileFor("list"))
     }
+
+    // ---- the usage guard -----------------------------------------------------
+
+    @Test
+    fun aVerbWithARequiredArgumentAndNoWordsAnswersItsUsage() {
+        // a REQUIRED positional (rendered quoted) with no words = missing
+        assertTrue(FleetCommands.missingRequired("\"repo\" <path>", emptyList()))
+        assertTrue(!FleetCommands.missingRequired("\"repo\" <path>", listOf("/tmp")))
+        // brain's question is OPTIONAL (bracketed) — nothing is missing
+        assertTrue(!FleetCommands.missingRequired("[question] <string> · --k <int>", emptyList()))
+        // no arguments at all: nothing to miss
+        assertTrue(!FleetCommands.missingRequired("-", emptyList()))
+    }
+
+    @Test
+    fun theUsageLineCarriesTheArgumentsAndTheSpaceFormHint() {
+        val row = FleetCommands.parse(json).first { it.name == "brain" }
+        val text = FleetCommands.usageOf(row)
+        assertTrue("/fleet_brain" in text, text)
+        assertTrue("&lt;string&gt;" in text, text)
+        assertTrue("/fleet brain" in text, text)
+    }
 }

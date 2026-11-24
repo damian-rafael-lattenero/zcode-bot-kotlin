@@ -3931,6 +3931,7 @@ class BotCommands(
                 "batería del ecosistema (colima, pg, brain, bots) · «check» = solo lectura",
             ),
             MenuCommand("fleet", "TODOS los scripts nu de la Mac — /fleet_list · /fleet <verbo> [args]"),
+            MenuCommand("fleet_list", "la lista completa: verbo, argumentos y para qué sirve"),
             // The usage-picked few (usage-report, 14 real days): each is ALSO a
             // real tap in the «/» menu. Every other verb works via /fleet <verb>.
             MenuCommand("fleet_ram_clean", "RAM de la Mac — sin args = plan · «--clean» = ejecuta"),
