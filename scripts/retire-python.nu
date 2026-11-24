@@ -23,7 +23,7 @@
 # Migrated from retire-python.sh on 2026-11-02. The knob edit is pure nu
 # (`upsert` + `to json`), not an embedded Python snippet.
 
-use lib/deploy.nu *
+use /Users/lattenero/Scripts/lib/deploy.nu *
 
 const DAEMON_LABEL = "com.zcode.bot-daemon"
 const PY_AGENTS = ["com.zcode.telegram-cmds" "com.zcode.telegram-watch" "com.zcode.bot-healer"]

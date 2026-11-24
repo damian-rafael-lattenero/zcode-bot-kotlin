@@ -7,13 +7,13 @@
 # Migrated from deploy-daemon.sh on 2026-11-02. Typed end to end; the
 # interpreter is pinned by the shebang (nu-nightly 0.116.2-nightly.28).
 
-use lib/deploy.nu *
+use /Users/lattenero/Scripts/lib/deploy.nu *
 
 const LABEL: string = "com.zcode.bot-daemon"
 
-# armed? / wait-armed ride lib/deploy.nu (tested: tests/test_deploy_lib.nu)
-# — one source for the watcher and the catch-recheck (the 22/11 audit: it
-# rode twice, verbatim).
+# armed? / wait-armed ride the hub's lib/deploy.nu (tested:
+# /Users/lattenero/Scripts/tests/lib/deploy.nu) — one source for the watcher
+# and the catch-recheck (the 22/11 audit: it rode twice, verbatim).
 
 def main []: nothing -> nothing {
     let repo: path = ($env.FILE_PWD | path dirname)

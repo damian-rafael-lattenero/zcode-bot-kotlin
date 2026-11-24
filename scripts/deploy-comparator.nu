@@ -10,7 +10,7 @@
 #
 # Migrated from deploy-comparator.sh on 2026-11-02.
 
-use lib/deploy.nu *
+use /Users/lattenero/Scripts/lib/deploy.nu *
 
 const LABEL: string = "com.zcode.bot-comparator"
 
