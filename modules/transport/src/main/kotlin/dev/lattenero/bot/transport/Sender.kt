@@ -66,11 +66,15 @@ class Sender(
         aOutbox: Boolean = true,
     ): SendResult {
         if (!cfg.configured) return SendResult.NotConfigured
+        // THE ITEM'S VOICE (24/11): the RESOLVED loudness travels WITH a
+        // parked message — the drain replays it instead of forcing silence
+        // (a 🔔 parked through a cooldown/breaker window never buzzed)
+        val notify = loud ?: cfg.loudAll
         if (cooldown.active()) {
             // Telegram named this window — parking beats burning attempts
             // inside it; the outbox flushes when it lifts
             logger.warn { "sendMessage: cooldown window — to the outbox" }
-            if (aOutbox) outbox.put(text)
+            if (aOutbox) outbox.put(text, notify)
             return SendResult.Parked
         }
         // ONE composition path: the dry-run knob logs this exact object and
@@ -95,12 +99,12 @@ class Sender(
             // Telegram/network is down and the breaker says so — the outbox
             // holds the message; getUpdates is the half-open probe
             logger.warn { "sendMessage: breaker OPEN — to the outbox" }
-            park(aOutbox, text)
+            park(aOutbox, text, notify)
         } catch (e: Throwable) {
             if (e is CancellationException) throw e
             retryAfterOf(e)?.let { cooldown.extend(it) }
             logger.warn { "sendMessage failed (final): ${e.message}" }
-            park(aOutbox, text)
+            park(aOutbox, text, notify)
             // Rejected SOLO cuando Telegram entendió el request y rechazó el
             // PAYLOAD (un 4xx — el HTML crudo de /steer): un 429 (throttle,
             // el mensaje está bien), la red y los timeouts son PARKED — el
@@ -109,8 +113,8 @@ class Sender(
         }
     }
 
-    private suspend fun park(aOutbox: Boolean, text: String): SendResult {
-        if (aOutbox) outbox.put(text)
+    private suspend fun park(aOutbox: Boolean, text: String, loud: Boolean): SendResult {
+        if (aOutbox) outbox.put(text, loud)
         return SendResult.Parked
     }
 
@@ -134,7 +138,9 @@ class Sender(
         val remaining = mutableListOf<dev.lattenero.bot.contracts.OutboxItem>()
         for ((index, item) in taken.withIndex()) {
             if (index > 0) pause() // the burst guard: sustained, never back-to-back
-            when (send(cfg, item.text, loud = false, aOutbox = false)) {
+            // the item's OWN voice (24/11): the parked text replays with the
+            // loudness it was sent with — a 🔔 must buzz on the drain too
+            when (send(cfg, item.text, loud = item.loud, aOutbox = false)) {
                 is SendResult.Sent -> ok++
 
                 // THE POISON CAP (2/11): a message Telegram REJECTS forever

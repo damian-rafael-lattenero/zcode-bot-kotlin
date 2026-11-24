@@ -25,4 +25,11 @@ data class SealFacts(
     val failedTools: Int,
     val answer: String?,
     val answerSpoken: Boolean = false,
+    /**
+     * THE FAILURE VERDICT (24/11): the seal's own typed error
+     * ([TurnLive.typedError] — `task_error`, not a guessed stop reason).
+     * The bell says FAILED with the fork's error line, and an empty failed
+     * turn still rings: an error is never silence-by-design.
+     */
+    val failed: Boolean = false,
 )

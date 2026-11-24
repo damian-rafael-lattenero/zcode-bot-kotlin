@@ -38,6 +38,22 @@ class OutboxTest {
     }
 
     @Test
+    fun aLoudItemCarriesTheFlagAndSurvivesTheSwap() = runTest {
+        val ob = outbox()
+        ob.put("callado")
+        ob.put("bien fuerte", loud = true)
+        assertEquals(
+            """[{"ts": 1730200000, "text": "callado"}, {"ts": 1730200000, "text": "bien fuerte", "loud": true}]""",
+            path.readText(),
+            "silent items keep Python's exact bytes; a loud one names its flag",
+        )
+        val taken = ob.takeAll()!!
+        assertEquals(listOf(false, true), taken.map { it.loud })
+        ob.putBack(taken)
+        assertEquals(listOf(false, true), ob.takeAll()!!.map { it.loud }, "the flag survives the round trip")
+    }
+
+    @Test
     fun nonAsciiStaysRawUtf8() = runTest {
         outbox().put("señal académica — «así»")
         assertEquals(

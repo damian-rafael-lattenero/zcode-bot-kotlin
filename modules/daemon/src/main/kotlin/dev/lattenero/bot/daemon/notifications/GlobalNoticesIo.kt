@@ -47,6 +47,12 @@ class GlobalNoticesIo(
     stateDir: File,
     private val leg: SendLeg,
     private val clockMs: () -> Long = System::currentTimeMillis,
+    /**
+     * THE CROSS-SOURCE GATE, shared with the seal tap: one transition earns
+     * ONE voice (default = a private gate, for a daemon wired without the
+     * seal tap).
+     */
+    private val voice: TaskVoiceGate = TaskVoiceGate(clockMs = clockMs),
 ) {
     private val stateFile = File(stateDir, STATE_FILE)
 
@@ -69,17 +75,18 @@ class GlobalNoticesIo(
     suspend fun speak(notices: List<GlobalNotice>) {
         val now = clockMs() / MILLIS_PER_SECOND
         notices.forEach { notice ->
-            val decision = when (notice) {
-                is GlobalNotice.Finished -> DECISION_FINISHED
-                is GlobalNotice.Failed -> DECISION_FAILED
-            }
-            val text = when (notice) {
-                is GlobalNotice.Finished -> NotifText.taskFinished(notice.task)
-                is GlobalNotice.Failed -> NotifText.taskFailed(notice.task)
-            }
-            val task = when (notice) {
-                is GlobalNotice.Finished -> notice.task
-                is GlobalNotice.Failed -> notice.task
+            val decision = decisionOf(notice)
+            // THE CROSS-SOURCE FOLD (24/11): the live card's seal may have
+            // spoken this very transition (measured 24/11: two messages and
+            // two buzzes for one turn end). First voice wins per verdict —
+            // a ❌ is never folded into the seal's 🏁, so a disagreement
+            // still rings.
+            if (!voice.trySpeak(notice.task.taskId, terminalOf(notice), notice.aliveStampMs)) {
+                logger.info {
+                    "global notice FOLDED — the other voice already spoke " +
+                        "$decision ${notice.task.taskId.takeLast(LOG_TAIL)}"
+                }
+                return@forEach
             }
             leg.deliver(
                 ShadowDecision(
@@ -87,14 +94,30 @@ class GlobalNoticesIo(
                     tsIso = TimeIso.format(now),
                     watcher = NotifText.WATCHER,
                     decision = decision,
-                    text = text,
+                    text = textOf(notice),
                 ),
                 loud = true,
             )
             logger.info {
-                "global notice: $decision ${task.taskId.takeLast(LOG_TAIL)} «${task.title.take(LOG_PREVIEW)}»"
+                "global notice: $decision " +
+                    "${notice.task.taskId.takeLast(LOG_TAIL)} «${notice.task.title.take(LOG_PREVIEW)}»"
             }
         }
+    }
+
+    private fun terminalOf(notice: GlobalNotice): TaskSignal.Terminal = when (notice) {
+        is GlobalNotice.Finished -> TaskSignal.Terminal.FINISHED
+        is GlobalNotice.Failed -> TaskSignal.Terminal.FAILED
+    }
+
+    private fun decisionOf(notice: GlobalNotice): String = when (notice) {
+        is GlobalNotice.Finished -> DECISION_FINISHED
+        is GlobalNotice.Failed -> DECISION_FAILED
+    }
+
+    private fun textOf(notice: GlobalNotice): String = when (notice) {
+        is GlobalNotice.Finished -> NotifText.taskFinished(notice.task)
+        is GlobalNotice.Failed -> NotifText.taskFailed(notice.task)
     }
 
     /** The never-miss Process — one pass per tick, restarts under the convergence law. */

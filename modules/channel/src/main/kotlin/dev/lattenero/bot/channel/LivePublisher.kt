@@ -1114,6 +1114,7 @@ class LivePublisher(
                     failedTools = state.failedTools,
                     answer = answer,
                     answerSpoken = answerSpoken,
+                    failed = state.typedError != null,
                 ),
             )
         } catch (e: CancellationException) {

@@ -108,6 +108,20 @@ class GlobalNoticesIoTest {
     }
 
     @Test
+    fun aVoiceThatAlreadySpokeFoldsTheGlobalNotice() = runBlocking {
+        setUpFixture()
+        insert("a", "running", "", now - 2_000L)
+        build().pass() // the silent baseline writes the memory
+        insert("a", "completed", "completed", now - 1_000L)
+        // the live card's seal spoke this very transition first
+        val voice = TaskVoiceGate(clockMs = { now })
+        voice.trySpeak("a", TaskSignal.Terminal.FINISHED, turnHintMs = now - 2_000L)
+        val io = GlobalNoticesIo(base, state, leg, clockMs = { now }, voice = voice)
+        io.speak(io.pass())
+        assertTrue(sent.isEmpty(), "one transition, one voice — the global stays folded")
+    }
+
+    @Test
     fun aStaleEndAtBootIsTheGhostItAlreadyWas() = runBlocking {
         setUpFixture()
         insert("old", "completed", "completed", now - GlobalNotices.FRESH_WINDOW_MS * 4)

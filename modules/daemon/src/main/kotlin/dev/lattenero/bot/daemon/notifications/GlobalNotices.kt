@@ -28,11 +28,27 @@ data class TaskSignal(
 
 /** What the owner must hear about ONE task, decided by a pure transition. */
 sealed interface GlobalNotice {
+    /** The row's task — both arms speak about the same identity. */
+    val task: TaskSignal
+
+    /**
+     * The last stamp the task's row carried while it was still ALIVE (the
+     * fold's previous read) — the cross-source gate's proof that a NEW turn
+     * began after the other voice spoke ([TaskVoiceGate]).
+     */
+    val aliveStampMs: Long?
+
     /** The task reached its end (completed or interrupted). */
-    data class Finished(val task: TaskSignal) : GlobalNotice
+    data class Finished(
+        override val task: TaskSignal,
+        override val aliveStampMs: Long? = null,
+    ) : GlobalNotice
 
     /** The task died with an error. */
-    data class Failed(val task: TaskSignal) : GlobalNotice
+    data class Failed(
+        override val task: TaskSignal,
+        override val aliveStampMs: Long? = null,
+    ) : GlobalNotice
 }
 
 /** One pass's answer: the next memory + the notices this pass earned. */
@@ -85,9 +101,12 @@ object GlobalNotices {
                 // the memory knew it alive (a real transition) OR it is a
                 // fresh end first seen (a task born and finished between reads)
                 if (previous != null || fresh) {
+                    // the ALIVE row's last stamp rides the notice: the
+                    // cross-source gate reads it as «this turn began after
+                    // the voice that already spoke» (the new-turn proof)
                     announce += when (terminal) {
-                        TaskSignal.Terminal.FINISHED -> GlobalNotice.Finished(row)
-                        TaskSignal.Terminal.FAILED -> GlobalNotice.Failed(row)
+                        TaskSignal.Terminal.FINISHED -> GlobalNotice.Finished(row, previous?.updatedMs)
+                        TaskSignal.Terminal.FAILED -> GlobalNotice.Failed(row, previous?.updatedMs)
                     }
                 }
             }

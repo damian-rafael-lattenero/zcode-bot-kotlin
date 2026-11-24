@@ -99,6 +99,14 @@ class GlobalNoticesTest {
     }
 
     @Test
+    fun theNoticeCarriesTheAliveStampsProof() {
+        val prev = listOf(signal("a", updatedMs = now - 9_000L))
+        val fold = GlobalNotices.pass(prev, listOf(signal("a", "completed", "completed")), now)
+        val notice = fold.announce[0] as GlobalNotice.Finished
+        assertEquals(now - 9_000L, notice.aliveStampMs, "the alive row's stamp proves a new turn after the other voice")
+    }
+
+    @Test
     fun theMemoryIsBoundedAndPrunesOldEntries() {
         val prev = (1..600).map { signal("s-$it", updatedMs = now - it) }
         val fold = GlobalNotices.pass(prev, emptyList(), now)

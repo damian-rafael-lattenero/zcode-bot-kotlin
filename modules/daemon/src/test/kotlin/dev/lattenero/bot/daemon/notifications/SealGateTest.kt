@@ -44,6 +44,19 @@ class SealGateTest {
     }
 
     @Test
+    fun theProbeReadsWithoutSpendingTheWindow() {
+        var now = 100_000L
+        val gate = SealGate(clockMs = { now })
+        assertFalse(gate.heard("t"), "nothing spoke yet")
+        assertTrue(gate.tryAnnounce("t"))
+        now += 10_000L
+        assertTrue(gate.heard("t"), "inside the window the task is heard")
+        assertFalse(gate.tryAnnounce("t"), "the fold still records nothing")
+        now += SealGate.SEAL_GAP_MS // 70 s after the announce
+        assertFalse(gate.heard("t"), "past the window the read answers free")
+    }
+
+    @Test
     fun tasksAreIndependent() {
         val gate = SealGate(clockMs = { 100_000L })
         assertTrue(gate.tryAnnounce("a"))

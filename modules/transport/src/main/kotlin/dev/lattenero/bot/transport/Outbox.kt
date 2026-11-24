@@ -61,14 +61,19 @@ class Outbox(
     // block — the mutex keeps the file lock a cross-process concern)
     private val jvmLock = Mutex()
 
-    /** Enqueues a message: text capped to CH_REPLY code points, the box keeps the LAST [MAX_BOX]. */
-    suspend fun put(text: String) {
-        val item = JsonObject(
-            mapOf(
-                "ts" to JsonPrimitive(now().toLong()),
-                "text" to JsonPrimitive(PyText.take(text, CH_REPLY)),
-            ),
-        )
+    /**
+     * Enqueues a message: text capped to CH_REPLY code points, the box keeps
+     * the LAST [MAX_BOX]. [loud] rides the item (24/11): a key-moment
+     * notification parked through a cooldown/breaker window used to drain
+     * SILENT — the phone never buzzed for it. Silent items keep Python's
+     * exact bytes (the flag appears only when true).
+     */
+    suspend fun put(text: String, loud: Boolean = false) {
+        val item = buildJsonObject {
+            put("ts", JsonPrimitive(now().toLong()))
+            put("text", JsonPrimitive(PyText.take(text, CH_REPLY)))
+            if (loud) put("loud", JsonPrimitive(true))
+        }
         try {
             updateCrossProcess(default = JsonArray(emptyList())) { box ->
                 val list = (box as? JsonArray)?.toMutableList() ?: mutableListOf()
@@ -195,6 +200,7 @@ class Outbox(
         put("ts", JsonPrimitive(ts))
         put("text", JsonPrimitive(text))
         if (attempts > 0) put("attempts", JsonPrimitive(attempts))
+        if (loud) put("loud", JsonPrimitive(true))
     }
 
     companion object {

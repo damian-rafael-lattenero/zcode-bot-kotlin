@@ -217,12 +217,20 @@ data class OutboxItem(
      * OPEN — el veneno de un comando se come la voz de todo el bot.
      */
     val attempts: Int = 0,
+    /**
+     * THE NOTIFICATION FLAG (aditivo 24/11, ignored by Python): true = the
+     * parked message must still BUZZ when the drain speaks it (a key-moment
+     * notification). Every item written before the flag existed reads false
+     * — the old drain spoke everything silently, which was the bug.
+     */
+    val loud: Boolean = false,
 ) {
     companion object {
         fun fromJson(o: JsonObject) = OutboxItem(
             ts = o.pickLong("ts") ?: 0,
             text = o.pickString("text") ?: "",
             attempts = o.pickLong("attempts")?.toInt() ?: 0,
+            loud = o.pickBoolean("loud") ?: false,
         )
     }
 

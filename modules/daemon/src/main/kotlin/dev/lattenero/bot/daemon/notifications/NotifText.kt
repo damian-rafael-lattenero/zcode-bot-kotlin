@@ -47,13 +47,16 @@ object NotifText {
      */
     fun turnSealed(seal: SealFacts): String? {
         val raw = seal.answer
-        if ((raw == null || raw.isBlank()) && seal.doneTools == 0) return null
+        if (isSilent(seal, raw)) return null
         val elapsed = seal.startedAtMs
             ?.let { LiveTurn.fmtDur((seal.sealedAtMs - it).coerceAtLeast(0L)) }
             ?: "?"
-        val tools = seal.doneTools
-        val head = "🏁 <b>«${PyText.esc(titleOf(seal.title, seal.taskId))}» — terminó " +
-            "($elapsed, $tools ${if (tools == 1) "herramienta" else "herramientas"})</b>"
+        val head = if (seal.failed) {
+            failedHead(seal, elapsed)
+        } else {
+            "🏁 <b>«${PyText.esc(titleOf(seal.title, seal.taskId))}» — terminó " +
+                "($elapsed, ${toolCount(seal.doneTools)})</b>"
+        }
         val answer = raw
             ?.takeIf { it.isNotBlank() }
             ?.takeIf { !seal.answerSpoken } // the card already said it — the 🔔 never repeats (single-source law)
@@ -61,6 +64,30 @@ object NotifText {
             .orEmpty()
         return head + answer
     }
+
+    /**
+     * THE SILENCE LAW: a CLEAN turn that produced nothing (no answer, zero
+     * tools) says nothing — silence is data, no decoration. A FAILED turn
+     * is the exception (24/11): an error must always ring, even empty.
+     */
+    private fun isSilent(seal: SealFacts, answer: String?): Boolean =
+        !seal.failed && seal.doneTools == 0 && (answer == null || answer.isBlank())
+
+    /**
+     * The FAILED head (24/11): the verdict, the same duration/tools budget
+     * and the fork's own error line — escaped and truncated like every
+     * other store-sourced piece. Before this, a failed turn read as a clean
+     * finish and an empty failed turn was silent.
+     */
+    private fun failedHead(seal: SealFacts, elapsed: String): String {
+        val head = "❌ <b>«${PyText.esc(titleOf(seal.title, seal.taskId))}» — falló " +
+            "($elapsed, ${toolCount(seal.doneTools)})</b>"
+        val reason = seal.stopReason.trim()
+        return if (reason.isBlank()) head else head + "\n" + PyText.esc(PyText.preview(reason, ANSWER_PREVIEW_CP))
+    }
+
+    private fun toolCount(tools: Int): String =
+        "$tools ${if (tools == 1) "herramienta" else "herramientas"}"
 
     /**
      * 🔔 MOMENT 1b — the subagent's START (owner, 16/11): a child began its

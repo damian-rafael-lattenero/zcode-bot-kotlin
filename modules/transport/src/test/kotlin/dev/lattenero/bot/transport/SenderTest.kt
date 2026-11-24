@@ -262,18 +262,23 @@ class SenderTest {
     }
 
     @Test
-    fun outboxFlushSendsThePileQuietly() = runTest {
+    fun outboxFlushReplaysEachItemsOwnLoudness() = runTest {
         behavior = { throw IOException("down") }
         val s = sender()
-        s.send(cfg, "primera")
-        s.send(cfg, "segunda")
+        s.send(cfg, "callada", loud = false)
+        s.send(cfg, "bien fuerte") // loud=null → loud_all=true
         assertEquals(2, parkedTexts().size)
 
         behavior = { respond("""{"result": {"message_id": 100}}""") }
         val ok = s.outboxFlush(cfg)
         assertEquals(2, ok)
         assertEquals("[]", outboxFile.readText(), "the box drained")
-        assertEquals(true, body(7)["disable_notification"]!!.jsonPrimitive.content.toBoolean(), "flush sends loud=false")
+        assertEquals(true, body(7)["disable_notification"]!!.jsonPrimitive.content.toBoolean(), "the quiet one stays quiet")
+        assertEquals(
+            false,
+            body(8)["disable_notification"]!!.jsonPrimitive.content.toBoolean(),
+            "the loud one BUZZES on the drain — a parked 🔔 never loses its voice (24/11)",
+        )
         assertEquals("100", lastPhFile.readText())
     }
 

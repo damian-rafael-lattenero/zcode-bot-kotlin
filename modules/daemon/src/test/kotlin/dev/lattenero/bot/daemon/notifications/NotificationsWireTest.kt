@@ -40,7 +40,11 @@ class NotificationsWireTest {
         doneTools: Int = 2,
         startedAtMs: Long? = 1_000L,
         sealedAtMs: Long = 61_000L,
-    ) = SealFacts(taskId, "título", "end_turn", startedAtMs, sealedAtMs, doneTools, 0, answer)
+        failed: Boolean = false,
+    ) = SealFacts(taskId, "título", "end_turn", startedAtMs, sealedAtMs, doneTools, 0, answer, failed = failed)
+
+    private fun task(sid: String, status: String = "completed", outcome: String = "completed") =
+        TaskSignal(sid, "título", "/Users/damian/Projects/app", status, outcome, 61_000L)
 
     @Test
     fun offBuildsNothing() {
@@ -88,7 +92,56 @@ class NotificationsWireTest {
         assertEquals(1, sent.size, "the card already showed it: 60 s per task")
         clock += 40_000L // 70 s after the announce
         taps.onSeal(facts("t1", answer = "una tercera"))
-        assertEquals(2, sent.size, "past the window: a new seal speaks again")
+        assertEquals(1, sent.size, "the SAME turn's ghost re-seal folds — its start stamp proves it")
+        taps.onSeal(facts("t1", answer = "un turno nuevo", startedAtMs = clock)) // a genuinely new turn
+        assertEquals(2, sent.size, "a new turn's start always speaks")
+    }
+
+    @Test
+    fun theGlobalVoiceFoldsWhenTheSealAlreadySpoke() = runTest {
+        val taps = NotificationsWire.build(tmpConfig(), send, on = true, clockMs = { 100_000L })!!
+        taps.onSeal(facts("t1"))
+        assertEquals(1, sent.size)
+        taps.global.speak(listOf(GlobalNotice.Finished(task("t1"), aliveStampMs = 50_000L)))
+        assertEquals(1, sent.size, "one transition, one buzz — whichever voice spoke first")
+    }
+
+    @Test
+    fun theSealFoldsWhenTheGlobalVoiceAlreadySpoke() = runTest {
+        val taps = NotificationsWire.build(tmpConfig(), send, on = true, clockMs = { 100_000L })!!
+        taps.global.speak(listOf(GlobalNotice.Finished(task("t1"), aliveStampMs = 50_000L)))
+        assertEquals(1, sent.size)
+        taps.onSeal(facts("t1"))
+        assertEquals(1, sent.size, "the same verdict inside the window is the same voice")
+    }
+
+    @Test
+    fun aGlobalFailureIsNeverFoldedIntoTheSealsFinish() = runTest {
+        val taps = NotificationsWire.build(tmpConfig(), send, on = true, clockMs = { 100_000L })!!
+        taps.onSeal(facts("t1"))
+        taps.global.speak(
+            listOf(GlobalNotice.Failed(task("t1", status = "error", outcome = "error"), aliveStampMs = 50_000L)),
+        )
+        assertEquals(2, sent.size, "the ❌ is a DIFFERENT verdict — the correction must ring")
+        assertTrue(sent[1].first.text.startsWith("❌ "))
+    }
+
+    @Test
+    fun aNewTurnSpeaksEvenRightAfterAnotherVoice() = runTest {
+        var clock = 100_000L
+        val taps = NotificationsWire.build(tmpConfig(), send, on = true, clockMs = { clock })!!
+        taps.global.speak(listOf(GlobalNotice.Finished(task("t1"), aliveStampMs = 50_000L)))
+        clock += 5_000L
+        taps.onSeal(facts("t1", startedAtMs = 102_000L)) // a turn that STARTED after the voice
+        assertEquals(2, sent.size, "a genuinely new turn always speaks")
+    }
+
+    @Test
+    fun anEmptyFailedTurnStillRings() = runTest {
+        val taps = NotificationsWire.build(tmpConfig(), send, on = true, clockMs = { 100_000L })!!
+        taps.onSeal(facts("t1", answer = null, doneTools = 0, failed = true))
+        assertEquals(1, sent.size, "an error is never silence-by-design")
+        assertTrue(sent[0].first.text.startsWith("❌ "))
     }
 
     @Test

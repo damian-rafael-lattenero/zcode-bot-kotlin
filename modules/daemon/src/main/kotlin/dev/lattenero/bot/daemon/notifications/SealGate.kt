@@ -23,6 +23,17 @@ class SealGate(
     /** taskId → the last announce's clock reading — the gate's only state. */
     private val last = ConcurrentHashMap<String, Long>()
 
+    /**
+     * The READ-ONLY probe: is this task inside its fold window right now?
+     * The seal tap asks BEFORE the cross-source gate (24/11) so a folded
+     * seal never spends the window — the record below happens only when
+     * the whole chain of gates allowed.
+     */
+    fun heard(taskId: String): Boolean {
+        val prev = last[taskId] ?: return false
+        return clockMs() - prev < minGapMs
+    }
+
     /** Atomic check-and-record: true = announce now (the clock moves to now). */
     fun tryAnnounce(taskId: String): Boolean {
         val now = clockMs()

@@ -119,4 +119,41 @@ class NotifTextTest {
         val facts = SealFacts("t", "título", "end_turn", null, 1_000L, 2, 0, null)
         assertTrue(NotifText.turnSealed(facts)!!.contains("(?, 2 herramientas)"))
     }
+
+    @Test
+    fun aFailedTurnRingsFailedWithTheForkErrorLine() {
+        val facts = SealFacts(
+            "t",
+            "título",
+            "provider 429: over capacity",
+            0,
+            5_000L,
+            doneTools = 3,
+            failedTools = 1,
+            answer = null,
+            failed = true,
+        )
+        val text = NotifText.turnSealed(facts)!!
+        assertTrue(text.startsWith("❌ "), "an error is never a clean finish")
+        assertTrue(text.contains("— falló (5s, 3 herramientas)"))
+        assertTrue(text.contains("provider 429: over capacity"))
+    }
+
+    @Test
+    fun aFailedTurnThatProducedNothingStillRings() {
+        val facts = SealFacts("t", "título", "timeout", 0, 1_000L, 0, 0, null, failed = true)
+        val text = NotifText.turnSealed(facts)!!
+        assertTrue(text.startsWith("❌ "))
+        assertTrue(text.contains("timeout"), "the error is the only honest content left")
+    }
+
+    @Test
+    fun theFailedErrorLineIsEscapedAndTruncated() {
+        val escaped = SealFacts("t", "t", "<b>boom</b>", 0, 1_000L, 0, 0, null, failed = true)
+        assertTrue(NotifText.turnSealed(escaped)!!.contains("&lt;b&gt;boom&lt;/b&gt;"))
+        val long = SealFacts("t", "t", "e".repeat(500), 0, 1_000L, 0, 0, null, failed = true)
+        val line = NotifText.turnSealed(long)!!.lines().last()
+        assertEquals(NotifText.ANSWER_PREVIEW_CP + 1, line.length, "150 chars + the ellipsis")
+        assertTrue(line.endsWith("…"))
+    }
 }

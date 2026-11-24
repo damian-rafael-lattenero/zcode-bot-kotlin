@@ -52,20 +52,42 @@ object NotificationsWire {
     ): NotifTaps? {
         if (!on) return null
         val watcher = SubagentNotifs(cfg.baseDir, File(cfg.homeDir, "state"), send.leg)
-        val global = GlobalNoticesIo(cfg.baseDir, File(cfg.homeDir, "state"), send.leg)
+        // ONE voice per transition: the seal tap and the global notifier share
+        // this gate (24/11: both spoke the same turn end, 5 s and 61 s apart)
+        val voice = TaskVoiceGate(clockMs = clockMs)
+        val global = GlobalNoticesIo(
+            cfg.baseDir,
+            File(cfg.homeDir, "state"),
+            send.leg,
+            clockMs = clockMs,
+            voice = voice,
+        )
         val gate = SealGate(clockMs = clockMs)
         return NotifTaps(
             watcher = watcher,
             onSeal = { facts ->
                 guard {
                     val text = NotifText.turnSealed(facts)
-                    if (text != null && gate.tryAnnounce(facts.taskId)) {
+                    if (text != null && claimVoice(facts, gate, voice)) {
                         deliverSeal(send, text)
                     }
                 }
             },
             global = global,
         )
+    }
+
+    /**
+     * THE GATES' CHAIN, in order: the 60 s probe is READ-ONLY, the
+     * cross-source gate records ONLY when it speaks, and the seal window is
+     * spent LAST — a folded seal costs nothing (24/11: a ghost re-seal used
+     * to burn the window and silence the next real turn).
+     */
+    private fun claimVoice(facts: SealFacts, gate: SealGate, voice: TaskVoiceGate): Boolean {
+        val terminal = if (facts.failed) TaskSignal.Terminal.FAILED else TaskSignal.Terminal.FINISHED
+        return !gate.heard(facts.taskId) &&
+            voice.trySpeak(facts.taskId, terminal, facts.startedAtMs) &&
+            gate.tryAnnounce(facts.taskId)
     }
 
     /** MOMENT 2's send: the COMMANDS lane (the shared throat), loud, one decision. */
