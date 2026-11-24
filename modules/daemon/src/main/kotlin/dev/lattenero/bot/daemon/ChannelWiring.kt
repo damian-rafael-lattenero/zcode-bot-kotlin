@@ -130,6 +130,21 @@ internal fun runningTaskIdsOf(runningJson: String?): Set<String> {
     return array.mapNotNull { (it as? JsonPrimitive)?.content?.takeIf { id -> id.isNotBlank() } }.toSet()
 }
 
+/**
+ * The boot's recovery plan: [own] is the bot's own conversation (it earns the
+ * card, and only while airing); [airing] is EVERY conversation with a turn in
+ * flight — each one is re-subscribed and its pending questions re-read, so a
+ * question asked while the daemon was DOWN still reaches the phone.
+ */
+internal data class BootRecovery(val own: ReattachTarget?, val airing: Set<String>)
+
+/** Pure: [statusJson] = the bot's status answer, [runningJson] = the fork's ActiveTaskIds reply. */
+internal fun bootRecoveryOf(statusJson: String?, runningJson: String?): BootRecovery {
+    val active = activeConversationOf(statusJson)
+    val airing = runningTaskIdsOf(runningJson)
+    return BootRecovery(own = active?.takeIf { it.taskId in airing }, airing = airing)
+}
+
 /** What [wireChannel] answers: the built pieces Main starts as Processes. */
 internal class ChannelStack(
     val client: ChannelClient,
@@ -1069,9 +1084,12 @@ internal fun wireChannel(
     }
     // THE BOOT RE-ATTACH (the mirror-blind wedge's missing half): the SAME
     // bounded wait the ladder uses, then the pure decision — the bot's own
-    // conversation, subscribed again ONLY while its turn is airing (a fork
-    // subscribe re-states the in-flight burst, so the normal birth path
-    // hands the phone its card back; an idle conversation earns nothing).
+    // conversation re-subscribed ONLY while its turn is airing (the fork's
+    // burst re-states the content, so the normal birth path hands the phone
+    // its card back; an idle conversation earns nothing). AND the pending
+    // questions' survival: EVERY airing conversation re-reads its snapshot,
+    // so a question asked while the daemon was down reaches the phone (the
+    // board's requestId dedupe keeps ONE card when the store already knew it).
     val bootReattach: suspend () -> Unit = {
         var waitedMs = 0L
         while (!client.connected && waitedMs < BOOT_LADDER_WAIT_MS) {
@@ -1084,25 +1102,39 @@ internal fun wireChannel(
             }
 
             else -> {
-                val active = activeConversationOf(
-                    statusJson = (client.query(ChannelQuery.BotStatus) as? QueryAnswer.Ok)?.resultJson,
-                )
-                val running = runningTaskIdsOf(
-                    runningJson = active
-                        ?.let { client.query(ChannelQuery.ActiveTaskIds(it.workspacePath)) as? QueryAnswer.Ok }
-                        ?.resultJson,
-                )
-                val target = active?.takeIf { it.taskId in running }
-                if (target == null) {
-                    logger.info { "boot re-attach: no turn airing — nothing to re-birth" }
-                } else {
+                val statusJson = (client.query(ChannelQuery.BotStatus) as? QueryAnswer.Ok)?.resultJson
+                val active = activeConversationOf(statusJson)
+                val runningJson = active
+                    ?.let { client.query(ChannelQuery.ActiveTaskIds(it.workspacePath)) as? QueryAnswer.Ok }
+                    ?.resultJson
+                val recovery = bootRecoveryOf(statusJson, runningJson)
+                // 1) THE CARD: the bot's own conversation, only while airing.
+                recovery.own?.let { own ->
                     hub.watchTask()
-                    hub.watchTaskId(target.taskId, System.currentTimeMillis())
-                    client.subscribe(target.taskId, target.workspacePath)
+                    hub.watchTaskId(own.taskId, System.currentTimeMillis())
                     hub.requestTick()
                     logger.info {
-                        "boot re-attach: ${target.taskId.takeLast(SID_TAIL)} was AIRING — " +
+                        "boot re-attach: ${own.taskId.takeLast(SID_TAIL)} was AIRING — " +
                             "subscribed again, the card re-births"
+                    }
+                }
+                // 2) THE PENDING QUESTIONS: EVERY airing conversation re-subscribes
+                //    and re-reads its own snapshot, so a question asked while the
+                //    daemon was down re-announces into a card (the board's dedupe
+                //    keeps one card when the store already knew it).
+                val ws = active?.workspacePath
+                if (ws != null) {
+                    recovery.airing.forEach { sid ->
+                        client.subscribe(sid, ws)
+                        recoverAfterReconnect(client, board, taskTitles, sid)
+                    }
+                }
+                if (recovery.airing.isEmpty()) {
+                    logger.info { "boot recovery: no turn airing — nothing to re-attach or re-announce" }
+                } else {
+                    logger.info {
+                        "boot recovery: ${recovery.airing.size} airing conversation(s) re-subscribed — " +
+                            "pending questions re-announced"
                     }
                 }
             }

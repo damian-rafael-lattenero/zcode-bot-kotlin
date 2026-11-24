@@ -49,4 +49,19 @@ class BootReattachTest {
         assertNull(active.takeIf { it.taskId in runningTaskIdsOf("""["other_task"]""") }) // idle: no card
         assertNull(active.takeIf { it.taskId in runningTaskIdsOf(null) }) // a dead channel invents nothing
     }
+
+    @Test
+    fun theBootRecoveryCarriesEveryAiringConversationAndOnlyAnAiringOwn() {
+        val both = bootRecoveryOf(status, """["sess_abc","sess_other"]""")
+        assertEquals("sess_abc", both.own?.taskId) // the bot's own conversation was airing → the card
+        assertEquals(setOf("sess_abc", "sess_other"), both.airing) // EVERY airing one re-subscribes
+
+        val ownIdle = bootRecoveryOf(status, """["sess_other"]""")
+        assertNull(ownIdle.own) // own idle: no card...
+        assertEquals(setOf("sess_other"), ownIdle.airing) // ...but the other one still recovers its questions
+
+        val nothing = bootRecoveryOf(status, null)
+        assertNull(nothing.own)
+        assertTrue(nothing.airing.isEmpty())
+    }
 }
