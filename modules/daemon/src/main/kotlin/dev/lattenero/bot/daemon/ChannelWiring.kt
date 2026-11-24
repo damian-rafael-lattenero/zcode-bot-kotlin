@@ -1868,8 +1868,102 @@ private suspend fun dispatchMessage(
                 null,
             )
 
+        // /fleet_<verbo> (24/11): EVERY nu command of the Mac behind ONE phone
+        // door. The hub owns the table — `fleet list --json` — and the daemon
+        // reads it at call time, so a script that lands today is a command
+        // today. `/fleet` and `/fleet_list` speak the list; the deploy verbs
+        // ride the deploy flow (launchd one-shot: a ten-minute build must
+        // never die at the runner's budget) and speak through their own say.
+        FleetCommands.isFleet(update.text) ->
+            fleetDispatch(update.text, update.fromId, cfg.ownerUserId, logsDir, deployFlow, speak)
+
         else -> commands.handle(update.text, update.updateId)
             ?.let { reply -> speakReply(mirror, cfg.chatId, reply, speak) }
+    }
+}
+
+/**
+ * /fleet_<verbo> — the family's front door: the deploy legs ride [DeployFlow]
+ * (launchd one-shot, and the flow speaks for itself), everything else answers
+ * through the commands lane's speak.
+ */
+private suspend fun fleetDispatch(
+    text: String,
+    fromId: Long?,
+    owner: Long?,
+    logsDir: File,
+    deploy: DeployFlow,
+    speak: suspend (String, Boolean, JsonObject?) -> Long?,
+) {
+    val leg = FleetCommands.deployTarget(text.substringBefore(' '))
+    if (leg != null) {
+        deploy.onText(leg, fromId)
+        return
+    }
+    speak(fleetNow(text, fromId, owner, logsDir), false, null)
+}
+
+/**
+ * /fleet_<verbo> — the generic edge: discovery (`fleet list --json`) → owner
+ * gate → [NuScriptRunner.run] → the phone render. `/fleet` and `/fleet_list`
+ * answer the table itself. A verb the hub does not know is refused BY NAME
+ * with the near matches; a discovery that fails says so before anything runs.
+ */
+private fun fleetNow(text: String, fromId: Long?, owner: Long?, logsDir: File): String {
+    val verb = FleetCommands.verbOf(text.substringBefore(' ').trim()) ?: "list"
+    val verbs = discoverVerbs(logsDir)
+    return if (verb == "list") {
+        FleetCommands.listText(verbs)
+    } else {
+        fleetRun(verb, FleetCommands.argvOf(text), fromId, owner, verbs, logsDir)
+    }
+}
+
+/** The discovery run — one `fleet list --json`; a failed one answers no verbs. */
+private fun discoverVerbs(logsDir: File): List<FleetCommands.Verb> {
+    val run = NuScriptRunner.run(
+        FleetCommands.SCRIPT,
+        FleetCommands.discoveryArgv(),
+        File(logsDir, FleetCommands.DISCOVERY_LOG),
+    )
+    return (run as? NuScriptRunner.Run.Ran)?.let { FleetCommands.parse(it.out) } ?: emptyList()
+}
+
+/** The gate, then the verb (or the honest refusal) — one expression, no ladder. */
+private fun fleetRun(
+    verb: String,
+    argv: List<String>,
+    fromId: Long?,
+    owner: Long?,
+    verbs: List<FleetCommands.Verb>,
+    logsDir: File,
+): String {
+    val refusal = FleetCommands.gate(fromId, owner)
+    return refusal ?: if (verbs.isEmpty()) {
+        FleetCommands.DISCOVERY_FAILED
+    } else {
+        verbs.firstOrNull { it.name == verb }?.let { row -> runVerb(row, argv, logsDir) }
+            ?: FleetCommands.unknown(verb, verbs)
+    }
+}
+
+/** One verb's run: the hub's script, the owner's words, the shared render. */
+private fun runVerb(row: FleetCommands.Verb, argv: List<String>, logsDir: File): String {
+    val logFile = File(logsDir, FleetCommands.logFileFor(row.name))
+    val mode = argv.joinToString(" ").ifEmpty { "-" }
+    return when (val run = NuScriptRunner.run(row.script, argv, logFile)) {
+        is NuScriptRunner.Run.Ran -> NuScriptRunner.render(
+            emoji = "🧰",
+            label = "fleet " + row.name,
+            mode = mode,
+            exit = run.exit,
+            tookMs = run.tookMs,
+            out = run.out,
+            logPath = logFile.absolutePath,
+        )
+
+        is NuScriptRunner.Run.TimedOut -> FleetCommands.timeout(row.name, NuScriptRunner.BUDGET_SECONDS)
+        is NuScriptRunner.Run.Errored -> FleetCommands.ERRORED + run.reason
     }
 }
 

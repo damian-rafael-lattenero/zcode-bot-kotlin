@@ -1,0 +1,155 @@
+package dev.lattenero.bot.daemon
+
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+
+/**
+ * /fleet_<verbo> (24/11): EVERY nushell command of the Mac, one phone door.
+ *
+ * The hub owns the table — `fleet list --json` in ~/Scripts/scripts/fleet.nu —
+ * and the daemon READS it at call time, so a new script is a new Telegram
+ * command the day it lands (no Kotlin edit, no restart). The name mapping is
+ * mechanical: `/fleet_ram_clean` -> verb `ram-clean`.
+ *
+ * The five deploy verbs never ride the runner: they go to the deploy flow
+ * (launchd one-shot), because a ten-minute gradle build must not die at the
+ * shared subprocess budget — and the deploy flow already owns the in-flight
+ * lock, the owner gate and the one-tap card.
+ *
+ * The pure half lives here (mapping, discovery parse, gate, words); the
+ * subprocess machinery is [NuScriptRunner]'s, the wiring throat is
+ * `fleetNow`.
+ */
+@Suppress("TooManyFunctions") // one family's whole surface: mapping, routing, discovery, gate, words
+internal object FleetCommands {
+
+    /** The Telegram prefix — every command of this family starts with it. */
+    const val PREFIX = "/fleet_"
+
+    /** The hub's door (the interpreter and budget live in [NuScriptRunner]). */
+    const val SCRIPT = "/Users/lattenero/Scripts/scripts/fleet.nu"
+
+    /** One row of `fleet list --json` — what the phone needs to offer a verb. */
+    internal data class Verb(
+        val name: String,
+        val kind: String,
+        val script: String,
+        val arguments: String,
+        val description: String,
+    )
+
+    /** `/fleet_ram_clean` -> `ram-clean`. Null when the word carries no verb. */
+    internal fun verbOf(word: String): String? {
+        val tail = if (word.startsWith(PREFIX)) word.removePrefix(PREFIX).trim() else ""
+        return tail.takeIf { it.isNotEmpty() }?.replace('_', '-')
+    }
+
+    /** Is this text ours at all? `/fleet` alone (the menu's tap) counts too. */
+    internal fun isFleet(text: String): Boolean {
+        val word = text.substringBefore(' ')
+        return word == "/fleet" || word.startsWith(PREFIX)
+    }
+
+    /**
+     * The deploy legs ride [DeployFlow] (launchd one-shot): the alias verbs and
+     * the discovered `zcode-*-deploy` twins both answer the same leg.
+     */
+    internal fun deployTarget(word: String): String? = when (verbOf(word)) {
+        "deploy-all", "zcode-deploy-all" -> "all"
+        "deploy-brain", "zcode-brain-deploy" -> "brain"
+        "deploy-bot", "zcode-bot-kotlin-deploy" -> "bot"
+        "deploy-fork", "zcode-fork-deploy" -> "fork"
+        "deploy-whatsapp", "zcode-whatsapp-kotlin-deploy" -> "whatsapp"
+        else -> null
+    }
+
+    /** The discovery argv — `fleet list --json`. */
+    internal fun discoveryArgv(): List<String> = listOf("list", "--json")
+
+    /** The log home per verb — the last run is the whole truth. */
+    internal fun logFileFor(verb: String): String = "fleet-$verb.log"
+
+    /** The discovery run has its own log — it never overwrites a verb's last run. */
+    internal const val DISCOVERY_LOG = "fleet-discovery.log"
+
+    /** The rest of the phone line, already split into argv (words, never a shell). */
+    internal fun argvOf(text: String): List<String> {
+        val rest = text.substringAfter(' ', "").trim()
+        if (rest.isEmpty()) return emptyList()
+        return rest.split(WHITESPACE).filter { it.isNotEmpty() }
+    }
+
+    /**
+     * Discovery parse: `fleet list --json` -> rows. Tolerant by design — a
+     * malformed payload answers empty and the caller says it could not read
+     * the table, never half a menu that would refuse valid verbs.
+     */
+    internal fun parse(json: String): List<Verb> = runCatching {
+        Json.parseToJsonElement(json).jsonArray.mapNotNull { element ->
+            val row = element.jsonObject
+            Verb(
+                name = row.string("name") ?: return@mapNotNull null,
+                kind = row.string("kind") ?: "script",
+                script = row.string("script") ?: return@mapNotNull null,
+                arguments = row.string("arguments") ?: "-",
+                description = row.string("description") ?: "-",
+            )
+        }
+    }.getOrDefault(emptyList())
+
+    /**
+     * THE SECOND LOCK (the /deploy and /ram_clean law): every verb runs code
+     * on the Mac, several of them destructive — the sender is re-checked
+     * against the owner before the edge spawns. Fail-closed.
+     */
+    internal fun gate(fromId: Long?, owner: Long?): String? =
+        if (fromId == null || owner == null || fromId != owner) NOT_OWNER else null
+
+    internal const val NOT_OWNER = "🚫 Solo el dueño corre comandos de la Mac."
+
+    internal const val DISCOVERY_FAILED =
+        "⚠️ No pude leer la lista de comandos (`fleet list --json` falló) — el daemon sigue vivo."
+
+    internal const val USAGE =
+        "🧰 /fleet_<verbo> — TODO comando nu de la Mac.\n" +
+            "🧰 /fleet_list — la lista completa (verbo, argumentos, para qué sirve)."
+
+    /** The phone's table: one line per verb — the description clipped, the args named. */
+    internal fun listText(verbs: List<Verb>): String {
+        if (verbs.isEmpty()) return DISCOVERY_FAILED
+        val lines = verbs.map { v ->
+            val desc = if (v.description.length <= DESCRIPTION_MAX) {
+                v.description
+            } else {
+                v.description.take(DESCRIPTION_MAX).substringBeforeLast(' ') + "…"
+            }
+            val takes = if (v.arguments == "-") "" else " ${v.arguments}"
+            "• /fleet_${v.name.replace('-', '_')}$takes — $desc"
+        }
+        return (listOf("🧰 <b>${verbs.size} comandos nu</b> — /fleet_&lt;verbo&gt; [args]:", "") + lines)
+            .joinToString("\n")
+    }
+
+    internal fun unknown(verb: String, verbs: List<Verb>): String {
+        val near = verbs.map { it.name }.filter { it.startsWith(verb.take(4)) }
+        val hint = if (near.isEmpty()) "" else "\n¿querías: ${near.joinToString(" · ") { it.replace('-', '_') }}?"
+        return "🤷 No existe el verbo «$verb» — /fleet_list tiene los ${verbs.size}.$hint"
+    }
+
+    /** The timeout words — the shared edge names the budget it burned. */
+    internal fun timeout(verb: String, budgetSeconds: Long): String =
+        "⏱ /fleet_${verb.replace('-', '_')} no terminó en $budgetSeconds s — lo maté; " +
+            "algo lo trabó (¿red? ¿lock?): probá de nuevo en un momento."
+
+    internal const val ERRORED = "⚠️ El comando no pudo correr — el daemon sigue vivo: "
+
+    /** 4096 chars is Telegram's ceiling; 26 verbs × ~120 chars fit with air. */
+    private const val DESCRIPTION_MAX = 110
+    private val WHITESPACE = Regex("\\s+")
+
+    private fun JsonObject.string(key: String): String? =
+        (this[key] as? kotlinx.serialization.json.JsonPrimitive)?.content
+}

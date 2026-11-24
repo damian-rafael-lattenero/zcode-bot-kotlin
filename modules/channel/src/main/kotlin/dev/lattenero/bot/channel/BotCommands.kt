@@ -3930,6 +3930,7 @@ class BotCommands(
                 "fleet_healthcheck",
                 "batería del ecosistema (colima, pg, brain, bots) · «check» = solo lectura",
             ),
+            MenuCommand("fleet", "TODOS los scripts nu de la Mac — /fleet_list · /fleet_<verbo>"),
             MenuCommand("brain", "pregunta al RAG de agent-brain — /brain status para el pulso"),
             MenuCommand("memory", "recuerdos del brain — /memory «texto» · recent [k] · status"),
             MenuCommand("learn", "aprendizaje de 7 días — memorias, evals y costos del brain"),
