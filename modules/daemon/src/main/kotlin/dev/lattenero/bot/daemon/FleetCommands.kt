@@ -42,7 +42,7 @@ internal object FleetCommands {
         val description: String,
     )
 
-    /** One phone line, parsed once: the verb (null = the list) and its argv. */
+    /** One phone line, parsed once: the verb (null = the list) and the argv it RUNS. */
     internal data class Call(val verb: String?, val argv: List<String>)
 
     /**
@@ -51,6 +51,8 @@ internal object FleetCommands {
      *   /fleet <verbo> [args...]      the space form (what the owner types)
      *   /fleet_<verbo> [args...]      the tap form (what the menu registers)
      * A bare `/fleet` or `/fleet list` answers the list (verb = null / "list").
+     * The argv comes back as the edge RUNS it: [phoneArgv] folds the verb's
+     * bare-form default in, so a bare tap IS its verb's action.
      */
     internal fun callOf(text: String): Call {
         val words = text.trim().split(WHITESPACE).filter { it.isNotEmpty() }
@@ -62,7 +64,33 @@ internal object FleetCommands {
             else -> null
         }
         val argv = if (head == "/fleet") tail.drop(1) else tail
-        return Call(verb = verb?.takeIf { it.isNotEmpty() }, argv = argv)
+        val named = verb?.takeIf { it.isNotEmpty() }
+        return Call(verb = named, argv = phoneArgv(named ?: "", argv))
+    }
+
+    /**
+     * THE PHONE DIALECT (the owner's ruling, 24/11): the menu tap carries no
+     * arguments, and `/fleet_ram_clean` must BE the clean — before this, the
+     * bare form fell into the script's read-only plan, so the tap looked like
+     * it did nothing. One row per verb: the [default] its bare form runs with,
+     * and the [words] the phone may say instead of the script's own flags
+     * (`report` = the read-only leg, spelled exactly as /ram_clean spells it;
+     * the script has no positional, so it maps to the bare argv). Anything
+     * unlisted rides verbatim.
+     */
+    internal data class Dialect(val default: List<String>, val words: Map<String, List<String>> = emptyMap())
+
+    private val DIALECTS: Map<String, Dialect> = mapOf(
+        "ram-clean" to Dialect(
+            default = listOf("--clean"),
+            words = mapOf("clean" to listOf("--clean"), "report" to emptyList()),
+        ),
+    )
+
+    /** The argv the edge runs: the bare default, the spelled word, or the words as typed. */
+    internal fun phoneArgv(verb: String, argv: List<String>): List<String> {
+        val dialect = DIALECTS[verb] ?: return argv
+        return if (argv.isEmpty()) dialect.default else dialect.words[argv.joinToString(" ")] ?: argv
     }
 
     /** Is this text ours at all? `/fleet` alone (the menu's tap) counts too. */

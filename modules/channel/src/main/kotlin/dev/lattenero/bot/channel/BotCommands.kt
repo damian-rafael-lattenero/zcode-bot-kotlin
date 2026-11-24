@@ -3934,7 +3934,7 @@ class BotCommands(
             MenuCommand("fleet_list", "la lista completa: verbo, argumentos y para qué sirve"),
             // The usage-picked few (usage-report, 14 real days): each is ALSO a
             // real tap in the «/» menu. Every other verb works via /fleet <verb>.
-            MenuCommand("fleet_ram_clean", "RAM de la Mac — sin args = plan · «--clean» = ejecuta"),
+            MenuCommand("fleet_ram_clean", "limpia la Mac AHORA (--clean por defecto) · «report» = solo lectura"),
             MenuCommand("fleet_brain", "pregunta al RAG: /fleet brain «pregunta»"),
             MenuCommand("fleet_fleet_errors", "errores frescos del fleet · «--since 2h»"),
             MenuCommand("fleet_deploy_status", "cómo terminó cada deploy y su pid"),

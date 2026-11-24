@@ -56,6 +56,40 @@ class FleetCommandsTest {
         assertTrue(!FleetCommands.isFleet("/ram_clean"))
     }
 
+    // ---- the phone dialect (the bare-form defaults, the owner's 24/11) --------
+
+    @Test
+    fun aBareRamCleanTapIsTheCleanNotThePlan() {
+        // the menu tap cannot carry args: the bare form IS the clean
+        assertEquals(listOf("--clean"), FleetCommands.callOf("/fleet_ram_clean").argv)
+        // the space form answers the same verb with the same words
+        assertEquals(listOf("--clean"), FleetCommands.callOf("/fleet ram-clean").argv)
+    }
+
+    @Test
+    fun theSpelledWordsKeepTheirMeaning() {
+        // «report» = the read-only leg, exactly as /ram_clean spells it: the
+        // script has no positional, so it maps to the bare argv (the plan)
+        assertEquals(emptyList(), FleetCommands.callOf("/fleet_ram_clean report").argv)
+        assertEquals(emptyList(), FleetCommands.callOf("/fleet ram-clean report").argv)
+        assertEquals(listOf("--clean"), FleetCommands.callOf("/fleet_ram_clean clean").argv)
+    }
+
+    @Test
+    fun anExplicitFlagRidesVerbatim() {
+        assertEquals(listOf("--clean"), FleetCommands.callOf("/fleet_ram_clean --clean").argv)
+        // terminal-only flags stay reachable (read-only ones)
+        assertEquals(listOf("--trend"), FleetCommands.callOf("/fleet_ram_clean --trend").argv)
+    }
+
+    @Test
+    fun theDialectLeavesEveryOtherVerbAlone() {
+        assertEquals(emptyList(), FleetCommands.callOf("/fleet_brain").argv)
+        assertEquals(listOf("hola"), FleetCommands.callOf("/fleet_brain hola").argv)
+        assertEquals(listOf("--since", "2h"), FleetCommands.callOf("/fleet_fleet_errors --since 2h").argv)
+        assertEquals(emptyList(), FleetCommands.phoneArgv("audit-fp", emptyList()))
+    }
+
     // ---- the deploy routing (the launchd lane) -------------------------------
 
     @Test
