@@ -31,7 +31,17 @@ fun interface SendLeg {
      * LIVE override to carry the markup (one composition path: the logged
      * body IS the posted body, buttons included).
      */
-    suspend fun deliverMarkup(decision: ShadowDecision, loud: Boolean, markup: JsonObject?): Long? {
+    suspend fun deliverMarkup(
+        decision: ShadowDecision,
+        loud: Boolean,
+        markup: JsonObject?,
+        /**
+         * RICH FIRST by default (24/11). `false` is the SCROLL LAW: a
+         * code-only body must ride the classic `sendMessage` — the rich
+         * `pre` wraps long lines on the client, the classic one scrolls.
+         */
+        rich: Boolean = true,
+    ): Long? {
         deliver(decision, loud)
         return null
     }
@@ -70,10 +80,15 @@ object SendLegs {
             deliverMarkup(d, loud, null)
         }
 
-        override suspend fun deliverMarkup(d: ShadowDecision, loud: Boolean, markup: JsonObject?): Long? {
+        override suspend fun deliverMarkup(
+            d: ShadowDecision,
+            loud: Boolean,
+            markup: JsonObject?,
+            rich: Boolean,
+        ): Long? {
             val r = composeSend(view(TgConfig.load(remote())), d.text, loud, markup)
             logger.info {
-                "send DRY-RUN ${d.watcher}/${d.decision}: method=${r.method} url=${r.url} body=${r.body}"
+                "send DRY-RUN ${d.watcher}/${d.decision}: method=${r.method} rich=$rich url=${r.url} body=${r.body}"
             }
             return null // nothing flew — the id stays unknown by definition
         }
@@ -99,13 +114,18 @@ object SendLegs {
             deliverMarkup(d, loud, null)
         }
 
-        override suspend fun deliverMarkup(d: ShadowDecision, loud: Boolean, markup: JsonObject?): Long? {
+        override suspend fun deliverMarkup(
+            d: ShadowDecision,
+            loud: Boolean,
+            markup: JsonObject?,
+            rich: Boolean,
+        ): Long? {
             val cfg = TgConfig.load(remote())
-            if (richSend != null) {
-                val rich = richSend(cfg, d.text, loud, markup)
-                if (rich != null) {
-                    logger.info { "send LIVE ${d.watcher}/${d.decision}: RICH message_id=$rich" }
-                    return rich
+            if (rich && richSend != null) {
+                val sent = richSend(cfg, d.text, loud, markup)
+                if (sent != null) {
+                    logger.info { "send LIVE ${d.watcher}/${d.decision}: RICH message_id=$sent" }
+                    return sent
                 }
             }
             return when (val r = send(cfg, d.text, loud, markup)) {

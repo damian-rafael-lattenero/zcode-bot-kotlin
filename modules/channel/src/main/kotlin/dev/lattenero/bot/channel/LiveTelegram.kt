@@ -230,6 +230,28 @@ class LiveTelegram(
         false
     }
 
+    /**
+     * THE CLASSIC EDIT (the scroll law, 24/11): a message BORN classic (the
+     * tool boxes, the file viewer) is edited classic too — a rich `pre`
+     * wraps long lines on the client, the classic `<pre>` scrolls, and a
+     * mid-life dialect switch would wrap the page the owner just opened.
+     */
+    @Suppress("ReturnCount") // the id guard and the throttle guard — two honest exits
+    suspend fun editPlain(
+        cfg: TgConfig,
+        messageId: Long,
+        text: String,
+        markup: JsonObject? = null,
+        critical: Boolean = false,
+    ): Boolean {
+        if (messageId <= 0) return false
+        if (editThrottled(cooldown.active(), critical)) {
+            logger.info { "plain edit skipped (cooldown window) mid=$messageId" }
+            return false
+        }
+        return editLeg(cfg, messageId, text, markup)
+    }
+
     /** Best-effort editMessageText; false when skipped or failed. The markup rides when present. */
     @Suppress("ReturnCount") // the skip and the leg are two honest exits
     suspend fun edit(cfg: TgConfig, messageId: Long, text: String, markup: JsonObject? = null): Boolean {

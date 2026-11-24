@@ -452,6 +452,25 @@ internal fun wireChannel(
         )
     }
 
+    // THE CLASSIC RENDER LANE (the scroll law, 24/11): code-only bodies (the
+    // tool boxes, the file viewer) ride sendMessage — the rich pre wraps
+    // long lines, the classic pre scrolls. Same throat, same outbox.
+    val fireSpeakPlain: suspend (String, Boolean, JsonObject?) -> Long? = { text, loud, markup ->
+        val now = System.currentTimeMillis() / 1000.0
+        send.firehose.deliverMarkup(
+            ShadowDecision(
+                ts = now,
+                tsIso = TimeIso.format(now),
+                watcher = "channel-live",
+                decision = "say",
+                text = text,
+            ),
+            loud,
+            markup,
+            rich = false,
+        )
+    }
+
     // the client's stream callback feeds the hub directly; the resync after a
     // reconnect re-baselines the view (the lost events stay lost — no replay)
     // F17 live: a finished turn (task_complete) drains the dormant queue —
@@ -1012,8 +1031,9 @@ internal fun wireChannel(
                     }
                 }.getOrNull()
             },
-            edit = { mid, text, markup -> viewerTelegram.edit(lane.config(), mid, text, markup) },
-            send = { text, markup -> fireSpeak(text, false, markup) },
+            // the viewer is CODE: classic send + classic edits (scroll law)
+            edit = { mid, text, markup -> viewerTelegram.editPlain(lane.config(), mid, text, markup) },
+            send = { text, markup -> fireSpeakPlain(text, false, markup) },
         )
     }
     // THE VIOLET VOICE's knob (5/11): rich_voice in daemon.json, ON by
@@ -1035,6 +1055,7 @@ internal fun wireChannel(
         onSeal = notifs?.onSeal ?: NotificationsWire.noSeal,
         fileMenu = fileMenu,
         richVoice = richVoice,
+        speakPlain = { text, markup -> fireSpeakPlain(text, false, markup) },
     )
     val wired = buildPoller(
         cfg,
@@ -1254,6 +1275,8 @@ private fun buildLiveView(
     fileMenu: FileMenu? = null,
     /** The violet voice (5/11) — rich messages for the LLM's prose. */
     richVoice: Boolean = true,
+    /** The CLASSIC throat (24/11) — code boxes ride sendMessage so long lines scroll. */
+    speakPlain: suspend (String, JsonObject?) -> Long? = { text, markup -> fireSpeak(text, false, markup) },
 ): LivePublisher? {
     val lane = lanes.live
     if (lane == null || !send.ownsSpectator) return null
@@ -1281,6 +1304,7 @@ private fun buildLiveView(
             if (ws != null) client.subscribe(taskId, ws)
         },
         speak = { text, markup -> fireSpeak(text, false, markup) },
+        speakPlain = speakPlain,
         // the transcript feed's per-tool CLOSE box: the spectator renderer
         // (the final transcript's own), status mark inside the head + the
         // VERBATIM output tail (the owner's «leer los commands de bash»)

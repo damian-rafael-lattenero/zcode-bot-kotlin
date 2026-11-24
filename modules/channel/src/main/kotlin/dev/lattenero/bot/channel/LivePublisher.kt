@@ -470,6 +470,13 @@ class LivePublisher(
     private val channelAlive: () -> Boolean,
     private val speak: suspend (text: String, markup: JsonObject?) -> Long?,
     /**
+     * THE CLASSIC THROAT (24/11): the same lane through `sendMessage` — the
+     * CODE boxes and the file viewer ride it because a rich `pre` wraps long
+     * lines on the client and the classic `<pre>` scrolls. Defaults to
+     * [speak] for the unwired/test double.
+     */
+    private val speakPlain: suspend (text: String, markup: JsonObject?) -> Long? = speak,
+    /**
      * The per-tool CLOSE renderer (injected — the daemon passes the
      * SPECTATOR's ToolBox, the same renderer the final transcript uses):
      * the feed's tool-close message's real content. A blank render (or
@@ -881,13 +888,14 @@ class LivePublisher(
             // pager's buttons intact for the flips.
             msg.pages?.let { pages ->
                 val text = boxBody(msg, pages)
-                speakBox(state, pages, msg.bornOpen) { markup -> speak(text, markup) }
+                // CODE: classic send so a long line scrolls (the scroll law)
+                speakBox(state, pages, msg.bornOpen) { markup -> speakPlain(text, markup) }
                 return@forEach
             }
             // A WRITE/EDIT CLOSE: the diff speaks WITH the file door —
             // «📄 archivo completo» reads the file fresh at tap time
             if (msg.editPath != null && fileMenu != null) {
-                speak(msg.text, fileMenu.buttonFor(msg.editPath))
+                speakPlain(msg.text, fileMenu.buttonFor(msg.editPath))
                 return@forEach
             }
             val block = msg.block ?: run {
@@ -994,7 +1002,8 @@ class LivePublisher(
         } else {
             val box = hub.box(registryId) ?: return@withLock BoxTaps.MISS
             val index = page.coerceIn(0, box.pages.size - 1)
-            val ok = telegram.edit(
+            // a box was BORN classic: its taps stay classic (the scroll law)
+            val ok = telegram.editPlain(
                 cfg,
                 box.messageId,
                 ToolOutputPages.renderPage(box.header, box.pages, index, box.language),
@@ -1019,7 +1028,7 @@ class LivePublisher(
             "📡 Sin Telegram configurado — no hay mensaje que abrir."
         } else {
             val box = hub.box(registryId) ?: return@withLock BoxTaps.MISS
-            val ok = telegram.edit(cfg, box.messageId, box.header, Keyboards.boxOpen(registryId))
+            val ok = telegram.editPlain(cfg, box.messageId, box.header, Keyboards.boxOpen(registryId))
             if (ok) hub.page(registryId, BoxLive.FOLDED)
             logger.info { "box tap: id=$registryId -> ${if (ok) "folded" else "fold BLOCKED (throttle)"}" }
             null

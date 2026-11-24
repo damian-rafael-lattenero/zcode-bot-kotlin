@@ -76,6 +76,25 @@ class SendLegTest {
         assertTrue(true, "parked is an answer, not an exception")
     }
 
+    // THE SCROLL LAW (24/11): a code body asks for the CLASSIC lane — the
+    // rich leg must not fire, or the phone wraps the long line again.
+    @Test
+    fun `rich false skips the rich leg and posts the classic send`() = runTest {
+        var richCalls = 0
+        var plainCalls = 0
+        val leg = SendLegs.live(
+            { _, _, _, _ -> plainCalls += 1; SendResult.Sent(1) },
+            richSend = { _, _, _, _ -> richCalls += 1; 2L },
+        ) { java.io.File("/nonexistent/telegram-remote.json") }
+
+        leg.deliverMarkup(decision(), loud = false, markup = null, rich = false)
+        assertEquals(0, richCalls, "the classic lane never touches sendRichMessage")
+        assertEquals(1, plainCalls)
+
+        leg.deliverMarkup(decision(), loud = false, markup = null, rich = true)
+        assertEquals(1, richCalls, "the rich lane is still the default for everything else")
+    }
+
     @Test
     fun `DaemonSend owns the spectator only outside shadow`() {
         assertEquals(false, DaemonSend.of(SendMode.SHADOW, SendLegs.NONE).ownsSpectator)
