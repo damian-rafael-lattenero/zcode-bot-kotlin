@@ -105,6 +105,7 @@ internal object ToolBox {
         return head + if (body.isNotEmpty()) "\n$body" else ""
     }
 
+    @Suppress("CyclomaticComplexMethod") // one branch per tool family — the body IS the dispatch table
     private fun body(name: String, inp: JsonObject, desc: String): String {
         val cmd = commandString(inp)
         return when {
@@ -115,10 +116,37 @@ internal object ToolBox {
 
             name in WRITE_TOOLS && PyText.truthy(inp["content"]) -> writeBody(inp)
             name in READ_TOOLS -> "<i>reading</i> <code>${PyText.esc(PyText.preview(desc, READ_DESC_CAP))}</code>"
+            name == "AskUserQuestion" -> askBody(inp) ?: rawBody(inp)
             name == "TodoWrite" -> todosBody(inp) ?: rawBody(inp)
             else -> rawBody(inp)
         }
     }
+
+    /**
+     * THE QUESTION, READABLE (24/11, the owner): the tool's JSON used to land
+     * as a raw `json` block. Now the question and its options speak as HTML —
+     * the header in bold, the question in prose, one bullet per option.
+     */
+    private fun askBody(inp: JsonObject): String? {
+        val questions = (inp["questions"] as? JsonArray)?.mapNotNull { it as? JsonObject } ?: return null
+        val chunks = questions.mapNotNull { q ->
+            val head = q.string("header") ?: q.string("question")?.take(HEAD_DESC_CAP) ?: return@mapNotNull null
+            val multi = (q["multiSelect"] as? JsonPrimitive)?.content == "true"
+            val lines = mutableListOf("❓ <b>${PyText.esc(head)}</b>" + if (multi) " · multi" else "")
+            q.string("question")?.takeIf { it.isNotBlank() }?.let { lines += PyText.esc(it) }
+            (q["options"] as? JsonArray)?.forEach { o ->
+                val opt = o as? JsonObject ?: return@forEach
+                val label = opt.string("label") ?: return@forEach
+                val desc = opt.string("description")
+                lines += "• <b>${PyText.esc(label)}</b>" + if (!desc.isNullOrBlank()) " — ${PyText.esc(desc)}" else ""
+            }
+            lines.joinToString("\n")
+        }
+        return chunks.takeIf { it.isNotEmpty() }?.joinToString("\n\n")
+    }
+
+    private fun JsonObject.string(key: String): String? =
+        (this[key] as? JsonPrimitive)?.takeIf { it.isString }?.content?.takeIf { it.isNotBlank() }
 
     /** The no-todos fallback — the honest raw JSON, highlighted as JSON. */
     private fun rawBody(inp: JsonObject): String =

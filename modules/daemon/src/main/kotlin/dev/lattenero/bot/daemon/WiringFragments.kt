@@ -90,14 +90,18 @@ internal fun feedBoxOf(tool: ToolLive): String {
         (input[k] as? JsonPrimitive)?.takeIf { it.isString }?.content?.isNotBlank() == true
     }
     val out = tool.output
-    val tail = if (out.isNullOrBlank() || alreadyShown) {
-        ""
-    } else {
-        // the tail's lines carry their REAL numbers (the owner, 3/11) —
-        // numbering happens BEFORE the cap, so a clipped tail still says
-        // which lines it is showing
-        val numbered = ToolOutputPages.pages(out, pageCp = OUTPUT_TAIL_CP).first()
-        "\n↳ <pre>${PyText.esc(numbered)}</pre>"
+    val tail = when {
+        out.isNullOrBlank() || alreadyShown -> ""
+        // a QUESTION's output is a sentence, not output lines: plain text,
+        // no numbering, no pre (24/11)
+        tool.name == "AskUserQuestion" -> "\n↳ ${PyText.esc(PyText.take(out, OUTPUT_TAIL_CP))}"
+        else -> {
+            // the tail's lines carry their REAL numbers (the owner, 3/11) —
+            // numbering happens BEFORE the cap, so a clipped tail still says
+            // which lines it is showing
+            val numbered = ToolOutputPages.pages(out, pageCp = OUTPUT_TAIL_CP).first()
+            "\n↳ <pre>${PyText.esc(numbered)}</pre>"
+        }
     }
     return box + tail
 }
