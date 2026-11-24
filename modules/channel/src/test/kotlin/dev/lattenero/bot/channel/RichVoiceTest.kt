@@ -103,4 +103,17 @@ class RichVoiceTest {
         val lone = RichVoice.thinkingBlock("un `backtick suelto")
         assertTrue(lone["text"] is JsonPrimitive, "no pair, no invention: ${lone["text"]}")
     }
+
+    // THE LINE SHAPES (24/11): a bullet the model wrote as `- ` reads as `•`,
+    // and a heading becomes a bold run — the CoT/answer look formatted, not raw.
+    @Test
+    fun bulletsAndHeadingsReadLikeThePhone() {
+        val block = RichVoice.thinkingBlock("## Plan\n- uno\n- dos")
+        val runs = block["text"]!!.jsonArray
+        val flat = runs.joinToString("") { run ->
+            if (run is JsonPrimitive) run.content else run.jsonObject["text"]!!.jsonPrimitive.content
+        }
+        assertEquals("Plan\n• uno\n• dos", flat)
+        assertEquals("bold", runs[0].jsonObject["type"]!!.jsonPrimitive.content)
+    }
 }

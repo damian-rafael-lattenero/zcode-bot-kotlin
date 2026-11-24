@@ -134,16 +134,19 @@ object RichVoice {
      * INLINE MARKDOWN (24/11): block text is LITERAL RichText, so a model's
      * `` `code` `` and `**bold**` arrived as raw markers on the phone. This
      * tiny converter turns balanced single-backtick spans into `code` runs
-     * and `**…**` into `bold` runs — everything else stays verbatim.
-     * Conservative by design: a marker with no pair is left as text.
+     * and `**…**` into `bold` runs, and normalizes the line shapes a phone
+     * reads at a glance: `- item` becomes `• item` and `## Title` becomes a
+     * bold run. Everything else stays verbatim — a marker with no pair is
+     * left as text (no invention).
      */
     internal fun inline(markdown: String): JsonElement {
+        val shaped = shapeLines(markdown)
         val out = mutableListOf<JsonElement>()
         var last = 0
         var matched = false
-        for (m in INLINE.findAll(markdown)) {
+        for (m in INLINE.findAll(shaped)) {
             matched = true
-            if (m.range.first > last) out += JsonPrimitive(markdown.substring(last, m.range.first))
+            if (m.range.first > last) out += JsonPrimitive(shaped.substring(last, m.range.first))
             val code = m.groupValues[1]
             out += buildJsonObject {
                 if (code.isNotEmpty()) {
@@ -156,12 +159,24 @@ object RichVoice {
             }
             last = m.range.last + 1
         }
-        if (!matched) return JsonPrimitive(markdown)
-        if (last < markdown.length) out += JsonPrimitive(markdown.substring(last))
+        if (!matched) return JsonPrimitive(shaped)
+        if (last < shaped.length) out += JsonPrimitive(shaped.substring(last))
         return JsonArray(out)
     }
 
+    /** Bullets and headings as the phone reads them; everything else verbatim. */
+    private fun shapeLines(markdown: String): String = markdown.lines().joinToString("\n") { line ->
+        val trimmed = line.trimStart()
+        when {
+            HEADING.matches(trimmed) -> "**" + trimmed.dropWhile { it == '#' || it == ' ' } + "**"
+            BULLET.matches(trimmed) -> "• " + trimmed.drop(1).trimStart()
+            else -> line
+        }
+    }
+
     private val INLINE = Regex("`([^`\\n]+)`|\\*\\*([^*\\n]+)\\*\\*")
+    private val HEADING = Regex("^#{1,6}\\s+\\S.*$")
+    private val BULLET = Regex("^[-*]\\s+\\S.*$")
 
     /**
      * The fence split: (isCode, language, chunk) in order. A ``` line

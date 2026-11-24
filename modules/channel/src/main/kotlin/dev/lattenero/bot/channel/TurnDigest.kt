@@ -181,19 +181,24 @@ object TurnDigest {
 
     /**
      * THE WIRE EDGE: one page → the rich message's block params (`pre` with
-     * its language, `pullquote` for prose) — the ONLY place the JSON shape
-     * exists in this file.
+     * its language, `pullquote` for prose). Prose goes through
+     * [RichVoice.inline]: the model's `code` and **bold** render as runs
+     * instead of arriving as raw markers (the 24/11 screenshot).
      */
     fun wire(page: List<VoiceBlock>): List<JsonObject> = page.map { block ->
         buildJsonObject {
             when (block) {
-                is VoiceBlock.Prose -> put("type", "pullquote")
+                is VoiceBlock.Prose -> {
+                    put("type", "pullquote")
+                    put("text", RichVoice.inline(block.text))
+                }
+
                 is VoiceBlock.Code -> {
                     put("type", "pre")
                     block.language?.let { put("language", it) }
+                    put("text", block.text)
                 }
             }
-            put("text", block.text)
         }
     }
 
