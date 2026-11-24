@@ -38,17 +38,22 @@ object ToolOutputPages {
     const val COMMAND_CLOSE_CP = 1000
 
     /**
-     * Number every line (1-based; [startLine] for a read begun at an
-     * offset) and split into pages of at most [pageCp] code points. A
-     * single line longer than a page is HARD-SPLIT — its continuations
-     * carry a blank number column — rather than truncated: the owner reads
-     * the whole output, page by page.
+     * Split into pages of at most [pageCp] code points. [numbered] = true adds
+     * the 1-based gutter ([startLine] for a read begun at an offset) — the
+     * OUTPUT pages' law. `false` is PURE CODE (the owner, 24/11): the file's
+     * lines verbatim, no gutter, so a long line scrolls instead of wrapping
+     * into a numbered wall. A single line over a page is still HARD-SPLIT
+     * (the message cap), never truncated.
      */
-    fun pages(text: String, startLine: Int = 1, pageCp: Int = PAGE_CP): List<String> {
-        val numbered = PyText.splitLines(text).flatMapIndexed { i, line -> fragment(line, i + startLine, pageCp) }
+    fun pages(text: String, startLine: Int = 1, pageCp: Int = PAGE_CP, numbered: Boolean = true): List<String> {
+        val lines = if (numbered) {
+            PyText.splitLines(text).flatMapIndexed { i, line -> fragment(line, i + startLine, pageCp) }
+        } else {
+            PyText.splitLines(text).flatMap { line -> rawFragment(line, pageCp) }
+        }
         val pages = mutableListOf<String>()
         val current = StringBuilder()
-        for (line in numbered) {
+        for (line in lines) {
             val sep = if (current.isEmpty()) 0 else 1
             if (current.isNotEmpty() && PyText.cpLength(current.toString()) + sep + PyText.cpLength(line) > pageCp) {
                 pages += current.toString()
@@ -115,6 +120,19 @@ object ToolOutputPages {
             else -> "<pre><code class=\"language-$language\">$page</code></pre>"
         }
         return "$header\n$body"
+    }
+
+    /** PURE CODE: the line verbatim, split only when it alone exceeds the page. */
+    private fun rawFragment(line: String, pageCp: Int): List<String> {
+        if (PyText.cpLength(line) <= pageCp) return listOf(line)
+        val out = mutableListOf<String>()
+        var rest = line
+        while (rest.isNotEmpty()) {
+            val piece = PyText.take(rest, pageCp)
+            out += piece
+            rest = rest.substring(piece.length)
+        }
+        return out
     }
 
     private fun fragment(line: String, number: Int, pageCp: Int): List<String> {

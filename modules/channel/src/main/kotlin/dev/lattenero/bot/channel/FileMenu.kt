@@ -58,7 +58,7 @@ class FileMenu(
     @Suppress("ReturnCount") // one exit per honest miss (unknown id, unreadable file, dead send)
     override suspend fun open(id: Int): String? {
         val path = paths[id] ?: return MISS
-        val pages = read(path)?.let(ToolOutputPages::pages) ?: return UNREADABLE
+        val pages = read(path)?.let { ToolOutputPages.pages(it, numbered = false) } ?: return UNREADABLE
         val mid = send(render(path, pages, 0), Keyboards.filePages(id, 0, pages.size)) ?: return SEND_FAILED
         viewers[id] = mid
         logger.info { "file viewer opened: id=$id pages=${pages.size} message_id=$mid" }
@@ -70,7 +70,8 @@ class FileMenu(
     override suspend fun page(id: Int, index: Int): String? {
         val path = paths[id] ?: return MISS
         val mid = viewers[id] ?: return open(id) // a viewer that died re-opens whole
-        val pages = read(path)?.let(ToolOutputPages::pages) ?: return UNREADABLE
+        // PURE CODE (24/11): the viewer's page is the file verbatim, no gutter
+        val pages = read(path)?.let { ToolOutputPages.pages(it, numbered = false) } ?: return UNREADABLE
         val at = index.coerceIn(0, pages.size - 1)
         edit(mid, render(path, pages, at), Keyboards.filePages(id, at, pages.size))
         return null // a throttled edit keeps the old page — the next tap retried it

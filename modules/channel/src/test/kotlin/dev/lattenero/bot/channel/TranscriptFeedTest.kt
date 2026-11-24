@@ -144,14 +144,26 @@ class TranscriptFeedTest {
     }
 
     @Test
-    fun aLongReadCollapsesAndNumbersFromItsOffset() {
+    fun theForkGutterIsStrippedOnlyWhenTheShapeIsCertain() {
+        val numbered = "3954    internal val A = 1\n3955    internal val B = 2\n3956    internal val C = 3"
+        assertEquals(
+            "internal val A = 1\ninternal val B = 2\ninternal val C = 3",
+            TranscriptFeed.stripForkGutter(numbered),
+        )
+        val code = "42 + x\n99 bottles\n100% done"
+        assertEquals(code, TranscriptFeed.stripForkGutter(code), "a code block that merely starts with numbers stays")
+    }
+
+    @Test
+    fun aLongReadCollapsesAsPureCodeFromItsOffset() {
         val content = (1..100).joinToString("\n") { "línea $it" }
         val inp = buildJsonObject { put("file_path", "/x/y.txt"); put("offset", 40) }
         val prev = turn(tools = listOf(closed("t1", name = "Read", status = null, input = inp)))
         val curr = turn(tools = listOf(closed("t1", name = "Read", input = inp, output = content)))
         val msgs = TranscriptFeed.messages(prev, curr, FeedVerbosity.NORMAL, { "BOX" }, verbs)
         val pages = msgs[0].pages!!
-        assertTrue(pages.pages.first().startsWith("  41│ línea 1"), "the read's REAL position")
+        assertTrue(pages.pages.first().startsWith("línea 1"), "the file's lines verbatim: ${pages.pages.first()}")
+        assertTrue("│" !in pages.pages.first(), "PURE CODE: no gutter (the scroll law)")
         assertTrue("y.txt · …/x" in msgs[0].text, "the read's file, NAME-FIRST (v2 §7)")
     }
 

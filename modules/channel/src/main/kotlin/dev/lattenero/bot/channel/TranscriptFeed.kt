@@ -68,6 +68,9 @@ data class FeedMessage(
  * speaks the collapsed blocks + tool closes, VERBOSE adds the tool OPEN
  * one-liners.
  */
+// The feed's whole vocabulary (messages, seal, commands, gutter, fences) —
+// the count is the shape, not a grab bag.
+@Suppress("TooManyFunctions")
 object TranscriptFeed {
 
     /**
@@ -258,11 +261,14 @@ object TranscriptFeed {
     // the 3/11 collapse law, the 12/11 born-open report and the fence law together
     @Suppress("CyclomaticComplexMethod")
     private fun collapseOf(lane: ToolLive): ToolOutputPages.Pages? {
-        val out = lane.output?.takeIf { it.isNotBlank() } ?: return null
+        val raw = lane.output?.takeIf { it.isNotBlank() } ?: return null
         val shell = lane.name in SHELL_TOOLS
         val read = lane.name in READ_TOOLS
+        // a READ's content arrives with the FORK's own gutter (`3954    code`):
+        // pure code (the scroll law) strips it — our page adds no numbers
+        val out = if (read) stripForkGutter(raw) else raw
         val dispatch = lane.name in DISPATCH_TOOLS
-        val tiny = !dispatch && !shell && (!read || PyText.cpLength(out) <= ToolOutputPages.INLINE_READ_CP)
+        val tiny = !dispatch && !shell && (!read || PyText.cpLength(raw) <= ToolOutputPages.INLINE_READ_CP)
         return if (tiny) {
             null
         } else {
@@ -300,10 +306,30 @@ object TranscriptFeed {
                     fence = commandOf(lane.input).takeIf { shell },
                     language = language,
                 ),
-                pages = ToolOutputPages.pages(out, start),
+                pages = ToolOutputPages.pages(out, start, numbered = !read),
                 language = language, // v2 §5: shell pages ride bash; reads their file's language
             )
         }
+    }
+
+    /**
+     * PURE CODE (24/11): the fork's Read content carries its own line gutter
+     * (`3954    code`). Strip it ONLY when the shape is certain — at least
+     * three non-blank lines, every one matching, and the numbers running
+     * consecutively; a code block that merely starts with numbers stays.
+     */
+    @Suppress("ReturnCount") // each guard refuses on its own evidence: size, shape, sequence
+    internal fun stripForkGutter(text: String): String {
+        val lines = PyText.splitLines(text)
+        val nonBlank = lines.indices.filter { lines[it].isNotBlank() }
+        if (nonBlank.size < MIN_GUTTER_LINES) return text
+        val matched = lines.map { GUTTER.find(it) }
+        if (nonBlank.any { matched[it] == null }) return text
+        val numbers = nonBlank.map { matched[it]!!.groupValues[1].toIntOrNull() ?: return text }
+        if (numbers.zipWithNext().any { (a, b) -> b != a + 1 }) return text
+        return lines.mapIndexed { i, line ->
+            if (line.isBlank()) line else matched[i]!!.groupValues[2]
+        }.joinToString("\n")
     }
 
     /** The command as the shell would see it (a list joins with spaces).
@@ -328,6 +354,12 @@ object TranscriptFeed {
 
     /** The open one-liner's detail cap (the card's lane line uses the same window). */
     private const val OPEN_DETAIL_CP = 60
+
+    /** The fork's Read gutter: `3954    code` (and the `│` variant the CLI prints). */
+    private val GUTTER = Regex("^\\s*(\\d{1,6})[│|]?\\s+(.*)$")
+
+    /** Below this a numbered shape is not proof of a gutter (a 2-line sample lies). */
+    private const val MIN_GUTTER_LINES = 3
 
     /**
      * The long command's per-message chunk (esc-safe: a pathological
