@@ -275,6 +275,25 @@ class LiveTurnTest {
     }
 
     @Test
+    fun theStreamingAnswerTagsTheOpenCodeBlock() {
+        var s: TurnLive? = null
+        s = reduce(s, ev("task_run_started"))
+        s = reduce(s, ev("agent_message_chunk", "content" to str("Listo:\n```kotlin\nfun fix() {")))
+        val text = LiveTurn.render(s!!, nowMs = s.lastEventAtMs!! + 2_000, channelAlive = true)
+        assertTrue("class=\"language-kotlin\"" in text, "the block being written is Kotlin: $text")
+    }
+
+    @Test
+    fun proseAfterAClosedFenceStaysPlain() {
+        var s: TurnLive? = null
+        s = reduce(s, ev("task_run_started"))
+        s = reduce(s, ev("agent_message_chunk", "content" to str("```kotlin\nval x = 1\n```\nlisto")))
+        val text = LiveTurn.render(s!!, nowMs = s.lastEventAtMs!! + 2_000, channelAlive = true)
+        assertTrue("<pre>" in text, text)
+        assertTrue("language-" !in text, "a closed fence leaves prose, never a fake highlighter: $text")
+    }
+
+    @Test
     fun theCardSpeaksTheChildsWordsWhileItStreams() {
         var s: TurnLive? = null
         s = reduce(s, ev("task_run_started"))

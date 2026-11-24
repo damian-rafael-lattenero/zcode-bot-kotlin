@@ -69,4 +69,17 @@ object CodeLang {
         "yml" to "yaml", "md" to "markdown",
         "rs" to "rust", "cs" to "csharp", "c++" to "cpp",
     )
+
+    /**
+     * The language of a STREAMING tail (the live card's answer preview): the
+     * LAST fence marker decides. A marker WITH a word opens a block that is
+     * still being written → that language; a bare ` ``` ` closes one (the
+     * words after it are prose) → null. This is correct even when the tail
+     * starts mid-block: a closing fence is the last marker in both views.
+     */
+    fun ofStreamingTail(text: String): String? {
+        val marker = text.lines().lastOrNull { it.trimStart().startsWith("```") } ?: return null
+        val word = marker.trimStart().removePrefix("```").trim().takeWhile { !it.isWhitespace() }
+        return normalize(word)
+    }
 }

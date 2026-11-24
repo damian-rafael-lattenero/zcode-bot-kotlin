@@ -42,4 +42,16 @@ class CodeLangTest {
         assertNull(CodeLang.normalize("  "))
         assertNull(CodeLang.normalize(null))
     }
+
+    // THE STREAMING TAIL: the LAST fence marker decides. An opener with a
+    // word = the block still being written; a bare close = prose after it.
+    @Test
+    fun theStreamingTailReadsTheLastFenceMarker() {
+        assertEquals("kotlin", CodeLang.ofStreamingTail("Listo:\n```kotlin\nfun fix() {"))
+        assertEquals("bash", CodeLang.ofStreamingTail("```sh\nls -la"))
+        assertNull(CodeLang.ofStreamingTail("```kotlin\nval x = 1\n```\nlisto"))
+        assertNull(CodeLang.ofStreamingTail("```\ncode"))
+        assertNull(CodeLang.ofStreamingTail("just some prose"))
+        assertNull(CodeLang.ofStreamingTail(""))
+    }
 }

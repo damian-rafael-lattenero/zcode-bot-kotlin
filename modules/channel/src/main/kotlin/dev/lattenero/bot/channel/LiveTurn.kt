@@ -716,7 +716,18 @@ object LiveTurn {
                     // box rendered `text[-3200:]` inside a <pre> while the
                     // turn wrote — the card speaks the answer AS IT STREAMS.
                     if (state.answerTail.isNotBlank()) {
-                        lines.add("<pre>${PyText.esc(state.answerTail)}</pre>")
+                        // the block the model is WRITING gets its language:
+                        // the last fence marker decides (open with a word →
+                        // tag; a bare close → the rest is prose)
+                        val language = CodeLang.ofStreamingTail(state.answerTail)
+                        val body = PyText.esc(state.answerTail)
+                        lines.add(
+                            if (language == null) {
+                                "<pre>$body</pre>"
+                            } else {
+                                "<pre><code class=\"language-$language\">$body</code></pre>"
+                            },
+                        )
                     }
                     lines.add(
                         "✍️ <b>escribiendo la respuesta</b> · ${phase.rawChars} caracteres · " +
@@ -778,7 +789,15 @@ object LiveTurn {
         state.subagentLanes.maxByOrNull { it.value.lastDeltaAtMs }?.let { (laneId, child) ->
             val tail = child.liveTail
             if (tail.isNotBlank() && clockNow - child.lastDeltaAtMs < CHILD_FRESH_MS) {
-                lines.add("<pre>${PyText.esc(PyText.take(tail, CHILD_TAIL_CP))}</pre>")
+                val shown = PyText.take(tail, CHILD_TAIL_CP)
+                val language = CodeLang.ofStreamingTail(shown)
+                lines.add(
+                    if (language == null) {
+                        "<pre>${PyText.esc(shown)}</pre>"
+                    } else {
+                        "<pre><code class=\"language-$language\">${PyText.esc(shown)}</code></pre>"
+                    },
+                )
             }
         }
         // the fork's own pill — the honest difference between «z.ai down» and «I typed too much»
