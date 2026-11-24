@@ -6,53 +6,77 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
- * /fleet_<verbo>'s pure half: the snake_case ↔ kebab-case mapping, the deploy
- * routing (those never ride the runner), the discovery parse (`fleet list
- * --json` — one row per verb, tolerant of garbage), the owner gate (fail-
- * closed) and the words the phone reads.
+ * /fleet_<verbo>'s pure half: the two command forms (the owner's `/fleet
+ * ram-clean args` and the menu's `/fleet_ram_clean args`), the deploy routing
+ * (those never ride the runner), the discovery parse (`fleet list --json` —
+ * one row per verb, tolerant of garbage), the owner gate (fail-closed) and
+ * the words the phone reads.
  */
 class FleetCommandsTest {
 
-    // ---- the mapping ---------------------------------------------------------
+    // ---- the two forms -------------------------------------------------------
 
     @Test
-    fun snakeCaseCommandsMapToKebabVerbs() {
-        assertEquals("ram-clean", FleetCommands.verbOf("/fleet_ram_clean"))
-        assertEquals("deploy-all", FleetCommands.verbOf("/fleet_deploy_all"))
-        assertEquals("fleet-errors", FleetCommands.verbOf("/fleet_fleet_errors"))
-        assertEquals("brain", FleetCommands.verbOf("/fleet_brain"))
-        assertEquals("audit-fp", FleetCommands.verbOf("/fleet_audit_fp"))
+    fun theSpaceFormAnswersTheVerbsName() {
+        assertEquals("ram-clean", FleetCommands.callOf("/fleet ram-clean").verb)
+        assertEquals("brain", FleetCommands.callOf("/fleet brain").verb)
+        assertEquals("audit-fp", FleetCommands.callOf("/fleet audit-fp").verb)
+        assertEquals(listOf("hola", "--k", "9"), FleetCommands.callOf("/fleet brain hola --k 9").argv)
+    }
+
+    @Test
+    fun theTapFormAnswersTheSameVerbs() {
+        assertEquals("ram-clean", FleetCommands.callOf("/fleet_ram_clean").verb)
+        assertEquals("fleet-errors", FleetCommands.callOf("/fleet_fleet_errors").verb)
+        assertEquals(listOf("--since", "2h"), FleetCommands.callOf("/fleet_fleet_errors --since 2h").argv)
+    }
+
+    @Test
+    fun bothFormsAgreeVerbByName() {
+        for (verb in listOf("ram-clean", "brain", "deploy-all", "worktree-sweep")) {
+            val tapped = FleetCommands.callOf("/fleet_" + verb.replace('-', '_'))
+            val spaced = FleetCommands.callOf("/fleet " + verb)
+            assertEquals(verb, tapped.verb, tapped.toString())
+            assertEquals(verb, spaced.verb, spaced.toString())
+        }
+    }
+
+    @Test
+    fun aBareFleetAsksForTheList() {
+        assertNull(FleetCommands.callOf("/fleet").verb)
+        assertEquals("list", FleetCommands.callOf("/fleet list").verb)
+        assertEquals(emptyList(), FleetCommands.callOf("/fleet list").argv)
     }
 
     @Test
     fun aWordWithoutAVerbIsNotAFleetCommand() {
-        assertNull(FleetCommands.verbOf("/fleet"))
-        assertNull(FleetCommands.verbOf("/fleet_"))
-        assertNull(FleetCommands.verbOf("/ram_clean"))
-        assertNull(FleetCommands.verbOf("fleet_ram_clean"))
+        assertNull(FleetCommands.callOf("/ram_clean").verb)
+        assertNull(FleetCommands.callOf("fleet ram-clean").verb)
+        assertNull(FleetCommands.callOf("/fleet_").verb)
+        assertTrue(!FleetCommands.isFleet("/ram_clean"))
     }
 
-    // ---- the deploy routing (the launchd lane) --------------------------------
+    // ---- the deploy routing (the launchd lane) -------------------------------
 
     @Test
-    fun theDeployVerbsRouteToTheirFlowLeg() {
+    fun theDeployVerbsRouteToTheirFlowLegInBothForms() {
         assertEquals("all", FleetCommands.deployTarget("/fleet_deploy_all"))
-        assertEquals("brain", FleetCommands.deployTarget("/fleet_deploy_brain"))
+        assertEquals("brain", FleetCommands.deployTarget("/fleet deploy-brain"))
         assertEquals("bot", FleetCommands.deployTarget("/fleet_deploy_bot"))
-        assertEquals("fork", FleetCommands.deployTarget("/fleet_deploy_fork"))
+        assertEquals("fork", FleetCommands.deployTarget("/fleet deploy-fork"))
         assertEquals("whatsapp", FleetCommands.deployTarget("/fleet_deploy_whatsapp"))
     }
 
     @Test
     fun theDiscoveredDeployTwinsAnswerTheSameLeg() {
         assertEquals("bot", FleetCommands.deployTarget("/fleet_zcode_bot_kotlin_deploy"))
-        assertEquals("all", FleetCommands.deployTarget("/fleet_zcode_deploy_all"))
+        assertEquals("all", FleetCommands.deployTarget("/fleet zcode-deploy-all"))
     }
 
     @Test
     fun everyOtherVerbHasNoDeployLeg() {
         assertNull(FleetCommands.deployTarget("/fleet_brain"))
-        assertNull(FleetCommands.deployTarget("/fleet_healthcheck"))
+        assertNull(FleetCommands.deployTarget("/fleet healthcheck"))
         assertNull(FleetCommands.deployTarget("/fleet_list"))
     }
 
@@ -124,13 +148,6 @@ class FleetCommandsTest {
         val text = FleetCommands.timeout("ram-clean", 90)
         assertTrue("/fleet_ram_clean" in text, text)
         assertTrue("90" in text, text)
-    }
-
-    @Test
-    fun theArgumentsAreTheOwnersOwnWords() {
-        assertEquals(listOf("report"), FleetCommands.argvOf("/fleet_ram_clean report"))
-        assertEquals(listOf("--k", "9", "hola"), FleetCommands.argvOf("/fleet_brain --k 9 hola"))
-        assertEquals(emptyList(), FleetCommands.argvOf("/fleet_brain"))
     }
 
     @Test

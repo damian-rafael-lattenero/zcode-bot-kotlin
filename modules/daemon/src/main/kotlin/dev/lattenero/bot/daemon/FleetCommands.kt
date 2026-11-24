@@ -41,10 +41,27 @@ internal object FleetCommands {
         val description: String,
     )
 
-    /** `/fleet_ram_clean` -> `ram-clean`. Null when the word carries no verb. */
-    internal fun verbOf(word: String): String? {
-        val tail = if (word.startsWith(PREFIX)) word.removePrefix(PREFIX).trim() else ""
-        return tail.takeIf { it.isNotEmpty() }?.replace('_', '-')
+    /** One phone line, parsed once: the verb (null = the list) and its argv. */
+    internal data class Call(val verb: String?, val argv: List<String>)
+
+    /**
+     * BOTH forms answer the same verb — the owner's `/fleet ram-clean --clean`
+     * and the Telegram-menu tap `/fleet_ram_clean --clean`:
+     *   /fleet <verbo> [args...]      the space form (what the owner types)
+     *   /fleet_<verbo> [args...]      the tap form (what the menu registers)
+     * A bare `/fleet` or `/fleet list` answers the list (verb = null / "list").
+     */
+    internal fun callOf(text: String): Call {
+        val words = text.trim().split(WHITESPACE).filter { it.isNotEmpty() }
+        val head = words.firstOrNull() ?: ""
+        val tail = words.drop(1)
+        val verb = when {
+            head == "/fleet" -> tail.firstOrNull()?.replace('_', '-')
+            head.startsWith(PREFIX) -> head.removePrefix(PREFIX).replace('_', '-')
+            else -> null
+        }
+        val argv = if (head == "/fleet") tail.drop(1) else tail
+        return Call(verb = verb?.takeIf { it.isNotEmpty() }, argv = argv)
     }
 
     /** Is this text ours at all? `/fleet` alone (the menu's tap) counts too. */
@@ -57,7 +74,7 @@ internal object FleetCommands {
      * The deploy legs ride [DeployFlow] (launchd one-shot): the alias verbs and
      * the discovered `zcode-*-deploy` twins both answer the same leg.
      */
-    internal fun deployTarget(word: String): String? = when (verbOf(word)) {
+    internal fun deployTarget(text: String): String? = when (callOf(text).verb) {
         "deploy-all", "zcode-deploy-all" -> "all"
         "deploy-brain", "zcode-brain-deploy" -> "brain"
         "deploy-bot", "zcode-bot-kotlin-deploy" -> "bot"
@@ -74,13 +91,6 @@ internal object FleetCommands {
 
     /** The discovery run has its own log — it never overwrites a verb's last run. */
     internal const val DISCOVERY_LOG = "fleet-discovery.log"
-
-    /** The rest of the phone line, already split into argv (words, never a shell). */
-    internal fun argvOf(text: String): List<String> {
-        val rest = text.substringAfter(' ', "").trim()
-        if (rest.isEmpty()) return emptyList()
-        return rest.split(WHITESPACE).filter { it.isNotEmpty() }
-    }
 
     /**
      * Discovery parse: `fleet list --json` -> rows. Tolerant by design — a

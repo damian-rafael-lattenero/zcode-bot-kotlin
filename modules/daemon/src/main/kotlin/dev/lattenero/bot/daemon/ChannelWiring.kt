@@ -1895,7 +1895,7 @@ private suspend fun fleetDispatch(
     deploy: DeployFlow,
     speak: suspend (String, Boolean, JsonObject?) -> Long?,
 ) {
-    val leg = FleetCommands.deployTarget(text.substringBefore(' '))
+    val leg = FleetCommands.deployTarget(text)
     if (leg != null) {
         deploy.onText(leg, fromId)
         return
@@ -1905,17 +1905,18 @@ private suspend fun fleetDispatch(
 
 /**
  * /fleet_<verbo> — the generic edge: discovery (`fleet list --json`) → owner
- * gate → [NuScriptRunner.run] → the phone render. `/fleet` and `/fleet_list`
+ * gate → [NuScriptRunner.run] → the phone render. `/fleet` and `/fleet list`
  * answer the table itself. A verb the hub does not know is refused BY NAME
  * with the near matches; a discovery that fails says so before anything runs.
  */
 private fun fleetNow(text: String, fromId: Long?, owner: Long?, logsDir: File): String {
-    val verb = FleetCommands.verbOf(text.substringBefore(' ').trim()) ?: "list"
+    val call = FleetCommands.callOf(text)
     val verbs = discoverVerbs(logsDir)
+    val verb = call.verb ?: "list"
     return if (verb == "list") {
         FleetCommands.listText(verbs)
     } else {
-        fleetRun(verb, FleetCommands.argvOf(text), fromId, owner, verbs, logsDir)
+        fleetRun(verb, call.argv, fromId, owner, verbs, logsDir)
     }
 }
 

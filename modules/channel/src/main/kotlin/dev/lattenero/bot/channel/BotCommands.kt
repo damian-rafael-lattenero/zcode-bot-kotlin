@@ -3930,7 +3930,17 @@ class BotCommands(
                 "fleet_healthcheck",
                 "batería del ecosistema (colima, pg, brain, bots) · «check» = solo lectura",
             ),
-            MenuCommand("fleet", "TODOS los scripts nu de la Mac — /fleet_list · /fleet_<verbo>"),
+            MenuCommand("fleet", "TODOS los scripts nu de la Mac — /fleet_list · /fleet <verbo> [args]"),
+            // The usage-picked few (usage-report, 14 real days): each is ALSO a
+            // real tap in the «/» menu. Every other verb works via /fleet <verb>.
+            MenuCommand("fleet_ram_clean", "RAM de la Mac — sin args = plan · «--clean» = ejecuta"),
+            MenuCommand("fleet_brain", "pregunta al RAG: /fleet brain «pregunta»"),
+            MenuCommand("fleet_fleet_errors", "errores frescos del fleet · «--since 2h»"),
+            MenuCommand("fleet_deploy_status", "cómo terminó cada deploy y su pid"),
+            MenuCommand("fleet_deploy_brain", "deploy del brain (launchd)"),
+            MenuCommand("fleet_deploy_bot", "deploy del bot (launchd)"),
+            MenuCommand("fleet_deploy_all", "los cuatro legs, en su orden"),
+            MenuCommand("fleet_worktree_sweep", "worktrees/branches — auditoría · «--clean» limpia"),
             MenuCommand("brain", "pregunta al RAG de agent-brain — /brain status para el pulso"),
             MenuCommand("memory", "recuerdos del brain — /memory «texto» · recent [k] · status"),
             MenuCommand("learn", "aprendizaje de 7 días — memorias, evals y costos del brain"),
