@@ -1852,20 +1852,22 @@ private suspend fun dispatchMessage(
         // process edge needs the wiring's own throat (a subprocess with a
         // budget), the plan/gate/render are RamCleanCommands' pure half
         update.text == "/ram_clean" || update.text.startsWith("/ram_clean ") ->
-            speak(
+            answerFleet(
+                api,
+                cfg,
                 ramCleanNow(update.text.removePrefix("/ram_clean"), update.fromId, cfg.ownerUserId, logsDir),
-                false,
-                null,
+                speak,
             )
 
         // /fleet_healthcheck (22/11): the ecosystem battery on the phone —
         // the same edge as /ram_clean, --fix by default (the owner's GO),
         // `check` = the read-only word
         update.text == "/fleet_healthcheck" || update.text.startsWith("/fleet_healthcheck ") ->
-            speak(
+            answerFleet(
+                api,
+                cfg,
                 fleetCheckNow(update.text.removePrefix("/fleet_healthcheck"), update.fromId, cfg.ownerUserId, logsDir),
-                false,
-                null,
+                speak,
             )
 
         // /fleet_<verbo> (24/11): EVERY nu command of the Mac behind ONE phone
@@ -1904,6 +1906,16 @@ private suspend fun fleetDispatch(
         return
     }
     val reply = fleetNow(text, fromId, owner, logsDir)
+    answerFleet(api, cfg, reply, speak)
+}
+
+/** Rich when the answer is table-shaped, the HTML `<pre>` when it is not (or when rich is refused). */
+private suspend fun answerFleet(
+    api: TgApi,
+    cfg: TgConfig,
+    reply: FleetCommands.Reply,
+    speak: suspend (String, Boolean, JsonObject?) -> Long?,
+) {
     val rich = reply.rich
     if (rich != null && sendRich(api, cfg, rich)) return
     speak(reply.plain, false, null)
@@ -2053,23 +2065,29 @@ private suspend fun filesOut(api: TgApi, cfg: TgConfig, rest: String): String {
  * (last run = the whole truth; the ledger keeps the history), and a
  * failure speaks honestly — the poller never dies for a cleaning.
  */
-private fun ramCleanNow(rest: String, fromId: Long?, owner: Long?, logsDir: File): String {
+private fun ramCleanNow(rest: String, fromId: Long?, owner: Long?, logsDir: File): FleetCommands.Reply {
     val plan = RamCleanCommands.gate(RamCleanCommands.plan(rest), fromId, owner)
-    if (plan is RamCleanCommands.Plan.Refused) return plan.reason
+    if (plan is RamCleanCommands.Plan.Refused) return FleetCommands.Reply(plan.reason, null)
     val logFile = File(logsDir, RamCleanCommands.LOG_FILE_NAME)
+    val mode = if (plan is RamCleanCommands.Plan.Clean) "clean" else "report"
     return when (val run = NuScriptRunner.run(RamCleanCommands.SCRIPT, plan.argv, logFile)) {
-        is NuScriptRunner.Run.Ran -> NuScriptRunner.render(
-            emoji = "🧹",
-            label = "ram-clean",
-            mode = if (plan is RamCleanCommands.Plan.Clean) "clean" else "report",
-            exit = run.exit,
-            tookMs = run.tookMs,
-            out = run.out,
-            logPath = logFile.absolutePath,
+        is NuScriptRunner.Run.Ran -> FleetCommands.Reply(
+            plain = NuScriptRunner.render(
+                emoji = "🧹",
+                label = "ram-clean",
+                mode = mode,
+                exit = run.exit,
+                tookMs = run.tookMs,
+                out = run.out,
+                logPath = logFile.absolutePath,
+            ),
+            rich = FleetCommands.richOf("ram-clean", mode, run.exit, run.tookMs, run.out),
         )
 
-        is NuScriptRunner.Run.TimedOut -> RamCleanCommands.timeout(NuScriptRunner.BUDGET_SECONDS)
-        is NuScriptRunner.Run.Errored -> RamCleanCommands.ERRORED + run.reason
+        is NuScriptRunner.Run.TimedOut ->
+            FleetCommands.Reply(RamCleanCommands.timeout(NuScriptRunner.BUDGET_SECONDS), null)
+
+        is NuScriptRunner.Run.Errored -> FleetCommands.Reply(RamCleanCommands.ERRORED + run.reason, null)
     }
 }
 
@@ -2081,23 +2099,29 @@ private fun ramCleanNow(rest: String, fromId: Long?, owner: Long?, logsDir: File
  * budget; the verdict line sits at the END of the battery's output, which
  * is exactly what the head+tail render keeps.
  */
-private fun fleetCheckNow(rest: String, fromId: Long?, owner: Long?, logsDir: File): String {
+private fun fleetCheckNow(rest: String, fromId: Long?, owner: Long?, logsDir: File): FleetCommands.Reply {
     val plan = FleetHealthcheckCommands.gate(FleetHealthcheckCommands.plan(rest), fromId, owner)
-    if (plan is FleetHealthcheckCommands.Plan.Refused) return plan.reason
+    if (plan is FleetHealthcheckCommands.Plan.Refused) return FleetCommands.Reply(plan.reason, null)
     val logFile = File(logsDir, FleetHealthcheckCommands.LOG_FILE_NAME)
+    val mode = if (plan is FleetHealthcheckCommands.Plan.Fix) "fix" else "check"
     return when (val run = NuScriptRunner.run(FleetHealthcheckCommands.SCRIPT, plan.argv, logFile)) {
-        is NuScriptRunner.Run.Ran -> NuScriptRunner.render(
-            emoji = "🩺",
-            label = "fleet-healthcheck",
-            mode = if (plan is FleetHealthcheckCommands.Plan.Fix) "fix" else "check",
-            exit = run.exit,
-            tookMs = run.tookMs,
-            out = run.out,
-            logPath = logFile.absolutePath,
+        is NuScriptRunner.Run.Ran -> FleetCommands.Reply(
+            plain = NuScriptRunner.render(
+                emoji = "🩺",
+                label = "fleet-healthcheck",
+                mode = mode,
+                exit = run.exit,
+                tookMs = run.tookMs,
+                out = run.out,
+                logPath = logFile.absolutePath,
+            ),
+            rich = FleetCommands.richOf("fleet-healthcheck", mode, run.exit, run.tookMs, run.out),
         )
 
-        is NuScriptRunner.Run.TimedOut -> FleetHealthcheckCommands.timeout(NuScriptRunner.BUDGET_SECONDS)
-        is NuScriptRunner.Run.Errored -> FleetHealthcheckCommands.ERRORED + run.reason
+        is NuScriptRunner.Run.TimedOut ->
+            FleetCommands.Reply(FleetHealthcheckCommands.timeout(NuScriptRunner.BUDGET_SECONDS), null)
+
+        is NuScriptRunner.Run.Errored -> FleetCommands.Reply(FleetHealthcheckCommands.ERRORED + run.reason, null)
     }
 }
 

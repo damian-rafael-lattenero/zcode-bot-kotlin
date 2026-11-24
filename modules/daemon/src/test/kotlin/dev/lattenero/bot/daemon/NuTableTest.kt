@@ -49,18 +49,25 @@ class NuTableTest {
         assertEquals(2, md!!.lines().count { it.startsWith("|---") }, md)
     }
 
-    // THE CONSERVATIVE LAW: nu wraps a long cell onto a continuation line, and
-    // that line carries fewer walls — converting it would move text into the
-    // wrong column. The whole run falls back (null = code block upstream).
+    // THE REBUILD LAW: nu wraps a long cell onto a continuation line (empty
+    // head, text further right — the healthcheck's `detail` column). The row
+    // is REBUILT, so the answer stays a native Telegram table instead of the
+    // <pre> wall the owner saw.
     @Test
-    fun aWrappedCellRefusesTheWholeConversion() {
+    fun aWrappedCellIsMergedBackIntoItsRow() {
         val wrapped = """
             │ # │ name                    │
             ├───┼─────────────────────────┤
             │ 0 │ a very long value that  │
             │   │ continues here          │
+            │ 1 │ short                   │
         """.trimIndent()
-        assertNull(NuTable.toRichMarkdown(wrapped))
+        val md = NuTable.toRichMarkdown(wrapped)
+        assertTrue(md != null, "a wrapped row must be rebuilt, not refused")
+        val lines = md!!.lines()
+        assertEquals("| # | name |", lines[0])
+        assertEquals("| 0 | a very long value that continues here |", lines[2])
+        assertEquals("| 1 | short |", lines[3])
     }
 
     @Test

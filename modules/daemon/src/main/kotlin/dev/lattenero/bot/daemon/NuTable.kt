@@ -54,23 +54,29 @@ internal object NuTable {
         return md.toString().trimEnd()
     }
 
-    /** One box table → one markdown table; null when the rows disagree. */
-    @Suppress("ReturnCount") // each refusal names its own reason: size, columns, wrap
+    /**
+     * One box table → one markdown table; null when the shape is untrustworthy.
+     *
+     * WRAPPED CELLS are REBUILT, not refused: nu prints a continuation line
+     * with an empty first column and the wrapped text further right (measured
+     * on /fleet_healthcheck, 24/11 — the `detail` column). Refusing sent the
+     * whole answer to a `<pre>`, which is exactly the wall the owner saw;
+     * merging the continuation back into its row restores the logical table,
+     * and Telegram's native table WRAPS a long cell properly.
+     */
+    @Suppress("ReturnCount") // each refusal names its own reason: size, columns, shape
     private fun renderTable(block: List<String>): String? {
-        val rows = block.filter { isRow(it) }
-        if (rows.size < 2) return null
-        val cols = cells(rows.first()).size
+        val raw = block.filter { isRow(it) }.map { cells(it) }
+        if (raw.size < 2) return null
+        val cols = raw.first().size
         if (cols < 2) return null
-        if (rows.any { cells(it).size != cols }) return null
-        // A WRAPPED cell prints a continuation line: empty first column, text
-        // in the wrapped one (nu pads every other cell). It is structurally a
-        // row, so the shape check cannot see it — the empty head can, and a
-        // real row always carries its index/name there.
-        if (rows.any { cells(it).first().isEmpty() }) return null
+        if (raw.any { it.size != cols }) return null
+        val rows = mergeContinuations(raw, cols)
+        if (rows.size < 2) return null
         val sb = StringBuilder()
         rows.forEachIndexed { index, row ->
             sb.append('|')
-            cells(row).forEach { cell -> sb.append(' ').append(escape(cell)).append(" |") }
+            row.forEach { cell -> sb.append(' ').append(escape(cell)).append(" |") }
             sb.append('\n')
             if (index == 0) {
                 sb.append('|')
@@ -79,6 +85,26 @@ internal object NuTable {
             }
         }
         return sb.toString()
+    }
+
+    /** Fold each continuation line (empty head) into the row above it. */
+    private fun mergeContinuations(raw: List<List<String>>, cols: Int): List<List<String>> {
+        val out = ArrayList<MutableList<String>>()
+        raw.forEach { cells ->
+            if (isContinuation(out, cells)) appendTo(out.last(), cells, cols) else out.add(cells.toMutableList())
+        }
+        return out
+    }
+
+    private fun isContinuation(out: List<MutableList<String>>, cells: List<String>): Boolean =
+        out.isNotEmpty() && cells.first().isEmpty() && cells.drop(1).any { it.isNotEmpty() }
+
+    private fun appendTo(prev: MutableList<String>, cells: List<String>, cols: Int) {
+        for (i in 1 until cols) {
+            if (cells[i].isNotEmpty()) {
+                prev[i] = if (prev[i].isEmpty()) cells[i] else prev[i] + " " + cells[i]
+            }
+        }
     }
 
     /** The cells of a wall row: everything between two walls, trimmed. */

@@ -101,11 +101,14 @@ internal object FleetCommands {
      * the phone; anything the parser refuses (wrapped cells) rides a fenced
      * code block — the monospace truth, never invented columns.
      */
-    internal fun richOf(row: Verb, argv: List<String>, exit: Int, tookMs: Long, out: String): String {
-        val mode = argv.joinToString(" ").ifEmpty { "-" }
+    internal fun richOf(row: Verb, argv: List<String>, exit: Int, tookMs: Long, out: String): String =
+        richOf("fleet " + row.name, argv.joinToString(" ").ifEmpty { "-" }, exit, tookMs, out)
+
+    /** The same body for a command with its own words (/ram_clean, /fleet_healthcheck). */
+    internal fun richOf(label: String, mode: String, exit: Int, tookMs: Long, out: String): String {
         val body = NuTable.toRichMarkdown(out.trimEnd()) ?: ("```\n" + out.trimEnd() + "\n```")
         val verdict = if (exit == 0) "" else " · exit $exit"
-        return "**🧰 fleet ${row.name}** ($mode) · ${tookMs / MS_PER_SECOND}s$verdict\n\n$body"
+        return "**🧰 $label** ($mode) · ${tookMs / MS_PER_SECOND}s$verdict\n\n$body"
     }
 
     private const val MS_PER_SECOND = 1000L
