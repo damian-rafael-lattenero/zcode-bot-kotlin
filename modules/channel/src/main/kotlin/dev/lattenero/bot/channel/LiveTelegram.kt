@@ -4,6 +4,7 @@ import dev.lattenero.bot.contracts.PyText
 import dev.lattenero.bot.transport.CH_REPLY
 import dev.lattenero.bot.transport.Cooldown
 import dev.lattenero.bot.transport.LastPh
+import dev.lattenero.bot.transport.RichRequest
 import dev.lattenero.bot.transport.SendRequest
 import dev.lattenero.bot.transport.TgApi
 import dev.lattenero.bot.transport.TgConfig
@@ -151,6 +152,72 @@ class LiveTelegram(
     } catch (e: Exception) {
         logger.warn { "violet fallback failed: ${e.message}" }
         null
+    }
+
+    /**
+     * THE RICH HTML LEG (24/11): the bot's existing HTML — tables, `<pre>`,
+     * bold, lines — as a Bot API 10.1 rich body. `null` answers a rejection
+     * (or a spent cooldown) and the CALLER keeps its own HTML `<pre>`
+     * fallback: a rich body sent through `sendMessage` would show its tags
+     * raw, so this leg never launders one dialect into the other.
+     */
+    @Suppress("TooGenericExceptionCaught") // best-effort by contract: the caller owns the fallback
+    suspend fun sendRichHtml(
+        cfg: TgConfig,
+        html: String,
+        loud: Boolean = false,
+        markup: JsonObject? = null,
+    ): Long? {
+        if (cooldown.active()) return null
+        return try {
+            val mid = messageIdOf(api.call("sendRichMessage", RichRequest.composeSend(cfg, html, loud, markup)))
+            mid?.let { lastPh?.note(it) }
+            mid
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: TgHttpException) {
+            retryAfterOf(e)?.let { cooldown.extend(it) }
+            logger.warn { "rich html send failed: ${e.message}" }
+            null
+        } catch (e: Exception) {
+            logger.warn { "rich html send failed: ${e.message}" }
+            null
+        }
+    }
+
+    /**
+     * The rich twin of [edit]: same throttle (a critical edit never waits),
+     * same 429 widening, `rich_message` instead of `text`. `false` = the
+     * caller may fall back to the plain edit.
+     */
+    suspend fun editRichHtml(
+        cfg: TgConfig,
+        messageId: Long,
+        html: String,
+        markup: JsonObject? = null,
+        critical: Boolean = false,
+    ): Boolean {
+        if (messageId <= 0) return false
+        if (editThrottled(cooldown.active(), critical)) {
+            logger.info { "rich edit skipped (cooldown window) mid=$messageId" }
+            return false
+        }
+        return editRichLeg(cfg, messageId, html, markup)
+    }
+
+    @Suppress("TooGenericExceptionCaught") // the live view never raises (Python's bare except)
+    private suspend fun editRichLeg(cfg: TgConfig, messageId: Long, html: String, markup: JsonObject?): Boolean = try {
+        api.call("editMessageText", RichRequest.composeEdit(cfg, messageId, html, markup))
+        true
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: TgHttpException) {
+        retryAfterOf(e)?.let { cooldown.extend(it) }
+        logger.warn { "rich edit failed: ${e.message}" }
+        false
+    } catch (e: Exception) {
+        logger.warn { "rich edit failed: ${e.message}" }
+        false
     }
 
     /** Best-effort editMessageText; false when skipped or failed. The markup rides when present. */
