@@ -3,6 +3,7 @@ package dev.lattenero.bot.channel
 import dev.lattenero.bot.contracts.PyText
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
@@ -17,15 +18,19 @@ typealias QuestionIndex = Int
 typealias AnswerValue = String
 
 /** The collected answers, keyed by the question's 0-based index — a record, not a bare map. */
-data class QuestionAnswers(val byIndex: Map<QuestionIndex, AnswerValue>) {
+data class QuestionAnswers(val byIndex: Map<QuestionIndex, List<AnswerValue>>) {
     val isEmpty: Boolean get() = byIndex.isEmpty()
 
-    /** The answer for one question's index, null when that question is still open. */
-    operator fun get(index: QuestionIndex): AnswerValue? = byIndex[index]
+    /** The answers for one question (empty = still open, or a multi-select with nothing picked). */
+    operator fun get(index: QuestionIndex): List<AnswerValue> = byIndex[index].orEmpty()
 
-    /** One more answer: an immutable copy-with, keyed by the question's index. */
-    fun plus(index: QuestionIndex, value: AnswerValue): QuestionAnswers =
-        QuestionAnswers(byIndex + (index to value))
+    /** One question's set REPLACED — a single pick, the ✍️ line, the multi split. */
+    fun set(index: QuestionIndex, values: List<AnswerValue>): QuestionAnswers =
+        QuestionAnswers(byIndex + (index to values))
+
+    /** One value TOGGLED in the question's set — multi-select's pick/unpick. */
+    fun toggle(index: QuestionIndex, value: AnswerValue): QuestionAnswers =
+        QuestionAnswers(byIndex + (index to if (value in get(index)) get(index) - value else get(index) + value))
 
     companion object {
         val EMPTY = QuestionAnswers(emptyMap())
@@ -95,6 +100,8 @@ data class QuestionItem(
     val header: String,
     val text: String,
     val options: List<QuestionOption>,
+    /** The fork's per-question flag: several picks allowed, sent as an ARRAY on the wire. */
+    val multiSelect: Boolean = false,
 )
 
 /**
@@ -128,7 +135,9 @@ data class PendingQuestion(
     val questions: List<QuestionItem> = emptyList(),
     /** The question currently on screen (0-based). */
     val questionIndex: Int = 0,
-    /** The answers collected so far: question index → the answer's value. */
+    /** Several picks allowed on the question ON SCREEN (the fork's per-question flag). */
+    val multiSelect: Boolean = false,
+    /** The answers collected so far: question index → the picked values (empty = open/skipped). */
     val answers: QuestionAnswers = QuestionAnswers.EMPTY,
     /**
      * THE TASK'S OWN TITLE (14/11, the any-task law): a question may arrive
@@ -234,6 +243,7 @@ internal fun parseQuestionEvent(event: JsonObject): PendingQuestion? {
                             options = elicitationOptions(
                                 q["options"] as? JsonArray ?: eventOptions.takeIf { i == 0 },
                             ),
+                            multiSelect = q.bool("multiSelect") == true,
                         )
                     }
                     .ifEmpty {
@@ -243,6 +253,7 @@ internal fun parseQuestionEvent(event: JsonObject): PendingQuestion? {
                                 header = eventHeader,
                                 text = event.str("message")?.takeIf { it.isNotBlank() } ?: "",
                                 options = elicitationOptions(eventOptions),
+                                multiSelect = event.bool("multiSelect") == true,
                             ),
                         )
                     }
@@ -257,6 +268,7 @@ internal fun parseQuestionEvent(event: JsonObject): PendingQuestion? {
                     options = items.first().options,
                     questionCount = items.size,
                     questions = items,
+                    multiSelect = items.first().multiSelect,
                     originLabel = origin,
                 )
             }
@@ -320,8 +332,10 @@ internal fun questionText(q: PendingQuestion): String = buildString {
 
 /**
  * The tap's keyboard: one button per option (`qa:<sid>:<i>` — the short id
- * keeps the 64-byte law asleep), permission rows pre-marked ✅/❌, and the
- * elicitation's «✍️ Responder» one-shot arm (`qf:<sid>`).
+ * keeps the 64-byte law asleep), permission rows pre-marked ✅/❌, the
+ * elicitation's «✍️ Responder» one-shot arm (`qf:<sid>`), and — on a
+ * multi-select question — the ☑️/⬜️ toggle marks on the pick already made
+ * plus the «📨 Enviar» row (`qs:<sid>`) that submits the set.
  */
 fun questionKeyboard(shortId: String, q: PendingQuestion): JsonObject = buildJsonObject {
     put("inline_keyboard", buildQuestionRows(shortId, q))
@@ -331,6 +345,9 @@ private fun buildQuestionRows(shortId: String, q: PendingQuestion): JsonArray {
     val rows = buildJsonArray {
         q.options.forEachIndexed { i, option ->
             val mark = when {
+                q.kind != "permission" && q.multiSelect -> {
+                    if (option.optionId in q.answers[q.questionIndex]) "☑️ " else "⬜️ "
+                }
                 q.kind != "permission" -> ""
                 option.isDeny -> "❌ "
                 else -> "✅ "
@@ -347,6 +364,7 @@ private fun buildQuestionRows(shortId: String, q: PendingQuestion): JsonArray {
             )
         }
         if (q.kind == "elicitation") {
+            if (q.multiSelect) add(buildJsonArray { add(Keyboards.button("📨 Enviar", "qs:$shortId")) })
             add(buildJsonArray { add(Keyboards.button("✍️ Responder", "qf:$shortId")) })
         }
     }
@@ -354,19 +372,45 @@ private fun buildQuestionRows(shortId: String, q: PendingQuestion): JsonArray {
 }
 
 /**
+ * ONE question's outgoing answer — its text, the picked values, and the wire
+ * MODE the fork chose ([multiSelect] = the values ride as an ARRAY, single =
+ * the scalar). A tagged record: the encoder never guesses.
+ */
+data class AnswerEntry(
+    val text: String,
+    val values: List<AnswerValue>,
+    val multiSelect: Boolean,
+)
+
+/**
  * The elicitation answer's CONTENT — the fork's own buildBotElicitationContent
  * shape (packages/services/src/bots/botsService.ts:4439): `answers` keyed by
- * each QUESTION's text (missing key = skipped, never an empty string),
- * `answer_N` per answered index, and `answer` only when the whole
- * questionnaire is one question. [entries] is the questionnaire in order:
- * (question text, answer) pairs.
+ * each QUESTION's text (a multi question's picks joined with ", ", blank =
+ * skipped), `answer_N` per answered index (an ARRAY for a multi-select
+ * question, the scalar otherwise), and `answer` only when the whole
+ * questionnaire is one question. [entries] is the questionnaire in order.
  */
-fun elicitationContentAll(entries: List<Pair<String, String>>, questionCount: Int): JsonObject =
-    buildJsonObject {
-        putJsonObject("answers") { entries.forEach { (text, value) -> put(text, value) } }
-        entries.forEachIndexed { index, (_, value) -> put("answer_$index", value) }
-        if (questionCount <= 1) entries.firstOrNull()?.let { (_, value) -> put("answer", value) }
+fun elicitationContentAll(entries: List<AnswerEntry>, questionCount: Int): JsonObject = buildJsonObject {
+    putJsonObject("answers") {
+        entries.forEach { entry -> put(entry.text, entry.values.joinToString(", ")) }
     }
+    entries.forEachIndexed { index, entry ->
+        if (entry.multiSelect) {
+            put("answer_$index", entry.values.jsonArray())
+        } else {
+            put("answer_$index", entry.values.firstOrNull().orEmpty())
+        }
+    }
+    if (questionCount <= 1) {
+        entries.firstOrNull()?.let { entry ->
+            if (entry.multiSelect) put("answer", entry.values.jsonArray())
+            else put("answer", entry.values.firstOrNull().orEmpty())
+        }
+    }
+}
+
+/** The values as a JSON array — the fork's multi-select wire shape. */
+private fun List<AnswerValue>.jsonArray(): JsonArray = buildJsonArray { forEach { add(JsonPrimitive(it)) } }
 
 /**
  * The SINGLE answered question's content — the one-question case of
@@ -374,7 +418,15 @@ fun elicitationContentAll(entries: List<Pair<String, String>>, questionCount: In
  * flown: `answers` + `answer_0` + `answer`).
  */
 fun elicitationContent(questionText: String, value: String, questionCount: Int = 1): JsonObject =
-    elicitationContentAll(listOf(questionText to value), questionCount)
+    elicitationContentAll(listOf(AnswerEntry(questionText, listOf(value), multiSelect = false)), questionCount)
+
+/**
+ * The fork's own multi-value split (botsService.ts: split on "," "，" "、"
+ * and newline, trimmed, blanks dropped) — a ✍️ line on a multi-select
+ * question becomes the several values it names.
+ */
+fun splitMultiValues(text: String): List<AnswerValue> =
+    text.split(',', '，', '、', '\n').map { it.trim() }.filter { it.isNotEmpty() }
 
 /**
  * THE PLAN'S APPROVE PAYLOAD — measured live 24/11: the owner tapped
@@ -389,15 +441,15 @@ fun elicitationContent(questionText: String, value: String, questionCount: Int =
 val PLAN_APPROVAL_ACCEPT_CONTENT: JsonObject = buildJsonObject { put("answer", "approve") }
 
 /**
- * The questionnaire's (question text, answer) pairs IN ORDER — the
- * [elicitationContentAll] input for a completed form. Unanswered questions
- * carry a blank value (the fork's broker drops blanks = skipped).
+ * The questionnaire's answers IN ORDER — the [elicitationContentAll] input
+ * for a completed form. Unanswered questions carry an empty set (the fork's
+ * broker drops blanks = skipped).
  */
-fun PendingQuestion.answerEntries(): List<Pair<String, String>> =
+fun PendingQuestion.answerEntries(): List<AnswerEntry> =
     if (questions.isEmpty()) {
-        listOf(title to answers[0].orEmpty())
+        listOf(AnswerEntry(title, answers[0], multiSelect))
     } else {
-        questions.mapIndexed { index, item -> item.text to answers[index].orEmpty() }
+        questions.mapIndexed { index, item -> AnswerEntry(item.text, answers[index], item.multiSelect) }
     }
 
 /**
@@ -418,6 +470,8 @@ sealed class QuestionFlow {
  * effects (send the dedicated message, edit it with the outcome), both
  * injected so the suite pins the flow without a socket.
  */
+// One function per question-flow verb (answer/toggle/submit/resolve ×2) — the board's own API.
+@Suppress("TooManyFunctions")
 class QuestionBoard(
     /** The dedicated question send — answers the message id (null = not sent). */
     private val sendQuestion: suspend (text: String, markup: JsonObject) -> Long? = { _, _ -> null },
@@ -529,39 +583,81 @@ class QuestionBoard(
      * last question honestly). Null = the question is gone (stale/double
      * tap) or not an elicitation — the caller's honest failure.
      */
+    suspend fun answer(shortId: String, value: AnswerValue): QuestionFlow? = answerAll(shortId, listOf(value))
+
+    /**
+     * The same flight for a SET of values — the ✍️ line on a multi-select
+     * question ([splitMultiValues]) REPLACES that question's picks.
+     */
     @Suppress("ReturnCount") // the guards ARE the law (the same honest shapes as onStreamEvent's dedupe)
-    suspend fun answer(shortId: String, value: String): QuestionFlow? {
+    suspend fun answerAll(shortId: String, values: List<AnswerValue>): QuestionFlow? {
         val step = synchronized(lock) {
             val current = byShortId[shortId] ?: return null
             if (current.kind != "elicitation") return null
-            val answers = current.answers.plus(current.questionIndex, value)
-            val next = current.questions.getOrNull(current.questionIndex + 1)
-            if (next == null) {
-                AnswerStep.Flies(current.copy(answers = answers))
-            } else {
-                val advanced = current.copy(
-                    questionIndex = current.questionIndex + 1,
-                    answers = answers,
-                    header = next.header,
-                    title = next.text,
-                    options = next.options,
-                )
-                byShortId[shortId] = advanced
-                AnswerStep.Stored(advanced)
-            }
+            advance(current, current.answers.set(current.questionIndex, values), shortId)
         }
-        return when (step) {
-            is AnswerStep.Stored -> {
-                persist() // the ADVANCED copy is the stored state — the disk follows
-                if (step.question.mid > 0) {
-                    val onScreen = step.question
-                    editQuestion(onScreen.mid, questionText(onScreen), questionKeyboard(shortId, onScreen))
-                }
-                QuestionFlow.Advanced(step.question)
-            }
+        return flight(step, shortId)
+    }
 
-            is AnswerStep.Flies -> QuestionFlow.Completed(step.question)
+    /**
+     * A MULTI-SELECT option tap: TOGGLE the value in the question's set and
+     * redraw the SAME message (the ☑️/⬜️ marks ARE the feedback) — never
+     * advances; the 📨 submit does. Null = the question is gone or is not a
+     * multi-select one (the caller's honest miss).
+     */
+    @Suppress("ReturnCount") // the guards ARE the law (the same honest shapes as answerAll's)
+    suspend fun toggle(shortId: String, value: AnswerValue): PendingQuestion? {
+        val updated = synchronized(lock) {
+            val current = byShortId[shortId] ?: return null
+            if (current.kind != "elicitation" || !current.multiSelect) return null
+            current.copy(answers = current.answers.toggle(current.questionIndex, value)).also {
+                byShortId[shortId] = it
+            }
         }
+        persist()
+        if (updated.mid > 0) editQuestion(updated.mid, questionText(updated), questionKeyboard(shortId, updated))
+        return updated
+    }
+
+    /** The multi-select SUBMIT: the stored set rides; the form advances/completes like [answerAll]. */
+    @Suppress("ReturnCount") // the guards ARE the law (the same honest shapes as answerAll's)
+    suspend fun submit(shortId: String): QuestionFlow? {
+        val step = synchronized(lock) {
+            val current = byShortId[shortId] ?: return null
+            if (current.kind != "elicitation" || !current.multiSelect) return null
+            advance(current, current.answers, shortId)
+        }
+        return flight(step, shortId)
+    }
+
+    /** The shared advance: the next question on screen (stored) or the COMPLETED copy that flies. Under the lock. */
+    private fun advance(current: PendingQuestion, answers: QuestionAnswers, shortId: String): AnswerStep {
+        val next = current.questions.getOrNull(current.questionIndex + 1)
+        if (next == null) return AnswerStep.Flies(current.copy(answers = answers))
+        val advanced = current.copy(
+            questionIndex = current.questionIndex + 1,
+            answers = answers,
+            header = next.header,
+            title = next.text,
+            options = next.options,
+            multiSelect = next.multiSelect,
+        )
+        byShortId[shortId] = advanced
+        return AnswerStep.Stored(advanced)
+    }
+
+    /** The step's effects: persist + redraw the advanced card, or hand the completed copy to the caller. */
+    private suspend fun flight(step: AnswerStep, shortId: String): QuestionFlow = when (step) {
+        is AnswerStep.Stored -> {
+            persist() // the ADVANCED copy is the stored state — the disk follows
+            if (step.question.mid > 0) {
+                val onScreen = step.question
+                editQuestion(onScreen.mid, questionText(onScreen), questionKeyboard(shortId, onScreen))
+            }
+            QuestionFlow.Advanced(step.question)
+        }
+
+        is AnswerStep.Flies -> QuestionFlow.Completed(step.question)
     }
 
     /** The answer's under-lock decision, effects applied outside the monitor. */

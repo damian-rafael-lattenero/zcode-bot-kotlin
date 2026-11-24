@@ -99,6 +99,13 @@ class QuestionsTapTest {
            {"question":"¿notas?","header":"Notas"}]}
     """.trimIndent()
 
+    private val multiSelectEvent = """
+        {"type":"elicitation_request","taskId":"task-q","requestId":"rms","questions":[
+           {"question":"¿qué bases?","multiSelect":true,"options":[
+             {"value":"main","label":"main"},{"value":"dev","label":"dev"},{"value":"qa","label":"qa"}]},
+           {"question":"¿qué runtime?","options":[{"value":"node","label":"node"}]}]}
+    """.trimIndent()
+
     private fun commands(ops: FakeOps, board: QuestionBoard): BotCommands =
         BotCommands(
             ops,
@@ -352,5 +359,91 @@ class QuestionsTapTest {
         )
         assertEquals(0, ops.responds.size) // NO orphan respond
         assertEquals(2, seams.edits.size) // the advance edit + the seal — nothing more
+    }
+
+    // ---- MULTI-SELECT: the tap toggles, the 📨 submit advances, the frame carries arrays ----
+
+    @Test
+    fun multiSelectTapTogglesInPlaceAndTheSubmitFliesTheOnlyFrame() = runBlocking {
+        val ops = FakeOps()
+        val seams = Seams()
+        val board = seams.board()
+        val cmds = commands(ops, board)
+        feed(board, multiSelectEvent)
+
+        assertNull(cmds.onCallback("qa:q1:0", 50, OWNER)) // main → toggled ON, no advance
+        assertEquals(listOf("main"), board.byShortId("q1")?.answers?.get(0))
+        assertEquals(0, ops.responds.size) // the submit owns the advance — no frame yet
+        assertEquals(1, seams.edits.size) // the same card redrawn with the mark
+        assertTrue("pregunta 2 de 2" !in seams.edits[0].second) // still question 1
+
+        cmds.onCallback("qa:q1:2", 51, OWNER) // qa → toggled ON
+        cmds.onCallback("qa:q1:0", 52, OWNER) // main → toggled OFF
+        assertEquals(listOf("qa"), board.byShortId("q1")?.answers?.get(0))
+
+        assertNull(cmds.onCallback("qs:q1", 53, OWNER)) // the 📨 submit → question 2 on screen
+        assertEquals(0, ops.responds.size)
+        assertTrue("pregunta 2 de 2" in seams.edits.last().second)
+
+        assertNull(cmds.onCallback("qa:q1:0", 54, OWNER)) // q2: node — the LAST answer
+        assertEquals(1, ops.responds.size) // exactly ONE frame for the whole form
+        val frame = ops.responds[0]
+        assertEquals("tg-54-qa", frame.messageId)
+        assertEquals(
+            Json.parseToJsonElement(
+                """{"answers":{"¿qué bases?":"qa","¿qué runtime?":"node"},"answer_0":["qa"],"answer_1":"node"}""",
+            ).jsonObject,
+            frame.content,
+        )
+        assertEquals("✅ Respondidas las 2 preguntas", seams.edits.last().second)
+        assertNull(board.byShortId("q1"))
+        assertEquals(
+            "⏳ Esa pregunta ya no está pendiente.",
+            cmds.onCallback("qs:q1", 55, OWNER)?.text, // a late submit: honest miss, no second frame
+        )
+        assertEquals(1, ops.responds.size)
+    }
+
+    @Test
+    fun multiSelectSubmitWithNothingPickedSkipsHonestlyAndSaysSo() = runBlocking {
+        val ops = FakeOps()
+        val seams = Seams()
+        val board = seams.board()
+        val cmds = commands(ops, board)
+        feed(
+            board,
+            """{"type":"elicitation_request","taskId":"task-q","requestId":"rme","questions":[
+                 {"question":"¿bases?","multiSelect":true,"options":[{"value":"main","label":"main"}]}]}""",
+        )
+        assertNull(cmds.onCallback("qs:q1", 60, OWNER))
+        assertEquals(1, ops.responds.size)
+        assertEquals(
+            Json.parseToJsonElement("""{"answers":{"¿bases?":""},"answer_0":[],"answer":[]}""").jsonObject,
+            ops.responds[0].content,
+        )
+        assertEquals("✅ Respondido (sin opciones marcadas)", seams.edits.single().second)
+        assertNull(board.byShortId("q1"))
+    }
+
+    @Test
+    fun multiSelectFreeTextReplacesThePicksWithTheSplitValues() = runBlocking {
+        val ops = FakeOps()
+        val board = Seams().board()
+        val cmds = commands(ops, board)
+        feed(
+            board,
+            """{"type":"elicitation_request","taskId":"task-q","requestId":"rmf","questions":[
+                 {"question":"¿bases?","multiSelect":true,"options":[{"value":"main","label":"main"}]}]}""",
+        )
+        cmds.onCallback("qa:q1:0", 61, OWNER) // main toggled ON
+        cmds.onCallback("qf:q1", 62, OWNER) // the ✍️ arm
+        assertNull(cmds.handle("dev, qa", 63)) // the line REPLACES the picks, split
+        assertEquals(1, ops.responds.size)
+        assertEquals(
+            Json.parseToJsonElement("""{"answers":{"¿bases?":"dev, qa"},"answer_0":["dev","qa"],"answer":["dev","qa"]}""")
+                .jsonObject,
+            ops.responds[0].content,
+        )
+        assertNull(board.byShortId("q1"))
     }
 }

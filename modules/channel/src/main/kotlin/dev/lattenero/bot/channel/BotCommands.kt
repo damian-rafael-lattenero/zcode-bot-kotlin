@@ -442,6 +442,10 @@ class BotCommands(
 
         data.startsWith("qf:") -> answerArm(data.removePrefix("qf:"))
 
+        // the 📨 tap: a MULTI-SELECT question's submit — the toggled set
+        // advances the form (or flies the ONE respond frame on the last one).
+        data.startsWith("qs:") -> questionSubmit(data.removePrefix("qs:"), updateId)
+
         data.startsWith("qgo:") -> queueSteer(data.removePrefix("qgo:"), updateId)
 
         data.startsWith("ql:") -> queueLaunch(data.removePrefix("ql:"), updateId)
@@ -2375,6 +2379,12 @@ class BotCommands(
         val option = q.options.getOrNull(index) ?: return null
         logger.info { "question tap: ${q.kind} «${option.label}» → ${q.requestId.take(REQUEST_ID_LOG)}…" }
         if (q.kind == "elicitation") {
+            if (q.multiSelect) {
+                // a MULTI-SELECT option tap TOGGLES (the redraw is the feedback);
+                // the 📨 submit is the one that advances.
+                val toggled = active.toggle(shortId, option.optionId)
+                return if (toggled == null) BotReply("⏳ Esa pregunta ya no está pendiente.") else null
+            }
             return when (val step = active.answer(shortId, option.optionId)) {
                 is QuestionFlow.Advanced -> null // the edit IS the feedback — the next question is on screen
 
@@ -2475,6 +2485,42 @@ class BotCommands(
         messageId = messageId,
     )
 
+    /**
+     * The 📨 submit of a MULTI-SELECT question: the toggled set rides and the
+     * form advances in place (or, on the LAST question, the ONE respond
+     * frame flies). The board's own state machine decides; a stale card gets
+     * the honest miss — never a silent tap.
+     */
+    @Suppress("ReturnCount") // one guard per outcome — the submit's honest shapes
+    private suspend fun questionSubmit(shortId: String, updateId: Long): BotReply? {
+        val active = board ?: return null
+        val q = active.byShortId(shortId) ?: return BotReply("⏳ Esa pregunta ya no está pendiente.")
+        logger.info {
+            "question submit: ${q.kind} «${q.answers[q.questionIndex].joinToString(", ")}» → " +
+                "${q.requestId.take(REQUEST_ID_LOG)}…"
+        }
+        return when (val step = active.submit(shortId)) {
+            is QuestionFlow.Advanced -> null // the edit IS the feedback — the next question is on screen
+
+            is QuestionFlow.Completed -> {
+                val picked = step.question.answers[step.question.questionIndex].joinToString(", ")
+                val resolvedSeal = when {
+                    step.question.questionCount > 1 -> "✅ Respondidas las ${step.question.questionCount} preguntas"
+                    picked.isBlank() -> "✅ Respondido (sin opciones marcadas)"
+                    else -> "✅ Respondido: <b>${PyText.esc(picked)}</b>"
+                }
+                flyRespond(
+                    frame = elicitationFrame(step.question, "tg-$updateId-qs"),
+                    shortId = shortId,
+                    active = active,
+                    resolvedSeal = resolvedSeal,
+                )
+            }
+
+            null -> BotReply("⏳ Esa pregunta ya no está pendiente.")
+        }
+    }
+
     /** The ✍️ arm: the NEXT free text IS the elicitation's answer (one shot, ArmedOrder's mechanics). */
     private suspend fun answerArm(shortId: String): BotReply {
         val q = board?.byShortId(shortId) ?: return BotReply("⏳ Esa pregunta ya no está pendiente.")
@@ -2501,7 +2547,10 @@ class BotCommands(
         val active = board ?: return false to null
         val q = active.byShortId(shortId) ?: return false to null
         if (q.kind != "elicitation") return false to null // plans and permissions answer by button only
-        return when (val step = active.answer(shortId, text)) {
+        // a MULTI-SELECT question takes the line as its several values (the
+        // fork's own split); the picks already toggled are REPLACED by it.
+        val values = if (q.multiSelect) splitMultiValues(text) else listOf(text)
+        return when (val step = active.answerAll(shortId, values)) {
             is QuestionFlow.Advanced -> true to null // the edit IS the feedback — the next question is on screen
 
             is QuestionFlow.Completed -> {

@@ -49,8 +49,11 @@ fun PendingQuestion.storeEntry(shortId: String): JsonObject = buildJsonObject {
     put("questionCount", JsonPrimitive(questionCount))
     putJsonArray("questions") { questions.forEach { add(it.storeJson()) } }
     put("questionIndex", JsonPrimitive(questionIndex))
+    if (multiSelect) put("multiSelect", JsonPrimitive(true))
     putJsonObject("answers") {
-        answers.byIndex.forEach { (index, value) -> put(index.toString(), JsonPrimitive(value)) }
+        answers.byIndex.forEach { (index, values) ->
+            putJsonArray(index.toString()) { values.forEach { add(JsonPrimitive(it)) } }
+        }
     }
 }
 
@@ -76,10 +79,16 @@ fun pendingQuestionOf(entry: JsonObject): PendingQuestion? {
         questionCount = entry.int("questionCount") ?: 1,
         questions = entry.array("questions").mapNotNull { it as? JsonObject }.map { itemOf(it) },
         questionIndex = entry.int("questionIndex") ?: 0,
+        multiSelect = entry.bool("multiSelect") ?: false,
         answers = QuestionAnswers(
             (entry["answers"] as? JsonObject).orEmpty()
                 .mapNotNull { (index, value) ->
-                    index.toIntOrNull()?.let { it to (value as? JsonPrimitive)?.content.orEmpty() }
+                    val values = when (value) {
+                        is JsonArray -> value.mapNotNull { (it as? JsonPrimitive)?.content }
+                        is JsonPrimitive -> listOf(value.content) // the pre-24/11 scalar entry
+                        else -> emptyList()
+                    }
+                    index.toIntOrNull()?.let { it to values }
                 }.toMap(),
         ),
         taskTitle = entry.str("taskTitle"),
@@ -98,6 +107,7 @@ private fun QuestionItem.storeJson(): JsonObject = buildJsonObject {
     put("header", JsonPrimitive(header))
     put("text", JsonPrimitive(text))
     putJsonArray("options") { options.forEach { add(it.storeJson()) } }
+    if (multiSelect) put("multiSelect", JsonPrimitive(true))
 }
 
 private fun optionOf(option: JsonObject): QuestionOption? {
@@ -114,6 +124,7 @@ private fun itemOf(item: JsonObject): QuestionItem = QuestionItem(
     header = item.str("header").orEmpty(),
     text = item.str("text").orEmpty(),
     options = item.array("options").mapNotNull { it as? JsonObject }.mapNotNull { optionOf(it) },
+    multiSelect = item.bool("multiSelect") == true,
 )
 
 private fun JsonObject.array(key: String): JsonArray = this[key] as? JsonArray ?: JsonArray(emptyList())

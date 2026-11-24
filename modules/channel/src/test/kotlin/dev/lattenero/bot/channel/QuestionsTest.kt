@@ -164,13 +164,16 @@ class QuestionsTest {
         val expected = Json.parseToJsonElement(
             """{"answers":{"¿qué base?":"main","¿qué runtime?":"node"},"answer_0":"main","answer_1":"node"}""",
         ) as JsonObject
-        val entries = listOf("¿qué base?" to "main", "¿qué runtime?" to "node")
+        val entries = listOf(
+            AnswerEntry("¿qué base?", listOf("main"), multiSelect = false),
+            AnswerEntry("¿qué runtime?", listOf("node"), multiSelect = false),
+        )
         assertEquals(expected, elicitationContentAll(entries, 2))
         // the singular `answer` rides ONLY for a one-question form
         val single = Json.parseToJsonElement(
             """{"answers":{"q":"x"},"answer_0":"x","answer":"x"}""",
         ) as JsonObject
-        assertEquals(single, elicitationContentAll(listOf("q" to "x"), 1))
+        assertEquals(single, elicitationContentAll(listOf(AnswerEntry("q", listOf("x"), multiSelect = false)), 1))
     }
 
     @Test
@@ -182,11 +185,22 @@ class QuestionsTest {
             ),
         )!!
         assertEquals(
-            listOf("¿qué base?" to "", "¿qué runtime?" to ""),
+            listOf(
+                AnswerEntry("¿qué base?", emptyList(), multiSelect = false),
+                AnswerEntry("¿qué runtime?", emptyList(), multiSelect = false),
+            ),
             q.answerEntries(), // nothing answered yet — the honest blanks
         )
-        val completed = q.copy(answers = QuestionAnswers(mapOf(0 to "main", 1 to "node")))
-        assertEquals(listOf("¿qué base?" to "main", "¿qué runtime?" to "node"), completed.answerEntries())
+        val completed = q.copy(
+            answers = QuestionAnswers(mapOf(0 to listOf("main"), 1 to listOf("node"))),
+        )
+        assertEquals(
+            listOf(
+                AnswerEntry("¿qué base?", listOf("main"), multiSelect = false),
+                AnswerEntry("¿qué runtime?", listOf("node"), multiSelect = false),
+            ),
+            completed.answerEntries(),
+        )
     }
 
     // ---- the board: registry laws ----
@@ -439,7 +453,7 @@ class QuestionsTest {
         // the flight owns the LAST answer: the stored entry keeps q1's answer but
         // not q2's — an Unavailable retry re-answers only the last question
         val stored = board.byShortId("q1")!!
-        assertEquals(mapOf(0 to "main"), stored.answers.byIndex)
+        assertEquals(mapOf(0 to listOf("main")), stored.answers.byIndex)
         assertEquals(1, stored.questionIndex)
         assertEquals(
             Json.parseToJsonElement(
@@ -573,5 +587,104 @@ class QuestionsTest {
         assertEquals(setOf("t1", "t2"), board.pendingTaskIds())
         board.resolveByRequestId("ra", "✅ Respondido desde la app.")
         assertEquals(setOf("t2"), board.pendingTaskIds())
+    }
+
+    // ---- multi-select: the fork's per-question flag, the ☑️ toggles, the arrays ----
+
+    private fun multiSelectForm(requestId: String) = ev(
+        """{"type":"elicitation_request","taskId":"t1","requestId":"$requestId","questions":[
+             {"question":"¿qué bases?","multiSelect":true,"options":[
+               {"value":"main","label":"main"},{"value":"dev","label":"dev"}]},
+             {"question":"¿runtime?","options":[{"value":"node","label":"node"}]}]}""",
+    )
+
+    @Test
+    fun multiSelectQuestionParsesTheFlagAndWearsTogglesAndSubmit() {
+        val q = parseQuestionEvent(multiSelectForm("rms"))!!
+        assertTrue(q.multiSelect) // the question ON SCREEN is the multi one
+        assertTrue(q.questions[0].multiSelect)
+        assertFalse(q.questions[1].multiSelect)
+        val rows = questionKeyboard("q5", q)["inline_keyboard"]!!.toString()
+        assertTrue("⬜️ main" in rows) // nothing picked yet
+        assertTrue("qs:q5" in rows) // the 📨 submit row
+        val picked = q.copy(answers = QuestionAnswers(mapOf(0 to listOf("dev"))))
+        val pickedRows = questionKeyboard("q5", picked)["inline_keyboard"]!!.toString()
+        assertTrue("☑️ dev" in pickedRows)
+        assertTrue("⬜️ main" in pickedRows)
+        // a SINGLE-select question wears neither the marks nor the submit row
+        val single = parseQuestionEvent(
+            ev("""{"type":"elicitation_request","taskId":"t1","requestId":"rs1","questions":[
+                 {"question":"¿runtime?","options":[{"value":"node","label":"node"}]}]}"""),
+        )!!
+        val singleRows = questionKeyboard("q6", single)["inline_keyboard"]!!.toString()
+        assertFalse("⬜️ " in singleRows)
+        assertFalse("qs:q6" in singleRows)
+    }
+
+    @Test
+    fun multiSelectAnswersRideAsArraysWhileSingleStaysScalar() {
+        val q = parseQuestionEvent(multiSelectForm("rma"))!!
+        val completed = q.copy(
+            answers = QuestionAnswers(mapOf(0 to listOf("main", "dev"), 1 to listOf("node"))),
+        )
+        assertEquals(
+            Json.parseToJsonElement(
+                """{"answers":{"¿qué bases?":"main, dev","¿runtime?":"node"},"answer_0":["main","dev"],"answer_1":"node"}""",
+            ) as JsonObject,
+            elicitationContentAll(completed.answerEntries(), completed.questionCount),
+        )
+    }
+
+    @Test
+    fun aSingleMultiSelectFormCarriesTheSingularAnswerAsAnArray() {
+        val q = PendingQuestion(
+            taskId = "t1",
+            requestId = "r1",
+            kind = "elicitation",
+            header = "H",
+            title = "¿bases?",
+            options = listOf(QuestionOption("a", "a"), QuestionOption("b", "b")),
+            multiSelect = true,
+        )
+        val content = elicitationContentAll(
+            q.copy(answers = QuestionAnswers(mapOf(0 to listOf("a", "b")))).answerEntries(),
+            1,
+        )
+        assertEquals(Json.parseToJsonElement("""["a","b"]"""), content["answer_0"])
+        assertEquals(Json.parseToJsonElement("""["a","b"]"""), content["answer"]) // the singular key, still an array
+    }
+
+    @Test
+    fun splitMultiValuesTakesTheForksOwnSeparators() {
+        assertEquals(listOf("main", "dev"), splitMultiValues(" main , dev "))
+        assertEquals(listOf("a", "b", "c"), splitMultiValues("a，b、c"))
+        assertEquals(emptyList(), splitMultiValues(" , "))
+    }
+
+    @Test
+    // `: Unit` (the assertNotNull law): a non-void @Test never runs in Jupiter
+    fun multiSelectTogglesStayInPlaceAndTheSubmitAdvancesWithTheSet(): Unit = runBlocking {
+        val seams = FlowSeams()
+        val board = seams.board()
+        board.onStreamEvent(
+            elicitationFrame(
+                "rmt",
+                questions = """
+                    {"question":"¿bases?","multiSelect":true,"options":[
+                      {"value":"main","label":"main"},{"value":"dev","label":"dev"}]},
+                    {"question":"¿runtime?","options":[{"value":"node","label":"node"}]}
+                """.trimIndent(),
+            ),
+        )
+        board.toggle("q1", "main")
+        board.toggle("q1", "dev")
+        board.toggle("q1", "main") // unpick
+        val q = board.byShortId("q1")!!
+        assertEquals(listOf("dev"), q.answers[0])
+        assertEquals(0, q.questionIndex) // toggles never advance
+        assertTrue(board.submit("q1") is QuestionFlow.Advanced) // the 📨 advances
+        assertEquals(1, board.byShortId("q1")?.questionIndex)
+        assertEquals(listOf("dev"), board.byShortId("q1")?.answers?.get(0))
+        assertNull(board.toggle("q1", "node")) // the single-select question takes no toggles
     }
 }

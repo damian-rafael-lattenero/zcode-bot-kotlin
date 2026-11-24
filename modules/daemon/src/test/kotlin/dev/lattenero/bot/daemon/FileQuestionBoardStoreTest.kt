@@ -51,11 +51,12 @@ class FileQuestionBoardStoreTest {
                 plan = "1. el plan",
                 questionCount = 2,
                 questions = listOf(
-                    QuestionItem("Elegí", "¿qué base?", listOf(QuestionOption("main", "main"))),
+                    QuestionItem("Elegí", "¿qué base?", listOf(QuestionOption("main", "main")), multiSelect = true),
                     QuestionItem("Notas", "¿notas?", emptyList()),
                 ),
                 questionIndex = 1,
-                answers = QuestionAnswers(mapOf(0 to "main")),
+                multiSelect = false,
+                answers = QuestionAnswers(mapOf(0 to listOf("main"))),
                 taskTitle = "kap — the detekt laws",
                 originLabel = "general-purpose · audit the migrations",
             ),
@@ -69,6 +70,21 @@ class FileQuestionBoardStoreTest {
         assertEquals(entries["q1"], loaded["q1"])
         assertEquals(entries["q2"], loaded["q2"])
         assertTrue(!File(dir, "question-board.json.tmp").exists()) // no tmp litter
+    }
+
+    @Test
+    fun aPreMultiSelectFileStillLoadsItsScalarAnswers() {
+        // The 4/11–24/11 shape stored ONE scalar per question; a daemon update
+        // must keep those cards armed after the restart (the additive law).
+        val file = File(dir, "legacy.json")
+        file.writeText(
+            """[{"shortId":"q1","taskId":"t1","requestId":"r1","kind":"elicitation","header":"H",""" +
+                """"title":"¿qué base?","options":[],"mid":5,"questionCount":1,"questions":[],""" +
+                """"questionIndex":0,"answers":{"0":"main"}}]""",
+        )
+        val loaded = FileQuestionBoardStore(file).load()["q1"]
+        assertEquals(listOf("main"), loaded?.answers?.get(0))
+        assertEquals(false, loaded?.multiSelect)
     }
 
     @Test
