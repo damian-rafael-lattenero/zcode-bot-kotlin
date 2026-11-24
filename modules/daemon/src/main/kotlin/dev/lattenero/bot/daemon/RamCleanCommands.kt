@@ -56,8 +56,10 @@ internal object RamCleanCommands {
         else -> plan
     }
 
-    /** The pinned script path — the interpreter and budget live in [NuScriptRunner]. */
-    internal const val SCRIPT = "/Users/lattenero/Scripts/ram-clean.nu"
+    /** The pinned script path — the interpreter and budget live in [NuScriptRunner].
+     *  The hub's 24/11 layout moved scripts under scripts/; the old flat path
+     *  keeps a symlink until this build is deployed. */
+    internal const val SCRIPT = "/Users/lattenero/Scripts/scripts/ram-clean.nu"
 
     /** The last run's full words — one file per run (the ledger keeps the history). */
     internal const val LOG_FILE_NAME = "ram-clean.log"
