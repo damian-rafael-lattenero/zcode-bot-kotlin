@@ -50,6 +50,14 @@ object DeleteRequest {
 }
 
 /**
+ * The render throttle's verdict for one edit — a CRITICAL edit (the question
+ * surface) is NEVER gated: the pending question outranks the feed's
+ * back-pressure, the same reasoning [LiveTelegram.ask] already carries. Pure,
+ * so the law is pinned without a socket.
+ */
+internal fun editThrottled(cooldownActive: Boolean, critical: Boolean): Boolean = !critical && cooldownActive
+
+/**
  * The live view's Telegram side — Python's `_live_send`/`_live_edit`
  * (F4d): the live view is OPTIONAL, a failure never breaks anything.
  * On a 429 the cooldown window WIDENS (the shared file — the same chat,
@@ -146,23 +154,51 @@ class LiveTelegram(
     }
 
     /** Best-effort editMessageText; false when skipped or failed. The markup rides when present. */
-    @Suppress("TooGenericExceptionCaught", "ReturnCount") // the live view never raises (Python's bare except)
+    @Suppress("ReturnCount") // the skip and the leg are two honest exits
     suspend fun edit(cfg: TgConfig, messageId: Long, text: String, markup: JsonObject? = null): Boolean {
         if (messageId <= 0) return false
-        if (cooldown.active()) return false
-        return try {
-            api.call("editMessageText", EditRequest.compose(cfg, messageId, text, markup))
-            true
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: TgHttpException) {
-            retryAfterOf(e)?.let { cooldown.extend(it) }
-            logger.warn { "live edit failed: ${e.message}" }
-            false
-        } catch (e: Exception) {
-            logger.warn { "live edit failed: ${e.message}" }
-            false
+        if (editThrottled(cooldown.active(), critical = false)) {
+            // the skip is NEVER silent: a dropped render is a finding, not a whisper
+            logger.info { "live edit skipped (cooldown window) mid=$messageId" }
+            return false
         }
+        return editLeg(cfg, messageId, text, markup)
+    }
+
+    /**
+     * THE QUESTION SURFACE's edit — the same call WITHOUT the render
+     * throttle, and with a receipt on EVERY outcome. A pending question is
+     * CRITICAL (the [ask] law): the advance or the seal that redraws its
+     * card must never be dropped by the feed's back-pressure, or the owner
+     * keeps answering a question that already advanced (measured 24/11:
+     * the 4th question of a form never reached the phone). Low volume, so
+     * the receipt is affordable — and it is the only way to tell a lost
+     * edit from a lost network.
+     */
+    suspend fun editCritical(cfg: TgConfig, messageId: Long, text: String, markup: JsonObject? = null): Boolean {
+        if (messageId <= 0) {
+            logger.warn { "question card edit skipped: no message id" }
+            return false
+        }
+        val ok = editLeg(cfg, messageId, text, markup)
+        logger.info { "question card edit mid=$messageId → ${if (ok) "ok" else "failed"}" }
+        return ok
+    }
+
+    /** The one leg: the call and its honest failures. A 429 widens the shared window. */
+    @Suppress("TooGenericExceptionCaught") // the live view never raises (Python's bare except)
+    private suspend fun editLeg(cfg: TgConfig, messageId: Long, text: String, markup: JsonObject?): Boolean = try {
+        api.call("editMessageText", EditRequest.compose(cfg, messageId, text, markup))
+        true
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: TgHttpException) {
+        retryAfterOf(e)?.let { cooldown.extend(it) }
+        logger.warn { "live edit failed: ${e.message}" }
+        false
+    } catch (e: Exception) {
+        logger.warn { "live edit failed: ${e.message}" }
+        false
     }
 
     /**

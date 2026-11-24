@@ -334,7 +334,11 @@ internal fun wireChannel(
         )
         QuestionBoard(
             sendQuestion = { text, markup -> questionTelegram.ask(TgConfig.load(remote), text, markup) ?: 0L },
-            editQuestion = { mid, text, markup -> questionTelegram.edit(TgConfig.load(remote), mid, text, markup) },
+            // the card's own edits are CRITICAL: an advance/seal is never
+            // dropped by the render throttle (the question surface's law)
+            editQuestion = { mid, text, markup ->
+                questionTelegram.editCritical(TgConfig.load(remote), mid, text, markup)
+            },
             store = questionStore,
         )
     } ?: QuestionBoard(store = questionStore)
