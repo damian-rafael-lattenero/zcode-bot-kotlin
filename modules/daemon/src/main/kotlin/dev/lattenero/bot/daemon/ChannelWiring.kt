@@ -373,6 +373,17 @@ internal fun wireChannel(
     // exact construction pattern.
     val questionStore = FileQuestionBoardStore(File(File(cfg.homeDir, "state"), QUESTION_BOARD_FILE))
 
+    // THE COMMANDS LANE'S RICH THROAT (24/11): the SAME api + shared
+    // cooldown the questions ride — the Bot API 10.1 envelope for the
+    // table-shaped answers. Null (SHADOW/DRY-RUN, spent window, rejection)
+    // sends the caller to its HTML fallback, never to a second dialect.
+    val commandsTelegram: LiveTelegram? = lanes.api?.let { api ->
+        LiveTelegram(
+            api = api,
+            cooldown = Cooldown(readFile = { File(pythonState, LaneFiles.COOLDOWN).takeIf { it.exists() } }),
+        )
+    }
+
     // THE QUESTIONS' throat (the answer round-trip): the commands lane's
     // OWN files — the chat the owner's taps already ride. A hanging
     // question is critical: the live-view law applies (the cooldown never
@@ -380,11 +391,7 @@ internal fun wireChannel(
     // DRY-RUN) the board still REGISTERS — the stream's laws hold, only
     // the phone's message is missing. Declared BEFORE the client: the
     // stream callback below captures it.
-    val board: QuestionBoard = lanes.api?.let { api ->
-        val questionTelegram = LiveTelegram(
-            api = api,
-            cooldown = Cooldown(readFile = { File(pythonState, LaneFiles.COOLDOWN).takeIf { it.exists() } }),
-        )
+    val board: QuestionBoard = commandsTelegram?.let { questionTelegram ->
         QuestionBoard(
             sendQuestion = { text, markup -> questionTelegram.ask(TgConfig.load(remote), text, markup) ?: 0L },
             // the card's own edits are CRITICAL: an advance/seal is never
@@ -417,6 +424,13 @@ internal fun wireChannel(
             loud,
             markup,
         )
+    }
+
+    // THE RICH COMMANDS THROAT (24/11): the commands lane's Bot API 10.1
+    // envelope. Null (shadow/dry-run, a spent window, a rejection) is the
+    // honest nothing — the caller answers with its own HTML `<pre>`.
+    val richSpeak: suspend (String, Boolean, JsonObject?) -> Long? = { html, loud, markup ->
+        commandsTelegram?.sendRichHtml(TgConfig.load(remote), html, loud, markup)
     }
 
     // the RENDER lane's speak: the live view's final answer/boxes ride the
@@ -1030,6 +1044,7 @@ internal fun wireChannel(
         hub,
         client,
         speak,
+        richSpeak,
         remote,
         queue,
         history,
@@ -1319,6 +1334,8 @@ private fun buildPoller(
     hub: LiveHub,
     client: ChannelClient,
     speak: suspend (String, Boolean, JsonObject?) -> Long?,
+    /** The Bot API 10.1 twin of [speak] (the table-shaped answers); null = use the HTML leg. */
+    richSpeak: suspend (String, Boolean, JsonObject?) -> Long?,
     remote: File,
     queue: InboundQueue,
     history: TasksHistory,
@@ -1622,6 +1639,7 @@ private fun buildPoller(
                             history,
                             commands,
                             speak,
+                            richSpeak,
                             deployFlow,
                             mirror,
                             update,
@@ -1834,6 +1852,7 @@ private suspend fun dispatchMessage(
     history: TasksHistory,
     commands: BotCommands,
     speak: suspend (String, Boolean, JsonObject?) -> Long?,
+    richSpeak: suspend (String, Boolean, JsonObject?) -> Long?,
     deployFlow: DeployFlow,
     mirror: MenuMirrorRefresher?,
     update: InboundUpdate.Message,
@@ -1853,9 +1872,8 @@ private suspend fun dispatchMessage(
         // budget), the plan/gate/render are RamCleanCommands' pure half
         update.text == "/ram_clean" || update.text.startsWith("/ram_clean ") ->
             answerFleet(
-                api,
-                cfg,
                 ramCleanNow(update.text.removePrefix("/ram_clean"), update.fromId, cfg.ownerUserId, logsDir),
+                richSpeak,
                 speak,
             )
 
@@ -1864,9 +1882,8 @@ private suspend fun dispatchMessage(
         // `check` = the read-only word
         update.text == "/fleet_healthcheck" || update.text.startsWith("/fleet_healthcheck ") ->
             answerFleet(
-                api,
-                cfg,
                 fleetCheckNow(update.text.removePrefix("/fleet_healthcheck"), update.fromId, cfg.ownerUserId, logsDir),
+                richSpeak,
                 speak,
             )
 
@@ -1877,7 +1894,7 @@ private suspend fun dispatchMessage(
         // ride the deploy flow (launchd one-shot: a ten-minute build must
         // never die at the runner's budget) and speak through their own say.
         FleetCommands.isFleet(update.text) ->
-            fleetDispatch(api, cfg, update.text, update.fromId, cfg.ownerUserId, logsDir, deployFlow, speak)
+            fleetDispatch(api, cfg, update.text, update.fromId, cfg.ownerUserId, logsDir, deployFlow, speak, richSpeak)
 
         else -> commands.handle(update.text, update.updateId)
             ?.let { reply -> speakReply(mirror, cfg.chatId, reply, speak) }
@@ -1887,8 +1904,8 @@ private suspend fun dispatchMessage(
 /**
  * /fleet_<verbo> — the family's front door: the deploy legs ride [DeployFlow]
  * (launchd one-shot, and the flow speaks for itself), everything else answers
- * through the commands lane — as a RICH message when the body is table-shaped
- * (Telegram renders native tables since Bot API 10.1), HTML `<pre>` otherwise.
+ * through the commands lane — as a RICH HTML message when the body is
+ * table-shaped (Bot API 10.1), the HTML `<pre>` otherwise.
  */
 private suspend fun fleetDispatch(
     api: TgApi,
@@ -1899,6 +1916,7 @@ private suspend fun fleetDispatch(
     logsDir: File,
     deploy: DeployFlow,
     speak: suspend (String, Boolean, JsonObject?) -> Long?,
+    richSpeak: suspend (String, Boolean, JsonObject?) -> Long?,
 ) {
     val leg = FleetCommands.deployTarget(text)
     if (leg != null) {
@@ -1906,43 +1924,18 @@ private suspend fun fleetDispatch(
         return
     }
     val reply = fleetNow(text, fromId, owner, logsDir)
-    answerFleet(api, cfg, reply, speak)
+    answerFleet(reply, richSpeak, speak)
 }
 
 /** Rich when the answer is table-shaped, the HTML `<pre>` when it is not (or when rich is refused). */
 private suspend fun answerFleet(
-    api: TgApi,
-    cfg: TgConfig,
     reply: FleetCommands.Reply,
+    richSpeak: suspend (String, Boolean, JsonObject?) -> Long?,
     speak: suspend (String, Boolean, JsonObject?) -> Long?,
 ) {
     val rich = reply.rich
-    if (rich != null && sendRich(api, cfg, rich)) return
+    if (rich != null && richSpeak(rich, false, null) != null) return
     speak(reply.plain, false, null)
-}
-
-/**
- * THE TABLE DOOR (24/11): `sendMessage` cannot render a table — a nu box table
- * wraps into a wall on a phone. Bot API 10.1's sendRichMessage renders GFM
- * tables natively, so a table-shaped answer rides it; any rejection (old
- * server, bad body, rate) falls back to the HTML `<pre>` the caller holds.
- */
-@Suppress("TooGenericExceptionCaught") // any rejection falls back to the <pre> the caller already holds
-private suspend fun sendRich(api: TgApi, cfg: TgConfig, markdown: String): Boolean = try {
-    api.call(
-        "sendRichMessage",
-        buildJsonObject {
-            put("chat_id", cfg.chatId)
-            put("rich_message", buildJsonObject { put("markdown", markdown) })
-        },
-    )
-    logger.info { "fleet rich message sent (${markdown.length} chars)" }
-    true
-} catch (e: CancellationException) {
-    throw e // shutdown keeps cancelling — never a silent fallback mid-cancel
-} catch (e: Exception) {
-    logger.warn { "fleet rich message rejected (${e.message}) — falling back to the HTML render" }
-    false
 }
 
 /**

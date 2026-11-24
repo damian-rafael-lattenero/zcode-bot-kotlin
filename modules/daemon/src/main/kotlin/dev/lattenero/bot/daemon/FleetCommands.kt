@@ -1,5 +1,6 @@
 package dev.lattenero.bot.daemon
 
+import dev.lattenero.bot.channel.NuTable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonArray
@@ -96,19 +97,19 @@ internal object FleetCommands {
     internal data class Reply(val plain: String, val rich: String?)
 
     /**
-     * The rich-markdown body of a verb's run. Bot API 10.1 renders TABLES
-     * natively from GFM markdown, so a clean nu table becomes a real table on
-     * the phone; anything the parser refuses (wrapped cells) rides a fenced
-     * code block — the monospace truth, never invented columns.
+     * The rich body of a verb's run: rich HTML (Bot API 10.1) so a clean nu
+     * table becomes a real table on the phone; anything the parser refuses
+     * rides an escaped `<pre>` — the monospace truth, never invented columns.
+     * [RichRequest.htmlRich] owns the `<br>` law at the envelope.
      */
     internal fun richOf(row: Verb, argv: List<String>, exit: Int, tookMs: Long, out: String): String =
         richOf("fleet " + row.name, argv.joinToString(" ").ifEmpty { "-" }, exit, tookMs, out)
 
     /** The same body for a command with its own words (/ram_clean, /fleet_healthcheck). */
     internal fun richOf(label: String, mode: String, exit: Int, tookMs: Long, out: String): String {
-        val body = NuTable.toRichMarkdown(out.trimEnd()) ?: ("```\n" + out.trimEnd() + "\n```")
+        val body = NuTable.toRichHtml(out.trimEnd()) ?: ("<pre>" + escapeHtml(out.trimEnd()) + "</pre>")
         val verdict = if (exit == 0) "" else " · exit $exit"
-        return "**🧰 $label** ($mode) · ${tookMs / MS_PER_SECOND}s$verdict\n\n$body"
+        return "<b>🧰 $label</b> ($mode) · ${tookMs / MS_PER_SECOND}s$verdict\n\n$body"
     }
 
     private const val MS_PER_SECOND = 1000L
