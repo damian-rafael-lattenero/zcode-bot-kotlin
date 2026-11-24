@@ -70,7 +70,7 @@ class SpectatorWatchTest {
         assertEquals("🖥️ <b>«ZCode»</b> — Mac turn live (spectator)", first[0].text)
         assertTrue(first[0].gated == true, "the task is current, the gate is open")
         assertEquals(sid, first[0].sid)
-        assertTrue(first[2].text.startsWith("🔧 <b>Bash</b> — <code>wc -l x.kt</code>"))
+        assertTrue(first[2].text.startsWith("🔧 <b>Nushell</b> — <code>wc -l x.kt</code>"))
         assertTrue(first[2].text.endsWith(" · <b>1</b>"))
 
         marker.delete() // F32 consumed it

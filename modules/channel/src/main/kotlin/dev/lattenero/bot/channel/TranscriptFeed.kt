@@ -178,7 +178,7 @@ object TranscriptFeed {
         }
         return chunks.mapIndexed { i, chunk ->
             val part = if (chunks.size == 1) "" else " (${i + 1}/${chunks.size})"
-            FeedMessage.of("<pre><code class=\"language-bash\">${PyText.esc(chunk)}</code></pre>$part")
+            FeedMessage.of("<pre><code class=\"language-${CodeLang.SHELL}\">${PyText.esc(chunk)}</code></pre>$part")
         }
     }
 
@@ -281,12 +281,12 @@ object TranscriptFeed {
             // the page's highlighter: a shell is bash; a read carries the
             // FILE's own language (kt → kotlin, nu → nu) — the phone colors it
             val language = when {
-                shell -> "bash"
+                shell -> CodeLang.SHELL
                 read -> CodeLang.ofPath(fileOf(lane.input))
                 else -> null
             }
             val kind = when {
-                shell -> "⚡ <b>${PyText.esc(lane.name)}</b>"
+                shell -> "⚡ <b>${PyText.esc(toolLabel(lane.name))}</b>"
                 dispatch -> "🤖 <b>${PyText.esc(lane.name)}</b>"
                 else -> "📖 <b>${PyText.esc(lane.name)}</b>"
             }

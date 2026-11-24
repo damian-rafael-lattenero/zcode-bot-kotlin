@@ -736,7 +736,7 @@
    "command": "pytest -q",
    "output": "3 passed"
   },
-  "expected": "🔧 <b>Bash</b> — <code>pytest -q</code>\n<pre><code class=\"language-bash\">pytest -q</code></pre>\n└ <pre>3 passed</pre>"
+  "expected": "🔧 <b>Nushell</b> — <code>pytest -q</code>\n<pre><code class=\"language-nu\">pytest -q</code></pre>\n└ <pre>3 passed</pre>"
  },
  {
   "kind": "tool_box",
@@ -748,7 +748,7 @@
     "-la"
    ]
   },
-  "expected": "🔧 <b>Bash</b> — <code>ls -la</code>\n<pre><code class=\"language-bash\">ls -la</code></pre>"
+  "expected": "🔧 <b>Nushell</b> — <code>ls -la</code>\n<pre><code class=\"language-nu\">ls -la</code></pre>"
  },
  {
   "kind": "tool_box",
@@ -757,7 +757,7 @@
   "input": {
    "command": "make"
   },
-  "expected": "🔧 <b>Bash</b> — <code>make</code>\n<pre><code class=\"language-bash\">make</code></pre>"
+  "expected": "🔧 <b>Nushell</b> — <code>make</code>\n<pre><code class=\"language-nu\">make</code></pre>"
  },
  {
   "kind": "tool_box",
@@ -767,7 +767,7 @@
    "command": "make",
    "output": ""
   },
-  "expected": "🔧 <b>Bash</b> — <code>make</code>\n<pre><code class=\"language-bash\">make</code></pre>"
+  "expected": "🔧 <b>Nushell</b> — <code>make</code>\n<pre><code class=\"language-nu\">make</code></pre>"
  },
  {
   "kind": "tool_box",

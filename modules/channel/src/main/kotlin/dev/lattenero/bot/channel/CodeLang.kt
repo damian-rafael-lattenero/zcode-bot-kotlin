@@ -13,6 +13,12 @@ package dev.lattenero.bot.channel
  */
 object CodeLang {
 
+    /**
+     * THE SHELL'S LANGUAGE (the owner, 24/11): this fleet's "Bash" tool runs
+     * NUSHELL — the code blocks declare `nu`, never `bash`.
+     */
+    const val SHELL = "nu"
+
     /** The file's language from its path: extension first, then the known extension-less names. */
     fun ofPath(path: String?): String? = path
         ?.substringAfterLast('/')

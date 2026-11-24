@@ -1,4 +1,6 @@
 package dev.lattenero.bot.daemon.spectator
+import dev.lattenero.bot.channel.CodeLang
+import dev.lattenero.bot.channel.toolLabel
 import dev.lattenero.bot.contracts.PyText
 
 import kotlinx.serialization.json.JsonArray
@@ -96,7 +98,8 @@ internal object ToolBox {
 
     fun box(name: String, inp: JsonObject): String {
         val desc = if (name == "TodoWrite") todoProgress(inp) else shortDesc(inp)
-        val head = "🔧 <b>${PyText.esc(name)}</b>" +
+        // the fleet's shell is NUSHELL — the phone never reads "Bash" (24/11)
+        val head = "🔧 <b>${PyText.esc(toolLabel(name))}</b>" +
             if (desc.isNotEmpty()) " — <code>${PyText.esc(PyText.preview(desc, HEAD_DESC_CAP))}</code>" else ""
         val body = body(name, inp, desc)
         return head + if (body.isNotEmpty()) "\n$body" else ""
@@ -176,7 +179,7 @@ internal object ToolBox {
             .firstNotNullOfOrNull { k -> inp[k].takeIf { PyText.truthy(it) } }
             ?.let { it as? JsonPrimitive }?.takeIf { it.isString }?.content
         val b = StringBuilder(
-            "<pre><code class=\"language-bash\">${PyText.esc(PyText.htmlClip(cmd, CH_BOX))}</code></pre>",
+            "<pre><code class=\"language-${CodeLang.SHELL}\">${PyText.esc(PyText.htmlClip(cmd, CH_BOX))}</code></pre>",
         )
         if (out != null && PyText.strip(out).isNotEmpty()) {
             b.append("\n└ <pre>${PyText.esc(PyText.htmlClip(out, OUTPUT_CAP))}</pre>")

@@ -509,7 +509,7 @@ class LivePublisherTest {
         now += 31_000L // the close's card swap is a SECOND birth: the spacing applies
         publisher.tick()
         assertTrue(
-            spoken.any { "⚡ <b>Bash</b>" in it && "tocar para ver" in it },
+            spoken.any { "⚡ <b>Nushell</b>" in it && "tocar para ver" in it },
             "NORMAL: the close collapses behind its button (the owner's 3/11)",
         )
     }
@@ -636,7 +636,7 @@ class LivePublisherTest {
         // AT the tool's arrival by the thinking's boundary law, traveling
         // COLLAPSED), then the record, then the answer LAST
         assertTrue(
-            spoken.any { "⚡ <b>Bash</b>" in it && "tocar para ver" in it },
+            spoken.any { "⚡ <b>Nushell</b>" in it && "tocar para ver" in it },
             "the unseen close speaks (collapsed) at the seal",
         )
         val tail = spoken.firstOrNull { "CoT 1" in it }
@@ -1367,12 +1367,12 @@ class LivePublisherTest {
         now += 31_000L // the close's card swap is a SECOND birth: the spacing applies
         publisher.tick() // the close collapses behind its pager button
         val box = hub.peek()?.boxes?.single()
-        assertEquals("bash", box?.language, "the fold carries the fence language for a shell's box")
+        assertEquals("nu", box?.language, "the fold carries the fence language for a shell's box")
         // THE TAP: the numbered page opens inside the bash code block (the
         // wire body is JSON — the fence's quotes ride escaped)
         assertEquals(null, publisher.open(box!!.boxId, 0))
         val opened = wire.bodies.last { it.second == "editMessageText" }.first
-        assertTrue("language-bash" in opened, "the shell's page rides the bash fence: $opened")
+        assertTrue("language-nu" in opened, "the shell's page rides the bash fence: $opened")
         assertTrue("<pre><code" in opened && "code></pre>" in opened, opened)
         assertTrue("1│ out one" in opened, "the numbering law unchanged: $opened")
     }
@@ -1458,7 +1458,7 @@ class LivePublisherTest {
             nowMs = 1_500,
         )
         publisher.tick() // the open drains: the long command speaks, the card swaps
-        val chunks = spoken.filter { "language-bash" in it }
+        val chunks = spoken.filter { "language-nu" in it }
         assertEquals(2, chunks.size, "4000 cp over the 3000-chunk: two messages, the whole command: $chunks")
         assertTrue("y".repeat(3000) in chunks[0] && "(1/2)" in chunks[0], chunks[0])
         assertTrue("y".repeat(1000) in chunks[1] && "(2/2)" in chunks[1], chunks[1])
@@ -1491,7 +1491,7 @@ class LivePublisherTest {
         )
         publisher.tick()
         assertTrue(
-            spoken.any { "language-bash" in it && "(1/2)" in it },
+            spoken.any { "language-nu" in it && "(1/2)" in it },
             "the card promised «va en el feed» — NORMAL speaks the data too: $spoken",
         )
         assertTrue(spoken.none { "▶️" in it }, "but the open one-liner stays quiet under NORMAL")

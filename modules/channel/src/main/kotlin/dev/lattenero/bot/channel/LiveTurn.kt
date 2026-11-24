@@ -119,6 +119,13 @@ internal fun ToolLive.editFilePath(): String? =
     }
 
 /**
+ * THE TOOL'S PHONE NAME (the owner, 24/11): the fork's "Bash" (and "Shell")
+ * tool runs NUSHELL on this fleet — the card and the boxes say so. Every
+ * other tool keeps its real name.
+ */
+fun toolLabel(name: String): String = if (name in SHELL_TOOLS) "Nushell" else name
+
+/**
  * The fork's TYPED terminal error (ZCodeTaskError: error, code?, detail?,
  * attribution?{source, reason, statusCode, providerErrorCode, retryable}) —
  * surfaced as its own pill, the honest end of a dead turn.
@@ -888,7 +895,8 @@ object LiveTurn {
             lane.outputLines != null -> "${lane.outputLines} líneas de salida"
             else -> PyText.esc(lane.status ?: "listo")
         }
-        return "${verbs.of(lane.name, lane.input, lane.isMcp).emoji} ${PyText.esc(lane.name)}$runtime · $verdict$mark"
+        val who = toolLabel(lane.name)
+        return "${verbs.of(lane.name, lane.input, lane.isMcp).emoji} ${PyText.esc(who)}$runtime · $verdict$mark"
     }
 
     /**
@@ -916,7 +924,7 @@ object LiveTurn {
         val name = lane?.name ?: phase.tool ?: ""
         return when {
             lane != null && name in SHELL_TOOLS -> {
-                val head = "${verb.emoji} <b>${PyText.esc(name)}</b> · $timer$stale"
+                val head = "${verb.emoji} <b>${PyText.esc(toolLabel(name))}</b> · $timer$stale"
                 val cmd = TranscriptFeed.commandOf(lane.input)
                     ?.takeIf { it.isNotBlank() }
                 listOf(head) + (cmd?.let(::commandBlock) ?: emptyList())
@@ -950,10 +958,11 @@ object LiveTurn {
      */
     private fun commandBlock(cmd: String): List<String> = when {
         PyText.cpLength(cmd) <= COMMAND_CARD_CP ->
-            listOf("<pre><code class=\"language-bash\">${PyText.esc(cmd)}</code></pre>")
+            listOf("<pre><code class=\"language-${CodeLang.SHELL}\">${PyText.esc(cmd)}</code></pre>")
 
         else -> listOf(
-            "<pre><code class=\"language-bash\">${PyText.esc(PyText.take(cmd, COMMAND_CARD_CP))}</code></pre>",
+            "<pre><code class=\"language-${CodeLang.SHELL}\">" +
+                "${PyText.esc(PyText.take(cmd, COMMAND_CARD_CP))}</code></pre>",
             "✂️ … el comando completo va en el feed",
         )
     }
@@ -969,7 +978,7 @@ object LiveTurn {
             lane.lines > 0 -> " · ${lane.lines} líneas"
             else -> ""
         }
-        return "${verb.emoji} <b>${PyText.esc(lane.name)}</b> · $timer$target$counts$stale"
+        return "${verb.emoji} <b>${PyText.esc(toolLabel(lane.name))}</b> · $timer$target$counts$stale"
     }
 
     private fun detailOf(shaped: String): String =

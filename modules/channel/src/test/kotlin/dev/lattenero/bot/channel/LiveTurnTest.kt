@@ -528,8 +528,8 @@ class LiveTurnTest {
         )
         text = LiveTurn.render(s!!, nowMs = s.lastEventAtMs!!, channelAlive = true, verbs = verbs)
         // v2 §3/§5: the bash NOW line IS the command — complete, in the bash block
-        assertTrue("⚡ <b>Bash</b> · 0s" in text, text)
-        assertTrue("<pre><code class=\"language-bash\">npm test</code></pre>" in text, text)
+        assertTrue("⚡ <b>Nushell</b> · 0s" in text, text)
+        assertTrue("<pre><code class=\"language-nu\">npm test</code></pre>" in text, text)
 
         // the minimal fallback knows MCP on its own (mcp__ or the plugin marker)
         s = reduce(
@@ -762,8 +762,8 @@ class LiveTurnTest {
             ),
         )
         val text = LiveTurn.render(s!!, nowMs = s.lastEventAtMs!!, channelAlive = true, verbs = verbs)
-        assertTrue("⚡ <b>Bash</b> · 0s" in text, text)
-        assertTrue("<pre><code class=\"language-bash\">npm test</code></pre>" in text, text)
+        assertTrue("⚡ <b>Nushell</b> · 0s" in text, text)
+        assertTrue("<pre><code class=\"language-nu\">npm test</code></pre>" in text, text)
         assertTrue("0 líneas" !in text) // the invented zero is GONE
         // a >1800 cp command: the card shows the head and promises the feed —
         // the command itself is NEVER elided mid-way there (v2 §3)
@@ -803,7 +803,7 @@ class LiveTurnTest {
         )
         assertEquals(3, s!!.tools.first().outputLines)
         val text = LiveTurn.render(s, nowMs = s.lastEventAtMs!!, channelAlive = true)
-        assertTrue("🔧 Bash · 0s · 3 líneas de salida" in text, "the stamp carries the runtime (v2 §5): $text")
+        assertTrue("🔧 Nushell · 0s · 3 líneas de salida" in text, "the stamp carries the runtime (v2 §5): $text")
         // a structured payload invents no count (the close boxes render it)
         s = reduce(
             s,
@@ -1116,7 +1116,7 @@ class LiveTurnTest {
             ),
         )
         val text = LiveTurn.render(closed, nowMs = closed.lastEventAtMs!!, channelAlive = true)
-        assertTrue("🔧 Bash · 12s · 2 líneas de salida" in text, "the measured runtime, frozen-clock-safe: $text")
+        assertTrue("🔧 Nushell · 12s · 2 líneas de salida" in text, "the measured runtime, frozen-clock-safe: $text")
     }
 
     // ---- live card v2: the number law and the filename law, as tables ----
