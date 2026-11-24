@@ -909,6 +909,17 @@ class BotCommandsTest {
         assertTrue("The ${BotCommands.MENU.size}" in bc.reply("/help", 2L)!!)
     }
 
+    // THE RICH MANUAL (24/11): the same /help as a native table; the plain
+    // text stays the fallback.
+    @Test
+    fun helpCarriesTheTableAsItsRichBody() = runBlocking {
+        val (bc, _) = commands(ops())
+        val rich = bc.handle("/help", 3L)!!.rich!!
+        assertTrue("<table bordered>" in rich, rich)
+        assertTrue("<td>/status</td>" in rich, "every command is a row: $rich")
+        assertTrue("What it does" in rich, rich)
+    }
+
     @Test
     fun statusWithoutContextAndDownAreHonest() = runBlocking {
         val (bc, _) = commands(ops(status = """{"bot":{"id":"daemon-local","enabled":true},"context":null}"""))

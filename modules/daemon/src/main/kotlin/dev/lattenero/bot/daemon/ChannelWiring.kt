@@ -1672,7 +1672,7 @@ private fun buildPoller(
                                 deployFlow.onTap(update.data.removePrefix("dep:"), update.fromId)
 
                             else -> commands.onCallback(update.data, update.updateId, update.fromId)
-                                ?.let { reply -> speakReply(mirror, cfg.chatId, reply, speak) }
+                                ?.let { reply -> speakReply(mirror, cfg.chatId, reply, richSpeak, speak) }
                         }
                     }
                 }
@@ -1825,9 +1825,13 @@ private suspend fun speakReply(
     mirror: MenuMirrorRefresher?,
     chatId: JsonElement,
     reply: BotReply,
+    richSpeak: suspend (String, Boolean, JsonObject?) -> Long?,
     speak: suspend (String, Boolean, JsonObject?) -> Long?,
 ) {
-    val messageId = speak(reply.text, false, reply.markup)
+    // the rich body first (native tables); a rejection answers the plain
+    // words — the two bodies are written for their own dialect
+    val messageId = reply.rich?.let { richSpeak(it, false, reply.markup) }
+        ?: speak(reply.text, false, reply.markup)
     val mark = reply.mirror
     if (mark != null && messageId != null) {
         mirror?.noteMenu(mark.taskId, mark, messageId, chatId, reply.text)
@@ -1901,7 +1905,7 @@ private suspend fun dispatchMessage(
             fleetDispatch(update.text, update.fromId, cfg.ownerUserId, logsDir, deployFlow, speak, richSpeak)
 
         else -> commands.handle(update.text, update.updateId)
-            ?.let { reply -> speakReply(mirror, cfg.chatId, reply, speak) }
+            ?.let { reply -> speakReply(mirror, cfg.chatId, reply, richSpeak, speak) }
     }
 }
 

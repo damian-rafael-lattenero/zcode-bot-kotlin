@@ -639,4 +639,11 @@ data class BotReply(
      * id). Null = an ordinary reply — never mirrored, never edited.
      */
     val mirror: MenuMirror.Mark? = null,
+    /**
+     * THE RICH BODY (24/11): the same answer as Bot API 10.1 rich HTML —
+     * a native table, when the reply IS a data grid. Null = the plain
+     * [text] is the whole answer. [text] stays the fallback: if the rich
+     * send is rejected the phone gets the plain words, never raw tags.
+     */
+    val rich: String? = null,
 )

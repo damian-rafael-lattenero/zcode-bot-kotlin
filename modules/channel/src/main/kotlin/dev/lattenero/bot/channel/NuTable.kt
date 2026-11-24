@@ -93,18 +93,9 @@ object NuTable {
         is Segment.Table -> renderHtml(segment)
     }
 
-    private fun renderHtml(table: Segment.Table): String = buildString {
-        append("<table bordered>")
-        table.rows.forEachIndexed { index, row ->
-            append("<tr>")
-            val tag = if (index == 0) "th" else "td"
-            row.forEach { cell ->
-                append('<').append(tag).append('>').append(PyText.esc(cell)).append("</").append(tag).append('>')
-            }
-            append("</tr>")
-        }
-        append("</table>")
-    }
+    /** The parsed rows through the ONE table builder (the first row is the header). */
+    private fun renderHtml(table: Segment.Table): String =
+        Tables.html(header = table.rows.first(), rows = table.rows.drop(1))
 
     /**
      * One box table → one [Segment.Table]; null when the shape is

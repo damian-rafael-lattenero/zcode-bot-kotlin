@@ -334,7 +334,7 @@ class BotCommands(
             "quota" -> quota()
             "usage" -> BotReply(usage())
             "ctx" -> ctxList()
-            "help", "start" -> BotReply(help())
+            "help", "start" -> BotReply(help(), rich = HELP_RICH)
             "subagents", "agents" -> subagents(rest)
             "plan", "plan_model_effort" -> plan() // the old mega-menu's name keeps muscle memory alive
             "model" -> modelPicker() // the plan in force's models (the split's second step)
@@ -3955,12 +3955,26 @@ class BotCommands(
             "📖 <b>The ${MENU.size}</b> (the owner's MVP — the rest is hot-fix territory):",
         ) +
             MENU.map { (cmd, desc) -> "/$cmd — $desc" } +
-            listOf(
-                "",
-                "Anything else is TEXT: it goes to the ACTIVE conversation (live mode) " +
-                    "and the live view shows every thought, tool and line as it happens. " +
-                    "Free text never opens a new one — /run «prompt» does.",
-            )).joinToString("\n")
+            listOf("", HELP_FOOTER)).joinToString("\n")
+
+        /**
+         * THE SAME MANUAL, AS A TABLE (24/11): 26 commands were a flat wall
+         * on the phone; the rich body is the grid (command → what it does).
+         * The plain [HELP] stays the fallback byte for byte.
+         */
+        internal val HELP_RICH: String =
+            "📖 <b>The ${MENU.size}</b> (the owner's MVP — the rest is hot-fix territory)\n\n" +
+                Tables.html(
+                    header = listOf("Command", "What it does"),
+                    rows = MENU.map { (cmd, desc) -> listOf("/$cmd", desc) },
+                ) +
+                "\n\n" + HELP_FOOTER
+
+        /** The manual's closing line — one source for both renders. */
+        private const val HELP_FOOTER =
+            "Anything else is TEXT: it goes to the ACTIVE conversation (live mode) " +
+                "and the live view shows every thought, tool and line as it happens. " +
+                "Free text never opens a new one — /run «prompt» does."
 
         /**
          * taskSnapshot → the turn's CONCLUSION — /last's answer AND the
