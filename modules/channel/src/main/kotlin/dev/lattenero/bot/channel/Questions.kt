@@ -377,6 +377,18 @@ fun elicitationContent(questionText: String, value: String, questionCount: Int =
     elicitationContentAll(listOf(questionText to value), questionCount)
 
 /**
+ * THE PLAN'S APPROVE PAYLOAD — measured live 24/11: the owner tapped
+ * «✅ Aprobar el plan» and the CLI resolved `decision: deny` +
+ * `plan_exit_denied`, leaving the plan on standby. The fork reads the plan
+ * answer OUT of `content` (interaction-broker's normalizePlanApprovalAnswer:
+ * `answers[question] ?? answer_0 ?? answer`) and a bare `action: "accept"`
+ * with no content normalizes to an EMPTY answer — which the same function
+ * maps to a DENY. The singular `answer` key is the fork's documented
+ * one-question fallback, so one key is enough.
+ */
+val PLAN_APPROVAL_ACCEPT_CONTENT: JsonObject = buildJsonObject { put("answer", "approve") }
+
+/**
  * The questionnaire's (question text, answer) pairs IN ORDER — the
  * [elicitationContentAll] input for a completed form. Unanswered questions
  * carry a blank value (the fork's broker drops blanks = skipped).

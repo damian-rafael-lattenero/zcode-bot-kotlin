@@ -2406,14 +2406,20 @@ class BotCommands(
                 messageId = "tg-$updateId-qa",
             )
 
-            else -> ClientFrame.Respond(
-                id = "",
-                taskId = q.taskId,
-                requestId = q.requestId,
-                kind = "plan",
-                action = if (option.isDeny || option.optionId == "decline") "decline" else "accept",
-                messageId = "tg-$updateId-qa",
-            )
+            else -> {
+                val denying = option.isDeny || option.optionId == "decline"
+                ClientFrame.Respond(
+                    id = "",
+                    taskId = q.taskId,
+                    requestId = q.requestId,
+                    kind = "plan",
+                    action = if (denying) "decline" else "accept",
+                    // The fork reads the plan answer OUT of content: a bare accept
+                    // normalizes to an empty answer and resolves as a DENY (24/11).
+                    content = if (denying) null else PLAN_APPROVAL_ACCEPT_CONTENT,
+                    messageId = "tg-$updateId-qa",
+                )
+            }
         }
         return flyRespond(
             frame = frame,

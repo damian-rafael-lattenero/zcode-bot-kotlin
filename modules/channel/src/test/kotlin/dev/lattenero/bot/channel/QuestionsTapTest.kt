@@ -190,6 +190,12 @@ class QuestionsTapTest {
         cmds.onCallback("qa:q1:0", 7, OWNER)
         assertEquals("plan", ops.responds[0].kind)
         assertEquals("accept", ops.responds[0].action)
+        // The fork's plan door reads the answer OUT of content: a bare accept
+        // resolved as a DENY live (24/11) — the approve must carry it.
+        assertEquals(
+            "approve",
+            (ops.responds[0].content?.get("answer") as? kotlinx.serialization.json.JsonPrimitive)?.content,
+        )
 
         ops.responds.clear()
         feed(
@@ -200,6 +206,7 @@ class QuestionsTapTest {
         cmds.onCallback("qa:q2:1", 8, OWNER)
         assertEquals("plan", ops.responds[0].kind)
         assertEquals("decline", ops.responds[0].action)
+        assertNull(ops.responds[0].content) // a decline needs no answer payload
     }
 
     @Test
