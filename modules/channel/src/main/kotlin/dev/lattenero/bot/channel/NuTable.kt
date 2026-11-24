@@ -98,7 +98,9 @@ object NuTable {
         table.rows.forEachIndexed { index, row ->
             append("<tr>")
             val tag = if (index == 0) "th" else "td"
-            row.forEach { cell -> append('<').append(tag).append('>').append(PyText.esc(cell)).append("</").append(tag).append('>') }
+            row.forEach { cell ->
+                append('<').append(tag).append('>').append(PyText.esc(cell)).append("</").append(tag).append('>')
+            }
             append("</tr>")
         }
         append("</table>")

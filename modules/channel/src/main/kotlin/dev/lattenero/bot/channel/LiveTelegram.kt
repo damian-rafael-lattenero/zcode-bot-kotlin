@@ -65,6 +65,9 @@ internal fun editThrottled(cooldownActive: Boolean, critical: Boolean): Boolean 
  * never the same process) and while it lasts the edits SKIP THEMSELVES:
  * streaming degrades, it never hammers.
  */
+// The Telegram edge's whole surface (birth/edit/question/rich/delete) — the
+// count is the port's shape, not a grab bag.
+@Suppress("TooManyFunctions")
 class LiveTelegram(
     private val api: TgApi,
     private val cooldown: Cooldown,
@@ -196,6 +199,7 @@ class LiveTelegram(
      * same 429 widening, `rich_message` instead of `text`. `false` = the
      * caller may fall back to the plain edit.
      */
+    @Suppress("ReturnCount") // the id guard, the throttle guard, the leg — three honest exits
     suspend fun editRichHtml(
         cfg: TgConfig,
         messageId: Long,

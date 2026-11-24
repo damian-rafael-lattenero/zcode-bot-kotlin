@@ -1843,7 +1843,7 @@ private suspend fun speakReply(
  * through its OWN say (the door's receipt is the announce's message id),
  * so it returns nothing here.
  */
-@Suppress("LongParameterList") // the wiring's breadth: every throat the dispatch may need
+@Suppress("LongParameterList", "CyclomaticComplexMethod") // the wiring's breadth + one branch per route
 private suspend fun dispatchMessage(
     api: TgApi,
     cfg: TgConfig,
@@ -1898,7 +1898,7 @@ private suspend fun dispatchMessage(
         // ride the deploy flow (launchd one-shot: a ten-minute build must
         // never die at the runner's budget) and speak through their own say.
         FleetCommands.isFleet(update.text) ->
-            fleetDispatch(api, cfg, update.text, update.fromId, cfg.ownerUserId, logsDir, deployFlow, speak, richSpeak)
+            fleetDispatch(update.text, update.fromId, cfg.ownerUserId, logsDir, deployFlow, speak, richSpeak)
 
         else -> commands.handle(update.text, update.updateId)
             ?.let { reply -> speakReply(mirror, cfg.chatId, reply, speak) }
@@ -1912,8 +1912,6 @@ private suspend fun dispatchMessage(
  * table-shaped (Bot API 10.1), the HTML `<pre>` otherwise.
  */
 private suspend fun fleetDispatch(
-    api: TgApi,
-    cfg: TgConfig,
     text: String,
     fromId: Long?,
     owner: Long?,
