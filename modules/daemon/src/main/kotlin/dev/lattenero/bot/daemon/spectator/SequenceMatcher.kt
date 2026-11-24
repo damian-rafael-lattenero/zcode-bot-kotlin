@@ -159,8 +159,8 @@ internal class SequenceMatcher(private val a: List<String>, private val b: List<
 /**
  * unified_diff's line emission. The `@@` hunk headers ARE generated (the
  * owner's line-number law, 3/11: a diff without positions is unreadable
- * on a phone) — [colorizeDiff] consumes them to number every line and
- * emits none of them.
+ * on a phone) — [plainDiff] consumes them to number every line and emits
+ * none of them.
  */
 // The emission is the algorithm: groups → lines, exactly difflib's order
 // (replace emits its '-' half AND its '+' half, like CPython's two ifs).
@@ -187,61 +187,50 @@ internal fun unifiedDiffLines(a: List<String>, b: List<String>): List<String> {
     return out
 }
 
-/** colorize_diff: 🟢 added / 🔴 removed / · context; first line the diffstat. Bare circles without @@ headers. */
-// messages.colorize_diff verbatim — every branch is a line class.
-@Suppress("CyclomaticComplexMethod", "LoopWithTooManyJumpStatements")
-internal fun colorizeDiff(lines: List<String>): List<String> {
-    val more = lines.count { it.startsWith("+") }
-    val less = lines.count { it.startsWith("-") }
-    val out = mutableListOf<String>()
-    if (more > 0 || less > 0) out.add("● 🟢 +$more  🔴 −$less")
-    var oldLn: Int? = null
-    var newLn: Int? = null
-    for (ln in lines) {
-        when {
-            ln.startsWith("@@") -> {
-                oldLn = FIRST_MINUS.find(ln)?.groupValues?.get(1)?.toIntOrNull()
-                newLn = FIRST_PLUS.find(ln)?.groupValues?.get(1)?.toIntOrNull()
-            }
-
-            ln.startsWith("\\") -> out.add("· $ln")
-
-            ln.startsWith("+") && newLn != null -> {
-                out.add("🟢 $newLn $ln")
-                newLn++
-            }
-
-            ln.startsWith("-") && oldLn != null -> {
-                out.add("🔴 $oldLn $ln")
-                oldLn++
-            }
-
-            newLn != null -> {
-                out.add("· $newLn $ln")
-                newLn++
-                if (oldLn != null) oldLn++
-            }
-
-            else ->
-                out.add((if (ln.startsWith("-")) "🔴 " else if (ln.startsWith("+")) "🟢 " else "· ") + ln)
-        }
-    }
-    return out
-}
-
 private val FIRST_MINUS = Regex("-(\\d+)")
 private val FIRST_PLUS = Regex("\\+(\\d+)")
 
-/**
- * _colored_diff: difflib over old/new, capped, never empty. The `@@`
- * hunk headers stay IN: [colorizeDiff] reads them to stamp every added,
- * removed and context line with its real number (the owner, 3/11: «no sé
- * bien lo que estoy leyendo a qué línea corresponde») and renders none of
- * them. Python's bare circles were the parity ceiling; the line numbers
- * are the improvement.
+/** THE PHONE'S DIFF (24/11, the owner): no emoji, no circles — a REAL diff
+ * for `<code class="language-diff">`, where the client paints `+` lines
+ * green and `-` lines red. Every line keeps its real position after the
+ * marker (the 3/11 law: `+ 4 │ code`); context lines start with two spaces.
+ * The `@@` headers only feed the numbers, never the body.
  */
-internal fun coloredDiff(old: List<String>, new: List<String>, maxChars: Int): String {
-    val d = unifiedDiffLines(old, new)
-    val joined = colorizeDiff(d).joinToString("\n")
-    return PyText.take(joined, maxChars).ifEmpty { "(no changes)" }
+internal fun plainDiff(old: List<String>, new: List<String>, maxChars: Int): String {
+    val out = mutableListOf<String>()
+    var oldLn = 0
+    var newLn = 0
+    for (ln in unifiedDiffLines(old, new)) {
+        when {
+            ln.startsWith("@@") -> {
+                oldLn = FIRST_MINUS.find(ln)?.groupValues?.get(1)?.toIntOrNull() ?: oldLn
+                newLn = FIRST_PLUS.find(ln)?.groupValues?.get(1)?.toIntOrNull() ?: newLn
+            }
+
+            ln.startsWith("\\") -> out += ln
+
+            ln.startsWith("-") -> {
+                out += "- $oldLn │ ${ln.drop(1)}"
+                oldLn++
+            }
+
+            ln.startsWith("+") -> {
+                out += "+ $newLn │ ${ln.drop(1)}"
+                newLn++
+            }
+
+            else -> {
+                out += "  $newLn │ ${ln.drop(1)}"
+                newLn++
+                oldLn++
+            }
+        }
+    }
+    return PyText.take(out.joinToString("\n"), maxChars).ifEmpty { "(no changes)" }
+}
+
+/** The diffstat, plain: `+4 −1` — the count without the circles. */
+internal fun diffStat(old: List<String>, new: List<String>): String {
+    val lines = unifiedDiffLines(old, new)
+    return "+${lines.count { it.startsWith("+") }} −${lines.count { it.startsWith("-") }}"
 }

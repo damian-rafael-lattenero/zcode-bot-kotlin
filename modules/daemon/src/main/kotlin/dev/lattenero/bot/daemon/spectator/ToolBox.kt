@@ -190,7 +190,7 @@ internal object ToolBox {
     private fun hasEdits(inp: JsonObject): Boolean =
         (inp["edits"] as? JsonArray)?.isNotEmpty() == true
 
-    /** MultiEdit: ONE colored diff per edit (never the raw JSON blob). */
+    /** MultiEdit: ONE real diff block per edit (never the raw JSON blob). */
     private fun editsBody(inp: JsonObject): String {
         val edits = inp["edits"] as JsonArray
         val perEditCap = CH_BOX / maxOf(1, edits.size)
@@ -198,41 +198,52 @@ internal object ToolBox {
             if (ed !is JsonObject) {
                 null
             } else {
-                "· edit ${idx + 1}\n" + coloredDiff(
+                "<i>edit ${idx + 1}</i>\n" + diffBlock(
                     PyText.splitLines(PyText.pyStr(ed["old_string"])),
                     PyText.splitLines(PyText.pyStr(ed["new_string"])),
                     perEditCap,
                 )
             }
         }
-        return "<pre>${PyText.esc(PyText.htmlClip(chunks.joinToString("\n"), CH_BOX))}</pre>"
+        return chunks.joinToString("\n")
     }
 
-    private fun editBody(inp: JsonObject): String {
-        val diff = coloredDiff(
-            PyText.splitLines(PyText.pyStr(inp["old_string"])),
-            PyText.splitLines(PyText.pyStr(inp["new_string"])),
-            CH_BOX,
-        )
-        return "<pre>${PyText.esc(PyText.htmlClip(diff, CH_BOX))}</pre>"
+    private fun editBody(inp: JsonObject): String = diffBlock(
+        PyText.splitLines(PyText.pyStr(inp["old_string"])),
+        PyText.splitLines(PyText.pyStr(inp["new_string"])),
+        CH_BOX,
+    )
+
+    /**
+     * THE DIFF BLOCK (24/11, the owner): the real unified diff inside a
+     * `language-diff` fence — the client paints `+` lines green and `-`
+     * lines red; no emoji circles, no gutter of ours (each line carries its
+     * own real position after the marker).
+     */
+    private fun diffBlock(old: List<String>, new: List<String>, cap: Int): String {
+        val stat = diffStat(old, new)
+        val code = plainDiff(old, new, cap)
+        return "<i>$stat</i>\n<pre><code class=\"language-diff\">${PyText.esc(code)}</code></pre>"
     }
 
-    /** A Write is all new: green dots with each of the first 40 lines' REAL number, then the stamp. */
+    /** A Write is all new: `+ N │ line` in a diff block, then the stamp. */
     private fun writeBody(inp: JsonObject): String {
         val lines = PyText.splitLines(PyText.pyStr(inp["content"]))
         val numbered = lines.take(WRITE_PREVIEW_LINES)
-            .mapIndexed { i, ln -> "🟢 ${i + 1} $ln" }
+            .mapIndexed { i, ln -> "+ ${i + 1} │ $ln" }
             .joinToString("\n")
-        val pre = "<pre>${PyText.esc(PyText.htmlClip(numbered, CH_BOX))}</pre>"
+        val pre = "<pre><code class=\"language-diff\">" +
+            PyText.esc(PyText.htmlClip(numbered, CH_BOX)) +
+            "</code></pre>"
         val stamp = linesStamp(lines.size, 0, lines.size)
         return "$pre\n<i>$stamp</i>"
     }
 
-    /** lines_stamp: 🟢 +N · 🔴 −M · K lines (the F50b stamp on every file shown). */
+    /** lines_stamp: +N · −M · K lines (the F50b stamp, plain — the block carries the colors). */
     fun linesStamp(added: Int, removed: Int, lines: Int? = null): String {
         val parts = mutableListOf<String>()
-        if (added != 0) parts.add("🟢 +$added")
-        if (removed != 0) parts.add("🔴 −$removed")
+        if (added != 0) parts.add("+$added")
+        if (removed != 0) parts.add("−$removed")
         lines?.let { parts.add("$it lines") }
         return parts.joinToString(" · ").ifEmpty { "—" }
     }
