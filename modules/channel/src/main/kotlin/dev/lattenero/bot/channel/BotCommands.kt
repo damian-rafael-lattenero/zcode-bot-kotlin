@@ -3784,11 +3784,24 @@ class BotCommands(
         return BotReply("$head «${PyText.esc(title)}» — $outcome")
     }
 
-    /** After an inbound fires, watch the conversation it lands in (the stream's own subscription). */
+    /**
+     * After an inbound fires, watch the conversation it lands in (the
+     * stream's own subscription) AND move the card's hold with it (24/11:
+     * the "no more streaming" the owner kept hitting). A fire moves the
+     * FOCUS — `subscribeFocus` drops the previous task — so a card still
+     * held on the old task lost its pipe and froze until the next attach.
+     * The hold follows the text now; a PIN (a subagent he is reading)
+     * keeps the card where it is.
+     */
     private suspend fun watchContext() {
         val ctx = contextAnswer() as? ContextAnswer.Ctx ?: return
         val taskId = ctx.value.activeTaskId ?: return
+        if (hub.peekPin() == null) {
+            hub.watchTask() // back to the whole-task world (a lane scope dies with the fire)
+            hub.watchTaskId(taskId, clock()) // the card's identity follows the text
+        }
         ops.subscribe(taskId, ctx.value.workspacePath)
+        hub.requestTick() // the fired turn's card is born NOW
     }
 
     /** Python's status line: «🎯 Active: «title»» — the index first, taskMeta as fallback. */

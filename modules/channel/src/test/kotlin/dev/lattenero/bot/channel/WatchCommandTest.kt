@@ -108,6 +108,21 @@ class WatchCommandTest {
     }
 
     @Test
+    fun aFireMovesTheCardsHoldToTheFiredConversation() = runBlocking {
+        // the card was held on task-A; the owner's text fires into task-B (the
+        // bot's active conversation). The FOCUS moves — without moving the
+        // hold, the card froze on A with its pipe gone (the 24/11 bug).
+        val hub = LiveHub()
+        hub.watchTaskId("task-A", 1_000L)
+        val ops = FakeOps(contextStatus)
+        val rows = listOf(TaskRow(sid = "task-B", title = "the open one", ws = "/ws/a"), cardRow)
+        val reply = commands(ops, FakeHistory(rows), hub).handle("hola", 5)
+        assertNull(reply, "a fired text speaks via the live view, no ack")
+        assertEquals("task-B", hub.peek()?.taskId, "the card follows the text")
+        assertEquals("task-B" to "/ws/a", ops.subscribed.last(), "the fresh focus is the fired conversation")
+    }
+
+    @Test
     fun nothingToWatchSaysSoHonestly() = runBlocking {
         val hub = LiveHub()
         val ops = FakeOps("""{"bot":{"enabled":true},"context":null}""")
