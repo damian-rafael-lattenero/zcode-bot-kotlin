@@ -102,6 +102,34 @@ import kotlin.time.Duration.Companion.seconds
 
 private val logger = KotlinLogging.logger {}
 
+/** The boot re-attach's target: the bot's own conversation (id + its workspace). */
+internal data class ReattachTarget(val taskId: String, val workspacePath: String)
+
+/**
+ * Pure: the bot's OWN conversation out of its status answer (the /status
+ * card's source). Null = no active conversation, or a torn/foreign shape —
+ * both mean the same thing at boot: nothing to re-attach.
+ */
+@Suppress("ReturnCount") // one guard per wire shape — the parser's own law
+internal fun activeConversationOf(statusJson: String?): ReattachTarget? {
+    val status = statusJson
+        ?.let { runCatching { Json.parseToJsonElement(it) }.getOrNull() } as? JsonObject
+        ?: return null
+    val context = status["context"] as? JsonObject ?: return null
+    val taskId = (context["activeTaskId"] as? JsonPrimitive)?.content?.takeIf { it.isNotBlank() } ?: return null
+    val workspacePath = (context["workspacePath"] as? JsonPrimitive)?.content?.takeIf { it.isNotBlank() }
+        ?: return null
+    return ReattachTarget(taskId, workspacePath)
+}
+
+/** Pure: the fork's ActiveTaskIds answer (a JSON array of ids) → the airing set. A torn shape is empty. */
+internal fun runningTaskIdsOf(runningJson: String?): Set<String> {
+    val array = runningJson
+        ?.let { runCatching { Json.parseToJsonElement(it) }.getOrNull() } as? JsonArray
+        ?: return emptySet()
+    return array.mapNotNull { (it as? JsonPrimitive)?.content?.takeIf { id -> id.isNotBlank() } }.toSet()
+}
+
 /** What [wireChannel] answers: the built pieces Main starts as Processes. */
 internal class ChannelStack(
     val client: ChannelClient,
@@ -130,6 +158,16 @@ internal class ChannelStack(
     val runStreamEffect: suspend (StreamEffect) -> Unit,
     /** 🔋 the quota watcher (audit item 5) — null with the `quota_watch` knob off. */
     val quotaWatch: QuotaWatch? = null,
+    /**
+     * THE BOOT RE-ATTACH (24/11, the mirror-blind wedge's missing half): a
+     * daemon restart mid-turn seals the pre-restart card and a RUNNING turn
+     * never re-births it — the phone sat 46 minutes without a card (measured
+     * live: the owner read the silence as a frozen bot). Once connected, if
+     * the bot's own conversation is AIRING, subscribe it again: the fork's
+     * subscribe burst re-states the in-flight content and the normal birth
+     * path hands the card back. Nothing running = nothing to re-birth.
+     */
+    val bootReattach: suspend () -> Unit = {},
 )
 
 /**
@@ -1029,6 +1067,47 @@ internal fun wireChannel(
                 recoverAfterReconnect(client, board, taskTitles, effect.taskId)
         }
     }
+    // THE BOOT RE-ATTACH (the mirror-blind wedge's missing half): the SAME
+    // bounded wait the ladder uses, then the pure decision — the bot's own
+    // conversation, subscribed again ONLY while its turn is airing (a fork
+    // subscribe re-states the in-flight burst, so the normal birth path
+    // hands the phone its card back; an idle conversation earns nothing).
+    val bootReattach: suspend () -> Unit = {
+        var waitedMs = 0L
+        while (!client.connected && waitedMs < BOOT_LADDER_WAIT_MS) {
+            delay(BOOT_LADDER_POLL_MS)
+            waitedMs += BOOT_LADDER_POLL_MS
+        }
+        when {
+            !client.connected -> logger.info {
+                "boot re-attach skipped — the channel never came up in ${BOOT_LADDER_WAIT_MS}ms"
+            }
+
+            else -> {
+                val active = activeConversationOf(
+                    statusJson = (client.query(ChannelQuery.BotStatus) as? QueryAnswer.Ok)?.resultJson,
+                )
+                val running = runningTaskIdsOf(
+                    runningJson = active
+                        ?.let { client.query(ChannelQuery.ActiveTaskIds(it.workspacePath)) as? QueryAnswer.Ok }
+                        ?.resultJson,
+                )
+                val target = active?.takeIf { it.taskId in running }
+                if (target == null) {
+                    logger.info { "boot re-attach: no turn airing — nothing to re-birth" }
+                } else {
+                    hub.watchTask()
+                    hub.watchTaskId(target.taskId, System.currentTimeMillis())
+                    client.subscribe(target.taskId, target.workspacePath)
+                    hub.requestTick()
+                    logger.info {
+                        "boot re-attach: ${target.taskId.takeLast(SID_TAIL)} was AIRING — " +
+                            "subscribed again, the card re-births"
+                    }
+                }
+            }
+        }
+    }
     return ChannelStack(
         client,
         liveView,
@@ -1042,6 +1121,7 @@ internal fun wireChannel(
         streamEffects,
         runStreamEffect,
         quotaWatch = wired?.quotaWatch,
+        bootReattach = bootReattach,
     )
 }
 

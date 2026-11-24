@@ -327,7 +327,14 @@ fun main(args: Array<String>) {
         // the first plan WITH tokens in HIS order applies itself — only
         // changes and failures speak). One coroutine, the firehoseProbe
         // pattern: a crash is one log line, never a boot's death.
-        stack.bootLadder.let { run -> launch { bootDefaultLadder(run, logger) } }
+        stack.bootLadder.let { run -> launch { bootStep("boot default ladder", run, logger) } }
+
+        // THE BOOT RE-ATTACH (24/11, the mirror-blind wedge's missing half):
+        // a restart mid-turn seals the pre-restart card and a RUNNING turn
+        // never re-births it — the phone went 46 minutes without a card. This
+        // step subscribes the airing conversation again, so the fork's burst
+        // re-states the content and the normal birth path hands the card back.
+        stack.bootReattach.let { run -> launch { bootStep("boot re-attach", run, logger) } }
 
         val root = coroutineContext[Job]
         Runtime.getRuntime().addShutdownHook(
@@ -448,18 +455,19 @@ private fun touch(file: File) {
     }
 }
 
-// the ladder's crash is one log line, never a boot's death (the firehoseProbe pattern)
+// A BOOT STEP's crash is one log line, never a boot's death (the firehoseProbe pattern).
 @Suppress("TooGenericExceptionCaught")
-private suspend fun bootDefaultLadder(
+private suspend fun bootStep(
+    what: String,
     run: suspend () -> Unit,
     logger: io.github.oshai.kotlinlogging.KLogger,
 ) {
     try {
         run()
-    } catch (e: kotlinx.coroutines.CancellationException) {
-        throw e // cancellation is not a ladder failure — the cancelled job keeps cancelling
+    } catch (e: CancellationException) {
+        throw e // cancellation is not a step failure — the cancelled job keeps cancelling
     } catch (e: Exception) {
-        logger.warn(e) { "boot default ladder crashed — one line, never a boot's death" }
+        logger.warn(e) { "$what crashed — one line, never a boot's death" }
     }
 }
 
