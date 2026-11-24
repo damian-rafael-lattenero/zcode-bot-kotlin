@@ -124,9 +124,29 @@ class FleetCommandsTest {
     fun theListSpeaksEveryVerbWithItsArguments() {
         val text = FleetCommands.listText(FleetCommands.parse(json))
         assertTrue("/fleet_brain" in text, text)
-        assertTrue("[question] <string>" in text, text)
         assertTrue("/fleet_deploy_bot" in text, text)
         assertTrue(text.contains("<b>2 comandos nu</b>"), text)
+    }
+
+    // THE POISON-BODY LAW (measured 24/11): the arguments carry `<string>`,
+    // and with parse_mode=HTML Telegram read it as a broken tag — the whole
+    // list was rejected 5 times and dropped, so /fleet_list answered nothing.
+    @Test
+    fun theDataIsHtmlEscapedAndTheMarkupSurvives() {
+        val text = FleetCommands.listText(FleetCommands.parse(json))
+        assertTrue("[question] &lt;string&gt;" in text, text)
+        assertTrue("&lt;int&gt;" in text, text)
+        assertTrue("&lt;path&gt;" !in text, "no path argument in this fixture")
+        // the only raw angle brackets left are the two of <b>…</b>
+        assertEquals(4, text.count { it == '<' } + text.count { it == '>' }, text)
+        assertTrue(text.startsWith("🧰 <b>2 comandos nu</b>"), text)
+    }
+
+    @Test
+    fun anUnknownVerbIsEscapedBeforeItReachesTheParser() {
+        val text = FleetCommands.unknown("<script>", FleetCommands.parse(json))
+        assertTrue("&lt;script&gt;" in text, text)
+        assertTrue("<script>" !in text, text)
     }
 
     @Test

@@ -127,6 +127,17 @@ internal object FleetCommands {
         "🧰 /fleet_<verbo> — TODO comando nu de la Mac.\n" +
             "🧰 /fleet_list — la lista completa (verbo, argumentos, para qué sirve)."
 
+    /**
+     * The phone sends with parse_mode=HTML, so every `<`, `>` and `&` in DATA
+     * is a tag to Telegram: `[repo] <path>` made the whole list a poison item
+     * — rejected five times and dropped (measured 24/11, the owner's first
+     * `/fleet_list`: the bot answered nothing at all).
+     */
+    internal fun escapeHtml(text: String): String = text
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+
     /** The phone's table: one line per verb — the description clipped, the args named. */
     internal fun listText(verbs: List<Verb>): String {
         if (verbs.isEmpty()) return DISCOVERY_FAILED
@@ -137,7 +148,7 @@ internal object FleetCommands {
                 v.description.take(DESCRIPTION_MAX).substringBeforeLast(' ') + "…"
             }
             val takes = if (v.arguments == "-") "" else " ${v.arguments}"
-            "• /fleet_${v.name.replace('-', '_')}$takes — $desc"
+            "• /fleet_${v.name.replace('-', '_')}${escapeHtml(takes)} — ${escapeHtml(desc)}"
         }
         return (listOf("🧰 <b>${verbs.size} comandos nu</b> — /fleet_&lt;verbo&gt; [args]:", "") + lines)
             .joinToString("\n")
@@ -146,7 +157,7 @@ internal object FleetCommands {
     internal fun unknown(verb: String, verbs: List<Verb>): String {
         val near = verbs.map { it.name }.filter { it.startsWith(verb.take(4)) }
         val hint = if (near.isEmpty()) "" else "\n¿querías: ${near.joinToString(" · ") { it.replace('-', '_') }}?"
-        return "🤷 No existe el verbo «$verb» — /fleet_list tiene los ${verbs.size}.$hint"
+        return "🤷 No existe el verbo «${escapeHtml(verb)}» — /fleet_list tiene los ${verbs.size}.$hint"
     }
 
     /** The timeout words — the shared edge names the budget it burned. */
