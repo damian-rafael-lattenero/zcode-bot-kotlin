@@ -1,5 +1,6 @@
 package dev.lattenero.bot.daemon.send
 
+import dev.lattenero.bot.channel.LiveTelegram
 import dev.lattenero.bot.transport.Cooldown
 import dev.lattenero.bot.transport.LastPh
 import dev.lattenero.bot.transport.Outbox
@@ -111,9 +112,13 @@ private fun liveLanes(remote: () -> File, pythonState: File): SendLanes {
         mainOutbox,
         LastPh({ File(pythonState, LaneFiles.LAST_PH) }),
     )
+    val mainTelegram = LiveTelegram(mainApi, mainCooldown)
     val mainLeg = SendLegs.live(
         { cfg, text, loud, markup -> mainSender.send(cfg, text, loud, markup) },
-        remote,
+        // the SAME text through the Bot API 10.1 envelope (24/11); a
+        // rejection falls back to the Sender leg (outbox + poison cap)
+        richSend = { cfg, text, loud, markup -> mainTelegram.sendRichHtml(cfg, text, loud, markup) },
+        remote = remote,
     )
     val flushMain: suspend () -> Unit = { mainSender.outboxFlush(TgConfig.load(remote())) }
     val split = TgConfig.load(remote()).firehoseSplit
@@ -161,9 +166,11 @@ private fun splitLanes(
         fireOutbox,
         LastPh({ File(pythonState, LaneFiles.FIRE_LAST_PH) }),
     )
+    val fireTelegram = LiveTelegram(fireApi, fireCooldown)
     val firehoseLeg = SendLegs.live(
         { cfg, text, loud, markup -> fireSender.send(cfg.firehose, text, loud, markup) },
-        remote,
+        richSend = { cfg, text, loud, markup -> fireTelegram.sendRichHtml(cfg.firehose, text, loud, markup) },
+        remote = remote,
     )
     val fireLane = LiveLane(
         api = fireApi,

@@ -72,35 +72,38 @@ class LiveTelegram(
 ) {
 
     /**
-     * sendMessage that answers the message_id (the card's birth); [markup]
-     * is the card's own keyboard (the ⏸️ row).
+     * The card's birth — rich first (Bot API 10.1), the classic
+     * `sendMessage` on any rejection. [markup] is the card's own keyboard.
      */
-    @Suppress("TooGenericExceptionCaught") // the live view never raises (Python's bare except)
     suspend fun birth(cfg: TgConfig, text: String, markup: JsonObject? = null): Long? {
         if (cooldown.active()) return null // throttled: the box is born dead — never critical
-        return try {
-            val wire = SendRequest.compose(cfg, text, loud = false, markup = markup)
-            val mid = messageIdOf(api.call("sendMessage", wire))
-            mid?.let { lastPh?.note(it) } // a live box is a message too (F84b)
-            mid
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            logger.warn { "live send failed: ${e.message}" }
-            null
-        }
+        return richSend(cfg, text, loud = false, markup = markup) ?: plainBirth(cfg, text, markup)
+    }
+
+    @Suppress("TooGenericExceptionCaught") // the live view never raises (Python's bare except)
+    private suspend fun plainBirth(cfg: TgConfig, text: String, markup: JsonObject?): Long? = try {
+        val wire = SendRequest.compose(cfg, text, loud = false, markup = markup)
+        val mid = messageIdOf(api.call("sendMessage", wire))
+        mid?.let { lastPh?.note(it) } // a live box is a message too (F84b)
+        mid
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        logger.warn { "live send failed: ${e.message}" }
+        null
     }
 
     /**
-     * The QUESTION's send — the dedicated message with its buttons (the
-     * answer round-trip's birth). A hanging question is CRITICAL: the
-     * cooldown does not gate it (the card's throttle is the feed's
-     * back-pressure, not the owner's answer — the turn blocks until the
-     * owner speaks), but a 429 still widens the window. loud=true: the
+     * The QUESTION's send — rich first, the classic `sendMessage` with its
+     * buttons on rejection. A hanging question is CRITICAL: the cooldown
+     * does not gate it, but a 429 still widens the window. loud=true: the
      * phone must buzz — a question the owner never sees is a hung turn.
      */
+    suspend fun ask(cfg: TgConfig, text: String, markup: JsonObject): Long? =
+        richSend(cfg, text, loud = true, markup = markup) ?: plainAsk(cfg, text, markup)
+
     @Suppress("TooGenericExceptionCaught") // the live view never raises (Python's bare except)
-    suspend fun ask(cfg: TgConfig, text: String, markup: JsonObject): Long? = try {
+    private suspend fun plainAsk(cfg: TgConfig, text: String, markup: JsonObject): Long? = try {
         messageIdOf(api.call("sendMessage", SendRequest.compose(cfg, text, loud = true, markup = markup)))
     } catch (e: CancellationException) {
         throw e
@@ -157,11 +160,10 @@ class LiveTelegram(
     /**
      * THE RICH HTML LEG (24/11): the bot's existing HTML — tables, `<pre>`,
      * bold, lines — as a Bot API 10.1 rich body. `null` answers a rejection
-     * (or a spent cooldown) and the CALLER keeps its own HTML `<pre>`
-     * fallback: a rich body sent through `sendMessage` would show its tags
-     * raw, so this leg never launders one dialect into the other.
+     * (or a spent cooldown) and the CALLER keeps its own HTML fallback: a
+     * rich body sent through `sendMessage` would show its tags raw, so this
+     * leg never launders one dialect into the other.
      */
-    @Suppress("TooGenericExceptionCaught") // best-effort by contract: the caller owns the fallback
     suspend fun sendRichHtml(
         cfg: TgConfig,
         html: String,
@@ -169,20 +171,24 @@ class LiveTelegram(
         markup: JsonObject? = null,
     ): Long? {
         if (cooldown.active()) return null
-        return try {
-            val mid = messageIdOf(api.call("sendRichMessage", RichRequest.composeSend(cfg, html, loud, markup)))
-            mid?.let { lastPh?.note(it) }
-            mid
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: TgHttpException) {
-            retryAfterOf(e)?.let { cooldown.extend(it) }
-            logger.warn { "rich html send failed: ${e.message}" }
-            null
-        } catch (e: Exception) {
-            logger.warn { "rich html send failed: ${e.message}" }
-            null
-        }
+        return richSend(cfg, html, loud, markup)
+    }
+
+    /** The raw rich send (no cooldown gate — the CRITICAL callers get their own): rejection → null. */
+    @Suppress("TooGenericExceptionCaught") // best-effort by contract: the caller owns the fallback
+    private suspend fun richSend(cfg: TgConfig, html: String, loud: Boolean, markup: JsonObject?): Long? = try {
+        val mid = messageIdOf(api.call("sendRichMessage", RichRequest.composeSend(cfg, html, loud, markup)))
+        mid?.let { lastPh?.note(it) }
+        mid
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: TgHttpException) {
+        retryAfterOf(e)?.let { cooldown.extend(it) }
+        logger.warn { "rich html send failed: ${e.message}" }
+        null
+    } catch (e: Exception) {
+        logger.warn { "rich html send failed: ${e.message}" }
+        null
     }
 
     /**
@@ -229,7 +235,7 @@ class LiveTelegram(
             logger.info { "live edit skipped (cooldown window) mid=$messageId" }
             return false
         }
-        return editLeg(cfg, messageId, text, markup)
+        return editRichThenPlain(cfg, messageId, text, markup)
     }
 
     /**
@@ -247,10 +253,19 @@ class LiveTelegram(
             logger.warn { "question card edit skipped: no message id" }
             return false
         }
-        val ok = editLeg(cfg, messageId, text, markup)
+        val ok = editRichThenPlain(cfg, messageId, text, markup)
         logger.info { "question card edit mid=$messageId → ${if (ok) "ok" else "failed"}" }
         return ok
     }
+
+    /**
+     * The rich edit first (the phone gets tables and line structure), the
+     * classic HTML edit on a REJECTION. A 429 already widened the shared
+     * window, so the plain retry would only eat a second refusal — it is
+     * skipped in that case.
+     */
+    private suspend fun editRichThenPlain(cfg: TgConfig, messageId: Long, text: String, markup: JsonObject?): Boolean =
+        editRichLeg(cfg, messageId, text, markup) || (!cooldown.active() && editLeg(cfg, messageId, text, markup))
 
     /** The one leg: the call and its honest failures. A 429 widens the shared window. */
     @Suppress("TooGenericExceptionCaught") // the live view never raises (Python's bare except)

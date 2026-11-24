@@ -103,7 +103,12 @@ internal object FilesCommands {
                 if (hunks.size >= PER_FILE_DIFF_LINES) {
                     append("\n   ✂️ el diff completo no entra — /file ${f.path}")
                 } else {
-                    hunks.forEach { append("\n   ").append(it) }
+                    // A `pre` keeps the alignment AND the escaping: a diff line
+                    // is file content, never markup (measured 24/11: a hunk with
+                    // `<` could break the whole HTML parse).
+                    append("\n<pre>")
+                    hunks.forEach { append(esc(it)).append('\n') }
+                    append("</pre>")
                 }
             }
             val candidate = out.length + head.length + body.length + 2

@@ -1864,8 +1864,12 @@ private suspend fun dispatchMessage(
         update.text.startsWith("/file") ->
             speak(filesOut(api, cfg, update.text.removePrefix("/file")), false, null)
 
+        // /diff rides the rich envelope too (the hunks are a `pre` now);
+        // a rejection falls back to the same HTML through sendMessage.
         update.text == "/diff" || update.text.startsWith("/diff ") ->
-            speak(diffNow(client, history, update.text.removePrefix("/diff")), false, null)
+            diffNow(client, history, update.text.removePrefix("/diff")).let { text ->
+                if (richSpeak(text, false, null) == null) speak(text, false, null)
+            }
 
         // /ram_clean (22/11): the fleet's ram-clean run BY the daemon — the
         // process edge needs the wiring's own throat (a subprocess with a

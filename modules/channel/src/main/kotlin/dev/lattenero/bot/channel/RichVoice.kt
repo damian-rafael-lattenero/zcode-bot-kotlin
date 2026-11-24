@@ -44,32 +44,82 @@ object RichVoice {
 
     /**
      * The prose's blocks: fenced code becomes `pre` blocks (the fence's
-     * language rides), everything else becomes `pullquote` blocks — the
-     * violet. One block per fence boundary; each block capped at
-     * [BLOCK_CP] (a phone's screen, under any per-message ceiling).
+     * language rides), a nu BOX TABLE becomes a native `table` block (the
+     * phone shows real columns), everything else becomes `pullquote` blocks
+     * — the violet. One block per shape; each capped at [BLOCK_CP].
      */
     fun proseBlocks(text: String): List<JsonObject> = splitFences(text)
-        .mapNotNull { (isCode, language, chunk) ->
-            val body = chunk.trim('\n').takeIf { it.isNotBlank() } ?: return@mapNotNull null
-            when {
-                isCode -> buildJsonObject {
-                    put("type", "pre")
-                    put("text", body.take(BLOCK_CP))
-                    language?.let { put("language", it) }
-                }
+        .flatMap { (isCode, language, chunk) -> blocksOf(isCode, language, chunk) }
+        .ifEmpty { listOf(pullquote(PyText.take(text, BLOCK_CP))) }
 
-                else -> buildJsonObject {
-                    put("type", "pullquote")
-                    put("text", body.take(BLOCK_CP))
-                }
+    private fun blocksOf(isCode: Boolean, language: String?, chunk: String): List<JsonObject> {
+        val body = chunk.trim('\n')
+        if (body.isBlank()) return emptyList()
+        return if (isCode) {
+            listOf(
+                buildJsonObject {
+                    put("type", "pre")
+                    put("text", PyText.take(body, BLOCK_CP))
+                    language?.let { put("language", it) }
+                },
+            )
+        } else {
+            textBlocks(body)
+        }
+    }
+
+    /** Prose runs and tables, in order: the parser is [NuTable]'s, shared with the fleet's HTML. */
+    private fun textBlocks(body: String): List<JsonObject> {
+        val segments = NuTable.parse(body) ?: return listOf(pullquote(PyText.take(body, BLOCK_CP)))
+        return segments.mapNotNull { segment ->
+            when (segment) {
+                is NuTable.Segment.Prose -> segment.lines.joinToString("\n")
+                    .takeIf { it.isNotBlank() }
+                    ?.let { pullquote(PyText.take(it, BLOCK_CP)) }
+
+                is NuTable.Segment.Table -> tableOrProse(segment)
             }
         }
-        .ifEmpty { listOf(pullquote(text.take(BLOCK_CP))) }
+    }
+
+    /**
+     * The native table block (`RichBlockTable`): cells need align + valign
+     * and the header row carries `is_header`. A table over the API's 20
+     * columns is NOT invented into a block (Telegram would reject it) — it
+     * stays honest prose.
+     */
+    private fun tableOrProse(table: NuTable.Segment.Table): JsonObject {
+        val columns = table.rows.firstOrNull()?.size ?: 0
+        if (columns == 0 || columns > MAX_TABLE_COLUMNS) {
+            val flat = table.rows.joinToString("\n") { row -> row.joinToString(" · ") }
+            return pullquote(PyText.take(flat, BLOCK_CP))
+        }
+        return buildJsonObject {
+            put("type", "table")
+            put("is_bordered", true)
+            put("cells", buildJsonArray {
+                table.rows.forEachIndexed { index, row ->
+                    add(buildJsonArray {
+                        row.forEach { cell ->
+                            add(
+                                buildJsonObject {
+                                    put("align", "left")
+                                    put("valign", "top")
+                                    put("text", cell)
+                                    if (index == 0) put("is_header", true)
+                                },
+                            )
+                        }
+                    })
+                }
+            })
+        }
+    }
 
     /** The thinking block: native expand/collapse, the whole text behind one tap. */
     fun thinkingBlock(text: String): JsonObject = buildJsonObject {
         put("type", "expandable_blockquote")
-        put("text", text.take(BLOCK_CP))
+        put("text", PyText.take(text, BLOCK_CP))
     }
 
     private fun pullquote(text: String): JsonObject = buildJsonObject {
@@ -104,4 +154,7 @@ object RichVoice {
 
     /** The violet block ceiling — a phone's screenful, well under any message cap. */
     const val BLOCK_CP = 3500
+
+    /** The Bot API's table ceiling: a wider table degrades to prose, never to a rejected block. */
+    const val MAX_TABLE_COLUMNS = 20
 }

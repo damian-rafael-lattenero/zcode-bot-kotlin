@@ -129,12 +129,17 @@ class BoxFoldTest {
     /** The last edit's own fields — the wire bytes Telegram receives. */
     private data class Edit(val messageId: Long, val text: String, val markup: JsonObject)
 
+    /**
+     * The rich envelope folds line breaks into `<br>` outside pre/code; the
+     * tests pin the LOGICAL html, so the inverse puts the newlines back.
+     */
     private fun lastEdit(wire: Wire): Edit {
         val body = Json.parseToJsonElement(wire.bodies.last { it.second == "editMessageText" }.first).jsonObject
         val markup = (body["reply_markup"] as JsonPrimitive).content
+        val rich = ((body["rich_message"] as? JsonObject)?.get("html") as? JsonPrimitive)?.content
         return Edit(
             messageId = body["message_id"]!!.jsonPrimitive.content.toLong(),
-            text = body["text"]!!.jsonPrimitive.content,
+            text = rich?.replace("<br>", "\n") ?: body["text"]!!.jsonPrimitive.content,
             markup = Json.parseToJsonElement(markup).jsonObject,
         )
     }

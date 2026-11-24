@@ -53,8 +53,15 @@ object NuTable {
      * Prose keeps its newlines: [RichRequest.htmlRich] turns them into the
      * phone's `<br>` at the envelope.
      */
+    fun toRichHtml(out: String): String? = parse(out)?.joinToString("\n") { render(it) }
+
+    /**
+     * The output as SEGMENTS — the ONE parse both renderers feed on: the
+     * fleet's rich HTML above and [RichVoice]'s `table` blocks. `null` = no
+     * table-shaped row at all, or a table whose shape is doubtful.
+     */
     @Suppress("ReturnCount") // the guards ARE the answer: no table, then per-block null
-    fun toRichHtml(out: String): String? {
+    internal fun parse(out: String): List<Segment>? {
         val lines = out.lines()
         if (lines.none { isRow(it) }) return null
         val segments = ArrayList<Segment>()
@@ -78,7 +85,7 @@ object NuTable {
             segments.add(renderTable(block) ?: return null)
         }
         if (prose.isNotEmpty()) segments.add(Segment.Prose(prose.toList()))
-        return segments.joinToString("\n") { render(it) }
+        return segments
     }
 
     private fun render(segment: Segment): String = when (segment) {

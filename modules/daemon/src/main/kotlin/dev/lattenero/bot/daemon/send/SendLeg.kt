@@ -83,17 +83,32 @@ object SendLegs {
      * LIVE: the daemon owns the send. The send function is injected
      * (Main wires Sender with the SHARED cooldown/outbox/tg-last-ph
      * files); every answer is one log line — the flip's paper trail.
+     *
+     * [richSend] is the Bot API 10.1 twin (24/11): the SAME text through
+     * `sendRichMessage`'s HTML envelope, so feed boxes, notifications and
+     * every other decision's message keeps its lines and renders a native
+     * table when it carries one. A rejection answers null and the plain
+     * Sender leg below owns the fallback — the outbox keeps it honest.
      */
     fun live(
         send: suspend (TgConfig, String, Boolean, JsonObject?) -> SendResult,
+        richSend: (suspend (TgConfig, String, Boolean, JsonObject?) -> Long?)? = null,
         remote: () -> File,
     ): SendLeg = object : SendLeg {
         override suspend fun deliver(d: ShadowDecision, loud: Boolean) {
             deliverMarkup(d, loud, null)
         }
 
-        override suspend fun deliverMarkup(d: ShadowDecision, loud: Boolean, markup: JsonObject?): Long? =
-            when (val r = send(TgConfig.load(remote()), d.text, loud, markup)) {
+        override suspend fun deliverMarkup(d: ShadowDecision, loud: Boolean, markup: JsonObject?): Long? {
+            val cfg = TgConfig.load(remote())
+            if (richSend != null) {
+                val rich = richSend(cfg, d.text, loud, markup)
+                if (rich != null) {
+                    logger.info { "send LIVE ${d.watcher}/${d.decision}: RICH message_id=$rich" }
+                    return rich
+                }
+            }
+            return when (val r = send(cfg, d.text, loud, markup)) {
                 is SendResult.Sent -> {
                     logger.info { "send LIVE ${d.watcher}/${d.decision}: message_id=${r.messageId}" }
                     r.messageId
@@ -125,6 +140,7 @@ object SendLegs {
                     null
                 }
             }
+        }
     }
 }
 

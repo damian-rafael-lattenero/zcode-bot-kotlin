@@ -57,4 +57,30 @@ class RichVoiceTest {
         val rich = wire["rich_message"]!!.jsonObject
         assertEquals(1, rich["blocks"]!!.jsonArray.size)
     }
+
+    @Test
+    fun aBoxTableBecomesANativeTableBlock() {
+        val text = "antes\n│ # │ leg  │\n├───┼──────┤\n│ 0 │ boot │\ndespués"
+        val blocks = RichVoice.proseBlocks(text)
+        assertEquals(
+            listOf("pullquote", "table", "pullquote"),
+            blocks.map { it["type"]!!.jsonPrimitive.content },
+            blocks.toString(),
+        )
+        val cells = blocks[1]["cells"]!!.jsonArray
+        assertEquals(2, cells.size)
+        val header = cells[0].jsonArray
+        assertEquals("left", header[0].jsonObject["align"]!!.jsonPrimitive.content)
+        assertEquals("top", header[0].jsonObject["valign"]!!.jsonPrimitive.content)
+        assertEquals("true", header[0].jsonObject["is_header"]!!.jsonPrimitive.content)
+        assertEquals("boot", cells[1].jsonArray[1].jsonObject["text"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun aTableOverTwentyColumnsDegradesToProseNeverToARejectedBlock() {
+        fun row(value: (Int) -> String) = (0 until 21).joinToString("") { "│ ${value(it)} " } + "│"
+        val text = row { "c$it" } + "\n" + row { "$it" }
+        val blocks = RichVoice.proseBlocks(text)
+        assertEquals(listOf("pullquote"), blocks.map { it["type"]!!.jsonPrimitive.content }, blocks.toString())
+    }
 }

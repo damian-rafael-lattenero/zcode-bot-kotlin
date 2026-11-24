@@ -116,6 +116,17 @@ class LivePublisherTest {
         }
     }
 
+    /**
+     * A CARD/FEED body: the rich HTML envelope (Bot API 10.1) or the classic
+     * text fallback. The voice's rich BLOCKS never count as a card.
+     */
+    private fun cardBodies(wire: Wire): List<Pair<String, String>> =
+        wire.bodies.filter { it.second == "sendMessage" || (it.second == "sendRichMessage" && "\"html\"" in it.first) }
+
+    /** The VOICE: rich blocks only (pullquote/pre/expandable). */
+    private fun blockBodies(wire: Wire): List<Pair<String, String>> =
+        wire.bodies.filter { it.second == "sendRichMessage" && "\"blocks\"" in it.first }
+
     @Test
     fun theBirthCarriesTheRealTitleResolvedOnce() = runTest {
         val taskId = "sess_abcd644150daf013"
@@ -130,13 +141,13 @@ class LivePublisherTest {
         }
         publisher.tick()
         assertEquals(1, calls) // exactly one history read
-        val birth = wire.bodies.first { it.second == "sendMessage" }.first
+        val birth = cardBodies(wire).first().first
         assertTrue("«arreglá el login»" in birth, "the birth wears the REAL title, not the sid tail")
         assertTrue("«644150daf013»" !in birth) // the tail is not the head
         hub.apply(frame(taskId, "agent_thought_chunk", at = 1_200, "content" to JsonPrimitive("más")), nowMs = 1_200)
         publisher.tick() // a new event → the card re-draws; the resolution is ONE-SHOT per turn
         assertEquals(1, calls)
-        val redraw = wire.bodies.last { it.second == "sendMessage" }.first
+        val redraw = cardBodies(wire).last().first
         assertTrue("arreglá el login" in redraw, "the re-drawn card carries the honest name too")
     }
 
@@ -148,7 +159,7 @@ class LivePublisherTest {
         val wire = Wire()
         val publisher = publisher(wire, hub) { _ -> null }
         publisher.tick()
-        val birth = wire.bodies.first { it.second == "sendMessage" }.first
+        val birth = cardBodies(wire).first().first
         assertTrue("644150daf013" in birth) // the sid tail — nothing invented
     }
 
@@ -168,7 +179,7 @@ class LivePublisherTest {
         val publisher = publisher(wire, hub, clock = { now }, resubscribe = { resubscribes += 1 })
         hub.watchTaskId(child, now)
         publisher.tick()
-        val birth = wire.bodies.first { it.second == "sendMessage" }.first
+        val birth = cardBodies(wire).first().first
         assertTrue("👁 <b>«_agent_quiet»</b> attachado" in birth, "the honest idle card BORN: $birth")
         assertTrue("ningún turno corriendo" in birth)
         // the watchdog stays silent: an awaited idle session has no dead bus
@@ -201,7 +212,7 @@ class LivePublisherTest {
         hub.apply(frame(taskId, "task_run_started", at = now), nowMs = now)
         hub.apply(frame(taskId, "agent_thought_chunk", at = now, "content" to JsonPrimitive("pensando")), nowMs = now)
         publisher.tick()
-        fun cardBirths(): Int = wire.bodies.count { it.second == "sendMessage" && "<b>" in it.first }
+        fun cardBirths(): Int = cardBodies(wire).count { "<b>" in it.first }
         assertEquals(1, cardBirths(), "the live card is born")
         now += STALE_SEAL_MS + 10_000L
         publisher.tick() // the stale horizon trips
@@ -229,12 +240,12 @@ class LivePublisherTest {
         }
         publisher.tick()
         assertEquals(0, calls) // nothing born, nothing burned
-        assertTrue(wire.bodies.none { it.second == "sendMessage" })
+        assertTrue(cardBodies(wire).isEmpty())
         // the turn actually starts: the attempt fires exactly at the birth
         hub.apply(frame(taskId, "agent_thought_chunk", at = 2_000, "content" to JsonPrimitive("ya")), nowMs = 2_000)
         publisher.tick()
         assertEquals(1, calls)
-        val birth = wire.bodies.first { it.second == "sendMessage" }.first
+        val birth = cardBodies(wire).first().first
         assertTrue("«arreglá el login»" in birth)
     }
 
@@ -271,16 +282,16 @@ class LivePublisherTest {
         publisher.tick() // the block sealed → the NATIVE expandable quote speaks, the card swaps
         // THE NATIVE THINKING (5/11): the whole block travels INSIDE the
         // rich message — the client collapses/expands it, no custom button
-        val rich = wire.bodies.firstOrNull { it.second == "sendRichMessage" }
+        val rich = blockBodies(wire).firstOrNull { "expandable_blockquote" in it.first }
         assertTrue(rich != null, "the block's violet message spoke")
         assertTrue("expandable_blockquote" in rich!!.first)
         // the swap's order: the card dies, the voice speaks, the card is
-        // REBORN — delete → sendRichMessage → birth sendMessage
+        // REBORN — delete → sendRichMessage(blocks) → birth sendRichMessage(html)
         val methods = wire.bodies.drop(afterBirth).map { it.second }
         assertEquals("sendRichMessage", methods.first(), "the voice speaks first")
         assertEquals("deleteMessage", methods[1], "then the stale card dies")
-        assertEquals("sendMessage", methods[2], "the card is reborn LAST")
-        val reborn = wire.bodies.last { it.second == "sendMessage" }.first
+        assertEquals("sendRichMessage", methods[2], "the card is reborn LAST (rich HTML)")
+        val reborn = cardBodies(wire).last().first
         assertTrue("⏳ <b>Procesando..." in reborn, "the re-born card IS the process card")
         assertTrue("📖 CoT: 1 bloque plegado" in reborn, "the card carries the CoT row (count only)")
     }
@@ -378,7 +389,7 @@ class LivePublisherTest {
         publisher.tick()
         val reclaim = wire.bodies.drop(afterBirth + inWindow.size).map { it.second }
         assertTrue("deleteMessage" in reclaim, "the old card dies to reclaim the bottom")
-        assertTrue(reclaim.last() == "sendMessage", "the card is REBORN last")
+        assertTrue("\"html\"" in wire.bodies.last().first, "the card is REBORN last (rich HTML)")
         // a quiet tick (no events, fixed clock): the render did not change —
         // nothing moves (the change law keeps the 429 budget alive)
         val before = wire.bodies.size
@@ -411,7 +422,7 @@ class LivePublisherTest {
         clockMs += 31_000L // the redraw is a SECOND birth: the spacing gate applies
         publisher.tick()
         val methods = wire.bodies.drop(afterBirth).map { it.second }
-        assertTrue("deleteMessage" in methods && methods.last() == "sendMessage")
+        assertTrue("deleteMessage" in methods && "\"html\"" in wire.bodies.last().first)
     }
 
     @Test
@@ -533,7 +544,7 @@ class LivePublisherTest {
         assertEquals(emptyList(), spoken.toList(), "SUMMARY: the feed is silent — the DATA obeys the level")
         val methods = wire.bodies.drop(afterBirth).map { it.second }
         assertTrue(
-            "deleteMessage" in methods && methods.last() == "sendMessage",
+            "deleteMessage" in methods && "\"html\"" in wire.bodies.last().first,
             "the card STILL re-draws last — the process is never hidden",
         )
     }
@@ -1185,7 +1196,7 @@ class LivePublisherTest {
         publisher.tick()
         hub.apply(frame(taskId, "task_complete", at = 1_200, "stopReason" to JsonPrimitive("end_turn")), nowMs = 1_200)
         publisher.tick()
-        val rich = wire.bodies.filter { it.second == "sendRichMessage" }
+        val rich = blockBodies(wire)
         assertTrue(rich.size >= 3, "9000 cp over the 3500 page: several violet messages: ${rich.size}")
         val joined = rich.flatMap { blockTexts(it.first) }.joinToString("")
         assertEquals(text, joined, "the chunks CONCATENATE to the whole — nothing dropped")
@@ -1217,12 +1228,12 @@ class LivePublisherTest {
         val publisher = publisher(wire, hub, finalTurn = { null })
         publisher.tick()
         publisher.tick()
-        val violet = wire.bodies.lastOrNull { it.second == "sendRichMessage" }
+        val violet = blockBodies(wire).lastOrNull()
         assertTrue(violet != null, "the fold's digest spoke violet: ${wire.bodies.map { it.second }}")
         assertTrue("Paso 1" in violet!!.first, "the spent step rides numbered: ${violet.first.take(300)}")
         assertTrue("✅ Respuesta" in violet.first, "the seal's copy is the conclusion")
         assertTrue("La conclusión del fold." in violet.first)
-        assertEquals(1, wire.bodies.count { it.second == "sendRichMessage" }, "one digest, one message")
+        assertEquals(1, blockBodies(wire).size, "one digest, one message")
     }
 
     @Test
@@ -1242,7 +1253,7 @@ class LivePublisherTest {
         )
         now += 31_000L
         publisher.tick()
-        val thinking = wire.bodies.firstOrNull { it.second == "sendRichMessage" && "expandable_blockquote" in it.first }
+        val thinking = blockBodies(wire).firstOrNull { "expandable_blockquote" in it.first }
         assertTrue(thinking != null, "the CoT is a NATIVE expandable quote: ${wire.bodies.map { it.second }}")
     }
 
@@ -1264,7 +1275,7 @@ class LivePublisherTest {
         publisher.tick()
         now += 31_000L
         publisher.tick()
-        assertEquals(0, wire.bodies.count { it.second == "sendRichMessage" }, "the knob OFF: no rich sends")
+        assertEquals(0, blockBodies(wire).size, "the knob OFF: no rich VOICE sends")
     }
 
     @Test
@@ -1518,10 +1529,10 @@ class LivePublisherTest {
         val publisher = publisher(wire, hub, finalTurn = { null })
         publisher.tick()
         publisher.tick()
-        val violet = wire.bodies.lastOrNull { it.second == "sendRichMessage" }
+        val violet = blockBodies(wire).lastOrNull()
         assertNotNull(violet, "the fallback spoke violet: ${wire.bodies.map { it.second }}")
         assertTrue("La conclusión del fallback" in violet.first, "the never-lost copy: ${violet.first.take(300)}")
-        assertEquals(1, wire.bodies.count { it.second == "sendRichMessage" }, "one violet copy only")
+        assertEquals(1, blockBodies(wire).size, "one violet copy only")
     }
 
     @Test
@@ -1549,7 +1560,7 @@ class LivePublisherTest {
         hub.apply(frame(taskId, "task_complete", at = 2_000, "stopReason" to JsonPrimitive("end_turn")), nowMs = 2_000)
         publisher.tick()
         assertEquals(1, seals, "one seal")
-        assertEquals(1, wire.bodies.count { it.second == "sendRichMessage" && "La conclusión" in it.first }, "the conclusion speaks exactly once")
+        assertEquals(1, blockBodies(wire).count { "La conclusión" in it.first }, "the conclusion speaks exactly once")
         // THE REBURST: head + deltas + complete, the same startedAt stamp —
         // every frame drops at the sealed memory
         hub.apply(frame(taskId, "task_run_started", at = 2_100, "startedAt" to JsonPrimitive(5_000L)), nowMs = 2_100)
@@ -1560,7 +1571,7 @@ class LivePublisherTest {
         hub.apply(frame(taskId, "task_complete", at = 2_300, "stopReason" to JsonPrimitive("end_turn")), nowMs = 2_300)
         publisher.tick()
         assertEquals(1, seals, "the reburst never re-seals")
-        assertEquals(1, wire.bodies.count { it.second == "sendRichMessage" && "La conclusión" in it.first }, "the conclusion never re-speaks")
+        assertEquals(1, blockBodies(wire).count { "La conclusión" in it.first }, "the conclusion never re-speaks")
         // A REAL new turn (a strictly newer startedAt stamp) lifts the memory
         // — and like every turn it carries traffic before the seal (the birth
         // law: an Idle state never births the card). The clock moves past the
