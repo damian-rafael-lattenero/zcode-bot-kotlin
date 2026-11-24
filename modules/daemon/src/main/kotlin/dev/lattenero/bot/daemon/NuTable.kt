@@ -8,22 +8,33 @@ package dev.lattenero.bot.daemon
  * find the box tables in a script's output and rewrite them as markdown
  * tables, leaving everything else as text.
  *
- * The parse is CONSERVATIVE by design: a table whose rows do not all carry the
- * same number of wall characters (a wrapped cell spans two lines) is NOT
- * guessed at — the whole run falls back to a fenced code block, which keeps
- * the monospace truth instead of inventing columns.
+ * Two laws learned the hard way on the phone (24/11):
+ *  - a GFM table must start its OWN block — prose on the line above joins the
+ *    header and Telegram renders the pipes literally, so a blank line goes
+ *    before and after every table;
+ *  - markdown folds single newlines into spaces — prose lines carry a
+ *    trailing backslash (CommonMark's hard break) to keep the terminal shape.
+ *
+ * A table whose rows do not all carry the same number of cells is NOT guessed
+ * at: the whole run falls back to a fenced code block, which keeps the
+ * monospace truth instead of inventing columns. A WRAPPED cell (nu prints the
+ * continuation with an empty head) is rebuilt, not refused.
  */
 internal object NuTable {
 
     private const val WALL = '│'
-    private const val TOP = '╭'
-    private const val MID = '├'
-    private const val BOTTOM = '╰'
 
-    private fun isBorder(line: String): Boolean {
-        val t = line.trim()
-        return t.startsWith(TOP) || t.startsWith(MID) || t.startsWith(BOTTOM)
-    }
+    /**
+     * The LEFT edge of a border line, across nu's themes: rounded (`╭ ╰`),
+     * thin (`┌ └`), heavy (`┏ ┗`) and the mid rules (`├ ┣`). Measured 24/11:
+     * the healthcheck sets `table.mode = "thin"`, so the top/bottom borders
+     * are `┌ └` — the old constants missed them, they leaked out as prose
+     * lines and the table lost its own paragraph (Telegram then rendered
+     * literal pipes).
+     */
+    private val BORDER_HEADS = setOf('╭', '╰', '┌', '└', '┏', '┗', '├', '┣')
+
+    private fun isBorder(line: String): Boolean = line.trimStart().firstOrNull() in BORDER_HEADS
 
     private fun isRow(line: String): Boolean = line.trim().startsWith(WALL)
 
@@ -40,7 +51,7 @@ internal object NuTable {
         var i = 0
         while (i < lines.size) {
             if (!isRow(lines[i]) && !isBorder(lines[i])) {
-                md.append(lines[i]).append('\n')
+                md.append(proseLine(lines, i))
                 i++
                 continue
             }
@@ -49,9 +60,27 @@ internal object NuTable {
                 block.add(lines[i])
                 i++
             }
-            md.append(renderTable(block) ?: return null)
+            val table = renderTable(block) ?: return null
+            // A GFM table must start its own block: prose on the line above
+            // becomes part of the header (Telegram then shows literal pipes).
+            if (md.isNotEmpty() && !md.endsWith("\n\n")) md.append('\n')
+            md.append(table).append('\n')
         }
         return md.toString().trimEnd()
+    }
+
+    /**
+     * One prose line, with the line structure KEPT. Markdown folds single
+     * newlines into spaces, so the healthcheck's per-leg lines collapsed into
+     * one paragraph on the phone (measured 24/11). A trailing backslash is
+     * CommonMark's hard break; the last line of a run needs none.
+     */
+    private fun proseLine(lines: List<String>, i: Int): String {
+        val line = lines[i]
+        val next = lines.getOrNull(i + 1)
+        val keepsGoing = next != null && next.isNotBlank() && !isRow(next) && !isBorder(next)
+        val needsBreak = line.isNotBlank() && keepsGoing && !line.endsWith("\\")
+        return line + (if (needsBreak) "\\" else "") + '\n'
     }
 
     /**
@@ -113,6 +142,12 @@ internal object NuTable {
         return parts.map { it.trim() }
     }
 
-    /** A pipe inside a cell would split the markdown row. */
-    private fun escape(cell: String): String = cell.replace("|", "\\|")
+    /**
+     * A pipe inside a cell would split the markdown row; runs of spaces are
+     * nu's canvas padding (the colima cell repeats it) and would show as gaps
+     * in a native table — the data is the words, not the alignment.
+     */
+    private fun escape(cell: String): String = cell.replace(SPACES, " ").replace("|", "\\|")
+
+    private val SPACES = Regex("\\s+")
 }

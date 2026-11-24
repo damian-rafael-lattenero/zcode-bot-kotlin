@@ -2,6 +2,7 @@ package dev.lattenero.bot.daemon
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -85,5 +86,50 @@ class NuTableTest {
         """.trimIndent()
         val md = NuTable.toRichMarkdown(withPipe)
         assertTrue(md!!.contains("a \\| b"), md)
+    }
+
+    // THE THIN-THEME LAW (measured live, 24/11): the healthcheck renders with
+    // table.mode = "thin" (`┌ └`), and prose sits right above the table. The
+    // borders must be consumed AND the table must own its paragraph, or
+    // Telegram shows literal pipes.
+    @Test
+    fun aThinTableAfterProseKeepsItsOwnParagraph() {
+        val out = """
+            == battery ==
+            ┌────┬───────┬──────┬─────────┐
+            │  # │ state │ leg  │ detail  │
+            ├────┼───────┼──────┼─────────┤
+            │  0 │ ok    │ boot │ a value │
+            └────┴───────┴──────┴─────────┘
+            11 ok · 0 fail
+        """.trimIndent()
+        val md = NuTable.toRichMarkdown(out)!!
+        assertTrue("\n\n| # | state | leg | detail |" in md, md)
+        assertFalse(md.contains('┌'), md)
+        assertFalse(md.contains('└'), md)
+        assertTrue(md.endsWith("11 ok · 0 fail"), md)
+    }
+
+    // THE SOFT-BREAK LAW: markdown folds single newlines into spaces; every
+    // prose line of a run keeps a CommonMark hard break so the phone shows the
+    // terminal's lines, not one long paragraph.
+    @Test
+    fun consecutiveProseLinesGetHardBreaks() {
+        val out = "one\ntwo\n$table"
+        val md = NuTable.toRichMarkdown(out)!!
+        assertTrue(md.startsWith("one\\\ntwo\n\n| # |"), md)
+    }
+
+    // nu pads cells with runs of spaces (its canvas); in a native table that
+    // is a gap, not data.
+    @Test
+    fun paddingSpacesInsideACellCollapse() {
+        val padded = """
+            │ # │ who              │
+            ├───┼──────────────────┤
+            │ 0 │ a    b     c     │
+        """.trimIndent()
+        val md = NuTable.toRichMarkdown(padded)!!
+        assertTrue("| 0 | a b c |" in md, md)
     }
 }
