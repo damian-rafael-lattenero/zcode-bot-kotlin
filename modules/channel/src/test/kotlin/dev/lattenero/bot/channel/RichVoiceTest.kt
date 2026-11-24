@@ -9,17 +9,19 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
-/** The violet voice's pure builders — the wire JSON is pinned here. */
+/**
+ * The voice's pure builders — the wire JSON is pinned here. Since 24/11 the
+ * prose (talk AND thinking) is plain `paragraph` blocks: normal HTML text,
+ * left-aligned, formatted — no quote container.
+ */
 class RichVoiceTest {
 
-    private fun blocksOf(vararg types: String) = types.toList()
-
     @Test
-    fun proseBecomesPullquotesAndCodeBecomesPre() {
+    fun proseBecomesParagraphsAndCodeBecomesPre() {
         val blocks = RichVoice.proseBlocks(
             "El meter es real: 55.337 tokens.\n```kotlin\nval x = 1\n```\nCapturo el frame.",
         )
-        assertEquals(listOf("pullquote", "pre", "pullquote"), blocks.map { it["type"]!!.jsonPrimitive.content })
+        assertEquals(listOf("paragraph", "pre", "paragraph"), blocks.map { it["type"]!!.jsonPrimitive.content })
         assertTrue("55.337" in blocks[0]["text"]!!.jsonPrimitive.content)
         assertEquals("kotlin", blocks[1]["language"]!!.jsonPrimitive.content)
         assertTrue("val x = 1" in blocks[1]["text"]!!.jsonPrimitive.content)
@@ -37,13 +39,22 @@ class RichVoiceTest {
         val unclosed = RichVoice.proseBlocks("```\nsin cerrar")
         assertEquals(listOf("pre"), unclosed.map { it["type"]!!.jsonPrimitive.content })
         val plain = RichVoice.proseBlocks("solo palabras")
-        assertEquals(listOf("pullquote"), plain.map { it["type"]!!.jsonPrimitive.content })
+        assertEquals(listOf("paragraph"), plain.map { it["type"]!!.jsonPrimitive.content })
     }
 
     @Test
-    fun theThinkingBlockIsTheNativeExpandable() {
-        val block = RichVoice.thinkingBlock("p".repeat(4000))
-        assertEquals("expandable_blockquote", block["type"]!!.jsonPrimitive.content)
+    fun aBlankLineSplitsTheTalkIntoParagraphs() {
+        val blocks = RichVoice.proseBlocks("uno\n\ndos\n\ntres")
+        assertEquals(3, blocks.size, blocks.toString())
+        assertTrue(blocks.all { it["type"]!!.jsonPrimitive.content == "paragraph" })
+    }
+
+    @Test
+    fun theThinkingIsPlainParagraphsCapped() {
+        val blocks = RichVoice.thinkingBlocks("p".repeat(4000))
+        assertEquals(1, blocks.size)
+        val block = blocks.single()
+        assertEquals("paragraph", block["type"]!!.jsonPrimitive.content)
         // the cap speaks: 3500 cp, never a wall beyond the client's render
         assertEquals(3500, block["text"]!!.jsonPrimitive.content.length)
     }
@@ -63,7 +74,7 @@ class RichVoiceTest {
         val text = "antes\n│ # │ leg  │\n├───┼──────┤\n│ 0 │ boot │\ndespués"
         val blocks = RichVoice.proseBlocks(text)
         assertEquals(
-            listOf("pullquote", "table", "pullquote"),
+            listOf("paragraph", "table", "paragraph"),
             blocks.map { it["type"]!!.jsonPrimitive.content },
             blocks.toString(),
         )
@@ -81,14 +92,14 @@ class RichVoiceTest {
         fun row(value: (Int) -> String) = (0 until 21).joinToString("") { "│ ${value(it)} " } + "│"
         val text = row { "c$it" } + "\n" + row { "$it" }
         val blocks = RichVoice.proseBlocks(text)
-        assertEquals(listOf("pullquote"), blocks.map { it["type"]!!.jsonPrimitive.content }, blocks.toString())
+        assertEquals(listOf("paragraph"), blocks.map { it["type"]!!.jsonPrimitive.content }, blocks.toString())
     }
 
     // THE INLINE LAW (24/11): block text is literal, so a model's `code` and
     // **bold** used to arrive as raw markers; balanced pairs become runs.
     @Test
     fun inlineMarkdownBecomesRichRuns() {
-        val block = RichVoice.thinkingBlock("mirá `/tasks` y **esto** literal")
+        val block = RichVoice.thinkingBlocks("mirá `/tasks` y **esto** literal").single()
         val text = block["text"]!!.jsonArray
         assertEquals(5, text.size, text.toString())
         assertEquals("code", text[1].jsonObject["type"]!!.jsonPrimitive.content)
@@ -99,8 +110,8 @@ class RichVoiceTest {
 
     @Test
     fun plainTextStaysAStringAndAnUnpairedMarkerIsLeftVerbatim() {
-        assertTrue(RichVoice.thinkingBlock("sin marcadores")["text"] is JsonPrimitive)
-        val lone = RichVoice.thinkingBlock("un `backtick suelto")
+        assertTrue(RichVoice.thinkingBlocks("sin marcadores").single()["text"] is JsonPrimitive)
+        val lone = RichVoice.thinkingBlocks("un `backtick suelto").single()
         assertTrue(lone["text"] is JsonPrimitive, "no pair, no invention: ${lone["text"]}")
     }
 
@@ -108,7 +119,7 @@ class RichVoiceTest {
     // and a heading becomes a bold run — the CoT/answer look formatted, not raw.
     @Test
     fun bulletsAndHeadingsReadLikeThePhone() {
-        val block = RichVoice.thinkingBlock("## Plan\n- uno\n- dos")
+        val block = RichVoice.thinkingBlocks("## Plan\n- uno\n- dos").single()
         val runs = block["text"]!!.jsonArray
         val flat = runs.joinToString("") { run ->
             if (run is JsonPrimitive) run.content else run.jsonObject["text"]!!.jsonPrimitive.content

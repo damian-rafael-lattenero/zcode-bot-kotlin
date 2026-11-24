@@ -148,6 +148,7 @@ class LiveTelegram(
             val body = block["text"]?.let { it as? JsonPrimitive }?.content ?: ""
             when (block["type"]?.let { it as? JsonPrimitive }?.content) {
                 "pre" -> "<pre>${PyText.esc(body)}</pre>"
+                "paragraph" -> PyText.esc(body) // normal text, no container
                 "expandable_blockquote" -> "<blockquote expandable>${PyText.esc(body)}</blockquote>"
                 else -> "<blockquote>${PyText.esc(body)}</blockquote>"
             }

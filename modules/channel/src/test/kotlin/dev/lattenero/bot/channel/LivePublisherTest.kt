@@ -111,7 +111,7 @@ class LivePublisherTest {
             ?.get("blocks") as? JsonArray ?: return emptyList()
         return blocks.mapNotNull { b ->
             val obj = b as? JsonObject ?: return@mapNotNull null
-            if ((obj["type"] as? JsonPrimitive)?.content != "pullquote") return@mapNotNull null
+            if ((obj["type"] as? JsonPrimitive)?.content != "paragraph") return@mapNotNull null
             flatten(obj["text"])
         }
     }
@@ -292,9 +292,9 @@ class LivePublisherTest {
         publisher.tick() // the block sealed → the NATIVE expandable quote speaks, the card swaps
         // THE NATIVE THINKING (5/11): the whole block travels INSIDE the
         // rich message — the client collapses/expands it, no custom button
-        val rich = blockBodies(wire).firstOrNull { "expandable_blockquote" in it.first }
+        val rich = blockBodies(wire).firstOrNull { "paragraph" in it.first }
         assertTrue(rich != null, "the block's violet message spoke")
-        assertTrue("expandable_blockquote" in rich!!.first)
+        assertTrue("paragraph" in rich!!.first)
         // the swap's order: the card dies, the voice speaks, the card is
         // REBORN — delete → sendRichMessage(blocks) → birth sendRichMessage(html)
         val methods = wire.bodies.drop(afterBirth).map { it.second }
@@ -1185,7 +1185,7 @@ class LivePublisherTest {
         assertTrue("Paso 1" in digest!!.first, "the opening step carries its number")
         assertTrue("tras 🔧 Bash" in digest.first, "the step names the tool it followed")
         assertTrue("El fix consistió en X." in digest.first, "the conclusion rides the ✅ block")
-        assertTrue("pullquote" in digest.first, "the violet identity holds")
+        assertTrue("paragraph" in digest.first, "the violet identity holds")
         // the conclusion is the digest's LAST block
         val lastText = blockTexts(digest.first).lastOrNull()
         assertTrue(lastText?.startsWith("✅ Respuesta") == true, "the conclusion closes the digest: $lastText")
@@ -1199,7 +1199,6 @@ class LivePublisherTest {
         val taskId = "task-9"
         val hub = LiveHub()
         hub.apply(frame(taskId, "task_run_started", at = 1_000), nowMs = 1_000)
-        hub.apply(frame(taskId, "agent_thought_chunk", at = 1_050, "content" to JsonPrimitive("p")), nowMs = 1_050)
         val wire = Wire()
         val text = "x".repeat(9000)
         val publisher = publisher(wire, hub, finalTurn = { voiceOf(text) })
@@ -1263,7 +1262,7 @@ class LivePublisherTest {
         )
         now += 31_000L
         publisher.tick()
-        val thinking = blockBodies(wire).firstOrNull { "expandable_blockquote" in it.first }
+        val thinking = blockBodies(wire).firstOrNull { "paragraph" in it.first }
         assertTrue(thinking != null, "the CoT is a NATIVE expandable quote: ${wire.bodies.map { it.second }}")
     }
 

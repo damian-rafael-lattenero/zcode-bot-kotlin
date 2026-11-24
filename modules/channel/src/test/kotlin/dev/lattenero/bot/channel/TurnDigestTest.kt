@@ -92,9 +92,9 @@ class TurnDigestTest {
         assertEquals(1, pages.size)
         assertEquals(1, pages[0].size)
         assertEquals(VoiceBlock.Prose("solo la respuesta"), pages[0][0], "the pure core stays typed")
-        // the wire edge speaks the same block: pullquote, verbatim words
+        // the wire edge speaks the same block: paragraph, verbatim words
         val wire = TurnDigest.wire(pages[0]).single()
-        assertEquals("pullquote", wire["type"]!!.jsonPrimitive.content)
+        assertEquals("paragraph", wire["type"]!!.jsonPrimitive.content)
         assertEquals("solo la respuesta", wire["text"]!!.jsonPrimitive.content)
     }
 
@@ -120,7 +120,7 @@ class TurnDigestTest {
         )
         val page = pages.single()
         assertEquals(
-            listOf("pullquote", "pre", "pullquote"),
+            listOf("paragraph", "pre", "paragraph"),
             TurnDigest.wire(page).map { it["type"]!!.jsonPrimitive.content },
         )
         assertEquals("kotlin", (page[1] as VoiceBlock.Code).language)

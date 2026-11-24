@@ -908,7 +908,7 @@ class LivePublisher(
             } ?: return@forEach
             // the thinking: NATIVE expand/collapse (10.3's expandable quote)
             // — the custom toggle button retires with the rich client
-            if (richVoice && telegram.sendRich(config(), listOf(RichVoice.thinkingBlock(text))) != null) {
+            if (richVoice && telegram.sendRich(config(), RichVoice.thinkingBlocks(text)) != null) {
                 return@forEach
             }
             cotBlocks.speakCollapsed(

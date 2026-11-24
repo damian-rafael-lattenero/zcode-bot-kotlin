@@ -181,15 +181,15 @@ object TurnDigest {
 
     /**
      * THE WIRE EDGE: one page → the rich message's block params (`pre` with
-     * its language, `pullquote` for prose). Prose goes through
+     * its language, a plain `paragraph` for prose). Prose goes through
      * [RichVoice.inline]: the model's `code` and **bold** render as runs
-     * instead of arriving as raw markers (the 24/11 screenshot).
+     * instead of arriving as raw markers.
      */
     fun wire(page: List<VoiceBlock>): List<JsonObject> = page.map { block ->
         buildJsonObject {
             when (block) {
                 is VoiceBlock.Prose -> {
-                    put("type", "pullquote")
+                    put("type", "paragraph")
                     put("text", RichVoice.inline(block.text))
                 }
 

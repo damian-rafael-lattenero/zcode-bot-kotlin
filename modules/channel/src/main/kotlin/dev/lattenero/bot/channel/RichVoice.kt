@@ -21,16 +21,17 @@ import kotlinx.serialization.json.put
  *
  * The spec's laws honored here (core.telegram.org/bots/api 10.3):
  * - InputRichMessage takes exactly ONE of html/markdown/blocks — this
- *   builder speaks BLOCKS (the quote identity is not negotiable).
+ *   builder speaks BLOCKS.
  * - Block text is LITERAL RichText: no HTML escaping, ever (the spec's
  *   own warning) — the escaper's law does not apply to rich text.
- * - Prose rides `pullquote` (the styled quote = the violet), code rides
- *   `pre` with its fence language, thinking rides `expandable_blockquote`
- *   (10.3: collapses/expands NATIVELY — no custom toggle button).
+ * - Prose (the model's talk AND its thinking) rides plain `paragraph`
+ *   blocks — normal left-aligned formatted text, the owner's 24/11 call;
+ *   a paragraph per blank-line chunk. Code rides `pre` with its fence
+ *   language.
  */
 object RichVoice {
 
-    /** One violet message's wire params (sendRichMessage) — silent, like the card. */
+    /** One voice message's wire params (sendRichMessage) — silent, like the card. */
     fun compose(
         cfg: TgConfig,
         blocks: List<JsonObject>,
@@ -47,12 +48,12 @@ object RichVoice {
     /**
      * The prose's blocks: fenced code becomes `pre` blocks (the fence's
      * language rides), a nu BOX TABLE becomes a native `table` block (the
-     * phone shows real columns), everything else becomes `pullquote` blocks
-     * — the violet. One block per shape; each capped at [BLOCK_CP].
+     * phone shows real columns), everything else becomes `paragraph` blocks
+     * — one per blank-line chunk, each capped at [BLOCK_CP].
      */
     fun proseBlocks(text: String): List<JsonObject> = splitFences(text)
         .flatMap { (isCode, language, chunk) -> blocksOf(isCode, language, chunk) }
-        .ifEmpty { listOf(pullquote(PyText.take(text, BLOCK_CP))) }
+        .ifEmpty { paragraphsOf(text) }
 
     private fun blocksOf(isCode: Boolean, language: String?, chunk: String): List<JsonObject> {
         val body = chunk.trim('\n')
@@ -73,14 +74,11 @@ object RichVoice {
 
     /** Prose runs and tables, in order: the parser is [NuTable]'s, shared with the fleet's HTML. */
     private fun textBlocks(body: String): List<JsonObject> {
-        val segments = NuTable.parse(body) ?: return listOf(pullquote(PyText.take(body, BLOCK_CP)))
-        return segments.mapNotNull { segment ->
+        val segments = NuTable.parse(body) ?: return paragraphsOf(body)
+        return segments.flatMap { segment ->
             when (segment) {
-                is NuTable.Segment.Prose -> segment.lines.joinToString("\n")
-                    .takeIf { it.isNotBlank() }
-                    ?.let { pullquote(PyText.take(it, BLOCK_CP)) }
-
-                is NuTable.Segment.Table -> tableOrProse(segment)
+                is NuTable.Segment.Prose -> paragraphsOf(segment.lines.joinToString("\n"))
+                is NuTable.Segment.Table -> listOf(tableOrProse(segment))
             }
         }
     }
@@ -95,7 +93,7 @@ object RichVoice {
         val columns = table.rows.firstOrNull()?.size ?: 0
         if (columns == 0 || columns > MAX_TABLE_COLUMNS) {
             val flat = table.rows.joinToString("\n") { row -> row.joinToString(" · ") }
-            return pullquote(PyText.take(flat, BLOCK_CP))
+            return paragraph(flat)
         }
         return buildJsonObject {
             put("type", "table")
@@ -119,16 +117,25 @@ object RichVoice {
         }
     }
 
-    /** The thinking block: native expand/collapse, the whole text behind one tap. */
-    fun thinkingBlock(text: String): JsonObject = buildJsonObject {
-        put("type", "expandable_blockquote")
+    /**
+     * THE THINKING (24/11, the owner): the SAME plain paragraphs as the talk
+     * — normal HTML text, left-aligned, formatted; no special quote block.
+     */
+    fun thinkingBlocks(text: String): List<JsonObject> = paragraphsOf(text)
+
+    /** Blank-line-separated chunks as paragraph blocks, each inline-formatted and capped. */
+    internal fun paragraphsOf(text: String): List<JsonObject> = text
+        .split(PARAGRAPH_BREAK)
+        .mapNotNull { chunk -> chunk.trim().takeIf { it.isNotEmpty() } }
+        .map { paragraph(it) }
+        .ifEmpty { listOf(paragraph(text)) }
+
+    private fun paragraph(text: String): JsonObject = buildJsonObject {
+        put("type", "paragraph")
         put("text", inline(PyText.take(text, BLOCK_CP)))
     }
 
-    private fun pullquote(text: String): JsonObject = buildJsonObject {
-        put("type", "pullquote")
-        put("text", inline(text))
-    }
+    private val PARAGRAPH_BREAK = Regex("\\n\\s*\\n")
 
     /**
      * INLINE MARKDOWN (24/11): block text is LITERAL RichText, so a model's
