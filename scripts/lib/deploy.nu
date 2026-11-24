@@ -132,3 +132,40 @@ export def tail-lines [path: string, count: int]: nothing -> list<string> {
     }
     open --raw $path | lines | last $count
 }
+
+# The arming predicate: a heartbeat NEWER than this deploy + zconn state
+# present. The files survive restarts, so mere existence false-passed a
+# daemon that never booted (measured 2026-11-02).
+export def armed? [hb: path, zconn: path, since: int]: nothing -> bool {
+    (($hb | path type) == "file") and ((^stat -f %m $hb | str trim | into int) >= $since) and (($zconn | path type) == "file")
+}
+
+# Event-driven arming wait (the waiting law): `watch` on the state dir wakes
+# us the moment the heartbeat is born or touched; `job recv --timeout` is the
+# deadline. The catch re-checks one last time (covers the pre-watch race and
+# a heartbeat landing just past the deadline). Basename filter in the each —
+# `--glob` matches the resolved absolute path and filters everything out
+# (measured 13/11).
+export def wait-armed [hb: path, zconn: path, since: int, deadline: duration]: nothing -> bool {
+    let dir: string = ($hb | path dirname)
+    let base: string = ($hb | path basename)
+    let watcher: int = (job spawn {
+        watch $dir
+        | each {|ev|
+            if ($ev.path | path basename) == $base {
+                if (armed? $hb $zconn $since) {
+                    'armed' | job send 0
+                }
+            }
+        }
+        | ignore
+    })
+    let ok: bool = (try {
+        job recv --timeout $deadline
+        true
+    } catch {
+        armed? $hb $zconn $since
+    })
+    try { job kill $watcher } catch { }
+    $ok
+}
