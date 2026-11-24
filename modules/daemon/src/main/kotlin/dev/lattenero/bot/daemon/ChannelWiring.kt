@@ -1875,7 +1875,7 @@ private suspend fun dispatchMessage(
         // ride the deploy flow (launchd one-shot: a ten-minute build must
         // never die at the runner's budget) and speak through their own say.
         FleetCommands.isFleet(update.text) ->
-            fleetDispatch(update.text, update.fromId, cfg.ownerUserId, logsDir, deployFlow, speak)
+            fleetDispatch(api, cfg, update.text, update.fromId, cfg.ownerUserId, logsDir, deployFlow, speak)
 
         else -> commands.handle(update.text, update.updateId)
             ?.let { reply -> speakReply(mirror, cfg.chatId, reply, speak) }
@@ -1885,9 +1885,12 @@ private suspend fun dispatchMessage(
 /**
  * /fleet_<verbo> — the family's front door: the deploy legs ride [DeployFlow]
  * (launchd one-shot, and the flow speaks for itself), everything else answers
- * through the commands lane's speak.
+ * through the commands lane — as a RICH message when the body is table-shaped
+ * (Telegram renders native tables since Bot API 10.1), HTML `<pre>` otherwise.
  */
 private suspend fun fleetDispatch(
+    api: TgApi,
+    cfg: TgConfig,
     text: String,
     fromId: Long?,
     owner: Long?,
@@ -1900,7 +1903,34 @@ private suspend fun fleetDispatch(
         deploy.onText(leg, fromId)
         return
     }
-    speak(fleetNow(text, fromId, owner, logsDir), false, null)
+    val reply = fleetNow(text, fromId, owner, logsDir)
+    val rich = reply.rich
+    if (rich != null && sendRich(api, cfg, rich)) return
+    speak(reply.plain, false, null)
+}
+
+/**
+ * THE TABLE DOOR (24/11): `sendMessage` cannot render a table — a nu box table
+ * wraps into a wall on a phone. Bot API 10.1's sendRichMessage renders GFM
+ * tables natively, so a table-shaped answer rides it; any rejection (old
+ * server, bad body, rate) falls back to the HTML `<pre>` the caller holds.
+ */
+@Suppress("TooGenericExceptionCaught") // any rejection falls back to the <pre> the caller already holds
+private suspend fun sendRich(api: TgApi, cfg: TgConfig, markdown: String): Boolean = try {
+    api.call(
+        "sendRichMessage",
+        buildJsonObject {
+            put("chat_id", cfg.chatId)
+            put("rich_message", buildJsonObject { put("markdown", markdown) })
+        },
+    )
+    logger.info { "fleet rich message sent (${markdown.length} chars)" }
+    true
+} catch (e: CancellationException) {
+    throw e // shutdown keeps cancelling — never a silent fallback mid-cancel
+} catch (e: Exception) {
+    logger.warn { "fleet rich message rejected (${e.message}) — falling back to the HTML render" }
+    false
 }
 
 /**
@@ -1909,12 +1939,12 @@ private suspend fun fleetDispatch(
  * answer the table itself. A verb the hub does not know is refused BY NAME
  * with the near matches; a discovery that fails says so before anything runs.
  */
-private fun fleetNow(text: String, fromId: Long?, owner: Long?, logsDir: File): String {
+private fun fleetNow(text: String, fromId: Long?, owner: Long?, logsDir: File): FleetCommands.Reply {
     val call = FleetCommands.callOf(text)
     val verbs = discoverVerbs(logsDir)
     val verb = call.verb ?: "list"
     return if (verb == "list") {
-        FleetCommands.listText(verbs)
+        FleetCommands.Reply(FleetCommands.listText(verbs), null)
     } else {
         fleetRun(verb, call.argv, fromId, owner, verbs, logsDir)
     }
@@ -1938,44 +1968,51 @@ private fun fleetRun(
     owner: Long?,
     verbs: List<FleetCommands.Verb>,
     logsDir: File,
-): String {
+): FleetCommands.Reply {
     val refusal = FleetCommands.gate(fromId, owner)
-    return refusal ?: if (verbs.isEmpty()) {
-        FleetCommands.DISCOVERY_FAILED
+    return if (refusal != null) {
+        FleetCommands.Reply(refusal, null)
+    } else if (verbs.isEmpty()) {
+        FleetCommands.Reply(FleetCommands.DISCOVERY_FAILED, null)
     } else {
         verbs.firstOrNull { it.name == verb }?.let { row -> runVerb(row, argv, logsDir) }
-            ?: FleetCommands.unknown(verb, verbs)
+            ?: FleetCommands.Reply(FleetCommands.unknown(verb, verbs), null)
     }
 }
 
-/** One verb's run: the hub's script, the owner's words, the shared render. */
-private fun runVerb(row: FleetCommands.Verb, argv: List<String>, logsDir: File): String {
-    if (FleetCommands.missingRequired(row.arguments, argv)) return FleetCommands.usageOf(row)
+/** One verb's run: the hub's script, the owner's words, the two renders. */
+private fun runVerb(row: FleetCommands.Verb, argv: List<String>, logsDir: File): FleetCommands.Reply {
+    if (FleetCommands.missingRequired(row.arguments, argv)) {
+        return FleetCommands.Reply(FleetCommands.usageOf(row), null)
+    }
     val logFile = File(logsDir, FleetCommands.logFileFor(row.name))
     val mode = argv.joinToString(" ").ifEmpty { "-" }
     return when (val run = NuScriptRunner.run(row.script, argv, logFile)) {
         is NuScriptRunner.Run.Ran -> {
             // the dispatch's own line: the next "no anda" has an answer here
             logger.info { "fleet ${row.name} [${mode}] -> exit ${run.exit} in ${run.tookMs}ms" }
-            NuScriptRunner.render(
-                emoji = "🧰",
-                label = "fleet " + row.name,
-                mode = mode,
-                exit = run.exit,
-                tookMs = run.tookMs,
-                out = run.out,
-                logPath = logFile.absolutePath,
+            FleetCommands.Reply(
+                plain = NuScriptRunner.render(
+                    emoji = "🧰",
+                    label = "fleet " + row.name,
+                    mode = mode,
+                    exit = run.exit,
+                    tookMs = run.tookMs,
+                    out = run.out,
+                    logPath = logFile.absolutePath,
+                ),
+                rich = FleetCommands.richOf(row, argv, run.exit, run.tookMs, run.out),
             )
         }
 
         is NuScriptRunner.Run.TimedOut -> {
             logger.warn { "fleet ${row.name} [${mode}] TIMED OUT after ${NuScriptRunner.BUDGET_SECONDS}s" }
-            FleetCommands.timeout(row.name, NuScriptRunner.BUDGET_SECONDS)
+            FleetCommands.Reply(FleetCommands.timeout(row.name, NuScriptRunner.BUDGET_SECONDS), null)
         }
 
         is NuScriptRunner.Run.Errored -> {
             logger.warn { "fleet ${row.name} [${mode}] could not spawn: ${run.reason}" }
-            FleetCommands.ERRORED + run.reason
+            FleetCommands.Reply(FleetCommands.ERRORED + run.reason, null)
         }
     }
 }

@@ -92,6 +92,24 @@ internal object FleetCommands {
     /** The discovery run has its own log — it never overwrites a verb's last run. */
     internal const val DISCOVERY_LOG = "fleet-discovery.log"
 
+    /** A fleet answer in the two dialects: HTML for sendMessage, markdown for sendRichMessage. */
+    internal data class Reply(val plain: String, val rich: String?)
+
+    /**
+     * The rich-markdown body of a verb's run. Bot API 10.1 renders TABLES
+     * natively from GFM markdown, so a clean nu table becomes a real table on
+     * the phone; anything the parser refuses (wrapped cells) rides a fenced
+     * code block — the monospace truth, never invented columns.
+     */
+    internal fun richOf(row: Verb, argv: List<String>, exit: Int, tookMs: Long, out: String): String {
+        val mode = argv.joinToString(" ").ifEmpty { "-" }
+        val body = NuTable.toRichMarkdown(out.trimEnd()) ?: ("```\n" + out.trimEnd() + "\n```")
+        val verdict = if (exit == 0) "" else " · exit $exit"
+        return "**🧰 fleet ${row.name}** ($mode) · ${tookMs / MS_PER_SECOND}s$verdict\n\n$body"
+    }
+
+    private const val MS_PER_SECOND = 1000L
+
     /**
      * Discovery parse: `fleet list --json` -> rows. Tolerant by design — a
      * malformed payload answers empty and the caller says it could not read
