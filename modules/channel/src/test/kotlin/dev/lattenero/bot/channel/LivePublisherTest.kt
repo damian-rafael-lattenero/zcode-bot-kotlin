@@ -112,8 +112,18 @@ class LivePublisherTest {
         return blocks.mapNotNull { b ->
             val obj = b as? JsonObject ?: return@mapNotNull null
             if ((obj["type"] as? JsonPrimitive)?.content != "pullquote") return@mapNotNull null
-            (obj["text"] as? JsonPrimitive)?.content
+            flatten(obj["text"])
         }
+    }
+
+    /** RichText back to its logical text: strings as-is, inline objects by their `text`. */
+    private fun flatten(element: JsonElement?): String? = when (element) {
+        is JsonPrimitive -> element.content
+        is JsonArray -> element.joinToString("") { part ->
+            if (part is JsonPrimitive) part.content else (part as? JsonObject)?.let { flatten(it["text"]) }.orEmpty()
+        }
+
+        else -> null
     }
 
     /**

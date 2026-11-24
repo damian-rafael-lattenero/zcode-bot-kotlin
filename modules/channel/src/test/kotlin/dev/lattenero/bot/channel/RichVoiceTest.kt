@@ -83,4 +83,24 @@ class RichVoiceTest {
         val blocks = RichVoice.proseBlocks(text)
         assertEquals(listOf("pullquote"), blocks.map { it["type"]!!.jsonPrimitive.content }, blocks.toString())
     }
+
+    // THE INLINE LAW (24/11): block text is literal, so a model's `code` and
+    // **bold** used to arrive as raw markers; balanced pairs become runs.
+    @Test
+    fun inlineMarkdownBecomesRichRuns() {
+        val block = RichVoice.thinkingBlock("mirá `/tasks` y **esto** literal")
+        val text = block["text"]!!.jsonArray
+        assertEquals(5, text.size, text.toString())
+        assertEquals("code", text[1].jsonObject["type"]!!.jsonPrimitive.content)
+        assertEquals("/tasks", text[1].jsonObject["text"]!!.jsonPrimitive.content)
+        assertEquals("bold", text[3].jsonObject["type"]!!.jsonPrimitive.content)
+        assertEquals("esto", text[3].jsonObject["text"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun plainTextStaysAStringAndAnUnpairedMarkerIsLeftVerbatim() {
+        assertTrue(RichVoice.thinkingBlock("sin marcadores")["text"] is JsonPrimitive)
+        val lone = RichVoice.thinkingBlock("un `backtick suelto")
+        assertTrue(lone["text"] is JsonPrimitive, "no pair, no invention: ${lone["text"]}")
+    }
 }

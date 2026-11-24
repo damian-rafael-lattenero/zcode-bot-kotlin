@@ -2,6 +2,8 @@ package dev.lattenero.bot.channel
 
 import dev.lattenero.bot.contracts.PyText
 import dev.lattenero.bot.transport.TgConfig
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.add
@@ -120,13 +122,46 @@ object RichVoice {
     /** The thinking block: native expand/collapse, the whole text behind one tap. */
     fun thinkingBlock(text: String): JsonObject = buildJsonObject {
         put("type", "expandable_blockquote")
-        put("text", PyText.take(text, BLOCK_CP))
+        put("text", inline(PyText.take(text, BLOCK_CP)))
     }
 
     private fun pullquote(text: String): JsonObject = buildJsonObject {
         put("type", "pullquote")
-        put("text", text)
+        put("text", inline(text))
     }
+
+    /**
+     * INLINE MARKDOWN (24/11): block text is LITERAL RichText, so a model's
+     * `` `code` `` and `**bold**` arrived as raw markers on the phone. This
+     * tiny converter turns balanced single-backtick spans into `code` runs
+     * and `**…**` into `bold` runs — everything else stays verbatim.
+     * Conservative by design: a marker with no pair is left as text.
+     */
+    internal fun inline(markdown: String): JsonElement {
+        val out = mutableListOf<JsonElement>()
+        var last = 0
+        var matched = false
+        for (m in INLINE.findAll(markdown)) {
+            matched = true
+            if (m.range.first > last) out += JsonPrimitive(markdown.substring(last, m.range.first))
+            val code = m.groupValues[1]
+            out += buildJsonObject {
+                if (code.isNotEmpty()) {
+                    put("type", "code")
+                    put("text", code)
+                } else {
+                    put("type", "bold")
+                    put("text", m.groupValues[2])
+                }
+            }
+            last = m.range.last + 1
+        }
+        if (!matched) return JsonPrimitive(markdown)
+        if (last < markdown.length) out += JsonPrimitive(markdown.substring(last))
+        return JsonArray(out)
+    }
+
+    private val INLINE = Regex("`([^`\\n]+)`|\\*\\*([^*\\n]+)\\*\\*")
 
     /**
      * The fence split: (isCode, language, chunk) in order. A ``` line
