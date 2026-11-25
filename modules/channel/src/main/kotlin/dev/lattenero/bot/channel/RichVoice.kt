@@ -124,8 +124,14 @@ object RichVoice {
      * THE THINKING (24/11, the owner): a PULLQUOTE — the pink background is
      * the identity of the model's reasoning — with the Markdown shaped
      * inline (code/bold/bullets/headings), never collapsed.
+     *
+     * THE HEADER (the owner, 25/11: the rich thinking reached the phone with
+     * no label at all — the 📖 only lived in the classic fallback): every
+     * block opens with `📖 CoT:` (numbered when the caller knows the block),
+     * the same first-line law the digest's `🧾 Digest:` obeys.
      */
-    fun thinkingBlocks(text: String): List<JsonObject> = listOf(pullquote(text))
+    fun thinkingBlocks(text: String, number: Int? = null): List<JsonObject> =
+        listOf(pullquote("📖 CoT" + (number?.let { " $it" } ?: "") + ":\n\n" + text))
 
     /** Blank-line-separated chunks as paragraph blocks, each inline-formatted and capped. */
     internal fun paragraphsOf(text: String): List<JsonObject> = text

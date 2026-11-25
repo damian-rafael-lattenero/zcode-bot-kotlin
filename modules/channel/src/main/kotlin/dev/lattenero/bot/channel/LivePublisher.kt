@@ -926,8 +926,10 @@ class LivePublisher(
                 else -> state.cotBlocks.getOrNull(block - 1)
             } ?: return@forEach
             // the thinking: NATIVE expand/collapse (10.3's expandable quote)
-            // — the custom toggle button retires with the rich client
-            if (richVoice && telegram.sendRich(config(), RichVoice.thinkingBlocks(text)) != null) {
+            // — the custom toggle button retires with the rich client. The
+            // block's number rides the header when the registry knows it.
+            val thinking = RichVoice.thinkingBlocks(text, block.takeIf { it > 0 })
+            if (richVoice && telegram.sendRich(config(), thinking) != null) {
                 return@forEach
             }
             cotBlocks.speakCollapsed(

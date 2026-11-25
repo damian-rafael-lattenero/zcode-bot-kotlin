@@ -1,5 +1,6 @@
 package dev.lattenero.bot.channel
 
+import dev.lattenero.bot.contracts.PyText
 import dev.lattenero.bot.transport.TgConfig
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonArray
@@ -55,8 +56,9 @@ class RichVoiceTest {
         assertEquals(1, blocks.size)
         val block = blocks.single()
         assertEquals("pullquote", block["type"]!!.jsonPrimitive.content)
-        // the cap speaks: 3500 cp, never a wall beyond the client's render
-        assertEquals(3500, block["text"]!!.jsonPrimitive.content.length)
+        // the cap speaks: 3500 CODE POINTS (the emoji's two UTF-16 units
+        // must not steal a character), never a wall beyond the client's render
+        assertEquals(3500, PyText.cpLength(block["text"]!!.jsonPrimitive.content))
     }
 
     @Test
@@ -124,8 +126,8 @@ class RichVoiceTest {
         val flat = runs.joinToString("") { run ->
             if (run is JsonPrimitive) run.content else run.jsonObject["text"]!!.jsonPrimitive.content
         }
-        assertEquals("Plan\n• uno\n• dos", flat)
-        assertEquals("bold", runs[0].jsonObject["type"]!!.jsonPrimitive.content)
+        assertEquals("📖 CoT:\n\nPlan\n• uno\n• dos", flat, "the header leads, then the shaped lines")
+        assertEquals("bold", runs[1].jsonObject["type"]!!.jsonPrimitive.content, "the heading is the first bold run")
     }
 
     // THE CLASSIC LANE (24/11): the same shaping as HTML — escaped text with

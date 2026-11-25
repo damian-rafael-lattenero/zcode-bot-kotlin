@@ -86,14 +86,21 @@ class TurnDigestTest {
     }
 
     @Test
-    fun aSingleStepRendersAsAQuoteAsAlways() {
+    fun aSingleStepRendersAsAQuoteBehindTheDigestHeader() {
         val pages = TurnDigest.pages(TurnVoice(listOf(TurnProse("solo la respuesta"))))
         assertEquals(1, pages.size)
         assertEquals(1, pages[0].size)
-        assertEquals(VoiceBlock.Prose("solo la respuesta"), pages[0][0], "the pure core stays typed")
+        assertEquals(
+            VoiceBlock.Prose("🧾 Digest:\n\nsolo la respuesta"),
+            pages[0][0],
+            "the pure core stays typed and the header rides the first block",
+        )
         // the classic edge speaks the same block: the words quoted, so the
         // bot's voice wears the CoT's own highlight (the owner, 25/11)
-        assertEquals("<blockquote>solo la respuesta</blockquote>", TurnDigest.htmlOf(pages[0]))
+        assertEquals(
+            "<blockquote>🧾 Digest:\n\nsolo la respuesta</blockquote>",
+            TurnDigest.htmlOf(pages[0]),
+        )
     }
 
     @Test
@@ -106,7 +113,10 @@ class TurnDigestTest {
             ),
         )
         val texts = TurnDigest.pages(voice).flatten().map { it.text }
-        assertTrue(texts[0].startsWith("Paso 1") && "hablo primero" in texts[0])
+        assertTrue(
+            texts[0].startsWith("🧾 Digest:\n\nPaso 1") && "hablo primero" in texts[0],
+            "the digest opens with its header, then the numbered step: ${texts[0].take(60)}",
+        )
         assertTrue(texts.any { it.startsWith("Paso 2 · tras 🔧 Bash") && "hablo tras la tool" in it })
         assertTrue(texts.last().startsWith("✅ Respuesta") && texts.last().endsWith("el final"))
     }
@@ -120,7 +130,7 @@ class TurnDigestTest {
         assertEquals("kotlin", (page[1] as VoiceBlock.Code).language)
         val html = TurnDigest.htmlOf(page)
         assertTrue("<pre><code class=\"language-kotlin\">val x = 1</code></pre>" in html, html)
-        assertTrue(html.startsWith("<blockquote>mira:</blockquote>"), html)
+        assertTrue(html.startsWith("<blockquote>🧾 Digest:\n\nmira:</blockquote>"), html)
         assertTrue(html.endsWith("<blockquote>fin</blockquote>"), html)
     }
 
@@ -142,7 +152,8 @@ class TurnDigestTest {
         val pages = TurnDigest.pages(TurnVoice(listOf(TurnProse(text))))
         val blocks = pages.flatten()
         assertTrue(blocks.all { PyText.cpLength(it.text) <= RichVoice.BLOCK_CP })
-        assertEquals(text.trim('\n'), blocks.joinToString("") { it.text })
+        // the header rides the first chunk: the continuation law still holds
+        assertEquals("🧾 Digest:\n\n" + text.trim('\n'), blocks.joinToString("") { it.text })
     }
 
     @Test

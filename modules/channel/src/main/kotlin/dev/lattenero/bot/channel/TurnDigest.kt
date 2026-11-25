@@ -153,15 +153,24 @@ object TurnDigest {
      *
      * The label rides INSIDE the step's first prose block (the label line,
      * then the words); a step opening with a fence speaks its label as its
-     * own tiny pullquote, the code follows clean. A single-step turn renders
-     * bare — the voice alone, exactly today's shape.
+     * own tiny pullquote, the code follows clean.
+     *
+     * THE FIRST LINE NAMES THE MESSAGE (the owner, 25/11): every digest opens
+     * with [HEADER] — a distinctive glyph plus the word — so the turn's own
+     * summary is recognizable at a glance in a thread full of cards and
+     * boxes. It rides INSIDE the first block, so the continuation law (the
+     * chunks concatenate to the whole) stays honest.
      */
     fun pages(voice: TurnVoice): List<List<VoiceBlock>> {
         val blocks = mutableListOf<VoiceBlock>()
         val total = voice.segments.size
         voice.segments.forEachIndexed { index, segment ->
             val label = labelOf(index, total, segment.afterTool)
-            val full = if (label == null) segment.text else "$label\n\n${segment.text}"
+            val full = listOfNotNull(
+                HEADER.takeIf { index == 0 },
+                label,
+                segment.text,
+            ).joinToString("\n\n")
             for ((isCode, language, chunk) in RichVoice.splitFences(full)) {
                 var rest = chunk.trim('\n')
                 while (rest.isNotEmpty()) {
@@ -173,6 +182,9 @@ object TurnDigest {
         }
         return pack(blocks)
     }
+
+    /** The digest's first line — the receipt glyph (`📋` is the plan, `📖` the CoT). */
+    const val HEADER: String = "🧾 Digest:"
 
     /** The page's plain shape — the degraded speak leg's text (escaping happens at the leg). */
     fun pageText(page: List<VoiceBlock>): String = page.joinToString("\n\n") { it.text }
