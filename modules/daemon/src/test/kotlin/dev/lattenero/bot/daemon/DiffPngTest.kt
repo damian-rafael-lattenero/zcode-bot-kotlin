@@ -38,6 +38,20 @@ class DiffPngTest {
     }
 
     @Test
+    fun `a diff with one side only collapses to one column`() {
+        // a fresh file is all additions: an empty left column would waste
+        // half the image on the phone
+        val adds = File(dir, "adds.png")
+        val both = File(dir, "both.png")
+        assertTrue(DiffPng.render("+ 7 │ val fresh = true", adds))
+        assertTrue(DiffPng.render("- 1 │ val a = true\n+ 1 │ val b = false\n- 2 │ val c = 1\n+ 2 │ val d = 2", both))
+        val single = PngRender.dimensions(adds.readBytes())!!
+        val pair = PngRender.dimensions(both.readBytes())!!
+        assertTrue(single.first < pair.first, "the one-sided diff is narrower: ${single.first} < ${pair.first}")
+        assertTrue(single.second < pair.second, "and shorter than two rows")
+    }
+
+    @Test
     fun `a wide diff clips instead of blowing the canvas`() {
         val wide = "+ 1 │ " + "x".repeat(400)
         val out = File(dir, "wide.png")

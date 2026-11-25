@@ -15,6 +15,10 @@ import javax.imageio.ImageIO
  * CHANGED MIDDLE emphasised, on the same teal canvas the other image doors
  * use. No browser, no external binary — AWT only, headless.
  *
+ * A diff that only adds (a fresh file) or only deletes carries ONE column:
+ * the empty side would waste half the image, and the owner reads this on a
+ * phone.
+ *
  * `render` is the edge: the pure [DiffShot.Plan] goes in, a PNG comes out.
  * [paint] and [drawRow] place the pixels; [Layout] measures once so the same
  * diff always draws the same image.
@@ -38,11 +42,20 @@ object DiffPng {
     private val DEL_HOT = Color(0x7A, 0x2E, 0x36)
     private val ADD_HOT = Color(0x2E, 0x6B, 0x45)
 
+    /** Which columns a plan earns: both, or the only side that carries lines. */
+    private enum class Sides { BOTH, OLD, NEW }
+
+    private fun sidesOf(plan: DiffShot.Plan): Sides = when {
+        plan.rows.none { it.old != null } -> Sides.NEW
+        plan.rows.none { it.new != null } -> Sides.OLD
+        else -> Sides.BOTH
+    }
+
     /** Draws the diff into [target]; false when the text carries no rows. */
     fun render(diff: String, target: File, title: String? = null): Boolean {
         val plan = DiffShot.rows(diff)
         if (plan.rows.isEmpty()) return false
-        val layout = Layout(title)
+        val layout = Layout(title, sidesOf(plan))
         val canvas = BufferedImage(layout.width, layout.height(plan), BufferedImage.TYPE_INT_RGB)
         val g = canvas.createGraphics()
         try {
@@ -75,22 +88,16 @@ object DiffPng {
     }
 
     private fun drawRow(g: Graphics2D, row: DiffShot.Row, layout: Layout, y: Int) {
-        if (!row.same) {
-            row.old?.let {
-                g.color = DEL_CELL
-                g.fillRect(PAD, y - layout.ascent, layout.gutterW + layout.colW, LINE_HEIGHT)
-            }
-            row.new?.let {
-                g.color = ADD_CELL
-                g.fillRect(layout.rightX - layout.gutterW, y - layout.ascent, layout.gutterW + layout.colW, LINE_HEIGHT)
-            }
-        }
-        g.color = GUTTER
-        row.oldNo?.let { g.drawString(it.toString(), PAD, y) }
-        row.newNo?.let { g.drawString(it.toString(), layout.rightX - layout.gutterW, y) }
         val spans = spansOf(row)
-        drawSide(g, row.old, layout.leftX, y, spans.first, if (row.same) null else DEL_HOT, layout)
-        drawSide(g, row.new, layout.rightX, y, spans.second, if (row.same) null else ADD_HOT, layout)
+        // a changed row tints its cells; a context row draws no cell at all
+        val base = if (row.same) null else DEL_CELL
+        val other = if (row.same) null else ADD_CELL
+        if (layout.showsOld) {
+            drawSide(g, layout.oldX, layout.oldGutterX, row.oldNo, row.old, spans.first, base, DEL_HOT, layout, y)
+        }
+        if (layout.showsNew) {
+            drawSide(g, layout.newX, layout.newGutterX, row.newNo, row.new, spans.second, other, ADD_HOT, layout, y)
+        }
     }
 
     /** The pair's changed middles; a lone side has none (its whole cell is hot). */
@@ -105,19 +112,33 @@ object DiffPng {
         }
     }
 
-    /** The line in grey plus its changed middle on a hotter cell ([hot] null = context). */
+    /**
+     * One column: the number in the gutter, the line in grey, and — when the
+     * row changed and the two sides share words — the changed middle on a
+     * hotter cell. [cell] null = a context row.
+     */
+    @Suppress("LongParameterList") // the position IS the call: x, gutter, number, words, span, colours
     private fun drawSide(
         g: Graphics2D,
-        line: String?,
         x: Int,
-        y: Int,
+        gutterX: Int,
+        no: Int?,
+        line: String?,
         span: IntRange,
-        hot: Color?,
+        cell: Color?,
+        hot: Color,
         layout: Layout,
+        y: Int,
     ) {
         if (line == null) return
         val shown = clip(line, COL_CHARS)
-        if (hot != null && !span.isEmpty() && span.last < shown.length) {
+        if (cell != null) {
+            g.color = cell
+            g.fillRect(gutterX, y - layout.ascent, layout.gutterW + layout.colW, LINE_HEIGHT)
+        }
+        g.color = GUTTER
+        no?.let { g.drawString(it.toString(), gutterX, y) }
+        if (cell != null && !span.isEmpty() && span.last < shown.length) {
             g.color = hot
             g.fillRect(
                 x - 2 + span.first * layout.charW,
@@ -134,7 +155,7 @@ object DiffPng {
         if (text.length <= max) text else text.take(max - 1) + "…"
 
     /** The one measurement pass: font metrics and every x/y the rows use. */
-    private class Layout(title: String?) {
+    private class Layout(title: String?, sides: Sides) {
         val font: Font = Font(Font.MONOSPACED, Font.PLAIN, FONT_SIZE)
         private val metrics = BufferedImage(1, 1, BufferedImage.TYPE_INT_RGB).createGraphics().also {
             it.font = font
@@ -144,9 +165,15 @@ object DiffPng {
         val colW: Int = charW * COL_CHARS
         val gutterW: Int = charW * GUTTER_CHARS
         val titleH: Int = if (title == null) 0 else LINE_HEIGHT + 8
-        val width: Int = PAD * 2 + gutterW * 2 + colW * 2 + GAP
-        val leftX: Int = PAD + gutterW
-        val rightX: Int = leftX + colW + GAP + gutterW
+        val showsOld: Boolean = sides != Sides.NEW
+        val showsNew: Boolean = sides != Sides.OLD
+        val oldGutterX: Int = PAD
+        val oldX: Int = PAD + gutterW
+        val newGutterX: Int = if (showsOld) oldX + colW + GAP else PAD
+        val newX: Int = newGutterX + gutterW
+        val width: Int = PAD * 2 + column(showsOld) + (if (showsOld && showsNew) GAP else 0) + column(showsNew)
+
+        private fun column(shown: Boolean): Int = if (shown) gutterW + colW else 0
 
         fun height(plan: DiffShot.Plan): Int =
             PAD * 2 + titleH + (plan.rows.size + if (plan.truncated) 1 else 0) * LINE_HEIGHT
