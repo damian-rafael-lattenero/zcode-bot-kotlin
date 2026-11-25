@@ -35,6 +35,7 @@ class PngTapsTest {
         png: ByteArray = "png".toByteArray(),
         sources: MutableList<String> = mutableListOf(),
         writesFile: Boolean = true,
+        bytes: MutableList<ByteArray> = mutableListOf(),
     ): PngTaps {
         var i = 0
         return PngTaps(
@@ -43,6 +44,7 @@ class PngTapsTest {
                 if (uploadFails) throw IllegalStateException("boom")
                 fields += sent
                 uploaded += file
+                bytes += file.readBytes() // the temp dies right after the tap
             },
             exec = { argv ->
                 calls += argv
@@ -67,6 +69,26 @@ class PngTapsTest {
             b[at + 2] = (value shr 8).toByte()
             b[at + 3] = value.toByte()
         }
+    }
+
+    @Test
+    fun `a diff rides the drawer, never silicon`() {
+        // the owner, 25/11: an edit's image IS the side-by-side view — the
+        // drawer paints it in the JVM, so silicon never even runs
+        val shots = PngShots()
+        val id = shots.register(PngRender.Shot("- 4 │ val old = 1\n+ 5 │ val new = 2", "diff"))
+        val uploaded = mutableListOf<File>()
+        val calls = mutableListOf<List<String>>()
+        val bytes = mutableListOf<ByteArray>()
+        val answer = runBlocking {
+            taps(shots, uploaded = uploaded, calls = calls, bytes = bytes).shoot(id)
+        }
+        assertNull(answer, "the image IS the feedback")
+        assertTrue(calls.isEmpty(), "the diff never reaches silicon")
+        assertEquals(1, uploaded.size)
+        assertEquals(0x89.toByte(), bytes.single()[0], "the upload starts with the PNG signature")
+        assertTrue(PngRender.fitsPhoto(bytes.single()), "the canvas is a legal photo")
+        assertTrue(dir.listFiles().orEmpty().isEmpty(), "both temp files die with the tap")
     }
 
     @Test
