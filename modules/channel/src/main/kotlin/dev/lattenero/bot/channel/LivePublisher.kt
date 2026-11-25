@@ -1012,7 +1012,7 @@ class LivePublisher(
         )
         logger.info {
             "box born: id=$boxId message_id=$mid pages=${pages.pages.size} " +
-                "language=${pages.language}${if (bornOpen) " BORN OPEN" else ""}"
+                "language=${pages.language} png=${pngId ?: "none"}${if (bornOpen) " BORN OPEN" else ""}"
         }
     }
 

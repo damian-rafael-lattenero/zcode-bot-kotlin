@@ -34,6 +34,7 @@ class PngTapsTest {
         uploadFails: Boolean = false,
         png: ByteArray = "png".toByteArray(),
         sources: MutableList<String> = mutableListOf(),
+        writesFile: Boolean = true,
     ): PngTaps {
         var i = 0
         return PngTaps(
@@ -47,7 +48,7 @@ class PngTapsTest {
                 calls += argv
                 sources += File(argv.last()).readText() // read BEFORE the temp dies
                 val code = exit.getOrElse(i++) { exit.last() }
-                if (code == 0) File(argv[argv.indexOf("--output") + 1]).writeBytes(png)
+                if (code == 0 && writesFile) File(argv[argv.indexOf("--output") + 1]).writeBytes(png)
                 code
             },
             chatId = { "555" },
@@ -170,5 +171,18 @@ class PngTapsTest {
         runBlocking { taps(shots, sources = sources).shoot(id) }
         assertEquals(3, sources.single().split('\n').size, "the width law ran BEFORE the render: ${sources.single().length}")
         assertEquals(250, sources.single().replace("\n", "").length, "wrapping never loses a character")
+    }
+
+    @Test
+    fun `silicon exiting zero without a file is a failed render, not an upload`() {
+        // MEASURED 25/11: a missing input makes silicon exit 0 and write
+        // NOTHING — the exit code alone lied and the tap died in the upload
+        val shots = PngShots()
+        val id = shots.register(PngRender.Shot("ls", "nu"))
+        val uploaded = mutableListOf<File>()
+        val answer = runBlocking { taps(shots, uploaded = uploaded, writesFile = false).shoot(id) }
+        assertTrue(answer!!.contains("silicon"), "the miss names the renderer: $answer")
+        assertTrue(uploaded.isEmpty(), "no file, no upload")
+        assertTrue(dir.listFiles().orEmpty().isEmpty(), "the temp files die")
     }
 }

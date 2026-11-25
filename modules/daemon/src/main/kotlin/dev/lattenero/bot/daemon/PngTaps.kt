@@ -63,7 +63,16 @@ class PngTaps(
                     PngRender.arguments(shot.copy(language = null), source.absolutePath, output.absolutePath, compact),
                 ) == 0
             }
-            if (!rendered) return RENDER_FAILED
+            // THE SILENT ZERO (measured 25/11): silicon exits 0 and writes
+            // NOTHING when it cannot read its input — the exit code alone is
+            // not a receipt, so the FILE is the verdict
+            if (!rendered || !output.exists()) {
+                logger.warn {
+                    "png $id: no image (silicon=$first file=${output.exists()} " +
+                        "source=${source.exists()} bytes=${source.length()})"
+                }
+                return RENDER_FAILED
+            }
             // THE PHOTO CEILINGS (10 MB, w+h ≤ 10 000, ratio ≤ 20): past them
             // Telegram rejects the photo — say it here instead of a dead tap
             if (!PngRender.fitsPhoto(output.readBytes())) return TOO_BIG
