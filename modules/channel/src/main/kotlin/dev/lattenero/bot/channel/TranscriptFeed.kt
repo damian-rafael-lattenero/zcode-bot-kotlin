@@ -181,7 +181,10 @@ object TranscriptFeed {
         }
         return chunks.mapIndexed { i, chunk ->
             val part = if (chunks.size == 1) "" else " (${i + 1}/${chunks.size})"
-            FeedMessage.of("<pre><code class=\"language-${CodeLang.SHELL}\">${PyText.esc(chunk)}</code></pre>$part")
+            FeedMessage.of(
+                "<pre><code class=\"language-${CodeLang.SHELL}\">" +
+                    "${PyText.esc(CommandShape.shape(chunk))}</code></pre>$part",
+            )
         }
     }
 

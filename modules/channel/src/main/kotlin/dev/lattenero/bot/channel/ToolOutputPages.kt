@@ -91,13 +91,16 @@ object ToolOutputPages {
     ): String {
         val noun = if (lines == 1) "1 línea" else "$lines líneas"
         if (fence != null) {
+            // THE SHAPED COMMAND (25/11): the client wraps every code block,
+            // so the pipes own the line breaks here — never an arbitrary cut
+            val shown = CommandShape.shape(fence)
             val block = when {
-                PyText.cpLength(fence) <= COMMAND_CLOSE_CP ->
-                    "<pre><code class=\"language-$language\">${PyText.esc(fence)}</code></pre>"
+                PyText.cpLength(shown) <= COMMAND_CLOSE_CP ->
+                    "<pre><code class=\"language-$language\">${PyText.esc(shown)}</code></pre>"
 
                 else ->
                     "<pre><code class=\"language-$language\">" +
-                        PyText.esc(PyText.take(fence, COMMAND_CLOSE_CP)) +
+                        PyText.esc(PyText.take(shown, COMMAND_CLOSE_CP)) +
                         "</code></pre>\n✂️ … el comando completo va en el feed"
             }
             return "$kind · $noun\n<i>📜 tocar para ver</i>\n$block"

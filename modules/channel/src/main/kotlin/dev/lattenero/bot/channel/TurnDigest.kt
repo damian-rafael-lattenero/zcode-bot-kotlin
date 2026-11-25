@@ -190,7 +190,9 @@ object TurnDigest {
             is VoiceBlock.Prose -> RichVoice.html(block.text)
             is VoiceBlock.Code -> {
                 val language = CodeLang.normalize(block.language) ?: CodeLang.SHELL
-                "<pre><code class=\"language-$language\">${PyText.esc(block.text)}</code></pre>"
+                // the shell's own command/pipeline: breaks at its pipes, never an arbitrary cut
+                val body = if (language == CodeLang.SHELL) CommandShape.shape(block.text) else block.text
+                "<pre><code class=\"language-$language\">${PyText.esc(body)}</code></pre>"
             }
         }
     }

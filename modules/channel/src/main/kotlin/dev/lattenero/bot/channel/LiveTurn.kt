@@ -957,12 +957,14 @@ object LiveTurn {
      * speaks the command ONCE, complete).
      */
     private fun commandBlock(cmd: String): List<String> = when {
-        PyText.cpLength(cmd) <= COMMAND_CARD_CP ->
-            listOf("<pre><code class=\"language-${CodeLang.SHELL}\">${PyText.esc(cmd)}</code></pre>")
+        PyText.cpLength(cmd) <= COMMAND_CARD_CP -> listOf(
+            "<pre><code class=\"language-${CodeLang.SHELL}\">" +
+                "${PyText.esc(CommandShape.shape(cmd))}</code></pre>",
+        )
 
         else -> listOf(
             "<pre><code class=\"language-${CodeLang.SHELL}\">" +
-                "${PyText.esc(PyText.take(cmd, COMMAND_CARD_CP))}</code></pre>",
+                "${PyText.esc(CommandShape.shape(PyText.take(cmd, COMMAND_CARD_CP)))}</code></pre>",
             "✂️ … el comando completo va en el feed",
         )
     }

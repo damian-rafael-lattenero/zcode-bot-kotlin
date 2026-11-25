@@ -1,5 +1,6 @@
 package dev.lattenero.bot.daemon.spectator
 import dev.lattenero.bot.channel.CodeLang
+import dev.lattenero.bot.channel.CommandShape
 import dev.lattenero.bot.channel.toolLabel
 import dev.lattenero.bot.contracts.PyText
 
@@ -207,7 +208,9 @@ internal object ToolBox {
             .firstNotNullOfOrNull { k -> inp[k].takeIf { PyText.truthy(it) } }
             ?.let { it as? JsonPrimitive }?.takeIf { it.isString }?.content
         val b = StringBuilder(
-            "<pre><code class=\"language-${CodeLang.SHELL}\">${PyText.esc(PyText.htmlClip(cmd, CH_BOX))}</code></pre>",
+            "<pre><code class=\"language-${CodeLang.SHELL}\">" +
+                PyText.esc(CommandShape.shape(PyText.htmlClip(cmd, CH_BOX))) +
+                "</code></pre>",
         )
         if (out != null && PyText.strip(out).isNotEmpty()) {
             b.append("\n└ <pre>${PyText.esc(PyText.htmlClip(out, OUTPUT_CAP))}</pre>")

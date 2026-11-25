@@ -103,4 +103,13 @@ class ToolOutputPagesTest {
         assertTrue("✂️ … el comando completo va en el feed" in capped, "the head capped at 1000 cp: $capped")
         assertTrue("y".repeat(1500) !in capped, "nothing beyond the cap rode: $capped")
     }
+
+    @Test
+    fun aLongCommandFenceBreaksAtItsPipesNeverMidToken() {
+        val command = "print (open --raw /tmp/probe-status.resp.json | from json | get result.rich_message | to json --raw)"
+        val header = ToolOutputPages.headerOf("⚡ <b>Nushell</b>", "", 1, fence = command, language = "nu")
+        assertTrue("| from json | get result.rich_message" in header, "the pipe owns the break: $header")
+        assertTrue(header.contains("\n  | to json --raw)"), "the continuation aligns under a pipe: $header")
+        assertTrue("json | get" !in header.substringBefore("<pre>"), "the header keeps its own shape: $header")
+    }
 }
