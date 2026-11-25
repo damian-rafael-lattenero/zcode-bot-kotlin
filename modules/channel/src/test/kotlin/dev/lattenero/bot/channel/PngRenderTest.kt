@@ -22,8 +22,10 @@ class PngRenderTest {
         assertTrue("/opt/homebrew/bin/silicon" == PngRender.SILICON, "silicon lives outside the launchd PATH")
         assertEquals("OneHalfDark", args[args.indexOf("--theme") + 1])
         assertEquals("#0B3B3C", args[args.indexOf("--background") + 1])
-        assertEquals("48", args[args.indexOf("--pad-horiz") + 1])
-        assertEquals("34", args[args.indexOf("--pad-vert") + 1])
+        assertEquals(PngRender.PAD_HORIZ.toString(), args[args.indexOf("--pad-horiz") + 1])
+        assertEquals(PngRender.PAD_VERT.toString(), args[args.indexOf("--pad-vert") + 1])
+        assertEquals(PngRender.LINE_PAD.toString(), args[args.indexOf("--line-pad") + 1])
+        assertEquals(PngRender.CODE_PAD_RIGHT.toString(), args[args.indexOf("--code-pad-right") + 1])
         assertTrue("--no-line-number" in args, "the text bubble keeps the gutter; the image is the pretty view")
         assertTrue("--no-window-controls" in args, "no traffic lights: a clean card, like the diff drawer")
     }

@@ -23,8 +23,12 @@ object PngRender {
     /** The owner's palette (A of the 25/11 probe): deep teal + OneHalfDark. */
     const val THEME: String = "OneHalfDark"
     const val BACKGROUND: String = "#0B3B3C"
-    const val PAD_HORIZ: Int = 48
-    const val PAD_VERT: Int = 34
+    const val PAD_HORIZ: Int = 72
+    const val PAD_VERT: Int = 72
+
+    /** The breathing room the code earns: between lines and past its right edge. */
+    const val LINE_PAD: Int = 5
+    const val CODE_PAD_RIGHT: Int = 56
 
     /**
      * silicon's binary by ABSOLUTE path: the daemon runs under launchd with
@@ -55,6 +59,13 @@ object PngRender {
         // rounded window were silicon's decoration — every image door paints
         // a clean card, like the diff drawer
         add("--no-window-controls")
+        // THE MARGINS (the owner, 25/11: the code touched the edges): the
+        // dense pass keeps the tight line pad so 300 lines still fit the
+        // photo ceiling; every other shot breathes
+        add("--line-pad")
+        add(if (compact) COMPACT_LINE_PAD.toString() else LINE_PAD.toString())
+        add("--code-pad-right")
+        add(CODE_PAD_RIGHT.toString())
         // THE DENSE FONT (the owner, 25/11): a tall block rides a smaller size
         // so one photo carries ~300 lines instead of ~190 (≈28 px/line at 14
         // vs 45 at 26) — the owner zooms, the image still fits the ceiling.
@@ -88,6 +99,9 @@ object PngRender {
 
     /** The dense pass's font — measured on the 25/11 probe (≈28 px per line). */
     const val COMPACT_FONT: String = "Hack=14"
+
+    /** The dense pass's line pad: 5 px × 300 lines would break the ceiling. */
+    const val COMPACT_LINE_PAD: Int = 2
 
     /** The dense pass's line budget — ~300 lines inside the 10 000-px ceiling. */
     const val MAX_LINES: Int = 300
