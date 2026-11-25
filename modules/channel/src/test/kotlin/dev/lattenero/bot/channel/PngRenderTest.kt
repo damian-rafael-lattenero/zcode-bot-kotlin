@@ -55,4 +55,41 @@ class PngRenderTest {
         assertEquals("weird-dsl", PngRender.grammar("weird-dsl"))
         assertEquals("weird-dsl", argv("weird-dsl")[argv("weird-dsl").indexOf("--language") + 1])
     }
+
+    @Test
+    fun `a long line wraps at the width law and a short one never moves`() {
+        val long = "x".repeat(250)
+        val wrapped = PngRender.wrap("$long\ncorta").split('\n')
+        assertEquals(listOf("x".repeat(100), "x".repeat(100), "x".repeat(50), "corta"), wrapped)
+        assertEquals("corta", PngRender.wrap("corta"), "a line under the law is untouched")
+    }
+
+    @Test
+    fun `the wrap never splits an emoji`() {
+        val line = "🙂".repeat(120) // 120 code points, 240 UTF-16 units
+        val wrapped = PngRender.wrap(line).split('\n')
+        assertTrue(wrapped.all { it.length % 2 == 0 }, "a surrogate pair is never cut: ${wrapped.map { it.length }}")
+        assertEquals(120, wrapped.sumOf { it.length / 2 }, "nothing is lost")
+    }
+
+    @Test
+    fun `the photo ceilings read the PNG's own header`() {
+        assertTrue(PngRender.fitsPhoto(pngOf(800, 400)), "a normal code image is a photo")
+        assertTrue(PngRender.fitsPhoto(pngOf(1000, 9000)), "w+h at the ceiling still fits")
+        assertFalse(PngRender.fitsPhoto(pngOf(200, 5000)), "ratio 25 > 20 — Telegram rejects it")
+        assertFalse(PngRender.fitsPhoto(pngOf(6000, 5000)), "w+h 11000 > 10000 — dozens of lines")
+        assertTrue(PngRender.fitsPhoto(byteArrayOf(1, 2, 3)), "an unreadable header defers to the upload")
+    }
+
+    /** A minimal PNG: signature + IHDR length + type + width + height. */
+    private fun pngOf(width: Int, height: Int): ByteArray = ByteArray(24).also { b ->
+        b[0] = 0x89.toByte()
+        b[1] = 'P'.code.toByte()
+        listOf(16 to width, 20 to height).forEach { (at, value) ->
+            b[at] = (value shr 24).toByte()
+            b[at + 1] = (value shr 16).toByte()
+            b[at + 2] = (value shr 8).toByte()
+            b[at + 3] = value.toByte()
+        }
+    }
 }

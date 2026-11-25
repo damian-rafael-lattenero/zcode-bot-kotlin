@@ -32,6 +32,8 @@ class PngTapsTest {
         calls: MutableList<List<String>> = mutableListOf(),
         fields: MutableList<Map<String, String>> = mutableListOf(),
         uploadFails: Boolean = false,
+        png: ByteArray = "png".toByteArray(),
+        sources: MutableList<String> = mutableListOf(),
     ): PngTaps {
         var i = 0
         return PngTaps(
@@ -43,14 +45,27 @@ class PngTapsTest {
             },
             exec = { argv ->
                 calls += argv
+                sources += File(argv.last()).readText() // read BEFORE the temp dies
                 val code = exit.getOrElse(i++) { exit.last() }
-                if (code == 0) File(argv[argv.indexOf("--output") + 1]).writeText("png")
+                if (code == 0) File(argv[argv.indexOf("--output") + 1]).writeBytes(png)
                 code
             },
             chatId = { "555" },
             tmpDir = dir,
             clock = { 1_000L },
         )
+    }
+
+    /** A minimal PNG header: signature + IHDR length + type + width + height. */
+    private fun pngOf(width: Int, height: Int): ByteArray = ByteArray(24).also { b ->
+        b[0] = 0x89.toByte()
+        b[1] = 'P'.code.toByte()
+        listOf(16 to width, 20 to height).forEach { (at, value) ->
+            b[at] = (value shr 24).toByte()
+            b[at + 1] = (value shr 16).toByte()
+            b[at + 2] = (value shr 8).toByte()
+            b[at + 3] = value.toByte()
+        }
     }
 
     @Test
@@ -132,5 +147,28 @@ class PngTapsTest {
         val fields = mutableListOf<Map<String, String>>()
         runBlocking { taps(shots, fields = fields).shoot(id) }
         assertTrue("reply_parameters" !in fields.single(), "no anchor, no quote: ${fields.single()}")
+    }
+
+    @Test
+    fun `an image past the photo ceilings speaks instead of uploading`() {
+        val shots = PngShots()
+        val id = shots.register(PngRender.Shot("x".repeat(5000), "kotlin"))
+        val uploaded = mutableListOf<File>()
+        val answer = runBlocking {
+            taps(shots, uploaded = uploaded, png = pngOf(200, 5000)).shoot(id)
+        }
+        assertTrue(answer!!.contains("no entra como foto"), "the reason names the ceiling: $answer")
+        assertTrue(uploaded.isEmpty(), "a doomed upload never flies")
+        assertTrue(dir.listFiles().orEmpty().isEmpty(), "the temp files die")
+    }
+
+    @Test
+    fun `the source silicon sees is already wrapped`() {
+        val shots = PngShots()
+        val id = shots.register(PngRender.Shot("y".repeat(250), "kotlin"))
+        val sources = mutableListOf<String>()
+        runBlocking { taps(shots, sources = sources).shoot(id) }
+        assertEquals(3, sources.single().split('\n').size, "the width law ran BEFORE the render: ${sources.single().length}")
+        assertEquals(250, sources.single().replace("\n", "").length, "wrapping never loses a character")
     }
 }

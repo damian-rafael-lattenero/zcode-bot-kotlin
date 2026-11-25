@@ -48,7 +48,8 @@ class PngTaps(
         val source = File(tmpDir, "png-$id-$stamp.txt")
         val output = File(tmpDir, "png-$id-$stamp.png")
         return try {
-            source.writeText(shot.text)
+            // the WIDTH law: the image wraps where the text must not
+            source.writeText(PngRender.wrap(shot.text))
             val first = exec(PngRender.arguments(shot, source.absolutePath, output.absolutePath))
             val rendered = if (first == 0) {
                 true
@@ -58,6 +59,9 @@ class PngTaps(
                 exec(PngRender.arguments(shot.copy(language = null), source.absolutePath, output.absolutePath)) == 0
             }
             if (!rendered) return RENDER_FAILED
+            // THE PHOTO CEILINGS (10 MB, w+h ≤ 10 000, ratio ≤ 20): past them
+            // Telegram rejects the photo — say it here instead of a dead tap
+            if (!PngRender.fitsPhoto(output.readBytes())) return TOO_BIG
             upload(fieldsOf(id), output)
             null
         } catch (e: CancellationException) {
@@ -89,6 +93,8 @@ class PngTaps(
     private companion object {
         const val RENDER_FAILED =
             "🖼️ No pude dibujar ese bloque (silicon falló) — el texto de arriba sigue siendo la verdad."
+        const val TOO_BIG =
+            "🖼️ Ese bloque no entra como foto (muy alto o muy ancho para Telegram) — el texto de arriba es la verdad."
         const val UPLOAD_FAILED = "📡 El PNG no voló: %s — probá de nuevo en un momento."
     }
 }
