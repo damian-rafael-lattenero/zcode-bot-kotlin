@@ -76,3 +76,25 @@ OneHalfDark). The image flies ONLY on the tap — never a stream of photos.
 ceiling 32768 cp / 500 blocks) · `BLOCK_CP = 3500` rich page/block ·
 `PAGE_CP = 2800` tool-output page · `COMMAND_CLOSE_CP = 1000` command in a
 box header · `COMMAND_CHUNK_CP = 3000` long-command message.
+
+## 7. A diff opens SIDE BY SIDE, never as a unified stream
+
+An edit/multiedit box's `📸` door paints the diff the way an IDE does
+(`DiffShot` builds the rows, `DiffPng` draws them in AWT — no browser, no
+external binary):
+
+- two columns with the REAL line numbers, red cells on the old side, green
+  on the new, and the **changed middle** — the span two lines do not share —
+  on a hotter tone inside each cell;
+- the bot's numbered format (`- 4 │ code`) and a standard unified diff both
+  parse: the marker is the sign, the numbers are a gift;
+- a plan with only additions (a fresh file) or only deletions keeps ONE
+  column — an empty side would waste half the phone's width;
+- a line past 64 characters is clipped with `…`; the message above keeps the
+  whole text, copyable;
+- 60 rows is the ceiling, and the last line says how many stayed behind;
+- file headers (`--- a/x`, `+++ b/x`), hunk headers and the no-newline
+  marker are not changes — the first sample drew them as a pair of paths.
+
+Measured on the 25/11 five-shape album; enforced by `DiffShotTest` and
+`DiffPngTest`.
