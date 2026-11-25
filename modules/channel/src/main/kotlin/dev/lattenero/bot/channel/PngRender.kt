@@ -103,11 +103,12 @@ object PngRender {
         }
 
     /**
-     * THE WIDTH LAW (the owner, 25/11): silicon never wraps — a 200-column
-     * line makes a 2500-px image Telegram scales into illegibility. Every
-     * line longer than [MAX_COLS] is hard-wrapped before the render (the
-     * IMAGE is the pretty view; the text message above keeps the original,
-     * copyable, untouched).
+     * THE LAST RESORT (the owner, 25/11: no image is wrapped): a render is
+     * never wrapped up front — the image grows to its longest line and the
+     * owner zooms. This runs only when the whole-line render came out past
+     * Telegram's photo ceilings, wrapping at [MAX_COLS]: a wrapped line beats
+     * a missing image. The text message above keeps the original, copyable,
+     * untouched.
      */
     fun wrap(text: String, cols: Int = MAX_COLS): String = text.split('\n').joinToString("\n") { line ->
         if (PyText.cpLength(line) <= cols) {
@@ -161,7 +162,7 @@ object PngRender {
             ((bytes[at + 2].toInt() and 0xFF) shl 8) or
             (bytes[at + 3].toInt() and 0xFF)
 
-    /** The widest line the image may carry — ~1400 px at silicon's default size. */
+    /** The last resort's wrap width — ~1400 px at silicon's default size. */
     const val MAX_COLS: Int = 100
 
     private const val MAX_PHOTO_PIXELS: Int = 10_000

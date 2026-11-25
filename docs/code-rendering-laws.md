@@ -66,9 +66,12 @@ Only three roads, each trades something away:
 3. **PNG render** (silicon, the owner's teal palette) — colors and zero
    wrapping, but a tap-to-open viewer with pinch-zoom, no copy.
 
-The bot now offers road 3 on demand: code boxes and every seal page carry a
-`📸 PNG` row (`PngShots` registry + `PngTaps` edge, palette A `#0B3B3C` +
+The bot offers road 3 on demand: code boxes and their outputs carry the
+`📸` row (`PngShots` registry + `PngTaps` edge, palette A `#0B3B3C` +
 OneHalfDark). The image flies ONLY on the tap — never a stream of photos.
+NO image is wrapped (the owner, 25/11): every render grows as wide as its
+longest line, and `PngRender.wrap` runs only when that render comes out past
+Telegram's photo ceilings — the same last-resort law the diff drawer follows.
 
 ## 6. Caps that bound the code bodies
 

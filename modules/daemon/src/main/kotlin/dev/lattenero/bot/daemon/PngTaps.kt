@@ -48,9 +48,11 @@ class PngTaps(
         val source = File(tmpDir, "png-$id-$stamp.txt")
         val output = File(tmpDir, "png-$id-$stamp.png")
         return try {
-            // the WIDTH law + the LINE BUDGET: the image wraps and caps where
-            // the text must not; a tall body also rides the dense font
-            val body = PngRender.fit(PngRender.wrap(shot.text))
+            // WHOLE LINES, ALWAYS (the owner, 25/11): the image grows as wide
+            // as its longest line — silicon draws the line complete and the
+            // owner zooms. Wrapping is the LAST RESORT, applied only when the
+            // photo could not exist at that width (the diff drawer's own law).
+            val body = PngRender.fit(shot.text)
             val compact = body.count { it == '\n' } + 1 > PngRender.COMPACT_AFTER
             source.writeText(body)
             // A DIFF rides the SIDE-BY-SIDE drawer (the owner, 25/11): two
@@ -79,9 +81,16 @@ class PngTaps(
                 }
                 return RENDER_FAILED
             }
-            // THE PHOTO CEILINGS (10 MB, w+h ≤ 10 000, ratio ≤ 20): past them
-            // Telegram rejects the photo — say it here instead of a dead tap
-            if (!PngRender.fitsPhoto(output.readBytes())) return TOO_BIG
+            // THE PHOTO CEILINGS (10 MB, w+h ≤ 10 000, ratio ≤ 20): only when
+            // the whole-line render passes them does the text wrap and the
+            // render run again — a wrapped line beats a lost tap
+            if (!PngRender.fitsPhoto(output.readBytes())) {
+                if (!wrapped(shot, source, output, compact)) {
+                    logger.warn { "png $id: the wrapped retry wrote no image" }
+                    return RENDER_FAILED
+                }
+                if (!PngRender.fitsPhoto(output.readBytes())) return TOO_BIG
+            }
             upload(fieldsOf(id), output)
             null
         } catch (e: CancellationException) {
@@ -93,6 +102,17 @@ class PngTaps(
             source.delete()
             output.delete()
         }
+    }
+
+    /**
+     * THE LAST RESORT (the owner, 25/11): the whole-line render came out past
+     * the photo ceilings, so the text wraps where the image cannot exist and
+     * silicon draws again. True = a file landed.
+     */
+    private fun wrapped(shot: PngRender.Shot, source: File, output: File, compact: Boolean): Boolean {
+        source.writeText(PngRender.fit(PngRender.wrap(shot.text)))
+        val code = exec(PngRender.arguments(shot, source.absolutePath, output.absolutePath, compact))
+        return code == 0 && output.exists()
     }
 
     /**

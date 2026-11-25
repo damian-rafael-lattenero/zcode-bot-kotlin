@@ -36,6 +36,7 @@ class PngTapsTest {
         sources: MutableList<String> = mutableListOf(),
         writesFile: Boolean = true,
         bytes: MutableList<ByteArray> = mutableListOf(),
+        pngSeq: List<ByteArray> = emptyList(),
     ): PngTaps {
         var i = 0
         return PngTaps(
@@ -49,8 +50,11 @@ class PngTapsTest {
             exec = { argv ->
                 calls += argv
                 sources += File(argv.last()).readText() // read BEFORE the temp dies
+                val call = i
                 val code = exit.getOrElse(i++) { exit.last() }
-                if (code == 0 && writesFile) File(argv[argv.indexOf("--output") + 1]).writeBytes(png)
+                if (code == 0 && writesFile) {
+                    File(argv[argv.indexOf("--output") + 1]).writeBytes(pngSeq.getOrNull(call) ?: png)
+                }
                 code
             },
             chatId = { "555" },
@@ -187,12 +191,52 @@ class PngTapsTest {
 
     @Test
     fun `the source silicon sees is already wrapped`() {
+        // the LAST RESORT walked in reverse: a wrap is never applied up front
+        // — `the source silicon sees is whole` owns that law now.
+        val shots = PngShots()
+        val id = shots.register(PngRender.Shot("y".repeat(250), "kotlin"))
+        val sources = mutableListOf<String>()
+        val calls = mutableListOf<List<String>>()
+        runBlocking {
+            taps(shots, sources = sources, calls = calls, pngSeq = listOf(pngOf(9000, 200), pngOf(1200, 400))).shoot(id)
+        }
+        assertEquals(3, sources.last().split('\n').size, "the retry wraps at the width law")
+        assertEquals(250, sources.last().replace("\n", "").length, "wrapping never loses a character")
+    }
+    @Test
+    fun `the source silicon sees is whole - no wrapping up front`() {
+        // the owner, 25/11: no image is wrapped. The render grows as wide as
+        // its longest line; the text above keeps the same line, copyable.
         val shots = PngShots()
         val id = shots.register(PngRender.Shot("y".repeat(250), "kotlin"))
         val sources = mutableListOf<String>()
         runBlocking { taps(shots, sources = sources).shoot(id) }
-        assertEquals(3, sources.single().split('\n').size, "the width law ran BEFORE the render: ${sources.single().length}")
-        assertEquals(250, sources.single().replace("\n", "").length, "wrapping never loses a character")
+        assertEquals(1, sources.single().split('\n').size, "one whole line: ${sources.single().length}")
+        assertEquals(250, sources.single().trim().length, "every character reached the renderer")
+    }
+
+    @Test
+    fun `a render past the photo ceilings wraps and renders again`() {
+        // the last resort only: this render is 45:1 (Telegram refuses it), so
+        // the retry wraps at the width law and the tap still flies
+        val shots = PngShots()
+        val id = shots.register(PngRender.Shot("y".repeat(250), "kotlin"))
+        val sources = mutableListOf<String>()
+        val calls = mutableListOf<List<String>>()
+        val uploaded = mutableListOf<File>()
+        val answer = runBlocking {
+            taps(
+                shots,
+                uploaded = uploaded,
+                calls = calls,
+                sources = sources,
+                pngSeq = listOf(pngOf(9000, 200), pngOf(1200, 400)),
+            ).shoot(id)
+        }
+        assertNull(answer, "the tap still flew")
+        assertEquals(2, calls.size, "the refused render was retried")
+        assertEquals(3, sources.last().split('\n').size, "the retry wrapped at 100 columns")
+        assertEquals(1, uploaded.size)
     }
 
     @Test
