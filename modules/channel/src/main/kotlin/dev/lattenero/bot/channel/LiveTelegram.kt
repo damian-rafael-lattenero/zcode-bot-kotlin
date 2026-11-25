@@ -83,6 +83,17 @@ class LiveTelegram(
         return richSend(cfg, text, loud = false, markup = markup) ?: plainBirth(cfg, text, markup)
     }
 
+    /**
+     * THE CLASSIC BIRTH (the scroll law): the live card rides `sendMessage`
+     * with the language-tagged `<pre>` blocks, so a long command stays on one
+     * line and scrolls. The rich lane is kept for what needs structure
+     * (tables, the pink CoT).
+     */
+    suspend fun birthClassic(cfg: TgConfig, text: String, markup: JsonObject? = null): Long? {
+        if (cooldown.active()) return null
+        return plainBirth(cfg, text, markup)
+    }
+
     @Suppress("TooGenericExceptionCaught") // the live view never raises (Python's bare except)
     private suspend fun plainBirth(cfg: TgConfig, text: String, markup: JsonObject?): Long? = try {
         val wire = SendRequest.compose(cfg, text, loud = false, markup = markup)

@@ -8,6 +8,7 @@ import dev.lattenero.bot.channel.QueryAnswer
 import dev.lattenero.bot.channel.TurnDigest
 import dev.lattenero.bot.channel.TurnVoice
 import dev.lattenero.bot.contracts.PyText
+import dev.lattenero.bot.channel.CodeLang
 import dev.lattenero.bot.channel.ToolLive
 import dev.lattenero.bot.channel.ToolOutputPages
 import dev.lattenero.bot.daemon.db.typed
@@ -98,9 +99,10 @@ internal fun feedBoxOf(tool: ToolLive): String {
         else -> {
             // the tail's lines carry their REAL numbers (the owner, 3/11) —
             // numbering happens BEFORE the cap, so a clipped tail still says
-            // which lines it is showing
+            // which lines it is showing. The language tag is what enables
+            // the phone's horizontal scroll (24/11): a bare pre wraps.
             val numbered = ToolOutputPages.pages(out, pageCp = OUTPUT_TAIL_CP).first()
-            "\n↳ <pre>${PyText.esc(numbered)}</pre>"
+            "\n↳ <pre><code class=\"language-${CodeLang.SHELL}\">${PyText.esc(numbered)}</code></pre>"
         }
     }
     return box + tail

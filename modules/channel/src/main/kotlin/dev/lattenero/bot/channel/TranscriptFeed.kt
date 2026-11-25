@@ -284,11 +284,12 @@ object TranscriptFeed {
                 else -> fileOf(lane.input)
             }.orEmpty()
             val start = if (read) offsetOf(lane.input) + 1 else 1
-            // the page's highlighter: a shell is bash; a read carries the
-            // FILE's own language (kt → kotlin, nu → nu) — the phone colors it
+            // the page's highlighter: a shell is nu; a read carries the FILE's
+            // own language (kt → kotlin) — and an unknown one falls back to
+            // nu so the block still scrolls (a bare pre wraps, 24/11)
             val language = when {
                 shell -> CodeLang.SHELL
-                read -> CodeLang.ofPath(fileOf(lane.input))
+                read -> CodeLang.ofPath(fileOf(lane.input)) ?: CodeLang.SHELL
                 else -> null
             }
             val kind = when {

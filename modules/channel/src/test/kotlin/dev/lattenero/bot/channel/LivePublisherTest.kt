@@ -300,7 +300,7 @@ class LivePublisherTest {
         val methods = wire.bodies.drop(afterBirth).map { it.second }
         assertEquals("sendRichMessage", methods.first(), "the voice speaks first")
         assertEquals("deleteMessage", methods[1], "then the stale card dies")
-        assertEquals("sendRichMessage", methods[2], "the card is reborn LAST (rich HTML)")
+        assertEquals("sendMessage", methods[2], "the card is reborn LAST (classic: scroll)")
         val reborn = cardBodies(wire).last().first
         assertTrue("⏳ <b>Procesando..." in reborn, "the re-born card IS the process card")
         assertTrue("📖 CoT: 1 bloque plegado" in reborn, "the card carries the CoT row (count only)")
@@ -399,7 +399,7 @@ class LivePublisherTest {
         publisher.tick()
         val reclaim = wire.bodies.drop(afterBirth + inWindow.size).map { it.second }
         assertTrue("deleteMessage" in reclaim, "the old card dies to reclaim the bottom")
-        assertTrue("\"html\"" in wire.bodies.last().first, "the card is REBORN last (rich HTML)")
+        assertEquals("sendMessage", wire.bodies.last().second, "the card is REBORN last (classic: scroll)")
         // a quiet tick (no events, fixed clock): the render did not change —
         // nothing moves (the change law keeps the 429 budget alive)
         val before = wire.bodies.size
@@ -432,7 +432,7 @@ class LivePublisherTest {
         clockMs += 31_000L // the redraw is a SECOND birth: the spacing gate applies
         publisher.tick()
         val methods = wire.bodies.drop(afterBirth).map { it.second }
-        assertTrue("deleteMessage" in methods && "\"html\"" in wire.bodies.last().first)
+        assertTrue("deleteMessage" in methods && wire.bodies.last().second == "sendMessage")
     }
 
     @Test
@@ -554,7 +554,7 @@ class LivePublisherTest {
         assertEquals(emptyList(), spoken.toList(), "SUMMARY: the feed is silent — the DATA obeys the level")
         val methods = wire.bodies.drop(afterBirth).map { it.second }
         assertTrue(
-            "deleteMessage" in methods && "\"html\"" in wire.bodies.last().first,
+            "deleteMessage" in methods && wire.bodies.last().second == "sendMessage",
             "the card STILL re-draws last — the process is never hidden",
         )
     }

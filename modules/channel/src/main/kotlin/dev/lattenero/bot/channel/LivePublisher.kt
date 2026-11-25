@@ -581,7 +581,7 @@ class LivePublisher(
      * it into the fold: [RenderState.boxes].)
      */
     private val cotBlocks = CotBlocks { messageId, text, markup ->
-        telegram.edit(config(), messageId, text, markup)
+        telegram.editPlain(config(), messageId, text, markup)
     }
 
     /**
@@ -603,7 +603,7 @@ class LivePublisher(
             return
         }
         orphanStore?.clear()
-        if (telegram.edit(
+        if (telegram.editPlain(
                 cfg,
                 orphan.messageId,
                 "⛓️ turno perdido — el bot se reinició (nuclear/crash) y este cartel quedó huérfano. " +
@@ -751,7 +751,7 @@ class LivePublisher(
 
     /** The task-switch corpse seal: the watched turn was replaced — the old card speaks once and dies. */
     private suspend fun sealReplaced(cfg: TgConfig, mid: Long) {
-        telegram.edit(
+        telegram.editPlain(
             cfg,
             mid,
             "⛓️ turno reemplazado — esta vista era de otra tarea; la nueva tiene su propio cartel.",
@@ -776,7 +776,7 @@ class LivePublisher(
      */
     private suspend fun sealStale(cfg: TgConfig, mid: Long, state: TurnLive, silenceMs: Long) {
         val minutes = silenceMs / MS_PER_SEC / 60
-        telegram.edit(
+        telegram.editPlain(
             cfg,
             mid,
             "🧊 turno en silencio hace $minutes min — sellado por inactividad. " +
@@ -818,7 +818,7 @@ class LivePublisher(
             lastText = ""
             tryBirth(cfg, state, text)
         } else {
-            if (telegram.edit(cfg, liveMid, text, cardMarkup(state))) lastText = text
+            if (telegram.editPlain(cfg, liveMid, text, cardMarkup(state))) lastText = text
         }
     }
 
@@ -1054,7 +1054,7 @@ class LivePublisher(
         if (feed.isNotEmpty() && telegram.throttled()) return
         sealed = true
         if (feed.isEmpty()) {
-            telegram.edit(cfg, mid, LiveTurn.sealText(state, now))
+            telegram.editPlain(cfg, mid, LiveTurn.sealText(state, now))
         } else {
             telegram.delete(cfg, mid)
             speakFeed(feed, state)
@@ -1178,7 +1178,7 @@ class LivePublisher(
             if (birthCooldownTicks > 0) birthCooldownTicks -= 1
             return
         }
-        val born = telegram.birth(cfg, text, cardMarkup(state))
+        val born = telegram.birthClassic(cfg, text, cardMarkup(state))
         if (born == null) {
             if (!birthFailLogged) {
                 logger.warn {

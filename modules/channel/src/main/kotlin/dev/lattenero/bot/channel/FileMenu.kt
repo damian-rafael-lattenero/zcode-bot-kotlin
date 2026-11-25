@@ -83,7 +83,7 @@ class FileMenu(
             .toLocalTime().format(DateTimeFormatter.ofPattern("HH:mm"))
         val header = "📄 <b>${PyText.esc(path)}</b> · ${pages.size} página(s) · " +
             "leído a las $readClock <i>(fresco al toque — edits posteriores incluidos)</i>"
-        return ToolOutputPages.renderPage(header, pages, index, CodeLang.ofPath(path))
+        return ToolOutputPages.renderPage(header, pages, index, CodeLang.ofPath(path) ?: CodeLang.SHELL)
     }
 
     private fun freshId(path: String): Int {
