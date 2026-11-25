@@ -103,8 +103,12 @@ object PngRender {
     /** The dense pass's line pad: 5 px × 300 lines would break the ceiling. */
     const val COMPACT_LINE_PAD: Int = 2
 
-    /** The dense pass's line budget — ~300 lines inside the 10 000-px ceiling. */
-    const val MAX_LINES: Int = 300
+    /**
+     * The dense pass's line budget — measured 25/11 with the 88-px canvas:
+     * a dense line costs ≈19.8 px, so 400 lines ride ≈7 900 px and still fit
+     * the 10 000 ceiling beside the image's width.
+     */
+    const val MAX_LINES: Int = 400
 
     /**
      * THE PLAIN GRAMMAR (measured 25/11): silicon cannot detect a language

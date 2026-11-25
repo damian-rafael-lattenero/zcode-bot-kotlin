@@ -77,9 +77,9 @@ class PngRenderTest {
         assertEquals("Hack=14", dense[dense.indexOf("--font") + 1], "the dense pass rides the measured font")
         assertFalse("--font" in PngRender.arguments(PngRender.Shot("x", null), "in", "out"), "short bodies keep the default")
 
-        val tall = (1..400).joinToString("\n") { "line $it" }
+        val tall = (1..(PngRender.MAX_LINES + 100)).joinToString("\n") { "line $it" }
         val fitted = PngRender.fit(tall).split('\n')
-        assertEquals(301, fitted.size, "300 lines plus the honest remainder note")
+        assertEquals(PngRender.MAX_LINES + 1, fitted.size, "the budget plus the honest remainder note")
         assertTrue(fitted.last().contains("100 líneas más"), "the note counts what stayed behind: ${fitted.last()}")
         assertEquals("a\nb", PngRender.fit("a\nb"), "a short body passes untouched")
     }
