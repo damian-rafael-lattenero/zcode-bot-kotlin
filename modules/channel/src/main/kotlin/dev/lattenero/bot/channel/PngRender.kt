@@ -23,8 +23,8 @@ object PngRender {
     /** The owner's palette (A of the 25/11 probe): deep teal + OneHalfDark. */
     const val THEME: String = "OneHalfDark"
     const val BACKGROUND: String = "#0B3B3C"
-    const val PAD_HORIZ: Int = 72
-    const val PAD_VERT: Int = 72
+    const val PAD_HORIZ: Int = 88
+    const val PAD_VERT: Int = 88
 
     /** The breathing room the code earns: between lines and past its right edge. */
     const val LINE_PAD: Int = 5
