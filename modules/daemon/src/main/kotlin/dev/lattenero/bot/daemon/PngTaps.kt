@@ -53,15 +53,21 @@ class PngTaps(
             val body = PngRender.fit(PngRender.wrap(shot.text))
             val compact = body.count { it == '\n' } + 1 > PngRender.COMPACT_AFTER
             source.writeText(body)
-            val first = exec(PngRender.arguments(shot, source.absolutePath, output.absolutePath, compact))
-            val rendered = if (first == 0) {
-                true
+            // A DIFF rides the SIDE-BY-SIDE drawer (the owner, 25/11): two
+            // columns and the changed middle, not silicon's unified stream.
+            var first = 0
+            val rendered = if (shot.language == DIFF_LANGUAGE) {
+                DiffPng.render(shot.text, output)
             } else {
-                // the retry drops the language: a slug silicon does not know
-                // must never cost the tap
-                exec(
-                    PngRender.arguments(shot.copy(language = null), source.absolutePath, output.absolutePath, compact),
-                ) == 0
+                first = exec(PngRender.arguments(shot, source.absolutePath, output.absolutePath, compact))
+                if (first == 0) {
+                    true
+                } else {
+                    // the retry drops the language: a slug silicon does not know
+                    // must never cost the tap
+                    val plain = shot.copy(language = null)
+                    exec(PngRender.arguments(plain, source.absolutePath, output.absolutePath, compact)) == 0
+                }
             }
             // THE SILENT ZERO (measured 25/11): silicon exits 0 and writes
             // NOTHING when it cannot read its input — the exit code alone is
@@ -105,6 +111,9 @@ class PngTaps(
     }
 
     private companion object {
+        /** The diff's own slug — the side-by-side drawer owns it, never silicon. */
+        const val DIFF_LANGUAGE = "diff"
+
         const val RENDER_FAILED =
             "🖼️ No pude dibujar ese bloque (silicon falló) — el texto de arriba sigue siendo la verdad."
         const val TOO_BIG =

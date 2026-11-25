@@ -149,7 +149,7 @@ object PngRender {
         maxOf(width, height).toDouble() / minOf(width, height)
 
     /** The PNG's width/height from its IHDR chunk (signature + length + type + w + h). */
-    internal fun dimensions(png: ByteArray): Pair<Int, Int>? {
+    fun dimensions(png: ByteArray): Pair<Int, Int>? {
         val looksLikePng = png.size >= IHDR_END && png[0] == PNG_MAGIC[0] && png[1] == PNG_MAGIC[1]
         return if (looksLikePng) beInt(png, IHDR_WIDTH) to beInt(png, IHDR_HEIGHT) else null
     }
