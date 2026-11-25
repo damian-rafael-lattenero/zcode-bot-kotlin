@@ -17,12 +17,16 @@ import javax.imageio.ImageIO
  * CHANGED MIDDLE emphasised, on the same teal canvas the other image doors
  * use. No browser, no external binary — AWT only, headless.
  *
- * NOTHING IS EVER CUT (the owner, 25/11: a line that does not fit must never
- * end in dots): the column width comes from the longest line in the plan, and
- * a line past [MAX_COLS] WRAPS inside its own row — the row grows to as many
- * visual lines as the longest side needs. A diff that only adds (a fresh
- * file) or only deletes carries ONE column: the empty side would waste half
- * the image.
+ * NO WRAPPING, EVER (the owner, 25/11: a line must never be wrapped): the
+ * column takes the whole line, however long it is — the image grows wide and
+ * the owner zooms. The column only narrows when the photo itself could not
+ * exist (two columns past Telegram's pixel ceiling), and only then does the
+ * line wrap: a wrapped line beats a missing image.
+ *
+ * NOTHING IS EVER CUT either (the owner, 25/11: a line that does not fit
+ * must never end in dots): the column width comes from the longest line in
+ * the plan. A diff that only adds (a fresh file) or only deletes carries ONE
+ * column: the empty side would waste half the image.
  *
  * `render` is the edge: the pure [DiffShot.Plan] goes in, a PNG comes out.
  * [paint] and [drawRow] place the pixels; [Layout] measures once so the same
@@ -39,8 +43,13 @@ object DiffPng {
     /** The narrowest a column may get: below this the gutter eats the code. */
     private const val MIN_COLS = 28
 
-    /** The widest a column may get: past it the line wraps instead. */
-    private const val MAX_COLS = 120
+    /**
+     * THE LAST RESORT's step: when even a 1× paint would pass the ceiling the
+     * column narrows by a fifth and the line wraps there — the only case
+     * where wrapping happens at all.
+     */
+    private const val FIT_SHRINK_NUM = 4
+    private const val FIT_SHRINK_DEN = 5
 
     /**
      * THE RESOLUTION LAW (the owner, 25/11: let it look small, he zooms): the
@@ -75,18 +84,30 @@ object DiffPng {
         else -> Sides.BOTH
     }
 
-    /** THE WIDTH LAW: the longest line sets the column, clamped both ways. */
+    /** THE WIDTH LAW: a column is exactly as wide as the longest line. */
     private fun colsOf(plan: DiffShot.Plan): Int =
         plan.rows
             .maxOf { maxOf(PyText.cpLength(it.old ?: ""), PyText.cpLength(it.new ?: "")) }
-            .coerceIn(MIN_COLS, MAX_COLS)
+            .coerceAtLeast(MIN_COLS)
 
-    /** Draws the diff into [target]; false when the text carries no rows. */
+    /**
+     * Draws the diff into [target]; false when the text carries no rows.
+     *
+     * The width starts at the longest line and only narrows when even a 1×
+     * paint would pass the photo ceiling — the sole case where a line wraps.
+     */
     fun render(diff: String, target: File, title: String? = null): Boolean {
         val plan = DiffShot.rows(diff)
         if (plan.rows.isEmpty()) return false
-        val layout = Layout(title, sidesOf(plan), colsOf(plan))
-        val scale = scaleFor(layout, plan)
+        val sides = sidesOf(plan)
+        var cols = colsOf(plan)
+        var layout = Layout(title, sides, cols)
+        var scale = scaleFor(layout, plan)
+        while (cols > MIN_COLS && (layout.width + layout.height(plan)) * scale > PHOTO_CEILING) {
+            cols = maxOf(MIN_COLS, cols * FIT_SHRINK_NUM / FIT_SHRINK_DEN)
+            layout = Layout(title, sides, cols)
+            scale = scaleFor(layout, plan)
+        }
         val canvas = BufferedImage(layout.width * scale, layout.height(plan) * scale, BufferedImage.TYPE_INT_RGB)
         val g = canvas.createGraphics()
         try {

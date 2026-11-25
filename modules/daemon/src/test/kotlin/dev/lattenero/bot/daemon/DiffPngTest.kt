@@ -5,6 +5,7 @@ import java.io.File
 import java.nio.file.Files
 import kotlin.test.AfterTest
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -52,17 +53,35 @@ class DiffPngTest {
     }
 
     @Test
-    fun `a long line wraps inside its row instead of ending in dots`() {
+    fun `a long line never wraps - the column takes it whole`() {
+        // the owner, 25/11: no wrapping, ever. Twenty rows of 150 chars keep
+        // ONE visual line each: the canvas grows sideways instead.
         val long = File(dir, "long.png")
         val short = File(dir, "short.png")
-        assertTrue(DiffPng.render("+ 1 │ " + "x".repeat(400), long))
-        assertTrue(DiffPng.render("+ 1 │ " + "x".repeat(30), short))
+        assertTrue(DiffPng.render(rowsOf(150), long))
+        assertTrue(DiffPng.render(rowsOf(30), short))
         val (longW, longH) = PngRender.dimensions(long.readBytes())!!
         val (shortW, shortH) = PngRender.dimensions(short.readBytes())!!
         assertTrue(longW > shortW, "wider content earns a wider column: $longW > $shortW")
-        assertTrue(longH > shortH, "the extra characters become lines, not dots: $longH > $shortH")
+        assertEquals(shortH, longH, "but every row keeps ONE visual line: no wrap")
         assertTrue(PngRender.fitsPhoto(long.readBytes()), "and the canvas is still a legal photo")
     }
+
+    @Test
+    fun `a line past the photo ceiling wraps as the last resort`() {
+        val huge = File(dir, "huge.png")
+        val plain = File(dir, "plain.png")
+        assertTrue(DiffPng.render("+ 1 │ " + "x".repeat(700), huge))
+        assertTrue(DiffPng.render("+ 1 │ x", plain))
+        val (hugeW, hugeH) = PngRender.dimensions(huge.readBytes())!!
+        val (_, plainH) = PngRender.dimensions(plain.readBytes())!!
+        assertTrue(hugeH > plainH, "700 chars cannot be one photo line: $hugeH > $plainH")
+        assertTrue(hugeW + hugeH <= 10_000, "the fallback keeps the image legal: $hugeW+$hugeH")
+    }
+
+    /** [count] addition rows, each carrying [width] characters. */
+    private fun rowsOf(width: Int): String =
+        (1..20).joinToString("\n") { "+ $it │ " + "x".repeat(width) }
 
     @Test
     fun `a small diff is painted at a zoomable resolution`() {

@@ -90,11 +90,14 @@ external binary):
   parse: the marker is the sign, the numbers are a gift;
 - a plan with only additions (a fresh file) or only deletions keeps ONE
   column — an empty side would waste half the phone's width;
-- a line past 120 characters WRAPS inside its own row — nothing is ever cut
-  and no ellipsis ever stands in for code (the owner, 25/11: «cuando no entra
-  la línea pone ……»);
-- the column width comes from the longest line of the plan (28–120 chars),
-  so a short diff makes a narrow image instead of a 6:1 banner;
+- a line is NEVER wrapped and never ends in dots (the owner, 25/11): the
+  column takes the whole line, however long it is — the image grows sideways
+  and the owner zooms. There is no fixed column cap: the width comes from the
+  longest line, and the column narrows (wrapping the line) only when even a
+  1× paint would pass Telegram's 10 000-px ceiling — a wrapped line beats a
+  missing image;
+- the column width comes from the longest line of the plan, so a short diff
+  makes a narrow image instead of a 6:1 banner;
 - the canvas is painted at the largest integer scale that still fits the
   pixel ceiling (up to 3×): the photo may look small on the phone, but a
   zoom finds real glyphs, and the height pads so the aspect never passes 8:1;
