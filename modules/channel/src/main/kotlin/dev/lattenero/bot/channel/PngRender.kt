@@ -51,6 +51,10 @@ object PngRender {
         add("--pad-vert")
         add(PAD_VERT.toString())
         add("--no-line-number")
+        // NO WINDOW CHROME (the owner, 25/11): the traffic lights and the
+        // rounded window were silicon's decoration — every image door paints
+        // a clean card, like the diff drawer
+        add("--no-window-controls")
         // THE DENSE FONT (the owner, 25/11): a tall block rides a smaller size
         // so one photo carries ~300 lines instead of ~190 (≈28 px/line at 14
         // vs 45 at 26) — the owner zooms, the image still fits the ceiling.

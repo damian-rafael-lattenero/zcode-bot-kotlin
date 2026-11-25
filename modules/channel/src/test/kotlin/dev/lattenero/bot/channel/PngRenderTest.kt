@@ -25,6 +25,7 @@ class PngRenderTest {
         assertEquals("48", args[args.indexOf("--pad-horiz") + 1])
         assertEquals("34", args[args.indexOf("--pad-vert") + 1])
         assertTrue("--no-line-number" in args, "the text bubble keeps the gutter; the image is the pretty view")
+        assertTrue("--no-window-controls" in args, "no traffic lights: a clean card, like the diff drawer")
     }
 
     @Test
