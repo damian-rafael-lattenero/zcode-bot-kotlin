@@ -15,6 +15,13 @@ Mac (every 60 s)                         healthchecks.io (always watching)
 └──────────────────────────┘            └──────────────────────────────┘
 ```
 
+A normal ping says "the Mac and its reader are alive". A `/fail` ping
+says "the Mac is alive but the bot has not heard Telegram for 3 minutes",
+and healthchecks.io alerts on it **immediately** — the check's period does
+not apply to an explicit `/fail`. That is why the `/fail` input must be a
+*sustained* silence and never a single failed poll (see
+`scripts/lib/beacon-decision.nu`).
+
 The gist is only for the manual diagnostic (`scripts/watchdog-check.nu`);
 it is not part of the healthchecks path.
 
@@ -62,7 +69,7 @@ as the manual script below.
 |---------|------|---------|
 | `DOWN: zcode Mac` | `@HealthchecksBot` | No heartbeat for ~2 min: internet cut, Mac asleep, beacon/launchd dead, or Mac dead — from outside they are indistinguishable, and all mean the bot is down. |
 | `UP: zcode Mac` | `@HealthchecksBot` | Heartbeats returned. |
-| `DOWN: zcode Mac` (the event log records a `/fail` signal) | `@HealthchecksBot` | The Mac is alive but Telegram is not usable: the live `getMe` probe fails, or the poller's last log event is an unresolved `getUpdates failed` (e.g. 409 Conflict from a second poller). The beacon pings `/fail`; healthchecks.io alerts through **its** bot, a path independent of the Mac's Telegram connection. |
+| `DOWN: zcode Mac` (the event log records a `/fail` signal) | `@HealthchecksBot` | The Mac is alive but the bot cannot hear the phone: the poller has not completed a successful `getUpdates` cycle for **3 minutes** (dead daemon, hung one, 409 from a second poller, 401, or a real network cut — one number covers them all). A single failed poll never rings: the cursor file's mtime is the receipt, and the next cycle is 3 s away. The beacon pings `/fail`; healthchecks.io alerts through **its** bot, a path independent of the Mac's Telegram connection. |
 | `💀 watchdog: la Mac no late hace X min` | `scripts/watchdog-check.nu` (manual) | Diagnostic path: reads the gist and sends through the second bot token. |
 | `[TEST] 💀 watchdog: simulación…` | `scripts/watchdog-check.nu --simulate-stale-minutes` | Circuit test; proves the gist read and the Telegram send path. |
 
@@ -76,7 +83,7 @@ as the manual script below.
    - **Schedule:** Simple
    - **Period:** `1 minute`
    - **Grace Time:** `1 minute`
-   - **Description:** `Heartbeat from the Mac's beacon.nu every 60 s. /fail means the Mac is alive but Telegram is unreachable or its poller is failing. Runbook: github.com/damian-rafael-lattenero/zcode-bot-kotlin/blob/master/docs/beacon-runbook.md`
+   - **Description:** `Heartbeat from the Mac's beacon.nu every 60 s. /fail means the Mac is alive but the bot has not heard Telegram for 3 minutes. Runbook: github.com/damian-rafael-lattenero/zcode-bot-kotlin/blob/master/docs/beacon-runbook.md`
 3. Copy the check's **Ping URL** (`https://hc-ping.com/<uuid>`).
 
 With period 1 min + grace 1 min, the alert fires ~2 minutes after the
@@ -156,9 +163,8 @@ still works, but there is no hosted heartbeat.
    ```
    The next heartbeat produces **`UP: zcode Mac`**. After a real
    connectivity outage the green arrives on the first beacon run
-   (≤60 s): the live `getMe` probe sees Telegram immediately, and the
-   poller's `poller RECOVERED` line clears the log signal — no stale
-   window keeps the check down.
+   (≤60 s): the poller recovers on its own 3 s cycle, so the cursor is
+   fresh again and the check clears — no stale window keeps it down.
 
 The equivalent live drill is turning off the Mac's Wi-Fi for 2–3
 minutes. The Mac cannot send anything, but healthchecks.io can: that is
@@ -195,7 +201,8 @@ detect anything on its own.
 | Heartbeat grace | healthchecks.io check | 60 s (alert ~2 min after the last ping) |
 | Beacon cadence | `scripts/com.zcode.beacon.plist` | 60 s |
 | Heartbeat URL | `~/.zcode/bot-kotlin/heartbeat.url` | secret, `0600` |
-| Telegram `/fail` signal | `scripts/beacon.nu` | live `getMe` probe (≤6 s), OR an unresolved `getUpdates failed` inside 60 s |
+| Telegram `/fail` signal | `scripts/lib/beacon-decision.nu` | the poller's cursor (`~/.zcode/hooks/state/tg-offset`) older than **180 s**; a fresh `state/deploying` marker keeps the check green for up to 900 s |
+| Beacon view (read-only) | `nu scripts/beacon.nu --status` | the beacon record + the decision, no ping and no gist push |
 | Gist stale threshold | `scripts/watchdog-check.nu` `STALE_AFTER_S` | 150 s (manual path only) |
 | Manual poll | `scripts/watchdog-check.nu` `POLL_EVERY_S` | 30 s |
 | Manual watch window | `scripts/watchdog-check.nu --loop-seconds` | 240 s (manual path only) |
@@ -205,13 +212,18 @@ detect anything on its own.
 - **healthchecks.io is a third party.** If it is down, no heartbeat
   alert is sent. Add a second integration (email is free) as redundancy,
   and keep an eye on [status.healthchecks.io](https://status.healthchecks.io/).
-- **The heartbeat proves the beacon ran, not that the bot daemon is
-  healthy.** `daemon_log_age_s` and `poll_fail_recent` are diagnostics;
-  the only daemon failure promoted to an alert is an unresolved
-  `getUpdates failed` (cleared by the poller's own `poller RECOVERED`
-  line, and bounded to 60 s) or a failed live `getMe` probe (`/fail`).
-  A daemon that dies while the beacon keeps running is not detected by
-  this check.
+- **The heartbeat proves the beacon ran; `/fail` proves the bot's reader
+  heard Telegram within 3 minutes.** `daemon_log_age_s` is a diagnostic
+  only. A daemon that dies while the beacon keeps running IS detected —
+  its cursor goes stale and `/fail` fires after 3 minutes — but a bot
+  that reads fine and cannot SEND is not (the cursor proves the read
+  half). Deploys are exempt for up to 15 minutes by design.
+- **A transient TCP reset is not an outage.** Measured 2026-11-25: the
+  long poll's keep-alive connections get reset ~200×/day (~1.6% of ~13k
+  polls) and each one used to become a DOWN + UP pair on the phone —
+  180 pairs by 11:11, 383 the day before. The decision is now a 180 s
+  sustained-silence window (`lib/beacon-decision.nu`, laws in
+  `tests/beacon-decision.nu`); do not lower it back to "any failure".
 - **A Mac asleep stops the beacon** → the alert says "Mac asleep or
   dead" honestly; distinguishing those two needs a second beacon inside
   the LAN, not on this Mac.
