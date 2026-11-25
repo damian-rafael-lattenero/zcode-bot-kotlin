@@ -181,6 +181,29 @@ object RichVoice {
         return JsonArray(out)
     }
 
+    /**
+     * The SAME inline shaping as HTML (the classic lane's prose): escapes
+     * everything, then emits `<code>`/`<b>` for the balanced pairs and `•` /
+     * bold headings. A line break is the caller's (it decides `<br>`).
+     */
+    fun html(markdown: String): String {
+        val shaped = shapeLines(markdown)
+        val sb = StringBuilder()
+        var last = 0
+        for (m in INLINE.findAll(shaped)) {
+            sb.append(PyText.esc(shaped.substring(last, m.range.first)))
+            val code = m.groupValues[1]
+            if (code.isNotEmpty()) {
+                sb.append("<code>").append(PyText.esc(code)).append("</code>")
+            } else {
+                sb.append("<b>").append(PyText.esc(m.groupValues[2])).append("</b>")
+            }
+            last = m.range.last + 1
+        }
+        sb.append(PyText.esc(shaped.substring(last)))
+        return sb.toString()
+    }
+
     /** Bullets and headings as the phone reads them; everything else verbatim. */
     private fun shapeLines(markdown: String): String = markdown.lines().joinToString("\n") { line ->
         val trimmed = line.trimStart()

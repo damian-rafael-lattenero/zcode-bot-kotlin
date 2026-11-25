@@ -11,8 +11,6 @@ import io.ktor.client.engine.mock.respond
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.content.TextContent
 import kotlinx.coroutines.test.runTest
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -103,28 +101,6 @@ class LivePublisherTest {
 
     /** A one-step voice — the injected resolver's shorthand (the tests' common shape). */
     private fun voiceOf(text: String): TurnVoice = TurnVoice(listOf(TurnProse(text)))
-
-    /** The rich message's PULLQUOTE block texts (the voice's prose — the CoT's expandable blocks excluded). */
-    private fun blockTexts(body: String): List<String> {
-        val blocks = ((Json.parseToJsonElement(body) as? JsonObject)
-            ?.get("rich_message") as? JsonObject)
-            ?.get("blocks") as? JsonArray ?: return emptyList()
-        return blocks.mapNotNull { b ->
-            val obj = b as? JsonObject ?: return@mapNotNull null
-            if ((obj["type"] as? JsonPrimitive)?.content != "paragraph") return@mapNotNull null
-            flatten(obj["text"])
-        }
-    }
-
-    /** RichText back to its logical text: strings as-is, inline objects by their `text`. */
-    private fun flatten(element: JsonElement?): String? = when (element) {
-        is JsonPrimitive -> element.content
-        is JsonArray -> element.joinToString("") { part ->
-            if (part is JsonPrimitive) part.content else (part as? JsonObject)?.let { flatten(it["text"]) }.orEmpty()
-        }
-
-        else -> null
-    }
 
     /**
      * A CARD/FEED body: the rich HTML envelope (Bot API 10.1) or the classic
@@ -1133,40 +1109,56 @@ class LivePublisherTest {
         publisher.tick()
         // the seal: the fold's digest speaks the spent steps ONCE, organized —
         // the words arrive at the end, labeled, never as mid-turn bubbles
-        val digest = wire.bodies.lastOrNull { it.second == "sendRichMessage" && "✅ Respuesta" in it.first }
-        assertTrue(digest != null, "the seal's digest spoke: ${wire.bodies.map { it.second }}")
-        assertTrue("El meter es real" in digest!!.first, "the spent step rides the digest, organized")
+        val digest = spoken.lastOrNull { "✅ Respuesta" in it }
+        assertNotNull(digest, "the seal's digest spoke: $spoken")
+        assertTrue("El meter es real" in digest, "the spent step rides the digest, organized")
+        assertTrue(
+            blockBodies(wire).none { "✅ Respuesta" in it.first },
+            "the digest rides the classic HTML lane, never the rich blocks",
+        )
     }
 
     @Test
-    fun theSealSpeaksTheFinalAnswerViolet() = runTest {
+    fun theSealSpeaksTheFinalAnswerAsFormattedHtml() = runTest {
+        // THE 24/11 SCROLL LAW on the answer: the seal's digest rides the
+        // classic HTML lane — inline `code` becomes a real run, prose keeps
+        // its breaks, and a long line scrolls instead of wrapping. The rich
+        // blocks stay for the CoT's pullquote.
         val taskId = "task-9"
         val hub = LiveHub()
         hub.apply(frame(taskId, "task_run_started", at = 1_000), nowMs = 1_000)
         hub.apply(frame(taskId, "agent_thought_chunk", at = 1_050, "content" to JsonPrimitive("p")), nowMs = 1_050)
         val wire = Wire()
-        val publisher = publisher(wire, hub, finalTurn = { voiceOf("La respuesta final con `codigo`.") })
+        val spoken = mutableListOf<String>()
+        val publisher = publisher(wire, hub, spoken, finalTurn = { voiceOf("La respuesta final con `codigo`.") })
         publisher.tick()
         hub.apply(frame(taskId, "task_complete", at = 1_200, "stopReason" to JsonPrimitive("end_turn")), nowMs = 1_200)
         publisher.tick()
-        val answerRich = wire.bodies.lastOrNull { it.second == "sendRichMessage" && "respuesta final" in it.first }
-        assertTrue(answerRich != null, "the final answer is a violet message: ${wire.bodies.map { it.second }}")
+        val answer = spoken.lastOrNull { "respuesta final" in it }
+        assertNotNull(answer, "the final answer spoke: $spoken")
+        assertTrue("<code>codigo</code>" in answer, "the inline code renders as a run: $answer")
+        assertTrue(
+            blockBodies(wire).none { "respuesta final" in it.first },
+            "never the rich lane: ${wire.bodies.map { it.second }}",
+        )
     }
 
     @Test
-    fun theSealSpeaksTheOrganizedDigestViolet() = runTest {
-        // THE 16/11 LAW (the owner chose the digest): the turn's voice seals
-        // ORGANIZED — the steps labeled with the tool each followed, the
-        // conclusion marked ✅ — one violet message (packed pages), never
-        // the raw concatenated wall.
+    fun theSealSpeaksTheOrganizedDigestAsHtml() = runTest {
+        // THE 16/11 LAW (the owner chose the digest) on the 24/11 lane: the
+        // turn's voice seals ORGANIZED — the steps labeled with the tool each
+        // followed, the conclusion marked ✅ — packed classic-HTML pages,
+        // never the raw concatenated wall and never a wrapping rich block.
         val taskId = "task-9"
         val hub = LiveHub()
         hub.apply(frame(taskId, "task_run_started", at = 1_000), nowMs = 1_000)
         hub.apply(frame(taskId, "agent_thought_chunk", at = 1_050, "content" to JsonPrimitive("p")), nowMs = 1_050)
         val wire = Wire()
+        val spoken = mutableListOf<String>()
         val publisher = publisher(
             wire,
             hub,
+            spoken,
             finalTurn = {
                 TurnVoice(
                     listOf(
@@ -1180,35 +1172,32 @@ class LivePublisherTest {
         publisher.tick()
         hub.apply(frame(taskId, "task_complete", at = 1_200, "stopReason" to JsonPrimitive("end_turn")), nowMs = 1_200)
         publisher.tick()
-        val digest = wire.bodies.lastOrNull { it.second == "sendRichMessage" && "✅ Respuesta" in it.first }
-        assertTrue(digest != null, "the digest is a violet message: ${wire.bodies.map { it.second }}")
-        assertTrue("Paso 1" in digest!!.first, "the opening step carries its number")
-        assertTrue("tras 🔧 Bash" in digest.first, "the step names the tool it followed")
-        assertTrue("El fix consistió en X." in digest.first, "the conclusion rides the ✅ block")
-        assertTrue("paragraph" in digest.first, "the violet identity holds")
-        // the conclusion is the digest's LAST block
-        val lastText = blockTexts(digest.first).lastOrNull()
-        assertTrue(lastText?.startsWith("✅ Respuesta") == true, "the conclusion closes the digest: $lastText")
+        val digest = spoken.lastOrNull { "✅ Respuesta" in it }
+        assertNotNull(digest, "the digest spoke: $spoken")
+        assertTrue("Paso 1" in digest, "the opening step carries its number")
+        assertTrue("tras 🔧 Bash" in digest, "the step names the tool it followed")
+        assertTrue(digest.trimEnd().endsWith("El fix consistió en X."), "the conclusion closes the digest: $digest")
+        assertTrue("<br>" in digest, "prose breaks survive as <br> (rich HTML would collapse them)")
+        assertTrue(blockBodies(wire).none { "✅ Respuesta" in it.first }, "the digest left the rich lane")
     }
 
     @Test
-    fun anOversizedConclusionChunksAcrossRichMessagesAndNothingDrops() = runTest {
+    fun anOversizedConclusionChunksAcrossMessagesAndNothingDrops() = runTest {
         // THE CONTINUATION LAW: a conclusion longer than one message CHUNKS
-        // across rich messages — the pieces concatenate to the whole, byte
+        // across classic pages — the pieces concatenate to the whole, byte
         // for byte. Truncation with no continuation is the 16/11 bug, dead.
         val taskId = "task-9"
         val hub = LiveHub()
         hub.apply(frame(taskId, "task_run_started", at = 1_000), nowMs = 1_000)
         val wire = Wire()
         val text = "x".repeat(9000)
-        val publisher = publisher(wire, hub, finalTurn = { voiceOf(text) })
+        val spoken = mutableListOf<String>()
+        val publisher = publisher(wire, hub, spoken, finalTurn = { voiceOf(text) })
         publisher.tick()
         hub.apply(frame(taskId, "task_complete", at = 1_200, "stopReason" to JsonPrimitive("end_turn")), nowMs = 1_200)
         publisher.tick()
-        val rich = blockBodies(wire)
-        assertTrue(rich.size >= 3, "9000 cp over the 3500 page: several violet messages: ${rich.size}")
-        val joined = rich.flatMap { blockTexts(it.first) }.joinToString("")
-        assertEquals(text, joined, "the chunks CONCATENATE to the whole — nothing dropped")
+        assertTrue(spoken.size >= 3, "9000 cp over the 3500 page: several messages: ${spoken.size}")
+        assertEquals(text, spoken.joinToString(""), "the chunks CONCATENATE to the whole — nothing dropped")
     }
 
     @Test
@@ -1234,15 +1223,15 @@ class LivePublisherTest {
         )
         hub.apply(frame(taskId, "task_complete", at = 2_000, "stopReason" to JsonPrimitive("end_turn")), nowMs = 2_000)
         val wire = Wire()
-        val publisher = publisher(wire, hub, finalTurn = { null })
+        val spoken = mutableListOf<String>()
+        val publisher = publisher(wire, hub, spoken, finalTurn = { null })
         publisher.tick()
         publisher.tick()
-        val violet = blockBodies(wire).lastOrNull()
-        assertTrue(violet != null, "the fold's digest spoke violet: ${wire.bodies.map { it.second }}")
-        assertTrue("Paso 1" in violet!!.first, "the spent step rides numbered: ${violet.first.take(300)}")
-        assertTrue("✅ Respuesta" in violet.first, "the seal's copy is the conclusion")
-        assertTrue("La conclusión del fold." in violet.first)
-        assertEquals(1, blockBodies(wire).size, "one digest, one message")
+        val digest = spoken.lastOrNull { "✅ Respuesta" in it }
+        assertNotNull(digest, "the fold's digest spoke: $spoken")
+        assertTrue("Paso 1" in digest, "the spent step rides numbered: ${digest.take(300)}")
+        assertTrue("La conclusión del fold." in digest)
+        assertEquals(1, spoken.count { "✅ Respuesta" in it }, "one digest, one message")
     }
 
     @Test
@@ -1513,11 +1502,11 @@ class LivePublisherTest {
         )
         hub.apply(frame(taskId, "task_complete", at = 1_200, "stopReason" to JsonPrimitive("end_turn")), nowMs = 1_200)
         val wire = Wire()
-        val publisher = publisher(wire, hub, finalTurn = { voiceOf("La respuesta completa y final.") })
+        val spoken = mutableListOf<String>()
+        val publisher = publisher(wire, hub, spoken, finalTurn = { voiceOf("La respuesta completa y final.") })
         publisher.tick() // birth
         publisher.tick() // the seal tick — the prose rides answerAtSeal, never the feed
-        val copies = wire.bodies.count { it.second == "sendRichMessage" && "La respuesta completa" in it.first }
-        assertEquals(1, copies, "the conclusion is ONE violet message: ${wire.bodies.map { it.second }}")
+        assertEquals(1, spoken.count { "La respuesta completa" in it }, "the conclusion is ONE message: $spoken")
     }
 
     @Test
@@ -1535,13 +1524,12 @@ class LivePublisherTest {
         )
         hub.apply(frame(taskId, "task_complete", at = 2_000, "stopReason" to JsonPrimitive("end_turn")), nowMs = 2_000)
         val wire = Wire()
-        val publisher = publisher(wire, hub, finalTurn = { null })
+        val spoken = mutableListOf<String>()
+        val publisher = publisher(wire, hub, spoken, finalTurn = { null })
         publisher.tick()
         publisher.tick()
-        val violet = blockBodies(wire).lastOrNull()
-        assertNotNull(violet, "the fallback spoke violet: ${wire.bodies.map { it.second }}")
-        assertTrue("La conclusión del fallback" in violet.first, "the never-lost copy: ${violet.first.take(300)}")
-        assertEquals(1, blockBodies(wire).size, "one violet copy only")
+        assertEquals(1, spoken.size, "one copy only: $spoken")
+        assertTrue("La conclusión del fallback" in spoken.single(), "the never-lost copy: ${spoken.single().take(300)}")
     }
 
     @Test
@@ -1569,7 +1557,7 @@ class LivePublisherTest {
         hub.apply(frame(taskId, "task_complete", at = 2_000, "stopReason" to JsonPrimitive("end_turn")), nowMs = 2_000)
         publisher.tick()
         assertEquals(1, seals, "one seal")
-        assertEquals(1, blockBodies(wire).count { "La conclusión" in it.first }, "the conclusion speaks exactly once")
+        assertEquals(1, spoken.count { "La conclusión" in it }, "the conclusion speaks exactly once: $spoken")
         // THE REBURST: head + deltas + complete, the same startedAt stamp —
         // every frame drops at the sealed memory
         hub.apply(frame(taskId, "task_run_started", at = 2_100, "startedAt" to JsonPrimitive(5_000L)), nowMs = 2_100)
@@ -1580,7 +1568,7 @@ class LivePublisherTest {
         hub.apply(frame(taskId, "task_complete", at = 2_300, "stopReason" to JsonPrimitive("end_turn")), nowMs = 2_300)
         publisher.tick()
         assertEquals(1, seals, "the reburst never re-seals")
-        assertEquals(1, blockBodies(wire).count { "La conclusión" in it.first }, "the conclusion never re-speaks")
+        assertEquals(1, spoken.count { "La conclusión" in it }, "the conclusion never re-speaks: $spoken")
         // A REAL new turn (a strictly newer startedAt stamp) lifts the memory
         // — and like every turn it carries traffic before the seal (the birth
         // law: an Idle state never births the card). The clock moves past the

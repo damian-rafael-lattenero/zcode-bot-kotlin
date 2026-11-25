@@ -1,7 +1,6 @@
 package dev.lattenero.bot.channel
 
 import dev.lattenero.bot.contracts.PyText
-import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
@@ -92,10 +91,8 @@ class TurnDigestTest {
         assertEquals(1, pages.size)
         assertEquals(1, pages[0].size)
         assertEquals(VoiceBlock.Prose("solo la respuesta"), pages[0][0], "the pure core stays typed")
-        // the wire edge speaks the same block: paragraph, verbatim words
-        val wire = TurnDigest.wire(pages[0]).single()
-        assertEquals("paragraph", wire["type"]!!.jsonPrimitive.content)
-        assertEquals("solo la respuesta", wire["text"]!!.jsonPrimitive.content)
+        // the classic edge speaks the same block: the words alone, formatted
+        assertEquals("solo la respuesta", TurnDigest.htmlOf(pages[0]))
     }
 
     @Test
@@ -114,16 +111,28 @@ class TurnDigestTest {
     }
 
     @Test
-    fun fencedCodeRidesPreBlocksInsideTheDigest() {
+    fun fencedCodeRidesAPreWithItsLanguageInsideTheDigest() {
         val pages = TurnDigest.pages(
             TurnVoice(listOf(TurnProse("mira:\n```kotlin\nval x = 1\n```\nfin"))),
         )
         val page = pages.single()
-        assertEquals(
-            listOf("paragraph", "pre", "paragraph"),
-            TurnDigest.wire(page).map { it["type"]!!.jsonPrimitive.content },
-        )
         assertEquals("kotlin", (page[1] as VoiceBlock.Code).language)
+        val html = TurnDigest.htmlOf(page)
+        assertTrue("<pre><code class=\"language-kotlin\">val x = 1</code></pre>" in html, html)
+        assertTrue(html.startsWith("mira:"), html)
+        assertTrue(html.endsWith("fin"), html)
+    }
+
+    @Test
+    fun proseLinesSurviveAsBreaksAndInlineCodeAsRuns() {
+        val html = TurnDigest.htmlOf(listOf(VoiceBlock.Prose("uno\nmirá `x`")))
+        assertEquals("uno<br>mirá <code>x</code>", html)
+    }
+
+    @Test
+    fun codeWithoutAFenceSpeaksTheShellLanguageAndEscapes() {
+        val html = TurnDigest.htmlOf(listOf(VoiceBlock.Code("a < b", null)))
+        assertEquals("<pre><code class=\"language-nu\">a &lt; b</code></pre>", html)
     }
 
     @Test

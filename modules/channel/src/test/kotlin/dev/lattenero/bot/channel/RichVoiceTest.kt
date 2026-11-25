@@ -127,4 +127,18 @@ class RichVoiceTest {
         assertEquals("Plan\n• uno\n• dos", flat)
         assertEquals("bold", runs[0].jsonObject["type"]!!.jsonPrimitive.content)
     }
+
+    // THE CLASSIC LANE (24/11): the same shaping as HTML — escaped text with
+    // real <code>/<b> runs, bullets and headings shaped, no raw markers. The
+    // line break stays the caller's (the digest decides the <br>).
+    @Test
+    fun htmlShapesInlineRunsAndEscapesEverythingElse() {
+        val html = RichVoice.html("## Plan\n- mirá `/tasks` y **esto** <b>")
+        assertEquals("<b>Plan</b>\n• mirá <code>/tasks</code> y <b>esto</b> &lt;b&gt;", html)
+    }
+
+    @Test
+    fun plainProseIsJustEscaped() {
+        assertEquals("a &lt; b", RichVoice.html("a < b"))
+    }
 }

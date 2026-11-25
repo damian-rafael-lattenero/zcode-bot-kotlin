@@ -1062,17 +1062,18 @@ class LivePublisher(
         }
         val voice = finalTurn(state.taskId)?.takeIf { it.segments.isNotEmpty() }
             ?: TurnDigest.ofFold(state).takeIf { it.segments.isNotEmpty() }
-        // THE VOICE'S LAST WORD (5/11; 16/11 THE DIGEST): the turn's prose
-        // seals ORGANIZED — [TurnDigest.pages] builds the steps (each one
-        // labeled with the tool it followed, the conclusion marked ✅) and
-        // packs them into pages of BLOCK_CP, ONE rich message per page. THE
-        // CONTINUATION LAW: an oversized step chunks across pages and the
-        // chunks concatenate to the whole — nothing is ever dropped, no
-        // message ever truncates silently. NEVER LOST (11/11, same ladder):
-        // the snapshot's voice first; when the snapshot cannot answer NOW,
-        // the fold's own projection ([TurnDigest.ofFold]) speaks. A violet
-        // page that could not fly (a cooldown window opened mid-seal) falls
-        // back to the parked speak lane — the words arrive, even degraded.
+        // THE VOICE'S LAST WORD (5/11; 16/11 THE DIGEST; 24/11 HTML): the
+        // turn's prose seals ORGANIZED — [TurnDigest.pages] builds the steps
+        // (each one labeled with the tool it followed, the conclusion marked
+        // ✅) and packs them into pages of BLOCK_CP, ONE CLASSIC HTML message
+        // per page (code fences declare a real language → long lines
+        // SCROLL). THE CONTINUATION LAW: an oversized step chunks across
+        // pages and the chunks concatenate to the whole — nothing is ever
+        // dropped. NEVER LOST (11/11, same ladder): the snapshot's voice
+        // first; when the snapshot cannot answer NOW, the fold's own
+        // projection ([TurnDigest.ofFold]) speaks. A page that could not fly
+        // (a cooldown window opened mid-seal) falls back to the parked speak
+        // lane — the words arrive, even degraded.
         // richVoice=false keeps the escaped plain pages.
         voice?.let { v ->
             val pages = TurnDigest.pages(v)
@@ -1080,8 +1081,8 @@ class LivePublisher(
                 // the LAST page carries the owner's 👍/👎 row (audit: the first
                 // preference data) — one tap, no extra message in the chat
                 val markup = if (index == pages.lastIndex) Keyboards.feedbackRow(state.taskId) else null
-                val violet = if (richVoice) telegram.sendRich(cfg, TurnDigest.wire(page), markup) else null
-                if (violet == null) speak(PyText.esc(TurnDigest.pageText(page)), markup)
+                val sent = if (richVoice) speakPlain(TurnDigest.htmlOf(page), markup) else null
+                if (sent == null) speak(PyText.esc(TurnDigest.pageText(page)), markup)
             }
         }
         val answer = voice?.conclusion

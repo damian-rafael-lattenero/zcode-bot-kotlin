@@ -5,8 +5,6 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
 
 /** One prose step of the turn's voice, with the tool that preceded it. */
 data class TurnProse(
@@ -31,8 +29,8 @@ data class TurnVoice(val segments: List<TurnProse>) {
 
 /**
  * One block of the turn's voice — TYPED (audit wave 4, the no-opaque-types
- * law): the core builds values, [TurnDigest.wire] renders the wire's JSON at
- * the Telegram edge only.
+ * law): the core builds values, [TurnDigest.htmlOf] renders the classic HTML
+ * at the Telegram edge only.
  */
 sealed interface VoiceBlock {
     /** The block's words, verbatim (a chunk that concatenates to the whole). */
@@ -180,24 +178,17 @@ object TurnDigest {
     fun pageText(page: List<VoiceBlock>): String = page.joinToString("\n\n") { it.text }
 
     /**
-     * THE WIRE EDGE: one page → the rich message's block params (`pre` with
-     * its language, a plain `paragraph` for prose). Prose goes through
-     * [RichVoice.inline]: the model's `code` and **bold** render as runs
-     * instead of arriving as raw markers.
+     * THE SAME PAGE AS CLASSIC HTML (24/11, the scroll law): prose with
+     * `<br>` + inline `<code>`/`<b>`, code fences as `<pre><code>` with a
+     * REAL language — the phone then scrolls long lines instead of wrapping
+     * them. The rich-block wire stays for the surfaces that need structure.
      */
-    fun wire(page: List<VoiceBlock>): List<JsonObject> = page.map { block ->
-        buildJsonObject {
-            when (block) {
-                is VoiceBlock.Prose -> {
-                    put("type", "paragraph")
-                    put("text", RichVoice.inline(block.text))
-                }
-
-                is VoiceBlock.Code -> {
-                    put("type", "pre")
-                    block.language?.let { put("language", it) }
-                    put("text", block.text)
-                }
+    fun htmlOf(page: List<VoiceBlock>): String = page.joinToString("\n\n") { block ->
+        when (block) {
+            is VoiceBlock.Prose -> RichVoice.html(block.text).replace("\n", "<br>")
+            is VoiceBlock.Code -> {
+                val language = CodeLang.normalize(block.language) ?: CodeLang.SHELL
+                "<pre><code class=\"language-$language\">${PyText.esc(block.text)}</code></pre>"
             }
         }
     }
