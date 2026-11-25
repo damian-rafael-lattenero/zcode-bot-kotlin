@@ -39,6 +39,15 @@ class PngRenderTest {
     }
 
     @Test
+    fun `a body taller than a page splits into pages that keep every line`() {
+        val tall = (1..(PngRender.PAGE_LINES * 2 + 5)).joinToString("\n") { "line $it" }
+        val pages = PngRender.pages(tall)
+        assertEquals(3, pages.size, "two full pages and the remainder")
+        assertEquals(tall, pages.joinToString("\n"), "paging loses nothing")
+        assertEquals(listOf("a\nb"), PngRender.pages("a\nb"), "a short body stays whole")
+    }
+
+    @Test
     fun `no flag rides the argv twice`() {
         // MEASURED 25/11: silicon answers "The argument '--language <LANG>'
         // was provided more than once" with exit 1 and NO file — a duplicated

@@ -18,6 +18,7 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.isSuccess
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -93,6 +94,46 @@ class TgApi(
         val bytes = resp.bodyAsBytes()
         target.writeBytes(bytes)
         return bytes.size.toLong()
+    }
+
+    /**
+     * AN ALBUM OUT (25/11): sendMediaGroup needs its photos in ONE request —
+     * the `media` JSON names them `attach://f0…fn` and each part follows. Same
+     * redactor law as [upload]: the URL carries the token, nothing flies raw.
+     */
+    @Suppress("TooGenericExceptionCaught", "ThrowsCount") // the same redactor law as call()
+    suspend fun uploadAlbum(method: String, fields: Map<String, String>, files: List<File>): JsonElement {
+        val cfg = configProvider()
+        val url = "${cfg.apiBase}/bot${cfg.token}/$method"
+        val media = files.mapIndexed { i, _ ->
+            JsonObject(mapOf("type" to JsonPrimitive("photo"), "media" to JsonPrimitive("attach://f$i")))
+        }
+        val resp = try {
+            client.submitFormWithBinaryData(
+                url = url,
+                formData = formData {
+                    fields.forEach { (name, value) -> append(name, value) }
+                    append("media", JsonArray(media).toString())
+                    files.forEachIndexed { i, file ->
+                        append(
+                            "f$i",
+                            file.readBytes(),
+                            Headers.build {
+                                append(HttpHeaders.ContentType, "application/octet-stream")
+                                append(HttpHeaders.ContentDisposition, "filename=\"${file.name}\"")
+                            },
+                        )
+                    }
+                },
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            throw IOException(cfg.redact(e.message ?: e::class.simpleName.orEmpty()), e)
+        }
+        val body = resp.bodyAsText()
+        if (!resp.status.isSuccess()) throw TgHttpException(resp.status.value, body)
+        return Json.parseToJsonElement(body)
     }
 
     /**

@@ -115,7 +115,25 @@ object PngRender {
     const val BASE_FONT_PX: Int = 26
     const val COMPACT_FONT_PX: Int = 14
 
-    /** The dense pass's face — the constant the tests and the docs quote. */
+    /**
+     * THE SERVER'S OWN CAP (measured 25/11 with sendPhoto): Telegram stores a
+     * photo at most 2560 px on its long side — a bigger canvas is downscaled
+     * and the zoom lands on mush. The ladder aims BELOW this, and content
+     * taller than a page is SPLIT ([pages]) so every image stays sharp.
+     */
+    const val SERVER_LONG_SIDE: Int = 2560
+
+    /** Lines a dense page holds under [SERVER_LONG_SIDE] (≈19.8 px per line). */
+    const val PAGE_LINES: Int = 120
+
+    /** Splits the body into per-image pages; a body that fits stays whole. */
+    fun pages(text: String, pageLines: Int = PAGE_LINES): List<String> {
+        val lines = text.split('\n')
+        if (lines.size <= pageLines) return listOf(text)
+        return lines.chunked(pageLines).map { it.joinToString("\n") }
+    }
+
+    /** The dense pass's font — the constant the tests and the docs quote. */
     const val COMPACT_FONT: String = "$FONT_FAMILY=$COMPACT_FONT_PX"
 
     /** The dense pass's line pad: 5 px × 400 lines would break the ceiling. */

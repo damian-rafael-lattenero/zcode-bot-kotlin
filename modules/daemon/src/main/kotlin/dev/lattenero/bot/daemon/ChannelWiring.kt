@@ -946,6 +946,12 @@ internal fun wireChannel(
                 api.upload("sendPhoto", fields, "photo", file)
                 Unit
             },
+            // a paged body flies as ONE album (the owner, 25/11): every page
+            // stays under Telegram's 2560-px photo cap, so the zoom is sharp
+            uploadAlbum = { fields, files ->
+                api.uploadAlbum("sendMediaGroup", fields, files)
+                Unit
+            },
             chatId = {
                 val chat = TgConfig.load(remote).chatId
                 (chat as? JsonPrimitive)?.content ?: chat.toString()

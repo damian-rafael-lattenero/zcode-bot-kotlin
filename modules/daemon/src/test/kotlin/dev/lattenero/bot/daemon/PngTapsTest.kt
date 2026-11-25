@@ -37,10 +37,12 @@ class PngTapsTest {
         writesFile: Boolean = true,
         bytes: MutableList<ByteArray> = mutableListOf(),
         pngSeq: List<ByteArray> = emptyList(),
+        album: MutableList<List<File>> = mutableListOf(),
     ): PngTaps {
         var i = 0
         return PngTaps(
             shots = shots,
+            uploadAlbum = { _, files -> album += files },
             upload = { sent, file ->
                 if (uploadFails) throw IllegalStateException("boom")
                 fields += sent
@@ -93,6 +95,22 @@ class PngTapsTest {
         assertEquals(0x89.toByte(), bytes.single()[0], "the upload starts with the PNG signature")
         assertTrue(PngRender.fitsPhoto(bytes.single()), "the canvas is a legal photo")
         assertTrue(dir.listFiles().orEmpty().isEmpty(), "both temp files die with the tap")
+    }
+
+    @Test
+    fun `a long body flies as one album of sharp pages`() {
+        // measured 25/11: Telegram stores a photo at most 2560 px on its long
+        // side, so 400 lines in one image would be downscaled to mush. The
+        // body pages into 120-line images and they ride ONE album.
+        val shots = PngShots()
+        val id = shots.register(PngRender.Shot((1..400).joinToString("\n") { "line $it" }, "log"))
+        val album = mutableListOf<List<File>>()
+        val uploaded = mutableListOf<File>()
+        val answer = runBlocking { taps(shots, uploaded = uploaded, album = album).shoot(id) }
+        assertNull(answer, "the album flew")
+        assertEquals(4, album.single().size, "400 lines = 4 pages of at most ${PngRender.PAGE_LINES}")
+        assertTrue(uploaded.isEmpty(), "a paged body never rides sendPhoto")
+        assertTrue(dir.listFiles().orEmpty().isEmpty(), "every page's temps die")
     }
 
     @Test

@@ -27,6 +27,9 @@ class PngTaps(
     private val shots: PngShots,
     /** The upload edge — production binds it to `TgApi.upload("sendPhoto", …)`. */
     private val upload: suspend (fields: Map<String, String>, file: File) -> Unit,
+    /** The album edge — production binds it to `TgApi.uploadAlbum("sendMediaGroup", …)`. */
+    private val uploadAlbum: suspend (fields: Map<String, String>, files: List<File>) -> Unit =
+        { _, _ -> },
     /** The exec edge — production binds it to silicon via ProcessBuilder. */
     private val exec: (argv: List<String>) -> Int = { argv ->
         ProcessBuilder(argv).redirectErrorStream(true).start().waitFor()
@@ -45,54 +48,46 @@ class PngTaps(
     suspend fun shoot(id: Int): String? {
         val shot = shots.get(id) ?: return PngShots.MISS
         val stamp = clock()
-        val source = File(tmpDir, "png-$id-$stamp.txt")
-        val output = File(tmpDir, "png-$id-$stamp.png")
+        // WHOLE LINES + THE PAGES (measured 25/11): Telegram stores a photo at
+        // most 2560 px on its long side, so a long body is SPLIT into as many
+        // SHARP images as it needs and they fly as one album — a single tall
+        // photo would be downscaled to mush. A diff is never paged: the drawer
+        // already caps its own rows.
+        val pages = if (shot.language == DIFF_LANGUAGE) {
+            listOf(shot.text)
+        } else {
+            PngRender.pages(PngRender.fit(shot.text))
+        }
+        val sources = pages.indices.map { File(tmpDir, "png-$id-$stamp-$it.txt") }
+        val outputs = pages.indices.map { File(tmpDir, "png-$id-$stamp-$it.png") }
         return try {
-            // WHOLE LINES, ALWAYS (the owner, 25/11): the image grows as wide
-            // as its longest line — silicon draws the line complete and the
-            // owner zooms. Wrapping is the LAST RESORT, applied only when the
-            // photo could not exist at that width (the diff drawer's own law).
-            val body = PngRender.fit(shot.text)
-            val compact = body.count { it == '\n' } + 1 > PngRender.COMPACT_AFTER
-            source.writeText(body)
-            // A DIFF rides the SIDE-BY-SIDE drawer (the owner, 25/11): two
-            // columns and the changed middle, not silicon's unified stream.
-            // A DIFF rides the SIDE-BY-SIDE drawer (the owner, 25/11): two
-            // columns and the changed middle, not silicon's unified stream.
-            when (imageOf(shot, source, output, compact)) {
-                Drawn.IMAGE -> Unit
-                // THE SILENT ZERO (measured 25/11): silicon exits 0 and writes
-                // NOTHING when it cannot read its input — the exit code alone
-                // is not a receipt, so the FILE is the verdict
-                Drawn.NONE -> {
-                    logger.warn {
-                        "png $id: no image (file=${output.exists()} " +
-                            "source=${source.exists()} bytes=${source.length()})"
-                    }
-                    return RENDER_FAILED
-                }
-                // THE PHOTO CEILINGS (10 MB, w+h ≤ 10 000, ratio ≤ 20): every
-                // whole-line scale was refused, so the text wraps and silicon
-                // draws once more — a wrapped line beats a lost tap
-                Drawn.TOO_BIG -> {
-                    if (!wrapped(shot, source, output, compact)) {
-                        logger.warn { "png $id: the wrapped retry wrote no image" }
+            val files = pages.mapIndexed { index, page ->
+                sources[index].writeText(page)
+                when (imageOf(shot, page, sources[index], outputs[index])) {
+                    Drawn.IMAGE -> outputs[index]
+                    // THE SILENT ZERO (measured 25/11): silicon exits 0 and
+                    // writes NOTHING when it cannot read its input — the exit
+                    // code alone is not a receipt, so the FILE is the verdict
+                    Drawn.NONE -> {
+                        logger.warn {
+                            "png $id: no image (file=${outputs[index].exists()} " +
+                                "source=${sources[index].exists()} bytes=${sources[index].length()})"
+                        }
                         return RENDER_FAILED
                     }
-                    if (!PngRender.fitsPhoto(output.readBytes())) return TOO_BIG
+                    // the photo cannot exist at this width: the text wraps and
+                    // silicon draws once more — a wrapped line beats a lost tap
+                    Drawn.TOO_BIG -> {
+                        if (!wrapped(shot, page, sources[index], outputs[index])) {
+                            logger.warn { "png $id: the wrapped retry wrote no image" }
+                            return RENDER_FAILED
+                        }
+                        if (!PngRender.fitsPhoto(outputs[index].readBytes())) return TOO_BIG
+                        outputs[index]
+                    }
                 }
             }
-            // THE PHOTO CEILINGS (10 MB, w+h ≤ 10 000, ratio ≤ 20): only when
-            // the whole-line render passes them does the text wrap and the
-            // render run again — a wrapped line beats a lost tap
-            if (!PngRender.fitsPhoto(output.readBytes())) {
-                if (!wrapped(shot, source, output, compact)) {
-                    logger.warn { "png $id: the wrapped retry wrote no image" }
-                    return RENDER_FAILED
-                }
-                if (!PngRender.fitsPhoto(output.readBytes())) return TOO_BIG
-            }
-            upload(fieldsOf(id), output)
+            send(id, files)
             null
         } catch (e: CancellationException) {
             throw e // structured concurrency: a shutdown is never an upload failure
@@ -100,29 +95,29 @@ class PngTaps(
             logger.warn(e) { "png shot $id: upload failed" }
             UPLOAD_FAILED.format(e.message ?: e::class.simpleName.orEmpty())
         } finally {
-            source.delete()
-            output.delete()
+            (sources + outputs).forEach { it.delete() }
         }
     }
 
-    /**
-     * THE IMAGE: a diff rides the side-by-side drawer; everything else rides
-     * silicon at the LARGEST scale Telegram still accepts (the resolution
-     * ladder: 3x when it fits, 2x next, 1x last). True = a legal file landed.
-     */
+    /** One image = the plain photo door; many = one album, all reply-anchored. */
+    private suspend fun send(id: Int, files: List<File>) {
+        if (files.size == 1) upload(fieldsOf(id), files.single()) else uploadAlbum(fieldsOf(id), files)
+    }
+
     /** What the image attempt answered: a legal photo, a photo too big, or nothing. */
     private enum class Drawn { IMAGE, TOO_BIG, NONE }
 
     /**
-     * THE IMAGE: a diff rides the side-by-side drawer; everything else rides
-     * silicon at the LARGEST scale Telegram still accepts (the resolution
-     * ladder: 3x when it fits, 2x next, 1x last).
+     * THE IMAGE of one [page]: a diff rides the side-by-side drawer;
+     * everything else rides silicon at the LARGEST scale Telegram still
+     * accepts (the resolution ladder: 3x when it fits, 2x next, 1x last).
      */
     @Suppress("ReturnCount") // three honest exits: the diff, a legal scale, or the verdict
-    private fun imageOf(shot: PngRender.Shot, source: File, output: File, compact: Boolean): Drawn {
+    private fun imageOf(shot: PngRender.Shot, page: String, source: File, output: File): Drawn {
         if (shot.language == DIFF_LANGUAGE) {
             return if (DiffPng.render(shot.text, output)) Drawn.IMAGE else Drawn.NONE
         }
+        val compact = page.count { it == '\n' } + 1 > PngRender.COMPACT_AFTER
         var anyFile = false
         for (scale in PngRender.MAX_SCALE downTo 1) {
             val drew = draw(shot, source, output, compact, scale) == 0 && output.exists()
@@ -148,12 +143,17 @@ class PngTaps(
 
     /**
      * THE LAST RESORT (the owner, 25/11): the whole-line render came out past
-     * the photo ceilings, so the text wraps where the image cannot exist and
+     * the photo ceilings, so [page] wraps where the image cannot exist and
      * silicon draws again. True = a file landed.
      */
-    private fun wrapped(shot: PngRender.Shot, source: File, output: File, compact: Boolean): Boolean {
-        source.writeText(PngRender.fit(PngRender.wrap(shot.text)))
-        val code = exec(PngRender.arguments(shot, source.absolutePath, output.absolutePath, compact))
+    private fun wrapped(
+        shot: PngRender.Shot,
+        page: String,
+        source: File,
+        output: File,
+    ): Boolean {
+        source.writeText(PngRender.fit(PngRender.wrap(page)))
+        val code = exec(PngRender.arguments(shot, source.absolutePath, output.absolutePath, false))
         return code == 0 && output.exists()
     }
 
