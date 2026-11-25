@@ -52,12 +52,24 @@ class DiffPngTest {
     }
 
     @Test
-    fun `a wide diff clips instead of blowing the canvas`() {
-        val wide = "+ 1 │ " + "x".repeat(400)
-        val out = File(dir, "wide.png")
-        assertTrue(DiffPng.render(wide, out))
+    fun `a long line wraps inside its row instead of ending in dots`() {
+        val long = File(dir, "long.png")
+        val short = File(dir, "short.png")
+        assertTrue(DiffPng.render("+ 1 │ " + "x".repeat(400), long))
+        assertTrue(DiffPng.render("+ 1 │ " + "x".repeat(30), short))
+        val (longW, longH) = PngRender.dimensions(long.readBytes())!!
+        val (shortW, shortH) = PngRender.dimensions(short.readBytes())!!
+        assertTrue(longW > shortW, "wider content earns a wider column: $longW > $shortW")
+        assertTrue(longH > shortH, "the extra characters become lines, not dots: $longH > $shortH")
+        assertTrue(PngRender.fitsPhoto(long.readBytes()), "and the canvas is still a legal photo")
+    }
+
+    @Test
+    fun `a small diff is painted at a zoomable resolution`() {
+        val out = File(dir, "small.png")
+        assertTrue(DiffPng.render("- 1 │ a\n+ 1 │ b", out))
         val (width, height) = PngRender.dimensions(out.readBytes())!!
-        assertTrue(width < 4000, "the canvas clips the line: $width")
-        assertTrue(height > 0)
+        assertTrue(width > 1_000, "the canvas is painted larger than its base grid: $width")
+        assertTrue(width + height <= 9_000, "and inside Telegram's pixel ceiling: $width+$height")
     }
 }
