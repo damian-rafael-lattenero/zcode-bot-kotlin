@@ -318,22 +318,26 @@ Run the steps in order and stop at the first one that answers "no". Each
 step names what it *proves*, not just what it prints. Every step below is
 read-only.
 
-### Step 0 — is Telegram reachable at all?
+### Step 0 — can the bot hear Telegram at all?
 
-The beacon already answers it every 60 s: it calls `getMe` directly and
-records the verdict.
+The beacon already answers it every 60 s from one positive number: the
+age of the poller's cursor (`tg-offset`), which the poller rewrites at
+the end of every successful `getUpdates` cycle.
 
 ```bash
-# [read-only] the newest beacon line, with the live Telegram probe
-tail -1 ~/.zcode/bot-kotlin/logs/beacon.log
-# 2026-11-03T22:59:47-03:00 ok epoch=... daemon_age_s=4 poll_fail_recent=false telegram_probe=ok
+# [read-only] the beacon's own view: the record + the /fail decision
+nu scripts/beacon.nu --status
+# {"beacon":{"epoch":…,"poller_silent_s":2,…},"plan":{"down":false,"reason":"poller heard Telegram 2s ago"}}
+
+# [read-only] the same number straight from the file
+stat -f '%Sm %N' ~/.zcode/hooks/state/tg-offset
 ```
 
-`telegram_probe=ok` + a silent bot means the problem is on the Mac (keep
-going). `telegram_probe=fail` means Telegram or the network is the
-problem: the bot's own apology will arrive when it recovers
-(`poller RECOVERED` in `daemon.jsonl`), and there is nothing to fix
-locally.
+`poller_silent_s` in the low single digits + a silent bot means the
+problem is on the Mac (keep going). `down: true` means the poller has not
+completed a cycle for 3 minutes: Telegram or the network is the problem,
+or a second poller holds the token (409). The bot's own apology arrives
+when it recovers, and there is nothing to fix locally.
 
 ### Step 1 — is the daemon alive?
 
@@ -1220,7 +1224,7 @@ it is not this system's manual. Every section of it, and its fate:
 | **`/stop` doesn't halt a phone-only run** (ADR-002) | **replaced.** `/stop` sends `session/stop` over the channel; if the host is down it says so (`📡 … Nothing was stopped.`). There is no phone-only run to explain: a run is the app's. |
 | **`/nuclear` = `/stop` markers → SIGTERM the registry pids → `killall -TERM ZCode` → `open -a ZCode` → bot kickstart** | **replaced.** `NuclearLadder` (§2.5): stopAll through the channel, SIGTERM→SIGKILL the CLI runners (external `ps`, comm exact), `launchctl bootout gui/<uid>/application.dev.zcode.*` (the only real kill — `killall` alone gets resurrected by launchd), `open -a ZCode`, wait for `hello_ok`, then `launchctl kickstart -k` the daemon. Two-step confirm and single-flight (`/nuclear` → the ☢️ tap / `/nuclear go`). |
 | **Network down → messages fall into the outbox and resend on their own** | **carried.** Same files (`outbox.json`, `tg-cooldown`, `tg-last-ph`), same behaviour, now drained by the daemon every 15 s (§3 Step 5). |
-| **Config: `~/.zcode/telegram-remote.json`, `~/.zcode/hooks/bot-provider.json`, hooks in `~/.zcode/cli/config.json` (7 events), `/etc/hosts`** | **partial.** The first two are carried (paths only — never print either). The CLI hooks are **gone on purpose** (§5.2). `/etc/hosts`/IPv6 is a host-level workaround, not part of this bot's config; the beacon's `getMe` (Step 0) is the honest test of Telegram reachability. |
+| **Config: `~/.zcode/telegram-remote.json`, `~/.zcode/hooks/bot-provider.json`, hooks in `~/.zcode/cli/config.json` (7 events), `/etc/hosts`** | **partial.** The first two are carried (paths only — never print either). The CLI hooks are **gone on purpose** (§5.2). `/etc/hosts`/IPv6 is a host-level workaround, not part of this bot's config; Step 0's cursor age (the poller's own receipt) is the honest test of Telegram reachability. |
 
 One doc-level discrepancy worth knowing while reading other files: the
 README's build section still says the local gate needs a Java 21
