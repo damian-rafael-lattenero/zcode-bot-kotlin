@@ -1226,9 +1226,12 @@ class LivePublisherTest {
         assertNotNull(digest, "the digest spoke: $spoken")
         assertTrue("Paso 1" in digest, "the opening step carries its number")
         assertTrue("tras 🔧 Bash" in digest, "the step names the tool it followed")
-        assertTrue(digest.trimEnd().endsWith("El fix consistió en X."), "the conclusion closes the digest: $digest")
         assertTrue(
-            "Paso 1\n\nReviso el handler primero." in digest,
+            digest.trimEnd().endsWith("El fix consistió en X.</blockquote>"),
+            "the conclusion closes the digest — quoted, the voice's own highlight: $digest",
+        )
+        assertTrue(
+            "<blockquote>Paso 1\n\nReviso el handler primero.</blockquote>" in digest,
             "the label and the words keep their REAL blank line (classic HTML rejects <br>): $digest",
         )
         assertTrue(blockBodies(wire).none { "✅ Respuesta" in it.first }, "the digest left the rich lane")
@@ -1250,7 +1253,10 @@ class LivePublisherTest {
         hub.apply(frame(taskId, "task_complete", at = 1_200, "stopReason" to JsonPrimitive("end_turn")), nowMs = 1_200)
         publisher.tick()
         assertTrue(spoken.size >= 3, "9000 cp over the 3500 page: several messages: ${spoken.size}")
-        assertEquals(text, spoken.joinToString(""), "the chunks CONCATENATE to the whole — nothing dropped")
+        // the prose rides quoted (the voice's highlight); the CHUNKS still
+        // concatenate to the whole byte for byte once the wrapper is peeled
+        val bare = spoken.joinToString("").replace("<blockquote>", "").replace("</blockquote>", "")
+        assertEquals(text, bare, "the chunks CONCATENATE to the whole — nothing dropped")
     }
 
     @Test

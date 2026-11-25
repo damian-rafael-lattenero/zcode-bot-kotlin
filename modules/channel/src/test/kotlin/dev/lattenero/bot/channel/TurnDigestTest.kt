@@ -86,13 +86,14 @@ class TurnDigestTest {
     }
 
     @Test
-    fun aSingleStepRendersBareAsAlways() {
+    fun aSingleStepRendersAsAQuoteAsAlways() {
         val pages = TurnDigest.pages(TurnVoice(listOf(TurnProse("solo la respuesta"))))
         assertEquals(1, pages.size)
         assertEquals(1, pages[0].size)
         assertEquals(VoiceBlock.Prose("solo la respuesta"), pages[0][0], "the pure core stays typed")
-        // the classic edge speaks the same block: the words alone, formatted
-        assertEquals("solo la respuesta", TurnDigest.htmlOf(pages[0]))
+        // the classic edge speaks the same block: the words quoted, so the
+        // bot's voice wears the CoT's own highlight (the owner, 25/11)
+        assertEquals("<blockquote>solo la respuesta</blockquote>", TurnDigest.htmlOf(pages[0]))
     }
 
     @Test
@@ -119,14 +120,14 @@ class TurnDigestTest {
         assertEquals("kotlin", (page[1] as VoiceBlock.Code).language)
         val html = TurnDigest.htmlOf(page)
         assertTrue("<pre><code class=\"language-kotlin\">val x = 1</code></pre>" in html, html)
-        assertTrue(html.startsWith("mira:"), html)
-        assertTrue(html.endsWith("fin"), html)
+        assertTrue(html.startsWith("<blockquote>mira:</blockquote>"), html)
+        assertTrue(html.endsWith("<blockquote>fin</blockquote>"), html)
     }
 
     @Test
     fun proseLinesSurviveAsRealBreaksAndInlineCodeAsRuns() {
         val html = TurnDigest.htmlOf(listOf(VoiceBlock.Prose("uno\nmirá `x`")))
-        assertEquals("uno\nmirá <code>x</code>", html)
+        assertEquals("<blockquote>uno\nmirá <code>x</code></blockquote>", html)
     }
 
     @Test

@@ -178,16 +178,24 @@ object TurnDigest {
     fun pageText(page: List<VoiceBlock>): String = page.joinToString("\n\n") { it.text }
 
     /**
-     * THE SAME PAGE AS CLASSIC HTML (24/11, the scroll law): prose with
-     * inline `<code>`/`<b>` and its REAL line breaks (classic `parse_mode=HTML`
-     * rejects `<br>` — measured by the 25/11 probe), code fences as
-     * `<pre><code class="language-X">` with a REAL language — the phone then
-     * scrolls long lines instead of wrapping them. The rich-block wire stays
-     * for the surfaces that need structure.
+     * THE SAME PAGE AS CLASSIC HTML (24/11): prose with inline `<code>`/`<b>`
+     * and its REAL line breaks (classic `parse_mode=HTML` rejects `<br>` —
+     * measured by the 25/11 probe), code fences as
+     * `<pre><code class="language-X">` with a REAL language. The rich-block
+     * wire stays for the surfaces that need structure.
+     *
+     * THE VOICE WEARS THE QUOTE (the owner, 25/11: when the bot speaks, the
+     * message must look highlighted like the CoT): every PROSE block rides a
+     * `<blockquote>` — the same quoted look the thinking blocks wear, so the
+     * bot's own words are visually its own channel. Telegram owns the tint
+     * (the client's theme colours a quote; a bot cannot set a hex), so this
+     * is the closest a message gets to «teal background». Code stays a
+     * `pre`: it keeps its language label, its copy affordance and the pipe
+     * shaping.
      */
     fun htmlOf(page: List<VoiceBlock>): String = page.joinToString("\n\n") { block ->
         when (block) {
-            is VoiceBlock.Prose -> RichVoice.html(block.text)
+            is VoiceBlock.Prose -> "<blockquote>${RichVoice.html(block.text)}</blockquote>"
             is VoiceBlock.Code -> {
                 val language = CodeLang.normalize(block.language) ?: CodeLang.SHELL
                 // the shell's own command/pipeline: breaks at its pipes, never an arbitrary cut
