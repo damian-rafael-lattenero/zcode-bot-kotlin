@@ -63,8 +63,12 @@ Only three roads, each trades something away:
 1. **Telegram Desktop** — its code blocks do scroll; the phone is the limit.
 2. **File attachment** (`.nu`, `.kt`, `.md`) — scrolls and copies whole,
    but leaves the inline bubble.
-3. **PNG render** (carbon-style) — colors and zero wrapping, but no copy and
-   pinch-zoom reading.
+3. **PNG render** (silicon, the owner's teal palette) — colors and zero
+   wrapping, but a tap-to-open viewer with pinch-zoom, no copy.
+
+The bot now offers road 3 on demand: code boxes and every seal page carry a
+`📸 PNG` row (`PngShots` registry + `PngTaps` edge, palette A `#0B3B3C` +
+OneHalfDark). The image flies ONLY on the tap — never a stream of photos.
 
 ## 6. Caps that bound the code bodies
 
