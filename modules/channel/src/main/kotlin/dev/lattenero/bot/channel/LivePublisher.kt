@@ -1137,18 +1137,11 @@ class LivePublisher(
             pages.forEachIndexed { index, page ->
                 // the LAST page carries the owner's 👍/👎 row (audit: the first
                 // preference data) — one tap, no extra message in the chat.
-                // EVERY page earns the 📸 door (the owner, 25/11): its own shot,
-                // registered HERE — the image flies only on the tap.
-                val base = if (index == pages.lastIndex) Keyboards.feedbackRow(state.taskId) else null
-                val shot = TurnDigest.shotOf(page)
-                val pngId = if (shot != null) pngShots?.register(shot) else null
-                val markup = if (pngId != null) Keyboards.withPng(base, pngId) else base
+                // NO 📸 door here (the owner, 25/11): a digest is the turn's
+                // prose, and the button never belonged on it.
+                val markup = if (index == pages.lastIndex) Keyboards.feedbackRow(state.taskId) else null
                 val sent = if (richVoice) speakPlain(TurnDigest.htmlOf(page), markup) else null
-                if (sent == null) {
-                    anchor(pngId, speak(PyText.esc(TurnDigest.pageText(page)), markup))
-                } else {
-                    anchor(pngId, sent) // the photo replies to THIS page
-                }
+                if (sent == null) speak(PyText.esc(TurnDigest.pageText(page)), markup)
             }
         }
         val answer = voice?.conclusion
