@@ -921,6 +921,47 @@ class BotCommandsTest {
     }
 
     @Test
+    fun theTaskListCarriesANativeTable() {
+        val rows = listOf(
+            TaskRow("sess_aaaaaaaaaaaa", "arreglá el login", "/w/proj-a", whenMs = 2),
+            TaskRow("sess_bbbbbbbbbbbb", "", "/w/proj-b", whenMs = 1),
+        )
+        val rich = BotCommands.renderTaskListRich(
+            rows,
+            running = setOf("sess_aaaaaaaaaaaa"),
+            activeSid = "sess_aaaaaaaaaaaa",
+            activeWs = "/w/proj-a",
+            all = false,
+        )
+        assertTrue("<table bordered>" in rich, rich)
+        assertTrue("<th>Conversación</th>" in rich, rich)
+        assertTrue("<td>arreglá el login</td>" in rich, rich)
+        assertTrue("<td>proj-b</td>" in rich, rich)
+        assertTrue("<td>bbbbbbbb</td>" in rich, "a nameless row wears its sid tail: $rich")
+    }
+
+    @Test
+    fun usageAndQuotaCarryTheirNativeTables() {
+        val usage = BotCommands.renderUsageRich(
+            """{"totalTokens": 52000, "inputTokens": 40000, "outputTokens": 10000,
+               "reasoningTokens": 2000, "cacheCreationTokens": 0, "cacheReadTokens": 0,
+               "modelRequestCount": 7}""",
+            "mi tarea",
+        )!!
+        assertTrue("<table bordered>" in usage, usage)
+        assertTrue("<td>input</td>" in usage && "<td>output</td>" in usage, usage)
+        assertTrue("<td>Total</td>" in usage, usage)
+
+        val quota = BotCommands.renderQuotaRich(
+            """{"quota": {"limits": [{"type": "CREDIT_LIMIT", "number": 5, "percentage": 30,
+               "currentValue": 30, "usage": 100, "nextResetTime": 1795650000}]}}""",
+            1_795_600_000_000L,
+        )!!
+        assertTrue("<th>Ventana</th>" in quota, quota)
+        assertTrue("70%" in quota, "the owner reads FREE: $quota")
+    }
+
+    @Test
     fun statusWithoutContextAndDownAreHonest() = runBlocking {
         val (bc, _) = commands(ops(status = """{"bot":{"id":"daemon-local","enabled":true},"context":null}"""))
         val none = bc.reply("/status", 1L)!!

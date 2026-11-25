@@ -332,7 +332,7 @@ class BotCommands(
             "stop" -> stop(rest)
             "nuclear", "nuke" -> nuclear(rest)
             "quota" -> quota()
-            "usage" -> BotReply(usage())
+            "usage" -> usage()
             "ctx" -> ctxList()
             "help", "start" -> BotReply(help(), rich = HELP_RICH)
             "subagents", "agents" -> subagents(rest)
@@ -2186,6 +2186,7 @@ class BotCommands(
         return BotReply(
             text = renderTaskList(rows, running, watched?.taskId, null, all, watchedSid = watched?.taskId),
             markup = Keyboards.tasksKeyboard(rows, running, watched?.taskId, lanes, dbRunning, clock()),
+            rich = renderTaskListRich(rows, running, watched?.taskId, null, all, watchedSid = watched?.taskId),
         )
     }
 
@@ -2205,6 +2206,14 @@ class BotCommands(
         // applied once in [scopedSorted] — the display cap cut after it)
         return BotReply(
             text = renderTaskList(
+                rows,
+                running,
+                ctx.value.activeTaskId,
+                ctx.value.workspacePath,
+                all,
+                watchedSid = watched?.taskId,
+            ),
+            rich = renderTaskListRich(
                 rows,
                 running,
                 ctx.value.activeTaskId,
@@ -3043,10 +3052,11 @@ class BotCommands(
         val ctx = contextAnswer() as? ContextAnswer.Ctx
         val taskId = ctx?.value?.activeTaskId
         val providerId = planViews(ctx?.value?.workspacePath)?.let { it.plan ?: it.defaultPlan }
-        val channel = when (val answer = ops.query(ChannelQuery.Quota(taskId = taskId))) {
-            is QueryAnswer.Ok -> renderQuota(answer.resultJson, clock())
+        val quotaAnswer = ops.query(ChannelQuery.Quota(taskId = taskId))
+        val channel = when (quotaAnswer) {
+            is QueryAnswer.Ok -> renderQuota(quotaAnswer.resultJson, clock())
             is QueryAnswer.Unavailable -> DEGRADED
-            is QueryAnswer.Failed -> "⚠️ Quota failed (${answer.code}): ${PyText.esc(answer.message ?: "?")}"
+            is QueryAnswer.Failed -> "⚠️ Quota failed (${quotaAnswer.code}): ${PyText.esc(quotaAnswer.message ?: "?")}"
         }
         val usable = channelUsable(channel)
         val direct = if (usable) null else quotaDirect?.let { run -> runCatching { run(providerId) }.getOrNull() }
@@ -3056,13 +3066,21 @@ class BotCommands(
             providerId != null && providerId.contains("opencode", ignoreCase = true) -> QUOTA_OPENCODE_UNREADABLE
             else -> channel
         }
-        if (direct == null && !usable) return BotReply(base) // degraded: the gifts stay silent
+        // THE RICH BODY: the same grid as a native table (24/11) — only from
+        // the channel's own snapshot; the direct/gift paths keep their text.
+        val rich = if (usable && quotaAnswer is QueryAnswer.Ok) {
+            renderQuotaRich(quotaAnswer.resultJson, clock())
+        } else {
+            null
+        }
+        if (direct == null && !usable) return BotReply(base, rich = rich)
         val gifts = giftsFor(taskId)
         val lines = GiftsMenu.render(gifts, clock())
-        if (lines.isEmpty()) return BotReply(base)
+        if (lines.isEmpty()) return BotReply(base, rich = rich)
         return BotReply(
             base + "\n" + lines.joinToString("\n"),
             markup = GiftsMenu.keyboard(gifts),
+            rich = rich?.let { table -> table + "\n\n" + lines.joinToString("\n") },
         )
     }
 
@@ -3084,16 +3102,20 @@ class BotCommands(
      * bound conversation → the honest 📭; channel down → 📡.
      */
     @Suppress("ReturnCount") // one guard per query outcome — the commands' shared shape
-    private suspend fun usage(): String {
-        val ctx = contextAnswer() as? ContextAnswer.Ctx ?: return noConversationOrDown()
+    private suspend fun usage(): BotReply {
+        val ctx = contextAnswer() as? ContextAnswer.Ctx ?: return BotReply(noConversationOrDown())
         val taskId = ctx.value.activeTaskId
-            ?: return "📭 No active conversation — /tasks and tap a row; its answers come back here."
+            ?: return BotReply("📭 No active conversation — /tasks and tap a row; its answers come back here.")
         val title = history.ctxTasks(SCOPE_FOR_PICK).firstOrNull { it.sid == taskId }
             ?.title?.takeIf { it.isNotEmpty() } ?: taskId.takeLast(SID_TAIL)
         return when (val answer = ops.query(ChannelQuery.TaskUsage(taskId, ctx.value.workspacePath))) {
-            is QueryAnswer.Ok -> renderUsage(answer.resultJson, title)
-            is QueryAnswer.Unavailable -> DEGRADED
-            is QueryAnswer.Failed -> "⚠️ Usage failed (${answer.code}): ${PyText.esc(answer.message ?: "?")}"
+            is QueryAnswer.Ok -> BotReply(
+                renderUsage(answer.resultJson, title),
+                rich = renderUsageRich(answer.resultJson, title),
+            )
+
+            is QueryAnswer.Unavailable -> BotReply(DEGRADED)
+            is QueryAnswer.Failed -> BotReply("⚠️ Usage failed (${answer.code}): ${PyText.esc(answer.message ?: "?")}")
         }
     }
 
@@ -4330,6 +4352,119 @@ class BotCommands(
         }
 
         /**
+         * THE SAME LIST AS A NATIVE TABLE (24/11): # · conversation ·
+         * project · state — the phone shows real columns; the plain list
+         * stays the fallback when the rich send is refused.
+         */
+        fun renderTaskListRich(
+            rows: List<TaskRow>,
+            running: Set<String>,
+            activeSid: String?,
+            activeWs: String?,
+            all: Boolean,
+            watchedSid: String? = null,
+        ): String {
+            if (rows.isEmpty()) return renderTaskList(rows, running, activeSid, activeWs, all, watchedSid)
+            val header = if (all) {
+                "💬 <b>All conversations</b> (loose ones included)"
+            } else {
+                "💬 <b>Conversations by project</b> — tap a row to watch it live"
+            }
+            val table = Tables.html(
+                header = listOf("#", "Conversación", "Proyecto", "Estado"),
+                rows = rows.mapIndexed { i, t ->
+                    val stamp = buildString {
+                        if (t.sid in running) append(STAMP_RUNNING)
+                        if (t.sid == activeSid) append(STAMP_ACTIVE)
+                    }.ifEmpty { STAMP_IDLE }
+                    val project = if (t.ws.isNotEmpty() && t.ws != activeWs) t.ws.substringAfterLast('/') else "—"
+                    val title = t.title.takeIf { it.isNotEmpty() } ?: t.sid.takeLast(SID_TAIL)
+                    listOf("${i + 1}", title, project, stamp)
+                },
+            )
+            val footer = buildString {
+                append("\n\nFree text you send goes to the active conversation (🎯).")
+                if (watchedSid != null && watchedSid != activeSid) {
+                    val watchedTitle = rows.firstOrNull { it.sid == watchedSid }
+                        ?.title?.takeIf { it.isNotEmpty() } ?: watchedSid.takeLast(SID_TAIL)
+                    append(
+                        "\n👁 Viendo en vivo: «${PyText.esc(watchedTitle)}» — tu texto sigue yendo a la " +
+                            "activa (el bind se niega mientras ese turno corre; el attach es solo lectura).",
+                    )
+                }
+            }
+            return "$header\n\n$table$footer"
+        }
+
+        /**
+         * THE SAME QUOTA AS A NATIVE TABLE (24/11): window · used · free ·
+         * reset. Null when the payload is not a grid (the caller keeps the
+         * honest text).
+         */
+        @Suppress("ReturnCount") // each guard refuses on its own evidence: unparseable, unavailable, shape
+        fun renderQuotaRich(json: String, nowMs: Long): String? {
+            val root = runCatching { Json.parseToJsonElement(json) as? JsonObject }.getOrNull() ?: return null
+            if (root.str("unavailableReason") != null) return null
+            quotaWindowsRich(root, nowMs)?.let { return it }
+            return planBucketsRich(root, nowMs)
+        }
+
+        private fun quotaWindowsRich(root: JsonObject, nowMs: Long): String? {
+            val limits = (root.obj("quota")?.get("limits") as? JsonArray)
+                ?.mapNotNull { it as? JsonObject }
+                ?.filter { it.str("type") == "CREDIT_LIMIT" }
+                .orEmpty()
+            if (limits.isEmpty()) return null
+            val rows = limits.sortedByDescending { it.int("number") ?: 0 }.map { lim ->
+                val name = when (lim.int("number")) {
+                    5 -> "⏱ 5 hours"
+                    1 -> "📅 Weekly"
+                    else -> "🔒 Limit"
+                }
+                val usedPct = lim.int("percentage")
+                val free = usedPct
+                    ?.let { "${(REMAINING_FULL - it).coerceIn(0, REMAINING_FULL)}%" + if (it >= 75) " ⚠️" else "" }
+                    ?: "—"
+                val reset = lim.long("nextResetTime")?.let { fmtReset(it, nowMs) } ?: "—"
+                listOf(
+                    name,
+                    "${fmtNum(lim.num("currentValue"))}/${fmtNum(lim.num("usage"))} credits",
+                    free,
+                    reset,
+                )
+            }
+            return "📊 <b>Coding plan</b>\n\n" +
+                Tables.html(listOf("Ventana", "Usado", "Libre", "Reset"), rows)
+        }
+
+        @Suppress("CyclomaticComplexMethod") // one guard per bucket field
+        private fun planBucketsRich(root: JsonObject, nowMs: Long): String? {
+            val limits = (root.obj("quota")?.get("limits") as? JsonArray)
+                ?.mapNotNull { it as? JsonObject }
+                ?.filter { it.num("unit") != null || it.num("usage") != null }
+                .orEmpty()
+            if (limits.isEmpty()) return null
+            val rows = limits.map { lim ->
+                val total = lim.num("unit")
+                val used = lim.num("usage") ?: 0.0
+                val label = lim.str("period") ?: lim.str("meter") ?: "cuota"
+                val usedPct = if (total != null && total > 0) ((used / total) * 100).toInt() else null
+                val free = usedPct
+                    ?.let { "${(REMAINING_FULL - it).coerceIn(0, REMAINING_FULL)}%" + if (it >= 75) " ⚠️" else "" }
+                    ?: "—"
+                val usedText = if (total != null && total > 0) {
+                    "${tokenRaw(used)}/${tokenRaw(total)}"
+                } else {
+                    "${tokenRaw(used)} usados"
+                }
+                val reset = lim.long("nextResetTime")?.let { fmtReset(it, nowMs) } ?: "—"
+                listOf(label, usedText, free, reset)
+            }
+            return "📊 <b>Start plan</b>\n\n" +
+                Tables.html(listOf("Ventana", "Usado", "Libre", "Reset"), rows)
+        }
+
+        /**
          * quota → Python's quota_report when the snapshot carries the limits
          * (⏱ 5 hours + 📅 Weekly, used/limit credits, the REMAINING percent —
          * the owner's 23/11 order — resets, ⚠️ at ≥75% used);
@@ -4469,6 +4604,31 @@ class BotCommands(
                 "lectura ${tokenRaw(root.long("cacheReadTokens")?.toDouble())}",
             usageTotalLine(root, total),
         )
+
+        /**
+         * THE SAME USAGE AS A NATIVE TABLE (24/11): concept → tokens. Null
+         * when the plain card is the honest answer (unparseable / empty): the
+         * caller keeps the text.
+         */
+        @Suppress("ReturnCount") // each guard refuses on its own evidence: unparseable, empty, shape
+        fun renderUsageRich(json: String, title: String): String? {
+            val root = runCatching { Json.parseToJsonElement(json) as? JsonObject }.getOrNull() ?: return null
+            val total = root.long("totalTokens")?.takeIf { it >= 0 } ?: return null
+            if (total == 0L) return null
+            val rows = listOf(
+                listOf("input", tokenRaw(root.long("inputTokens")?.toDouble())),
+                listOf("output", tokenRaw(root.long("outputTokens")?.toDouble())),
+                listOf("reasoning", tokenRaw(root.long("reasoningTokens")?.toDouble())),
+                listOf("cache creación", tokenRaw(root.long("cacheCreationTokens")?.toDouble())),
+                listOf("cache lectura", tokenRaw(root.long("cacheReadTokens")?.toDouble())),
+                listOf(
+                    "Total",
+                    "${fmtNum(root.long("modelRequestCount")?.toDouble())} req · ${tokenRaw(total.toDouble())} tokens",
+                ),
+            )
+            return "📈 <b>Uso de «${PyText.esc(title)}»</b> — acumulado de la conversación\n\n" +
+                Tables.html(listOf("Concepto", "Tokens"), rows)
+        }
 
         /** Python's bold total — requests through [fmtNum] (grouping only), tokens through [tokenRaw]. */
         private fun usageTotalLine(root: JsonObject, total: Long): String {
