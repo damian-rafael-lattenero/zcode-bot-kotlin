@@ -44,6 +44,12 @@ data class FeedMessage(
      * anti-ban law). Null = no image door on this message.
      */
     val png: PngRender.Shot? = null,
+    /**
+     * THE SECOND DOOR (the owner, 25/11): a shell box earns TWO images — the
+     * command it ran ([pngCommand]) and the output it printed ([png]). Null
+     * on every other message.
+     */
+    val pngCommand: PngRender.Shot? = null,
 ) {
     companion object {
         /** A plain data message (a tool close, an open one-liner). */
@@ -144,6 +150,7 @@ object TranscriptFeed {
                         pages = collapsed,
                         bornOpen = lane.name in DISPATCH_TOOLS,
                         png = collapsed.png,
+                        pngCommand = collapsed.pngCommand,
                     )
                     return@forEach
                 }
@@ -327,17 +334,20 @@ object TranscriptFeed {
                 ),
                 pages = ToolOutputPages.pages(out, start, numbered = !read),
                 language = language, // v2 §5: shell pages ride bash; reads their file's language
-                // THE 📸 RECIPE (the owner, 25/11: «ver salida PNG»): a shell
-                // box shows its OUTPUT — the command already rides the header's
-                // fence. An empty run has no output to draw, so the command is
-                // the fallback (the door never renders a blank image). A read
-                // keeps the pure file body; a dispatch's report is prose.
+                // THE TWO 📸 DOORS (the owner, 25/11): a shell box shows its
+                // INPUT command AND its OUTPUT — two images, two taps. An
+                // empty run has no output to draw, so the command rides both.
+                // A read keeps the pure file body; a dispatch's report is
+                // prose, not a shot.
                 png = when {
                     shell -> (out.takeIf { it.isNotBlank() } ?: commandOf(lane.input))
                         ?.let { PngRender.Shot(it, CodeLang.SHELL) }
                     read -> PngRender.Shot(out, language)
                     else -> null
                 },
+                pngCommand = commandOf(lane.input)
+                    .takeIf { shell }
+                    ?.let { PngRender.Shot(it, CodeLang.SHELL) },
             )
         }
     }

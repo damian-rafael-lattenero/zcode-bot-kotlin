@@ -904,8 +904,8 @@ class LivePublisher(
             msg.pages?.let { pages ->
                 val text = boxBody(msg, pages)
                 // CODE: classic send so a long line scrolls (the scroll law);
-                // the 📸 door rides the same keyboard, registered only here
-                speakBox(state, pages, msg.bornOpen, pngIdOf(msg)) { markup -> speakPlain(text, markup) }
+                // the 📸 doors ride the same keyboard, registered only here
+                speakBox(state, pages, msg.bornOpen, boxDoors(msg)) { markup -> speakPlain(text, markup) }
                 return@forEach
             }
             // A WRITE/EDIT CLOSE: the diff speaks WITH the file door —
@@ -966,6 +966,19 @@ class LivePublisher(
     private fun pngIdOf(msg: FeedMessage): Int? = msg.png?.let { shot -> pngShots?.register(shot) }
 
     /**
+     * A box's TWO doors (the owner, 25/11): the INPUT command and the OUTPUT
+     * it printed, each its own registered shot — two rows, two taps, and both
+     * photos reply to the box.
+     */
+    private fun boxDoors(msg: FeedMessage): List<Pair<String, Int>> {
+        val registry = pngShots ?: return emptyList()
+        return buildList {
+            msg.pngCommand?.let { add(Keyboards.PNG_COMMAND_LABEL to registry.register(it)) }
+            msg.png?.let { add(Keyboards.PNG_OUTPUT_LABEL to registry.register(it)) }
+        }
+    }
+
+    /**
      * The message's keyboard plus the 📸 row, and the id that opened it —
      * the caller binds the id to the message once the send lands ([anchor]),
      * so the photo replies to the box instead of sinking to the bottom.
@@ -984,7 +997,7 @@ class LivePublisher(
         state: TurnLive,
         pages: ToolOutputPages.Pages,
         bornOpen: Boolean,
-        pngId: Int? = null,
+        doors: List<Pair<String, Int>> = emptyList(),
         send: suspend (markup: JsonObject?) -> Long?,
     ) {
         val base = state.taskId.hashCode() and BOX_ID_MASK
@@ -994,13 +1007,10 @@ class LivePublisher(
         } else {
             Keyboards.boxOpen(boxId)
         }
-        val markup = if (pngId != null) {
-            Keyboards.withPng(keyboard, pngId, Keyboards.PNG_OUTPUT_LABEL)
-        } else {
-            keyboard
-        }
+        val markup = if (doors.isEmpty()) keyboard else Keyboards.withPngRows(keyboard, doors)
         val mid = send(markup) ?: return
-        anchor(pngId, mid) // the photo will reply to THIS box, not sink to the bottom
+        // both photos reply to THIS box, never sinking to the bottom
+        doors.forEach { (_, id) -> anchor(id, mid) }
         hub.boxBorn(
             state.taskId,
             boxId,
@@ -1012,7 +1022,8 @@ class LivePublisher(
         )
         logger.info {
             "box born: id=$boxId message_id=$mid pages=${pages.pages.size} " +
-                "language=${pages.language} png=${pngId ?: "none"}${if (bornOpen) " BORN OPEN" else ""}"
+                "language=${pages.language} png=${doors.map { it.second }.ifEmpty { listOf("none") }}" +
+                "${if (bornOpen) " BORN OPEN" else ""}"
         }
     }
 

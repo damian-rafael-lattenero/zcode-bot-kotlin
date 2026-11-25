@@ -141,10 +141,13 @@ class TranscriptFeedTest {
         assertTrue("2 líneas" in msgs[0].text)
         assertTrue("tocar para ver" in msgs[0].text)
         assertTrue("BOX" !in msgs[0].text, "the box never rides: the output is behind the button")
-        // THE 📸 RECIPE (the owner, 25/11): a shell box's image is its OUTPUT —
-        // the command already rides the header's fence
+        // THE TWO 📸 DOORS (the owner, 25/11): the OUTPUT and the INPUT —
+        // the command already rides the header's fence, but it earns its own
+        // image door too
         assertEquals(PngRender.Shot("uno\ndos", CodeLang.SHELL), pages.png)
-        assertEquals(pages.png, msgs[0].png, "the message carries the door's recipe along")
+        assertEquals(PngRender.Shot("ls -la", CodeLang.SHELL), pages.pngCommand)
+        assertEquals(pages.png, msgs[0].png, "the message carries the output's recipe along")
+        assertEquals(pages.pngCommand, msgs[0].pngCommand, "and the command's own")
     }
 
     @Test

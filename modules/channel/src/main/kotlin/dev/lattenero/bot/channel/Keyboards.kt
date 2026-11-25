@@ -544,20 +544,31 @@ object Keyboards {
      * places). A null markup becomes the one-row keyboard — the digest and
      * the code boxes share this single combinator.
      */
-    fun withPng(markup: JsonObject?, registryId: Int, label: String = PNG_LABEL): JsonObject {
+    fun withPng(markup: JsonObject?, registryId: Int, label: String = PNG_LABEL): JsonObject =
+        withPngRows(markup, listOf(label to registryId))
+
+    /**
+     * One 📸 row per shot, in order: a shell box earns TWO doors (the owner,
+     * 25/11) — the INPUT command and the OUTPUT it printed — while the digest
+     * and the edit closes keep their single door.
+     */
+    fun withPngRows(markup: JsonObject?, shots: List<Pair<String, Int>>): JsonObject {
         val rows = markup?.get("inline_keyboard") as? JsonArray ?: JsonArray(emptyList())
         return buildJsonObject {
             putJsonArray("inline_keyboard") {
                 rows.forEach { add(it) }
-                add(buildJsonArray { add(pngRow(registryId, label)) })
+                shots.forEach { (label, id) -> add(buildJsonArray { add(pngRow(id, label)) }) }
             }
         }
     }
 
     private const val PNG_LABEL = "📸 PNG"
 
-    /** The BOX's own door (the owner, 25/11): its image is the command's OUTPUT. */
+    /** The BOX's OUTPUT door (the owner, 25/11): the image is what the run printed. */
     const val PNG_OUTPUT_LABEL: String = "📸 salida PNG"
+
+    /** The BOX's INPUT door: the image is the command itself. */
+    const val PNG_COMMAND_LABEL: String = "📸 comando PNG"
 
     /**
      * THE FILE VIEWER's doors (the owner, 5/11): a WRITE/EDIT close's one

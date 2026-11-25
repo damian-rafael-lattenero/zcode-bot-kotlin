@@ -25,6 +25,8 @@ object ToolOutputPages {
         val pages: List<String>,
         val language: String? = null,
         val png: PngRender.Shot? = null,
+        /** The SECOND door (25/11): the command a shell box ran. */
+        val pngCommand: PngRender.Shot? = null,
     )
 
     /** The page budget — well under Telegram's 4096 with the header aboard. */
