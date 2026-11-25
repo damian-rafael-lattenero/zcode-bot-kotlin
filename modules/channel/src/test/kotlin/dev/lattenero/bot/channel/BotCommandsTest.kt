@@ -641,6 +641,29 @@ class BotCommandsTest {
         assertTrue("context: app" in reply)
     }
 
+    // THE RICH STATUS (24/11): the same card as a Campo/Valor table — one
+    // pass feeds both lanes, the plain sentences stay the fallback.
+    @Test
+    fun statusCarriesTheCampoValorTable() = runBlocking {
+        val o = ops().apply { answers["activeTaskIds"] = """["task-77"]""" }
+        val (bc, _) = commands(o, FakeHistory(rows, ModelSel("GLM-5.3", "high")))
+        val rich = bc.handle("/status", 2L)!!.rich!!
+        assertTrue("<table bordered>" in rich, rich)
+        assertTrue("<th>Campo</th><th>Valor</th>" in rich, rich)
+        assertTrue("<td>Contexto</td>" in rich, rich)
+        assertTrue("<td>Activa</td>" in rich, rich)
+        assertTrue("<td>Modelo</td>" in rich, rich)
+        assertTrue("<td>Running now</td>" in rich, rich)
+        assertTrue("GLM-5.3" in rich, rich)
+        assertTrue("<code>" !in rich, "cells are inline-only: no markup invented inside them: $rich")
+    }
+
+    @Test
+    fun statusWithoutContextKeepsTheHonestPlainAnswer() = runBlocking {
+        val (bc, _) = commands(ops(status = """{"bot":{"id":"daemon-local","enabled":true},"context":null}"""))
+        assertNull(bc.handle("/status", 1L)!!.rich, "no grid invented for the honest none")
+    }
+
     @Test
     fun quotaRendersThePoolAndReset() = runBlocking {
         val (bc, _) = commands(ops())

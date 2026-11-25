@@ -324,6 +324,34 @@ class DeployFlowTest {
         assertTrue("deploy-fork.log" in rig2.spoken.last().first)
     }
 
+    // THE RICH PAIR (24/11): the card's native table body rides the rich
+    // leg with its plain twin alongside; the pair owns the ladder, so [say]
+    // is never retried behind it (a parked plain leg can never double-post).
+    @Test
+    fun theTargetsCardRidesTheRichPairWithItsPlainTwin() = runTest {
+        val richBodies = mutableListOf<String>()
+        val plainBodies = mutableListOf<String>()
+        val sayCalls = mutableListOf<String>()
+        val f = DeployFlow(
+            machine = DeployCommand(),
+            say = { text, _, _ -> sayCalls.add(text); 7L },
+            sayPair = { rich, plain, _, _ ->
+                richBodies.add(rich)
+                plainBodies.add(plain)
+                101L
+            },
+            spawn = { },
+            ownerUserId = { OWNER },
+        )
+        f.onText("", OWNER)
+        assertEquals(1, richBodies.size, "one rich card: $richBodies")
+        assertTrue("<table bordered>" in richBodies.single(), richBodies.single())
+        assertTrue("<td>🤖 Bot Kotlin</td>" in richBodies.single(), richBodies.single())
+        assertTrue("<th>Target</th>" in richBodies.single(), richBodies.single())
+        assertEquals(listOf(DeployFlow.TARGETS_CARD), plainBodies, "the plain twin rides along, byte for byte")
+        assertEquals(0, sayCalls.size, "the pair owns the ladder — say is never a second post")
+    }
+
     private companion object {
         const val OWNER = 7L
         const val INTRUDER = 13L

@@ -939,23 +939,35 @@ internal fun wireChannel(
         )
     }
     val deployEdit: suspend (Long, String, JsonObject?) -> Boolean = { messageId, text, markup ->
-        deployTelegram?.edit(TgConfig.load(remote), messageId, text, markup) ?: false
+        // RICH FIRST (24/11): the targets card is born rich (its table body),
+        // so the row-die edits the SAME message's rich shape; the classic
+        // edit stays the fallback for cards born before the switch.
+        val cfg = TgConfig.load(remote)
+        (deployTelegram?.editRichHtml(cfg, messageId, text, markup, critical = true) ?: false) ||
+            (deployTelegram?.edit(cfg, messageId, text, markup) ?: false)
+    }
+    // THE SAY LADDER: the commands lane's leg; `rich=false` is the plain
+    // body's own path (a table body would be rejected by sendMessage).
+    val deploySay: suspend (String, Boolean, JsonObject?, Boolean) -> Long? = { text, loud, markup, rich ->
+        val now = System.currentTimeMillis() / 1000.0
+        send.leg.deliverMarkup(
+            ShadowDecision(
+                ts = now,
+                tsIso = TimeIso.format(now),
+                watcher = "channel",
+                decision = "say",
+                text = text,
+            ),
+            loud,
+            markup,
+            rich,
+        )
     }
     val deployFlow = DeployFlow(
         machine = DeployCommand(),
-        say = { text, loud, markup ->
-            val now = System.currentTimeMillis() / 1000.0
-            send.leg.deliverMarkup(
-                ShadowDecision(
-                    ts = now,
-                    tsIso = TimeIso.format(now),
-                    watcher = "channel",
-                    decision = "say",
-                    text = text,
-                ),
-                loud,
-                markup,
-            )
+        say = { text, loud, markup -> deploySay(text, loud, markup, true) },
+        sayPair = { rich, plain, loud, markup ->
+            richSpeak(rich, loud, markup) ?: deploySay(plain, loud, markup, false)
         },
         spawn = { target ->
             // BOTH never arrives here: the FLOW splits it (fork first — the

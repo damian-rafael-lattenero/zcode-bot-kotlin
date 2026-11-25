@@ -4,6 +4,7 @@ import dev.lattenero.bot.channel.DeployCommand
 import dev.lattenero.bot.channel.DeployCommand.Target
 import dev.lattenero.bot.channel.DeployCommand.Verdict
 import dev.lattenero.bot.channel.Keyboards
+import dev.lattenero.bot.channel.Tables
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.JsonObject
@@ -52,6 +53,14 @@ class DeployFlow(
     private val machine: DeployCommand,
     private val say: suspend (String, Boolean, JsonObject?) -> Long?,
     /**
+     * THE RICH PAIR (24/11): the targets card's native table body plus the
+     * honest plain twin, one ladder (rich → plain → park). Null = unwired
+     * (shadow/dry-run): [say] speaks the plain card alone. When wired, the
+     * card's birth is the pair's business — [say] is NOT retried behind a
+     * parked plain leg, so a window can never double-post the card.
+     */
+    private val sayPair: (suspend (rich: String, plain: String, loud: Boolean, markup: JsonObject?) -> Long?)? = null,
+    /**
      * The keyboard-strip edit: (messageId, text, markup) — the targets
      * card's row dies in place. Null = unwired (shadow/dry-run): the row
      * stays as decoration and the in-flight refusal answers its taps.
@@ -97,7 +106,13 @@ class DeployFlow(
     }
 
     private suspend fun showTargetsCard() {
-        val born = say(TARGETS_CARD, false, Keyboards.deployTargets())
+        val markup = Keyboards.deployTargets()
+        val pair = sayPair
+        val born = if (pair != null) {
+            pair(TARGETS_CARD_RICH, TARGETS_CARD, false, markup)
+        } else {
+            say(TARGETS_CARD, false, markup)
+        }
         if (born != null) targetsCardId = born
     }
 
@@ -227,6 +242,44 @@ class DeployFlow(
                 "🧠 <b>Brain (agent-brain)</b> — build (installDist + detekt) → install → el LaunchAgent " +
                 "del brain se reinicia (outage breve de /brain y memoria; el plugin reconecta solo)\n" +
                 "🚀 <b>Todos</b> — fork PRIMERO, después brain, el daemon y el bot de WhatsApp (jobs hermanos de launchd)"
+            )
+
+        /**
+         * THE SAME CARD AS A NATIVE TABLE (24/11): target → what the tap
+         * runs. The plain [TARGETS_CARD] stays the fallback byte for byte.
+         */
+        val TARGETS_CARD_RICH: String = (
+            "🚀 <b>Deploy</b>\n¿Qué deployo? Tocar ES lanzar — una única vez por target, " +
+                "la botonera muere al toque:\n\n" +
+                Tables.html(
+                    header = listOf("Target", "Qué hace"),
+                    rows = listOf(
+                        listOf(
+                            "🤖 Bot Kotlin",
+                            "build (tests incluidos) → install → el LaunchAgent reinicia el daemon",
+                        ),
+                        listOf(
+                            "🍴 ZCode Fork",
+                            "build AHORA (~15 min, avisos por fases, la app sigue viva) → cierra ZCode solo → " +
+                                "swap → reabre (unos segundos de canal 📡 al final)",
+                        ),
+                        listOf(
+                            "📱 WhatsApp (whatsdigest)",
+                            "build con tests → install → el LaunchAgent del bot de los grupos se reinicia y " +
+                                "se verifica solo (nunca toca ESTE daemon)",
+                        ),
+                        listOf(
+                            "🧠 Brain (agent-brain)",
+                            "build (installDist + detekt) → install → el LaunchAgent del brain se reinicia " +
+                                "(outage breve de /brain y memoria; el plugin reconecta solo)",
+                        ),
+                        listOf(
+                            "🚀 Todos",
+                            "fork PRIMERO, después brain, el daemon y el bot de WhatsApp " +
+                                "(jobs hermanos de launchd)",
+                        ),
+                    ),
+                )
             )
 
         /** The card's flown rows — the edit's text: keyboard stripped, the choice marked. */

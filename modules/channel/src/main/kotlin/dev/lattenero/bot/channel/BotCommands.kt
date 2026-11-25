@@ -328,7 +328,7 @@ class BotCommands(
             // memory alive.
             "tasks", "task" -> taskList(all = false)
             "all_tasks", "alltasks" -> taskList(all = true)
-            "status" -> BotReply(status())
+            "status" -> status()
             "stop" -> stop(rest)
             "nuclear", "nuke" -> nuclear(rest)
             "quota" -> quota()
@@ -2894,51 +2894,84 @@ class BotCommands(
         )
     }
 
-    /** /status — what runs NOW (sessions-index) + the daemon's own live view. */
-    private suspend fun status(): String {
+    /**
+     * /status — what runs NOW (sessions-index) + the daemon's own live view.
+     * ONE pass feeds both lanes: the honest sentences keep their shape and
+     * the rich body is the same fields as a Campo/Valor table (24/11).
+     */
+    private suspend fun status(): BotReply {
         val lines = mutableListOf("📊 <b>Status</b>")
+        val rows = mutableListOf<List<String>>()
         when (val ctx = contextAnswer()) {
             ContextAnswer.Degraded -> lines.add(DEGRADED)
             ContextAnswer.None -> lines.add(ACTIVE_NONE)
-            is ContextAnswer.Ctx -> {
-                lines.add(
-                    "context: ${PyText.esc(ctx.value.workspacePath.substringAfterLast('/'))}" +
-                        " · ${PyText.esc(ctx.value.mode)}",
-                )
-                lines.add(activeLine(ctx.value.activeTaskId, ctx.value.workspacePath))
-                modelLine(ctx.value.activeTaskId, ctx.value.mode)?.let(lines::add)
-                // THE OWNER'S SELECTION (5/11): the choice that outranks the heuristics
-                selectedSid?.let { chosen ->
-                    lines.add(
-                        "🎯 elegida: «${PyText.esc(selectedTitle ?: chosen.takeLast(SID_TAIL))}» — " +
-                            "tu texto va ahí hasta que elijas otra",
-                    )
-                }
-                when (val answer = ops.query(ChannelQuery.ActiveTaskIds(ctx.value.workspacePath))) {
-                    is QueryAnswer.Ok -> {
-                        val ids = parseStrings(answer.resultJson)
-                        lines.add(
-                            if (ids.isEmpty()) {
-                                "running now: nothing"
-                            } else {
-                                "running now: ${ids.size} — " +
-                                    ids.joinToString(", ") { "<code>${PyText.esc(it.takeLast(SID_TAIL))}</code>" }
-                            },
-                        )
-                    }
-
-                    else -> lines.add("running now: ? (query failed)")
-                }
-            }
+            is ContextAnswer.Ctx -> statusFacts(ctx, lines, rows)
         }
         hub.peek()?.let { turn ->
             val elapsed = turn.startedAtMs?.let { LiveTurn.fmtDur(clock() - it) } ?: "?"
-            lines.add(
-                "live view: «${PyText.esc(turn.title)}» · $elapsed · ${turn.phase::class.simpleName} · " +
-                    "🧠 ${turn.thoughtChars} · 🔧 ${turn.doneTools + turn.tools.count { it.status == null }}",
-            )
+            val live = "«${turn.title}» · $elapsed · ${turn.phase::class.simpleName} · " +
+                "🧠 ${turn.thoughtChars} · 🔧 ${turn.doneTools + turn.tools.count { it.status == null }}"
+            lines.add("live view: ${PyText.esc(live)}")
+            rows.add(listOf("Live view", live))
         }
-        return lines.joinToString("\n")
+        // A single row is no grid: the honest sentences stay the whole answer
+        // (a degraded channel or a lone live view never gets a table).
+        val rich = if (rows.size >= 2) {
+            "📊 <b>Status</b>\n\n" + Tables.html(listOf("Campo", "Valor"), rows)
+        } else {
+            null
+        }
+        return BotReply(lines.joinToString("\n"), rich = rich)
+    }
+
+    /** The context block's facts, each one appended to BOTH projections in the same step. */
+    @Suppress("CyclomaticComplexMethod") // one branch per fact source, each one honest
+    private suspend fun statusFacts(
+        ctx: ContextAnswer.Ctx,
+        lines: MutableList<String>,
+        rows: MutableList<List<String>>,
+    ) {
+        fun row(label: String, plain: String, cell: String = plain) {
+            lines.add(plain)
+            rows.add(listOf(label, cell))
+        }
+        val context = "${ctx.value.workspacePath.substringAfterLast('/')} · ${ctx.value.mode}"
+        row("Contexto", "context: ${PyText.esc(context)}", context)
+        val activeId = ctx.value.activeTaskId
+        if (activeId == null) {
+            row("Activa", ACTIVE_NONE, ACTIVE_NONE_VALUE)
+        } else {
+            val title = activeName(activeId, ctx.value.workspacePath)
+            val plain = if (title != null) {
+                "«${PyText.esc(title)}»"
+            } else {
+                "<code>${PyText.esc(activeId.takeLast(SID_TAIL))}</code>"
+            }
+            row("Activa", "🎯 Active: $plain", if (title != null) "«$title»" else activeId.takeLast(SID_TAIL))
+            modelValue(activeId, ctx.value.mode)?.let { model ->
+                row("Modelo", "🤖 ${PyText.esc(model)}", model)
+            }
+        }
+        // THE OWNER'S SELECTION (5/11): the choice that outranks the heuristics
+        selectedSid?.let { chosen ->
+            val selected = "«${selectedTitle ?: chosen.takeLast(SID_TAIL)}» — " +
+                "tu texto va ahí hasta que elijas otra"
+            row("Elegida", "🎯 elegida: ${PyText.esc(selected)}", selected)
+        }
+        when (val answer = ops.query(ChannelQuery.ActiveTaskIds(ctx.value.workspacePath))) {
+            is QueryAnswer.Ok -> {
+                val ids = parseStrings(answer.resultJson)
+                if (ids.isEmpty()) {
+                    row("Running now", "running now: nothing", "nothing")
+                } else {
+                    val tails = ids.map { it.takeLast(SID_TAIL) }
+                    val plain = "${ids.size} — " + tails.joinToString(", ") { "<code>${PyText.esc(it)}</code>" }
+                    row("Running now", "running now: $plain", "${ids.size} — " + tails.joinToString(", "))
+                }
+            }
+
+            else -> lines.add("running now: ? (query failed)")
+        }
     }
 
     /**
@@ -3826,26 +3859,29 @@ class BotCommands(
         hub.requestTick() // the fired turn's card is born NOW
     }
 
-    /** Python's status line: «🎯 Active: «title»» — the index first, taskMeta as fallback. */
+    /**
+     * The active conversation's title — the index first, taskMeta as
+     * fallback; null means nothing names it (the render shows the sid tail).
+     * /status's one source for its plain line and its table cell.
+     */
     @Suppress("ReturnCount") // one guard per fallback of the title lookup
-    private suspend fun activeLine(taskId: String?, workspacePath: String): String {
-        if (taskId == null) return ACTIVE_NONE
+    private suspend fun activeName(taskId: String, workspacePath: String): String? {
         val fromIndex = history.ctxTasks(SCOPE_FOR_PICK).firstOrNull { it.sid == taskId }?.title
-        val title = fromIndex?.takeIf { it.isNotEmpty() }
+        return fromIndex?.takeIf { it.isNotEmpty() }
             ?: when (val answer = ops.query(ChannelQuery.TaskMeta(taskId, workspacePath))) {
                 is QueryAnswer.Ok -> parse(answer.resultJson)?.str("title")?.takeIf { it.isNotEmpty() }
                 else -> null
             }
-            ?: return "🎯 Active: <code>${PyText.esc(taskId.takeLast(SID_TAIL))}</code>"
-        return "🎯 Active: «${PyText.esc(title)}»"
     }
 
-    /** Python's «🤖 model · 🧠 thinking · 🎛 mode» — model/thinking from db.sqlite, the mode from the context. */
-    @Suppress("ReturnCount") // one guard per absent source (no task, no persisted selection)
-    private suspend fun modelLine(taskId: String?, mode: String): String? {
-        if (taskId == null) return null
+    /**
+     * Python's «model · 🧠 thinking · 🎛 mode» VALUE (model/thinking from
+     * db.sqlite, the mode from the context) — the «🤖 …» line and the table
+     * cell share this string; null when no selection is persisted.
+     */
+    private suspend fun modelValue(taskId: String, mode: String): String? {
         val sel = runCatching { history.modelSelection(taskId) }.getOrNull() ?: return null
-        return "🤖 ${PyText.esc(sel.modelId)} · 🧠 ${PyText.esc(sel.reasoningLevel)} · 🎛 ${modeLabel(mode)}"
+        return "${sel.modelId} · 🧠 ${sel.reasoningLevel} · 🎛 ${modeLabel(mode)}"
     }
 
     /** Python's MODES labels (plan/yolo vocabulary; the fork says full_access for yolo). */
@@ -3948,7 +3984,9 @@ class BotCommands(
         /** Python's status: «🎯 Active: none (/task n to pick one)» — buttons are the picker now. */
 
         /** Python's status: «🎯 Active: none (/task n to pick one)» — buttons are the picker now. */
-        internal const val ACTIVE_NONE = "🎯 Active: none — /tasks and tap a row"
+        /** The value behind [ACTIVE_NONE] — the plain line and the table cell share it. */
+        internal const val ACTIVE_NONE_VALUE = "none — /tasks and tap a row"
+        internal const val ACTIVE_NONE = "🎯 Active: $ACTIVE_NONE_VALUE"
         internal const val SID_TAIL = 8
 
         /** The requestId's log tail (the full wire id is noise in the daemon log). */
