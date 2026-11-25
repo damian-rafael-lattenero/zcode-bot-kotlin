@@ -50,11 +50,11 @@ class RichVoiceTest {
     }
 
     @Test
-    fun theThinkingIsPlainParagraphsCapped() {
+    fun theThinkingIsAPinkPullquoteCapped() {
         val blocks = RichVoice.thinkingBlocks("p".repeat(4000))
         assertEquals(1, blocks.size)
         val block = blocks.single()
-        assertEquals("paragraph", block["type"]!!.jsonPrimitive.content)
+        assertEquals("pullquote", block["type"]!!.jsonPrimitive.content)
         // the cap speaks: 3500 cp, never a wall beyond the client's render
         assertEquals(3500, block["text"]!!.jsonPrimitive.content.length)
     }

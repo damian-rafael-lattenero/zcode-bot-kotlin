@@ -29,6 +29,9 @@ import kotlinx.serialization.json.put
  *   a paragraph per blank-line chunk. Code rides `pre` with its fence
  *   language.
  */
+// The voice's whole surface (wire, prose/blocks/table/inline/paragraphs) —
+// the count is the shape, not a grab bag.
+@Suppress("TooManyFunctions")
 object RichVoice {
 
     /** One voice message's wire params (sendRichMessage) — silent, like the card. */
@@ -118,10 +121,11 @@ object RichVoice {
     }
 
     /**
-     * THE THINKING (24/11, the owner): the SAME plain paragraphs as the talk
-     * — normal HTML text, left-aligned, formatted; no special quote block.
+     * THE THINKING (24/11, the owner): a PULLQUOTE — the pink background is
+     * the identity of the model's reasoning — with the Markdown shaped
+     * inline (code/bold/bullets/headings), never collapsed.
      */
-    fun thinkingBlocks(text: String): List<JsonObject> = paragraphsOf(text)
+    fun thinkingBlocks(text: String): List<JsonObject> = listOf(pullquote(text))
 
     /** Blank-line-separated chunks as paragraph blocks, each inline-formatted and capped. */
     internal fun paragraphsOf(text: String): List<JsonObject> = text
@@ -132,6 +136,12 @@ object RichVoice {
 
     private fun paragraph(text: String): JsonObject = buildJsonObject {
         put("type", "paragraph")
+        put("text", inline(PyText.take(text, BLOCK_CP)))
+    }
+
+    /** The pink quote: the thinking's own background. */
+    private fun pullquote(text: String): JsonObject = buildJsonObject {
+        put("type", "pullquote")
         put("text", inline(PyText.take(text, BLOCK_CP)))
     }
 
