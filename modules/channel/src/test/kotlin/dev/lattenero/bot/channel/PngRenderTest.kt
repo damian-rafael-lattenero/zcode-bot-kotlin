@@ -39,6 +39,16 @@ class PngRenderTest {
     }
 
     @Test
+    fun `no flag rides the argv twice`() {
+        // MEASURED 25/11: silicon answers "The argument '--language <LANG>'
+        // was provided more than once" with exit 1 and NO file — a duplicated
+        // flag is a dead tap at every scale, not a warning
+        val flags = argv("kotlin").filter { it.startsWith("--") }
+        assertEquals(flags.size, flags.distinct().size, "a flag repeated is a dead tap: $flags")
+        assertEquals(1, flags.count { it == "--language" }, "the language rides once: $flags")
+    }
+
+    @Test
     fun `nushell has no syntect grammar and rides the closest shell`() {
         assertEquals("sh", PngRender.grammar("nu"))
         assertEquals("sh", PngRender.grammar("Nushell"))

@@ -86,14 +86,8 @@ object PngRender {
         add("--font")
         add("$FONT_FAMILY=${(if (compact) COMPACT_FONT_PX else BASE_FONT_PX) * scale}")
         // ALWAYS a language (measured 25/11): silicon cannot detect one from
-        // a `.txt` source, so omitting the flag is a silent dead tap
-        add("--language")
-        add(grammar(shot.language))
-        // THE DENSE FONT (the owner, 25/11): a tall block rides a smaller size
-        // so one photo carries ~300 lines instead of ~190 (≈28 px/line at 14
-        // vs 45 at 26) — the owner zooms, the image still fits the ceiling.
-        // ALWAYS a language (measured 25/11): silicon cannot detect one from
-        // a `.txt` source, so omitting the flag is a silent dead tap
+        // a `.txt` source, so omitting the flag is a silent dead tap. It rides
+        // ONCE — silicon refuses a flag given twice and writes nothing.
         add("--language")
         add(grammar(shot.language))
         add("--output")
