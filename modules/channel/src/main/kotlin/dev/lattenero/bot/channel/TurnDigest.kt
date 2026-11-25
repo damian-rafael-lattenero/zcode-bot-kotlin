@@ -179,13 +179,15 @@ object TurnDigest {
 
     /**
      * THE SAME PAGE AS CLASSIC HTML (24/11, the scroll law): prose with
-     * `<br>` + inline `<code>`/`<b>`, code fences as `<pre><code>` with a
-     * REAL language — the phone then scrolls long lines instead of wrapping
-     * them. The rich-block wire stays for the surfaces that need structure.
+     * inline `<code>`/`<b>` and its REAL line breaks (classic `parse_mode=HTML`
+     * rejects `<br>` — measured by the 25/11 probe), code fences as
+     * `<pre><code class="language-X">` with a REAL language — the phone then
+     * scrolls long lines instead of wrapping them. The rich-block wire stays
+     * for the surfaces that need structure.
      */
     fun htmlOf(page: List<VoiceBlock>): String = page.joinToString("\n\n") { block ->
         when (block) {
-            is VoiceBlock.Prose -> RichVoice.html(block.text).replace("\n", "<br>")
+            is VoiceBlock.Prose -> RichVoice.html(block.text)
             is VoiceBlock.Code -> {
                 val language = CodeLang.normalize(block.language) ?: CodeLang.SHELL
                 "<pre><code class=\"language-$language\">${PyText.esc(block.text)}</code></pre>"

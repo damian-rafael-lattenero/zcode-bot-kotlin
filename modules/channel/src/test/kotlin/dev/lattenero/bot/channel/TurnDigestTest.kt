@@ -124,9 +124,9 @@ class TurnDigestTest {
     }
 
     @Test
-    fun proseLinesSurviveAsBreaksAndInlineCodeAsRuns() {
+    fun proseLinesSurviveAsRealBreaksAndInlineCodeAsRuns() {
         val html = TurnDigest.htmlOf(listOf(VoiceBlock.Prose("uno\nmirá `x`")))
-        assertEquals("uno<br>mirá <code>x</code>", html)
+        assertEquals("uno\nmirá <code>x</code>", html)
     }
 
     @Test

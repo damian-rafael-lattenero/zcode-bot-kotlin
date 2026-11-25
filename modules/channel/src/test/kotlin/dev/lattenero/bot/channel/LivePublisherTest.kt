@@ -1177,7 +1177,10 @@ class LivePublisherTest {
         assertTrue("Paso 1" in digest, "the opening step carries its number")
         assertTrue("tras 🔧 Bash" in digest, "the step names the tool it followed")
         assertTrue(digest.trimEnd().endsWith("El fix consistió en X."), "the conclusion closes the digest: $digest")
-        assertTrue("<br>" in digest, "prose breaks survive as <br> (rich HTML would collapse them)")
+        assertTrue(
+            "Paso 1\n\nReviso el handler primero." in digest,
+            "the label and the words keep their REAL blank line (classic HTML rejects <br>): $digest",
+        )
         assertTrue(blockBodies(wire).none { "✅ Respuesta" in it.first }, "the digest left the rich lane")
     }
 

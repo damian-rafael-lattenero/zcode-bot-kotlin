@@ -130,7 +130,8 @@ class RichVoiceTest {
 
     // THE CLASSIC LANE (24/11): the same shaping as HTML — escaped text with
     // real <code>/<b> runs, bullets and headings shaped, no raw markers. The
-    // line break stays the caller's (the digest decides the <br>).
+    // line break stays the caller's (the classic lane keeps REAL newlines —
+    // parse_mode=HTML rejects <br>).
     @Test
     fun htmlShapesInlineRunsAndEscapesEverythingElse() {
         val html = RichVoice.html("## Plan\n- mirá `/tasks` y **esto** <b>")
