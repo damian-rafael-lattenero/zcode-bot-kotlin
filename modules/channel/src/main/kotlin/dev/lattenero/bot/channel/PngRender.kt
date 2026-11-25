@@ -58,10 +58,10 @@ object PngRender {
             add("--font")
             add(COMPACT_FONT)
         }
-        grammar(shot.language)?.let {
-            add("--language")
-            add(it)
-        }
+        // ALWAYS a language (measured 25/11): silicon cannot detect one from
+        // a `.txt` source, so omitting the flag is a silent dead tap
+        add("--language")
+        add(grammar(shot.language))
         add("--output")
         add(output)
         add(source)
@@ -89,15 +89,24 @@ object PngRender {
     const val MAX_LINES: Int = 300
 
     /**
+     * THE PLAIN GRAMMAR (measured 25/11): silicon cannot detect a language
+     * from the `.txt` source and has NO plain-text grammar (`txt`, `text`,
+     * `plain` all answer *Unsupported*) — it exits 0, writes nothing, and the
+     * tap would die. `log` is the least opinionated grammar it accepts: prose
+     * stays near-monospace and the theme still paints it.
+     */
+    const val PLAIN: String = "log"
+
+    /**
      * The slug silicon understands: `nu`/`nushell` have no syntect grammar →
-     * `sh`; a known slug passes as-is; a blank one answers null (plain text,
-     * no highlighter). An unknown slug is NOT filtered here — the edge's
-     * retry-without-language is the honest fallback (silicon knows more
+     * `sh`; a blank one rides [PLAIN] (silicon cannot draw without one); a
+     * known slug passes as-is. An unknown slug is NOT filtered here — the
+     * edge's retry-without-language is the honest fallback (silicon knows more
      * languages than this object ever will).
      */
-    fun grammar(language: String?): String? =
+    fun grammar(language: String?): String =
         when (val slug = language?.trim()?.lowercase()?.takeIf { it.isNotEmpty() }) {
-            null -> null
+            null -> PLAIN
             "nu", "nushell" -> "sh"
             else -> slug
         }

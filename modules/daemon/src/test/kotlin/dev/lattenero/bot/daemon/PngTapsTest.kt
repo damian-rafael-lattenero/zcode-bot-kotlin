@@ -120,7 +120,7 @@ class PngTapsTest {
     }
 
     @Test
-    fun `an unknown slug retries without the language and still flies`() {
+    fun `an unknown slug retries on the plain grammar and still flies`() {
         val shots = PngShots()
         val id = shots.register(PngRender.Shot("weird", "weird-dsl"))
         val uploaded = mutableListOf<File>()
@@ -130,7 +130,9 @@ class PngTapsTest {
         }
         assertNull(answer)
         assertEquals(2, calls.size, "one refused render, one plain retry")
-        assertTrue("--language" !in calls.last(), "the retry drops the highlighter")
+        // silicon cannot draw without a language (measured 25/11): the retry
+        // rides the plain grammar instead of dropping the flag
+        assertEquals(PngRender.PLAIN, calls.last()[calls.last().indexOf("--language") + 1])
         assertEquals(1, uploaded.size)
     }
 

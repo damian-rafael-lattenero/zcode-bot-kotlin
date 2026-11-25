@@ -43,11 +43,15 @@ class PngRenderTest {
     }
 
     @Test
-    fun `a blank language omits the flag - plain monospace, still themed`() {
-        assertFalse("--language" in argv(null), "no flag means no highlighter")
-        assertFalse("--language" in argv(""), "blank is blank")
-        assertEquals(null, PngRender.grammar(null))
-        assertEquals(null, PngRender.grammar("  "))
+    fun `a blank language rides the plain grammar - silicon cannot draw without one`() {
+        // measured 25/11: silicon fails to detect a language from a `.txt`
+        // source and has no plain grammar (txt/text/plain are Unsupported);
+        // it exits 0, writes nothing, and the tap dies. `log` is the least
+        // opinionated grammar it accepts.
+        assertEquals(PngRender.PLAIN, PngRender.grammar(null))
+        assertEquals(PngRender.PLAIN, PngRender.grammar("  "))
+        assertEquals(PngRender.PLAIN, argv(null)[argv(null).indexOf("--language") + 1])
+        assertEquals(PngRender.PLAIN, argv("")[argv("").indexOf("--language") + 1], "blank is blank")
     }
 
     @Test
