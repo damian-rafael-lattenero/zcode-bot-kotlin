@@ -141,6 +141,23 @@ class TranscriptFeedTest {
         assertTrue("2 líneas" in msgs[0].text)
         assertTrue("tocar para ver" in msgs[0].text)
         assertTrue("BOX" !in msgs[0].text, "the box never rides: the output is behind the button")
+        // THE 📸 RECIPE: a shell box's image is its COMMAND (not the output)
+        assertEquals(PngRender.Shot("ls -la", CodeLang.SHELL), pages.png)
+        assertEquals(pages.png, msgs[0].png, "the message carries the door's recipe along")
+    }
+
+    @Test
+    fun anEditCloseCarriesTheInjectedImageShot() {
+        val inp = buildJsonObject {
+            put("file_path", "/w/Main.kt"); put("old_string", "a"); put("new_string", "b")
+        }
+        val prev = turn(tools = listOf(closed("t1", name = "Edit", status = null, input = inp)))
+        val curr = turn(tools = listOf(closed("t1", name = "Edit", input = inp)))
+        val msgs = TranscriptFeed.messages(
+            prev, curr, FeedVerbosity.NORMAL, { "BOX" }, verbs,
+            pngShot = { PngRender.Shot("DIFF(${it.name})", "diff") },
+        )
+        assertEquals(PngRender.Shot("DIFF(Edit)", "diff"), msgs[0].png)
     }
 
     @Test

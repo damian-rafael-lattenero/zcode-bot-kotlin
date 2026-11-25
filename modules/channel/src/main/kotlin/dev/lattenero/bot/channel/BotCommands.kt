@@ -270,6 +270,14 @@ class BotCommands(
      */
     private val fileTaps: FileTaps? = null,
     /**
+     * THE 📸 TAP (the owner, 25/11): `png:<id>` renders the shot behind the
+     * button with silicon and sends the photo — the image flies ONLY on a
+     * tap (never a stream of photos). Null = unwired (tests): the tap
+     * answers the honest retired note. Null ANSWER = the photo flew (no
+     * text reply — the image IS the feedback); a string = the honest miss.
+     */
+    private val png: (suspend (Int) -> String?)? = null,
+    /**
      * The last fired prompt's store (Python's F22): the SAVE rides the
      * free-text fire path's success branch, /retry reads it back. Null =
      * unwired (tests): /retry answers the honest «nada» and the save is
@@ -524,6 +532,18 @@ class BotCommands(
                 BotReply(BoxTaps.MISS)
             } else {
                 boxTaps.fold(id)?.let { BotReply(it) }
+            }
+        }
+
+        // THE 📸 TAP (25/11): the shot behind the button becomes an image —
+        // silicon renders it and the upload sends the photo. A working tap
+        // answers NO text (the photo IS the feedback); a miss names itself.
+        data.startsWith("png:") -> {
+            val id = data.removePrefix("png:").toIntOrNull()
+            if (id == null || png == null) {
+                BotReply(PngShots.MISS)
+            } else {
+                png(id)?.let { BotReply(it) }
             }
         }
 

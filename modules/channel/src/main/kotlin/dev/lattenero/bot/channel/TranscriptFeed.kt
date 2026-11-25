@@ -37,6 +37,13 @@ data class FeedMessage(
      * earn this.
      */
     val bornOpen: Boolean = false,
+    /**
+     * THE 📸 DOOR (the owner, 25/11): the code behind this message — the
+     * shell's command, the read's file body, an edit's diff — rendered as
+     * an image ONLY when the owner taps (never a stream of photos: the
+     * anti-ban law). Null = no image door on this message.
+     */
+    val png: PngRender.Shot? = null,
 ) {
     companion object {
         /** A plain data message (a tool close, an open one-liner). */
@@ -90,6 +97,12 @@ object TranscriptFeed {
         level: FeedVerbosity,
         toolBox: (ToolLive) -> String,
         verbs: ToolVerbifier,
+        /**
+         * THE 📸 RECIPE for the non-box closes (25/11): an edit/write close's
+         * diff, the write's content — the daemon's ToolBox owns the material
+         * and the renderer. Null answer = no image door on that message.
+         */
+        pngShot: (ToolLive) -> PngRender.Shot? = { null },
     ): List<FeedMessage> {
         if (level == FeedVerbosity.SUMMARY) return emptyList()
         if (prev == null || prev.taskId != curr.taskId) return emptyList()
@@ -130,6 +143,7 @@ object TranscriptFeed {
                         text = collapsed.header,
                         pages = collapsed,
                         bornOpen = lane.name in DISPATCH_TOOLS,
+                        png = collapsed.png,
                     )
                     return@forEach
                 }
@@ -141,6 +155,7 @@ object TranscriptFeed {
                 out += FeedMessage(
                     text = box.ifBlank { closeFallback(lane, verbs) },
                     editPath = editPath,
+                    png = if (lane.input == null) null else pngShot(lane),
                 )
             }
         }
@@ -312,6 +327,13 @@ object TranscriptFeed {
                 ),
                 pages = ToolOutputPages.pages(out, start, numbered = !read),
                 language = language, // v2 §5: shell pages ride bash; reads their file's language
+                // THE 📸 RECIPE: the command for a shell, the pure file body
+                // for a read; a dispatch's report is prose, not a shot
+                png = when {
+                    shell -> commandOf(lane.input)?.let { PngRender.Shot(it, CodeLang.SHELL) }
+                    read -> PngRender.Shot(out, language)
+                    else -> null
+                },
             )
         }
     }

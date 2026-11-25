@@ -386,4 +386,40 @@ class CallbackTapsTest {
         assertEquals(BoxTaps.MISS, bare.onCallback("bp:7:0", 3L, OWNER)!!.text)
         assertEquals(BoxTaps.MISS, bare.onCallback("bf:7", 4L, OWNER)!!.text)
     }
+
+    @Test
+    fun thePngTapRunsTheShotEdgeAndAnUnwiredOneAnswersTheMiss() = runBlocking {
+        val fired = mutableListOf<Int>()
+        val wired = BotCommands(
+            ops = FakeOps(),
+            hub = LiveHub(),
+            daemonReset = { "" },
+            ownerUserId = { OWNER },
+            clock = { 1L },
+            png = { id -> fired.add(id); null },
+        )
+        // a working tap answers NO text: the photo IS the feedback
+        kotlin.test.assertNull(wired.onCallback("png:9", 1L, OWNER))
+        assertEquals(listOf(9), fired)
+        // a render/upload miss speaks its own words
+        val failing = BotCommands(
+            ops = FakeOps(),
+            hub = LiveHub(),
+            daemonReset = { "" },
+            ownerUserId = { OWNER },
+            clock = { 1L },
+            png = { "📡 no voló" },
+        )
+        assertEquals("📡 no voló", failing.onCallback("png:9", 2L, OWNER)!!.text)
+        // unwired or unparseable ids answer the honest registry miss
+        val bare = BotCommands(
+            ops = FakeOps(),
+            hub = LiveHub(),
+            daemonReset = { "" },
+            clock = { 1L },
+            ownerUserId = { OWNER },
+        )
+        assertEquals(PngShots.MISS, bare.onCallback("png:9", 3L, OWNER)!!.text)
+        assertEquals(PngShots.MISS, wired.onCallback("png:x", 4L, OWNER)!!.text)
+    }
 }

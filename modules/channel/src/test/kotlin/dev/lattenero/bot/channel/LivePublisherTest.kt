@@ -76,6 +76,9 @@ class LivePublisherTest {
         clock: () -> Long = { TICK_MS },
         resubscribe: suspend (String) -> Unit = {},
         richVoice: Boolean = true,
+        pngShots: PngShots? = null,
+        /** The CLASSIC throat's own capture (null = the [speak] double). */
+        speakPlain: (suspend (String, JsonObject?) -> Long?)? = null,
         // NOT last: the existing tests' trailing lambda binds resolveTitle
         onSeal: suspend (SealFacts) -> Unit = {},
         resolveTitle: suspend (String) -> String? = { null },
@@ -95,6 +98,8 @@ class LivePublisherTest {
             verbosity = verbosity,
             resubscribe = resubscribe,
             richVoice = richVoice,
+            pngShots = pngShots,
+            speakPlain = speakPlain ?: { text, _ -> spoken.add(text); 777L },
             resolveTitle = resolveTitle,
             onSeal = onSeal,
         )
@@ -725,6 +730,51 @@ class LivePublisherTest {
         assertEquals(listOf("LA RESPUESTA"), spoken.toList(), "SUMMARY: the answer is the only word")
         assertTrue(wire.bodies.none { it.second == "deleteMessage" }, "no swap at the SUMMARY seal")
         assertTrue("end_turn" in wire.bodies.last { it.second == "editMessageText" }.first, "the record edits in place")
+    }
+
+    @Test
+    fun aShellBoxCarriesTheImageDoorAndRegistersItsShot() = runTest {
+        val taskId = "task-9"
+        val hub = LiveHub()
+        hub.apply(frame(taskId, "task_run_started", at = 1_000), nowMs = 1_000)
+        hub.apply(frame(taskId, "agent_thought_chunk", at = 1_050, "content" to JsonPrimitive("arranco")), nowMs = 1_050)
+        val wire = Wire()
+        val shots = PngShots()
+        val plain = mutableListOf<Pair<String, JsonObject?>>()
+        var now = TICK_MS
+        val publisher = publisher(
+            wire,
+            hub,
+            clock = { now },
+            pngShots = shots,
+            speakPlain = { text, markup -> plain.add(text to markup); 778L },
+        )
+        publisher.tick() // birth
+        hub.apply(
+            frame(
+                taskId, "tool_call", at = 1_500,
+                "toolId" to JsonPrimitive("tb"), "toolName" to JsonPrimitive("Bash"),
+                "input" to buildJsonObject { put("command", "ls") },
+            ),
+            nowMs = 1_500,
+        )
+        hub.apply(
+            frame(
+                taskId, "tool_call_update", at = 1_600, "status" to JsonPrimitive("completed"),
+                "toolId" to JsonPrimitive("tb"), "content" to JsonPrimitive("out"),
+            ),
+            nowMs = 1_600,
+        )
+        now += 31_000L
+        publisher.tick() // the close's box is born — the 📸 door rides its keyboard
+        assertEquals(1, shots.size(), "the box registered exactly one shot")
+        assertEquals(PngRender.Shot("ls", CodeLang.SHELL), shots.get(1))
+        // the box speaks through the CLASSIC throat (the scroll law's lane)
+        val box = plain.firstOrNull { "tocar para ver" in it.first }
+        assertNotNull(box, "the box spoke: $plain")
+        val markup = box.second?.toString().orEmpty()
+        assertTrue("png:1" in markup, "the image door rides the box keyboard: $markup")
+        assertTrue("Ver salida" in markup, "the pager's door keeps its place: $markup")
     }
 
     private companion object {

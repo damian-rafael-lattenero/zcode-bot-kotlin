@@ -546,6 +546,18 @@ class LivePublisher(
      */
     private val fileMenu: FileMenu? = null,
     /**
+     * THE 📸 SHOTS (the owner, 25/11): every code-bearing message earns an
+     * on-demand image door — the text rides the button's registry id and
+     * silicon draws it ONLY when the owner taps (a stream of photos would
+     * risk the bot's account). Null = the door stays off (tests, unwired).
+     */
+    private val pngShots: PngShots? = null,
+    /**
+     * The recipe for the NON-box closes (edit/write diffs): the daemon's
+     * ToolBox owns the material. Null answer = that close stays buttonless.
+     */
+    private val pngShotOf: (ToolLive) -> PngRender.Shot? = { null },
+    /**
      * THE VIOLET VOICE's knob (the owner, 5/11, daemon.json `rich_voice`):
      * the digest's steps, the CoT blocks and the final answer travel as
      * rich messages — pullquote/pre/expandable blocks (Bot API 10.x), ONE
@@ -845,7 +857,7 @@ class LivePublisher(
             return
         }
         if (telegram.throttled()) return
-        val feed = TranscriptFeed.messages(feedSeen, state, level, toolBox, verbs)
+        val feed = TranscriptFeed.messages(feedSeen, state, level, toolBox, verbs, pngShotOf)
         feedSeen = state
         if (feed.isEmpty()) return
         val mid = statusMessageId
@@ -888,18 +900,20 @@ class LivePublisher(
             // pager's buttons intact for the flips.
             msg.pages?.let { pages ->
                 val text = boxBody(msg, pages)
-                // CODE: classic send so a long line scrolls (the scroll law)
-                speakBox(state, pages, msg.bornOpen) { markup -> speakPlain(text, markup) }
+                // CODE: classic send so a long line scrolls (the scroll law);
+                // the 📸 door rides the same keyboard, registered only here
+                speakBox(state, pages, msg.bornOpen, pngIdOf(msg)) { markup -> speakPlain(text, markup) }
                 return@forEach
             }
             // A WRITE/EDIT CLOSE: the diff speaks WITH the file door —
-            // «📄 archivo completo» reads the file fresh at tap time
+            // «📄 archivo completo» reads the file fresh at tap time — plus
+            // the 📸 image door when the daemon handed the recipe
             if (msg.editPath != null && fileMenu != null) {
-                speakPlain(msg.text, fileMenu.buttonFor(msg.editPath))
+                speakPlain(msg.text, pngMarkup(msg, fileMenu.buttonFor(msg.editPath)))
                 return@forEach
             }
             val block = msg.block ?: run {
-                speak(msg.text, null)
+                speak(msg.text, pngMarkup(msg, null))
                 return@forEach
             }
             val text = when (block) {
@@ -941,19 +955,30 @@ class LivePublisher(
      * the box SHOWING page 1 (the child's report's own law): the fold
      * carries the page so a tap on the born-open message flips from truth.
      */
+    /** Registers the message's shot (when the 📸 door is wired) and answers its id. */
+    private fun pngIdOf(msg: FeedMessage): Int? = msg.png?.let { shot -> pngShots?.register(shot) }
+
+    /** The message's keyboard plus the 📸 row — the markup unchanged when no shot rides. */
+    private fun pngMarkup(msg: FeedMessage, markup: JsonObject?): JsonObject? {
+        val id = pngIdOf(msg) ?: return markup
+        return Keyboards.withPng(markup, id)
+    }
+
     private suspend fun speakBox(
         state: TurnLive,
         pages: ToolOutputPages.Pages,
         bornOpen: Boolean,
+        pngId: Int? = null,
         send: suspend (markup: JsonObject?) -> Long?,
     ) {
         val base = state.taskId.hashCode() and BOX_ID_MASK
         val boxId = (hub.peek()?.boxes?.maxOfOrNull { it.boxId } ?: base) + 1
-        val markup = if (bornOpen) {
+        val keyboard = if (bornOpen) {
             Keyboards.boxPages(boxId, 0, pages.pages.size)
         } else {
             Keyboards.boxOpen(boxId)
         }
+        val markup = if (pngId != null) Keyboards.withPng(keyboard, pngId) else keyboard
         val mid = send(markup) ?: return
         hub.boxBorn(
             state.taskId,
@@ -1049,7 +1074,7 @@ class LivePublisher(
      */
     private suspend fun seal(cfg: TgConfig, mid: Long, state: TurnLive, now: Long) {
         val level = verbosity.current()
-        val feed = TranscriptFeed.messages(feedSeen, state, level, toolBox, verbs) +
+        val feed = TranscriptFeed.messages(feedSeen, state, level, toolBox, verbs, pngShotOf) +
             if (level == FeedVerbosity.SUMMARY) emptyList() else TranscriptFeed.pendingFlush(state)
         if (feed.isNotEmpty() && telegram.throttled()) return
         sealed = true

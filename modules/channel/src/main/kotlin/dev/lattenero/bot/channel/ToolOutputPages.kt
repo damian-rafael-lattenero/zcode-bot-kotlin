@@ -17,8 +17,15 @@ object ToolOutputPages {
 
     /** One collapsed output: the header (always visible) + numbered pages.
      *  [language] fences the pages (`bash` → Telegram's code highlight,
-     *  v2 §5; null = the plain `<pre>` the non-shell pages always had). */
-    data class Pages(val header: String, val pages: List<String>, val language: String? = null)
+     *  v2 §5; null = the plain `<pre>` the non-shell pages always had).
+     *  [png] is the image door's recipe (25/11): the code/command behind
+     *  the box, rendered by silicon only when the owner taps 📸. */
+    data class Pages(
+        val header: String,
+        val pages: List<String>,
+        val language: String? = null,
+        val png: PngRender.Shot? = null,
+    )
 
     /** The page budget — well under Telegram's 4096 with the header aboard. */
     const val PAGE_CP = 2800

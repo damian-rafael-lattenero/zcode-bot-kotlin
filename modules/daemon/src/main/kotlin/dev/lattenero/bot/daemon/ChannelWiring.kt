@@ -30,6 +30,8 @@ import dev.lattenero.bot.channel.LiveTelegram
 import dev.lattenero.bot.channel.MenuMirrorRefresher
 import dev.lattenero.bot.channel.ModeMenu
 import dev.lattenero.bot.channel.PlanQuota
+import dev.lattenero.bot.channel.PngRender
+import dev.lattenero.bot.channel.PngShots
 import dev.lattenero.bot.channel.Poller
 import dev.lattenero.bot.channel.OpencodeQuota
 import dev.lattenero.bot.channel.QuotaDirect
@@ -932,6 +934,25 @@ internal fun wireChannel(
     // own chat). Null api (SHADOW / DRY-RUN) = the closure answers false
     // (the edit never flies): the row stays as decoration and the flow's
     // in-flight refusal answers its taps (best-effort either way).
+    // THE 📸 DOOR (the owner, 25/11): the button carries only an id; the
+    // registry holds the text and silicon draws the image ONLY on the tap —
+    // the phone never gets a photo nobody asked for (the account's risk is
+    // the stream, not the request). No api (SHADOW/DRY-RUN) = the door off.
+    val pngShots = PngShots()
+    val pngTaps = lanes.api?.let { api ->
+        PngTaps(
+            shots = pngShots,
+            upload = { fields, file ->
+                api.upload("sendPhoto", fields, "photo", file)
+                Unit
+            },
+            chatId = {
+                val chat = TgConfig.load(remote).chatId
+                (chat as? JsonPrimitive)?.content ?: chat.toString()
+            },
+            tmpDir = File(cfg.homeDir, "state"),
+        )
+    }
     val deployTelegram = lanes.api?.let { api ->
         LiveTelegram(
             api = api,
@@ -1068,6 +1089,8 @@ internal fun wireChannel(
         fileMenu = fileMenu,
         richVoice = richVoice,
         speakPlain = { text, markup -> fireSpeakPlain(text, false, markup) },
+        pngShots = pngShots,
+        pngShotOf = { lane -> ToolBox.pngShot(lane) },
     )
     val wired = buildPoller(
         cfg,
@@ -1101,6 +1124,7 @@ internal fun wireChannel(
         attachClock = attachClock,
         mirror = mirrorRefresh,
         fileTaps = fileMenu,
+        pngTaps = pngTaps,
         // THE AUTH SENTINEL's marker (12/11): the owner's «already attended»
         // on a Mac password dialog — one file in the daemon's OWN state dir
         // (the queue's exact pattern), pid keyed, consumed by the sentinel
@@ -1289,6 +1313,10 @@ private fun buildLiveView(
     richVoice: Boolean = true,
     /** The CLASSIC throat (24/11) — code boxes ride sendMessage so long lines scroll. */
     speakPlain: suspend (String, JsonObject?) -> Long? = { text, markup -> fireSpeak(text, false, markup) },
+    /** THE 📸 DOOR (25/11) — the registry the buttons' ids point at; null = off. */
+    pngShots: PngShots? = null,
+    /** THE 📸 RECIPE for the non-box closes — the spectator's ToolBox owns the material. */
+    pngShotOf: (ToolLive) -> PngRender.Shot? = { null },
 ): LivePublisher? {
     val lane = lanes.live
     if (lane == null || !send.ownsSpectator) return null
@@ -1350,6 +1378,8 @@ private fun buildLiveView(
         },
         onSeal = onSeal,
         fileMenu = fileMenu,
+        pngShots = pngShots,
+        pngShotOf = pngShotOf,
         richVoice = richVoice,
     )
 }
@@ -1409,6 +1439,8 @@ private fun buildPoller(
     // THE FILE VIEWER's taps (5/11) — fvm:/fvp: ride the same menu the
     // publisher attaches its doors with
     fileTaps: FileTaps? = null,
+    // THE 📸 TAP's edge (25/11) — png:<id> runs silicon + the upload
+    pngTaps: PngTaps? = null,
     // THE AUTH SENTINEL's marker (12/11): the auth: tap's verdict, written
     // to the state dir the sentinel polls — default no-op for unwired tests
     authDismiss: (String) -> Unit = {},
@@ -1565,6 +1597,7 @@ private fun buildPoller(
         // registries: the tap edits the message it spoke)
         boxTaps = liveView,
         fileTaps = fileTaps,
+        png = { id -> pngTaps?.shoot(id) },
         authDismiss = authDismiss,
         lastPrompt = lastPrompt,
         brain = brain,

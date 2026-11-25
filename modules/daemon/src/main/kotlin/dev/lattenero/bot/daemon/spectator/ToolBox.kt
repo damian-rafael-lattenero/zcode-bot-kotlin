@@ -1,6 +1,8 @@
 package dev.lattenero.bot.daemon.spectator
 import dev.lattenero.bot.channel.CodeLang
 import dev.lattenero.bot.channel.CommandShape
+import dev.lattenero.bot.channel.PngRender
+import dev.lattenero.bot.channel.ToolLive
 import dev.lattenero.bot.channel.toolLabel
 import dev.lattenero.bot.contracts.PyText
 
@@ -104,6 +106,46 @@ internal object ToolBox {
             if (desc.isNotEmpty()) " — <code>${PyText.esc(PyText.preview(desc, HEAD_DESC_CAP))}</code>" else ""
         val body = body(name, inp, desc)
         return head + if (body.isNotEmpty()) "\n$body" else ""
+    }
+
+    /**
+     * THE 📸 RECIPE for a NON-box close (the owner, 25/11): the real diff an
+     * edit/multiedit shows, the content a write brings — drawn by silicon
+     * ONLY when the owner taps (a stream of photos risks the account). A
+     * shell's command and a read's body already ride their box
+     * ([dev.lattenero.bot.channel.ToolOutputPages.Pages.png]); null here
+     * means this message carries no image door.
+     */
+    fun pngShot(lane: ToolLive): PngRender.Shot? {
+        val inp = lane.input ?: return null
+        return when {
+            hasEdits(inp) -> PngRender.Shot(editsPng(inp), "diff")
+            lane.name in EDIT_TOOLS && inp.containsKey("old_string") && inp["old_string"] !is JsonNull ->
+                PngRender.Shot(
+                    plainDiff(
+                        PyText.splitLines(PyText.pyStr(inp["old_string"])),
+                        PyText.splitLines(PyText.pyStr(inp["new_string"])),
+                        CH_BOX,
+                    ),
+                    "diff",
+                )
+            lane.name in WRITE_TOOLS && PyText.truthy(inp["content"]) ->
+                PngRender.Shot(PyText.pyStr(inp["content"]), CodeLang.ofPath(filePathOf(inp)))
+            else -> null
+        }
+    }
+
+    /** MultiEdit's shot: every edit's real diff, labeled in order. */
+    private fun editsPng(inp: JsonObject): String {
+        val edits = inp["edits"] as? JsonArray ?: return ""
+        return edits.mapIndexedNotNull { idx, ed ->
+            (ed as? JsonObject) ?: return@mapIndexedNotNull null
+            "# edit ${idx + 1}\n" + plainDiff(
+                PyText.splitLines(PyText.pyStr(ed["old_string"])),
+                PyText.splitLines(PyText.pyStr(ed["new_string"])),
+                CH_BOX,
+            )
+        }.joinToString("\n")
     }
 
     @Suppress("CyclomaticComplexMethod") // one branch per tool family — the body IS the dispatch table
