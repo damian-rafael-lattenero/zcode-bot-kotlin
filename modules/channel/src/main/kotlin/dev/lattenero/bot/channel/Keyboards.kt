@@ -1,5 +1,6 @@
 package dev.lattenero.bot.channel
 
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.add
@@ -529,6 +530,29 @@ object Keyboards {
     }
 
     private const val PAGES_PER_ROW = 5
+
+    /**
+     * THE 📸 DOOR (the owner, 25/11: a PNG on demand for any structured
+     * text). The shot itself lives server-side ([PngShots]); the data
+     * carries its id — six bytes, far under the 64-byte law.
+     */
+    fun pngRow(registryId: Int): JsonObject = button("📸 PNG", "png:$registryId")
+
+    /**
+     * Any keyboard plus the 📸 row: the existing rows keep their order and
+     * the image door lands LAST (the pager's 🔙 and the vote row keep their
+     * places). A null markup becomes the one-row keyboard — the digest and
+     * the code boxes share this single combinator.
+     */
+    fun withPng(markup: JsonObject?, registryId: Int): JsonObject {
+        val rows = markup?.get("inline_keyboard") as? JsonArray ?: JsonArray(emptyList())
+        return buildJsonObject {
+            putJsonArray("inline_keyboard") {
+                rows.forEach { add(it) }
+                add(buildJsonArray { add(pngRow(registryId)) })
+            }
+        }
+    }
 
     /**
      * THE FILE VIEWER's doors (the owner, 5/11): a WRITE/EDIT close's one
