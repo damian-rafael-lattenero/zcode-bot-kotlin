@@ -48,15 +48,20 @@ class PngTaps(
         val source = File(tmpDir, "png-$id-$stamp.txt")
         val output = File(tmpDir, "png-$id-$stamp.png")
         return try {
-            // the WIDTH law: the image wraps where the text must not
-            source.writeText(PngRender.wrap(shot.text))
-            val first = exec(PngRender.arguments(shot, source.absolutePath, output.absolutePath))
+            // the WIDTH law + the LINE BUDGET: the image wraps and caps where
+            // the text must not; a tall body also rides the dense font
+            val body = PngRender.fit(PngRender.wrap(shot.text))
+            val compact = body.count { it == '\n' } + 1 > PngRender.COMPACT_AFTER
+            source.writeText(body)
+            val first = exec(PngRender.arguments(shot, source.absolutePath, output.absolutePath, compact))
             val rendered = if (first == 0) {
                 true
             } else {
                 // the retry drops the language: a slug silicon does not know
                 // must never cost the tap
-                exec(PngRender.arguments(shot.copy(language = null), source.absolutePath, output.absolutePath)) == 0
+                exec(
+                    PngRender.arguments(shot.copy(language = null), source.absolutePath, output.absolutePath, compact),
+                ) == 0
             }
             if (!rendered) return RENDER_FAILED
             // THE PHOTO CEILINGS (10 MB, w+h ≤ 10 000, ratio ≤ 20): past them

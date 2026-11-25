@@ -994,7 +994,11 @@ class LivePublisher(
         } else {
             Keyboards.boxOpen(boxId)
         }
-        val markup = if (pngId != null) Keyboards.withPng(keyboard, pngId) else keyboard
+        val markup = if (pngId != null) {
+            Keyboards.withPng(keyboard, pngId, Keyboards.PNG_OUTPUT_LABEL)
+        } else {
+            keyboard
+        }
         val mid = send(markup) ?: return
         anchor(pngId, mid) // the photo will reply to THIS box, not sink to the bottom
         hub.boxBorn(

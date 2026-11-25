@@ -40,7 +40,7 @@ object PngRender {
      * the numbered gutter when it needs one — the image is the pretty view.
      * The file name carries no meaning (the language is explicit).
      */
-    fun arguments(shot: Shot, source: String, output: String): List<String> = buildList {
+    fun arguments(shot: Shot, source: String, output: String, compact: Boolean = false): List<String> = buildList {
         add(SILICON)
         add("--theme")
         add(THEME)
@@ -51,6 +51,13 @@ object PngRender {
         add("--pad-vert")
         add(PAD_VERT.toString())
         add("--no-line-number")
+        // THE DENSE FONT (the owner, 25/11): a tall block rides a smaller size
+        // so one photo carries ~300 lines instead of ~190 (≈28 px/line at 14
+        // vs 45 at 26) — the owner zooms, the image still fits the ceiling.
+        if (compact) {
+            add("--font")
+            add(COMPACT_FONT)
+        }
         grammar(shot.language)?.let {
             add("--language")
             add(it)
@@ -59,6 +66,27 @@ object PngRender {
         add(output)
         add(source)
     }
+
+    /**
+     * THE LINE BUDGET (the owner, 25/11: the image may show up to a point and
+     * then stop): it keeps the first [MAX_LINES] lines and says how many
+     * stayed behind — the text message above is always whole.
+     */
+    fun fit(text: String, maxLines: Int = MAX_LINES): String {
+        val lines = text.split('\n')
+        if (lines.size <= maxLines) return text
+        val rest = lines.size - maxLines
+        return lines.take(maxLines).joinToString("\n") + "\n… ($rest líneas más en el texto de arriba)"
+    }
+
+    /** Past this many lines the render goes dense. */
+    const val COMPACT_AFTER: Int = 100
+
+    /** The dense pass's font — measured on the 25/11 probe (≈28 px per line). */
+    const val COMPACT_FONT: String = "Hack=14"
+
+    /** The dense pass's line budget — ~300 lines inside the 10 000-px ceiling. */
+    const val MAX_LINES: Int = 300
 
     /**
      * The slug silicon understands: `nu`/`nushell` have no syntect grammar →

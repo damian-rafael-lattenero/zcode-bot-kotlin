@@ -65,6 +65,19 @@ class PngRenderTest {
     }
 
     @Test
+    fun `a tall body goes dense and past the budget it says how much stayed`() {
+        val dense = PngRender.arguments(PngRender.Shot("x", null), "in", "out", compact = true)
+        assertEquals("Hack=14", dense[dense.indexOf("--font") + 1], "the dense pass rides the measured font")
+        assertFalse("--font" in PngRender.arguments(PngRender.Shot("x", null), "in", "out"), "short bodies keep the default")
+
+        val tall = (1..400).joinToString("\n") { "line $it" }
+        val fitted = PngRender.fit(tall).split('\n')
+        assertEquals(301, fitted.size, "300 lines plus the honest remainder note")
+        assertTrue(fitted.last().contains("100 líneas más"), "the note counts what stayed behind: ${fitted.last()}")
+        assertEquals("a\nb", PngRender.fit("a\nb"), "a short body passes untouched")
+    }
+
+    @Test
     fun `the wrap never splits an emoji`() {
         val line = "🙂".repeat(120) // 120 code points, 240 UTF-16 units
         val wrapped = PngRender.wrap(line).split('\n')

@@ -327,10 +327,14 @@ object TranscriptFeed {
                 ),
                 pages = ToolOutputPages.pages(out, start, numbered = !read),
                 language = language, // v2 §5: shell pages ride bash; reads their file's language
-                // THE 📸 RECIPE: the command for a shell, the pure file body
-                // for a read; a dispatch's report is prose, not a shot
+                // THE 📸 RECIPE (the owner, 25/11: «ver salida PNG»): a shell
+                // box shows its OUTPUT — the command already rides the header's
+                // fence. An empty run has no output to draw, so the command is
+                // the fallback (the door never renders a blank image). A read
+                // keeps the pure file body; a dispatch's report is prose.
                 png = when {
-                    shell -> commandOf(lane.input)?.let { PngRender.Shot(it, CodeLang.SHELL) }
+                    shell -> (out.takeIf { it.isNotBlank() } ?: commandOf(lane.input))
+                        ?.let { PngRender.Shot(it, CodeLang.SHELL) }
                     read -> PngRender.Shot(out, language)
                     else -> null
                 },

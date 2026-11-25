@@ -536,7 +536,7 @@ object Keyboards {
      * text). The shot itself lives server-side ([PngShots]); the data
      * carries its id — six bytes, far under the 64-byte law.
      */
-    fun pngRow(registryId: Int): JsonObject = button("📸 PNG", "png:$registryId")
+    fun pngRow(registryId: Int, label: String = PNG_LABEL): JsonObject = button(label, "png:$registryId")
 
     /**
      * Any keyboard plus the 📸 row: the existing rows keep their order and
@@ -544,15 +544,20 @@ object Keyboards {
      * places). A null markup becomes the one-row keyboard — the digest and
      * the code boxes share this single combinator.
      */
-    fun withPng(markup: JsonObject?, registryId: Int): JsonObject {
+    fun withPng(markup: JsonObject?, registryId: Int, label: String = PNG_LABEL): JsonObject {
         val rows = markup?.get("inline_keyboard") as? JsonArray ?: JsonArray(emptyList())
         return buildJsonObject {
             putJsonArray("inline_keyboard") {
                 rows.forEach { add(it) }
-                add(buildJsonArray { add(pngRow(registryId)) })
+                add(buildJsonArray { add(pngRow(registryId, label)) })
             }
         }
     }
+
+    private const val PNG_LABEL = "📸 PNG"
+
+    /** The BOX's own door (the owner, 25/11): its image is the command's OUTPUT. */
+    const val PNG_OUTPUT_LABEL: String = "📸 salida PNG"
 
     /**
      * THE FILE VIEWER's doors (the owner, 5/11): a WRITE/EDIT close's one

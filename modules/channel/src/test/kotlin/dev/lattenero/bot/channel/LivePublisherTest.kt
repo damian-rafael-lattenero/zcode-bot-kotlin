@@ -772,12 +772,17 @@ class LivePublisherTest {
         now += 31_000L
         publisher.tick() // the close's box is born — the 📸 door rides its keyboard
         assertEquals(1, shots.size(), "the box registered exactly one shot")
-        assertEquals(PngRender.Shot("ls", CodeLang.SHELL), shots.get(1))
+        assertEquals(
+            PngRender.Shot("out", CodeLang.SHELL),
+            shots.get(1),
+            "the box's image is its OUTPUT (the command rides the header)",
+        )
         // the box speaks through the CLASSIC throat (the scroll law's lane)
         val box = plain.firstOrNull { "tocar para ver" in it.first }
         assertNotNull(box, "the box spoke: $plain")
         val markup = box.second?.toString().orEmpty()
         assertTrue("png:1" in markup, "the image door rides the box keyboard: $markup")
+        assertTrue("salida PNG" in markup, "the door names what it shows: $markup")
         assertTrue("Ver salida" in markup, "the pager's door keeps its place: $markup")
     }
 
