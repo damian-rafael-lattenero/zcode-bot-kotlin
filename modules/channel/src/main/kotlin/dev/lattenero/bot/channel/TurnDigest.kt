@@ -198,6 +198,24 @@ object TurnDigest {
     }
 
     /**
+     * THE PAGE'S 📸 RECIPE (the owner, 25/11): the seal's own words as one
+     * image on demand. The language rides ONLY when the whole page is code —
+     * a mixed page (prose + a fence) would paint its prose with a code
+     * grammar, so it goes plain monospace instead. A blank page has nothing
+     * to draw and answers null.
+     */
+    fun shotOf(page: List<VoiceBlock>): PngRender.Shot? {
+        val text = page.joinToString("\n\n") { it.text }.trim()
+        if (text.isEmpty()) return null
+        val language = if (page.all { it is VoiceBlock.Code }) {
+            page.mapNotNull { (it as VoiceBlock.Code).language }.distinct().singleOrNull()
+        } else {
+            null
+        }
+        return PngRender.Shot(text, language)
+    }
+
+    /**
      * The step's label line: the trailing step is the CONCLUSION (✅ marks
      * it); the rest count from 1 and name the tool they followed. A
      * single-step turn earns no chrome — the voice speaks bare.

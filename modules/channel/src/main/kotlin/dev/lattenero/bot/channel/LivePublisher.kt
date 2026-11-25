@@ -1104,8 +1104,13 @@ class LivePublisher(
             val pages = TurnDigest.pages(v)
             pages.forEachIndexed { index, page ->
                 // the LAST page carries the owner's 👍/👎 row (audit: the first
-                // preference data) — one tap, no extra message in the chat
-                val markup = if (index == pages.lastIndex) Keyboards.feedbackRow(state.taskId) else null
+                // preference data) — one tap, no extra message in the chat.
+                // EVERY page earns the 📸 door (the owner, 25/11): its own shot,
+                // registered HERE — the image flies only on the tap.
+                val base = if (index == pages.lastIndex) Keyboards.feedbackRow(state.taskId) else null
+                val shot = TurnDigest.shotOf(page)
+                val pngId = if (shot != null) pngShots?.register(shot) else null
+                val markup = if (pngId != null) Keyboards.withPng(base, pngId) else base
                 val sent = if (richVoice) speakPlain(TurnDigest.htmlOf(page), markup) else null
                 if (sent == null) speak(PyText.esc(TurnDigest.pageText(page)), markup)
             }
