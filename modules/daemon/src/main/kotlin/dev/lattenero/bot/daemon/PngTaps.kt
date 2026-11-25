@@ -58,10 +58,7 @@ class PngTaps(
                 exec(PngRender.arguments(shot.copy(language = null), source.absolutePath, output.absolutePath)) == 0
             }
             if (!rendered) return RENDER_FAILED
-            upload(
-                mapOf("chat_id" to chatId(), "disable_notification" to "true"),
-                output,
-            )
+            upload(fieldsOf(id), output)
             null
         } catch (e: CancellationException) {
             throw e // structured concurrency: a shutdown is never an upload failure
@@ -71,6 +68,21 @@ class PngTaps(
         } finally {
             source.delete()
             output.delete()
+        }
+    }
+
+    /**
+     * The send's plain fields — plus the ANCHOR when the button's message is
+     * known: the photo replies TO THAT MESSAGE, so Telegram quotes the box's
+     * title/command right above the image and the picture never drowns at
+     * the bottom of the thread. `allow_sending_without_reply` keeps the
+     * upload alive if the owner deleted the box meanwhile.
+     */
+    private fun fieldsOf(id: Int): Map<String, String> = buildMap {
+        put("chat_id", chatId())
+        put("disable_notification", "true")
+        shots.anchor(id)?.let {
+            put("reply_parameters", """{"message_id":$it,"allow_sending_without_reply":true}""")
         }
     }
 

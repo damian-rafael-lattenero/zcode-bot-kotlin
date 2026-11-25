@@ -30,13 +30,15 @@ class PngTapsTest {
         exit: List<Int> = listOf(0),
         uploaded: MutableList<File> = mutableListOf(),
         calls: MutableList<List<String>> = mutableListOf(),
+        fields: MutableList<Map<String, String>> = mutableListOf(),
         uploadFails: Boolean = false,
     ): PngTaps {
         var i = 0
         return PngTaps(
             shots = shots,
-            upload = { _, file ->
+            upload = { sent, file ->
                 if (uploadFails) throw IllegalStateException("boom")
+                fields += sent
                 uploaded += file
             },
             exec = { argv ->
@@ -109,5 +111,26 @@ class PngTapsTest {
         val id = shots.register(PngRender.Shot("x", "kotlin"))
         val answer = runBlocking { taps(shots, uploadFails = true).shoot(id) }
         assertTrue(answer!!.contains("boom"), "the reason rides the words: $answer")
+    }
+
+    @Test
+    fun `an anchored shot replies to the button's own message`() {
+        val shots = PngShots()
+        val id = shots.register(PngRender.Shot("ls | first 3", "nu"))
+        shots.attach(id, 73123)
+        val fields = mutableListOf<Map<String, String>>()
+        runBlocking { taps(shots, fields = fields).shoot(id) }
+        val reply = fields.single()["reply_parameters"]
+        assertTrue(reply != null && "73123" in reply, "the photo quotes the box above it: $reply")
+        assertTrue("allow_sending_without_reply" in reply!!, "a deleted box never blocks the upload")
+    }
+
+    @Test
+    fun `a shot with no anchor uploads bare`() {
+        val shots = PngShots()
+        val id = shots.register(PngRender.Shot("ls", "nu"))
+        val fields = mutableListOf<Map<String, String>>()
+        runBlocking { taps(shots, fields = fields).shoot(id) }
+        assertTrue("reply_parameters" !in fields.single(), "no anchor, no quote: ${fields.single()}")
     }
 }

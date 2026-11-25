@@ -49,6 +49,24 @@ class PngShotsTest {
     }
 
     @Test
+    fun `the anchor binds the photo to the button's message`() {
+        val shots = PngShots()
+        val id = shots.register(PngRender.Shot("ls", "nu"))
+        assertNull(shots.anchor(id), "no send yet = no anchor")
+        shots.attach(id, 73123)
+        assertEquals(73123L, shots.anchor(id), "the photo will reply to that message")
+    }
+
+    @Test
+    fun `an attach for a pruned id is a silent no-op`() {
+        val shots = PngShots(cap = 1)
+        val id = shots.register(PngRender.Shot("one", null))
+        shots.register(PngRender.Shot("two", null)) // evicts `one`
+        shots.attach(id, 99)
+        assertNull(shots.anchor(id), "a shot the registry dropped keeps no anchor")
+    }
+
+    @Test
     fun `withPng keeps the existing rows and lands the image door last`() {
         val existing = Keyboards.boxOpen(7)
         val merged = Keyboards.withPng(existing, 3)

@@ -462,7 +462,10 @@ internal const val STALE_SEAL_MS = 900_000L
  */
 // The publisher's ladder: one function per duty (birth, feed, seal, watchdog,
 // prize cache) — the split is the state machine's shape, not duplication.
-@Suppress("TooManyFunctions", "LongParameterList")
+// LargeClass rides the same rationale: the class IS the turn's state machine;
+// its own split (card / feed / seal) is a refactor of its own, not a side
+// effect of the 📸 door.
+@Suppress("TooManyFunctions", "LongParameterList", "LargeClass")
 class LivePublisher(
     private val hub: LiveHub,
     private val telegram: LiveTelegram,
@@ -909,11 +912,13 @@ class LivePublisher(
             // «📄 archivo completo» reads the file fresh at tap time — plus
             // the 📸 image door when the daemon handed the recipe
             if (msg.editPath != null && fileMenu != null) {
-                speakPlain(msg.text, pngMarkup(msg, fileMenu.buttonFor(msg.editPath)))
+                val (markup, id) = pngMarkup(msg, fileMenu.buttonFor(msg.editPath))
+                anchor(id, speakPlain(msg.text, markup))
                 return@forEach
             }
             val block = msg.block ?: run {
-                speak(msg.text, pngMarkup(msg, null))
+                val (markup, id) = pngMarkup(msg, null)
+                anchor(id, speak(msg.text, markup))
                 return@forEach
             }
             val text = when (block) {
@@ -958,10 +963,19 @@ class LivePublisher(
     /** Registers the message's shot (when the 📸 door is wired) and answers its id. */
     private fun pngIdOf(msg: FeedMessage): Int? = msg.png?.let { shot -> pngShots?.register(shot) }
 
-    /** The message's keyboard plus the 📸 row — the markup unchanged when no shot rides. */
-    private fun pngMarkup(msg: FeedMessage, markup: JsonObject?): JsonObject? {
-        val id = pngIdOf(msg) ?: return markup
-        return Keyboards.withPng(markup, id)
+    /**
+     * The message's keyboard plus the 📸 row, and the id that opened it —
+     * the caller binds the id to the message once the send lands ([anchor]),
+     * so the photo replies to the box instead of sinking to the bottom.
+     */
+    private fun pngMarkup(msg: FeedMessage, markup: JsonObject?): Pair<JsonObject?, Int?> {
+        val id = pngIdOf(msg) ?: return markup to null
+        return Keyboards.withPng(markup, id) to id
+    }
+
+    /** Binds a shot to the message that wears its button (no-op when either side is missing). */
+    private fun anchor(pngId: Int?, mid: Long?) {
+        if (pngId != null && mid != null) pngShots?.attach(pngId, mid)
     }
 
     private suspend fun speakBox(
@@ -980,6 +994,7 @@ class LivePublisher(
         }
         val markup = if (pngId != null) Keyboards.withPng(keyboard, pngId) else keyboard
         val mid = send(markup) ?: return
+        anchor(pngId, mid) // the photo will reply to THIS box, not sink to the bottom
         hub.boxBorn(
             state.taskId,
             boxId,
@@ -1112,7 +1127,11 @@ class LivePublisher(
                 val pngId = if (shot != null) pngShots?.register(shot) else null
                 val markup = if (pngId != null) Keyboards.withPng(base, pngId) else base
                 val sent = if (richVoice) speakPlain(TurnDigest.htmlOf(page), markup) else null
-                if (sent == null) speak(PyText.esc(TurnDigest.pageText(page)), markup)
+                if (sent == null) {
+                    anchor(pngId, speak(PyText.esc(TurnDigest.pageText(page)), markup))
+                } else {
+                    anchor(pngId, sent) // the photo replies to THIS page
+                }
             }
         }
         val answer = voice?.conclusion
