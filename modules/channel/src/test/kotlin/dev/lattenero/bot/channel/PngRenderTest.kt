@@ -75,7 +75,7 @@ class PngRenderTest {
     fun `a tall body goes dense and past the budget it says how much stayed`() {
         val dense = PngRender.arguments(PngRender.Shot("x", null), "in", "out", compact = true)
         assertEquals("Hack=14", dense[dense.indexOf("--font") + 1], "the dense pass rides the measured font")
-        assertFalse("--font" in PngRender.arguments(PngRender.Shot("x", null), "in", "out"), "short bodies keep the default")
+        assertEquals("Hack=26", argv("kotlin")[argv("kotlin").indexOf("--font") + 1], "the default face is explicit")
 
         val tall = (1..(PngRender.MAX_LINES + 100)).joinToString("\n") { "line $it" }
         val fitted = PngRender.fit(tall).split('\n')

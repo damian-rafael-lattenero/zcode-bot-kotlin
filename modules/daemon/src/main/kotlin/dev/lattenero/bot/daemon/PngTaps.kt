@@ -57,29 +57,30 @@ class PngTaps(
             source.writeText(body)
             // A DIFF rides the SIDE-BY-SIDE drawer (the owner, 25/11): two
             // columns and the changed middle, not silicon's unified stream.
-            var first = 0
-            val rendered = if (shot.language == DIFF_LANGUAGE) {
-                DiffPng.render(shot.text, output)
-            } else {
-                first = exec(PngRender.arguments(shot, source.absolutePath, output.absolutePath, compact))
-                if (first == 0) {
-                    true
-                } else {
-                    // the retry drops the language: a slug silicon does not know
-                    // must never cost the tap
-                    val plain = shot.copy(language = null)
-                    exec(PngRender.arguments(plain, source.absolutePath, output.absolutePath, compact)) == 0
+            // A DIFF rides the SIDE-BY-SIDE drawer (the owner, 25/11): two
+            // columns and the changed middle, not silicon's unified stream.
+            when (imageOf(shot, source, output, compact)) {
+                Drawn.IMAGE -> Unit
+                // THE SILENT ZERO (measured 25/11): silicon exits 0 and writes
+                // NOTHING when it cannot read its input — the exit code alone
+                // is not a receipt, so the FILE is the verdict
+                Drawn.NONE -> {
+                    logger.warn {
+                        "png $id: no image (file=${output.exists()} " +
+                            "source=${source.exists()} bytes=${source.length()})"
+                    }
+                    return RENDER_FAILED
                 }
-            }
-            // THE SILENT ZERO (measured 25/11): silicon exits 0 and writes
-            // NOTHING when it cannot read its input — the exit code alone is
-            // not a receipt, so the FILE is the verdict
-            if (!rendered || !output.exists()) {
-                logger.warn {
-                    "png $id: no image (silicon=$first file=${output.exists()} " +
-                        "source=${source.exists()} bytes=${source.length()})"
+                // THE PHOTO CEILINGS (10 MB, w+h ≤ 10 000, ratio ≤ 20): every
+                // whole-line scale was refused, so the text wraps and silicon
+                // draws once more — a wrapped line beats a lost tap
+                Drawn.TOO_BIG -> {
+                    if (!wrapped(shot, source, output, compact)) {
+                        logger.warn { "png $id: the wrapped retry wrote no image" }
+                        return RENDER_FAILED
+                    }
+                    if (!PngRender.fitsPhoto(output.readBytes())) return TOO_BIG
                 }
-                return RENDER_FAILED
             }
             // THE PHOTO CEILINGS (10 MB, w+h ≤ 10 000, ratio ≤ 20): only when
             // the whole-line render passes them does the text wrap and the
@@ -102,6 +103,47 @@ class PngTaps(
             source.delete()
             output.delete()
         }
+    }
+
+    /**
+     * THE IMAGE: a diff rides the side-by-side drawer; everything else rides
+     * silicon at the LARGEST scale Telegram still accepts (the resolution
+     * ladder: 3x when it fits, 2x next, 1x last). True = a legal file landed.
+     */
+    /** What the image attempt answered: a legal photo, a photo too big, or nothing. */
+    private enum class Drawn { IMAGE, TOO_BIG, NONE }
+
+    /**
+     * THE IMAGE: a diff rides the side-by-side drawer; everything else rides
+     * silicon at the LARGEST scale Telegram still accepts (the resolution
+     * ladder: 3x when it fits, 2x next, 1x last).
+     */
+    @Suppress("ReturnCount") // three honest exits: the diff, a legal scale, or the verdict
+    private fun imageOf(shot: PngRender.Shot, source: File, output: File, compact: Boolean): Drawn {
+        if (shot.language == DIFF_LANGUAGE) {
+            return if (DiffPng.render(shot.text, output)) Drawn.IMAGE else Drawn.NONE
+        }
+        var anyFile = false
+        for (scale in PngRender.MAX_SCALE downTo 1) {
+            val drew = draw(shot, source, output, compact, scale) == 0 && output.exists()
+            if (!drew) continue
+            anyFile = true
+            if (PngRender.fitsPhoto(output.readBytes())) return Drawn.IMAGE
+        }
+        return if (anyFile) Drawn.TOO_BIG else Drawn.NONE
+    }
+
+    /**
+     * ONE render at [scale]; silicon's exit code, with the last-resort retry
+     * on the plain grammar when the slug is one silicon does not know (a bad
+     * language must never cost the tap).
+     */
+    private fun draw(shot: PngRender.Shot, source: File, output: File, compact: Boolean, scale: Int): Int {
+        output.delete() // a stale file from the previous scale is not a receipt
+        val code = exec(PngRender.arguments(shot, source.absolutePath, output.absolutePath, compact, scale))
+        if (code == 0 && output.exists()) return 0
+        val plain = shot.copy(language = null)
+        return exec(PngRender.arguments(plain, source.absolutePath, output.absolutePath, compact, scale))
     }
 
     /**

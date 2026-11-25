@@ -26,6 +26,12 @@ object PngRender {
     const val PAD_HORIZ: Int = 88
     const val PAD_VERT: Int = 88
 
+    /**
+     * THE RESOLUTION LADDER (the owner, 25/11: «se ve pixelado»): the edge
+     * paints at the largest of these that Telegram still accepts.
+     */
+    const val MAX_SCALE: Int = 3
+
     /** The breathing room the code earns: between lines and past its right edge. */
     const val LINE_PAD: Int = 5
     const val CODE_PAD_RIGHT: Int = 56
@@ -43,36 +49,49 @@ object PngRender {
      * silicon's argv for this shot. `--no-line-number`: the text bubble keeps
      * the numbered gutter when it needs one — the image is the pretty view.
      * The file name carries no meaning (the language is explicit).
+     *
+     * [scale] multiplies the font and every pad together: silicon has no
+     * `--scale`, so 2x resolution IS a 2x font with 2x margins. Measured
+     * 25/11: `Hack=26` is silicon's default, so scale 1 changes nothing.
      */
-    fun arguments(shot: Shot, source: String, output: String, compact: Boolean = false): List<String> = buildList {
+    fun arguments(
+        shot: Shot,
+        source: String,
+        output: String,
+        compact: Boolean = false,
+        scale: Int = 1,
+    ): List<String> = buildList {
         add(SILICON)
         add("--theme")
         add(THEME)
         add("--background")
         add(BACKGROUND)
         add("--pad-horiz")
-        add(PAD_HORIZ.toString())
+        add((PAD_HORIZ * scale).toString())
         add("--pad-vert")
-        add(PAD_VERT.toString())
+        add((PAD_VERT * scale).toString())
         add("--no-line-number")
         // NO WINDOW CHROME (the owner, 25/11): the traffic lights and the
         // rounded window were silicon's decoration — every image door paints
         // a clean card, like the diff drawer
         add("--no-window-controls")
         // THE MARGINS (the owner, 25/11: the code touched the edges): the
-        // dense pass keeps the tight line pad so 300 lines still fit the
+        // dense pass keeps the tight line pad so 400 lines still fit the
         // photo ceiling; every other shot breathes
         add("--line-pad")
-        add(if (compact) COMPACT_LINE_PAD.toString() else LINE_PAD.toString())
+        add(((if (compact) COMPACT_LINE_PAD else LINE_PAD) * scale).toString())
         add("--code-pad-right")
-        add(CODE_PAD_RIGHT.toString())
+        add((CODE_PAD_RIGHT * scale).toString())
+        // THE TYPE: the dense pass rides a smaller face; [scale] multiplies it
+        add("--font")
+        add("$FONT_FAMILY=${(if (compact) COMPACT_FONT_PX else BASE_FONT_PX) * scale}")
+        // ALWAYS a language (measured 25/11): silicon cannot detect one from
+        // a `.txt` source, so omitting the flag is a silent dead tap
+        add("--language")
+        add(grammar(shot.language))
         // THE DENSE FONT (the owner, 25/11): a tall block rides a smaller size
         // so one photo carries ~300 lines instead of ~190 (≈28 px/line at 14
         // vs 45 at 26) — the owner zooms, the image still fits the ceiling.
-        if (compact) {
-            add("--font")
-            add(COMPACT_FONT)
-        }
         // ALWAYS a language (measured 25/11): silicon cannot detect one from
         // a `.txt` source, so omitting the flag is a silent dead tap
         add("--language")
@@ -97,10 +116,15 @@ object PngRender {
     /** Past this many lines the render goes dense. */
     const val COMPACT_AFTER: Int = 100
 
-    /** The dense pass's font — measured on the 25/11 probe (≈28 px per line). */
-    const val COMPACT_FONT: String = "Hack=14"
+    /** The type family, and the two sizes: the default face and the dense one. */
+    const val FONT_FAMILY: String = "Hack"
+    const val BASE_FONT_PX: Int = 26
+    const val COMPACT_FONT_PX: Int = 14
 
-    /** The dense pass's line pad: 5 px × 300 lines would break the ceiling. */
+    /** The dense pass's face — the constant the tests and the docs quote. */
+    const val COMPACT_FONT: String = "$FONT_FAMILY=$COMPACT_FONT_PX"
+
+    /** The dense pass's line pad: 5 px × 400 lines would break the ceiling. */
     const val COMPACT_LINE_PAD: Int = 2
 
     /**

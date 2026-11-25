@@ -192,19 +192,48 @@ class PngTapsTest {
     }
 
     @Test
-    fun `the source silicon sees is already wrapped`() {
-        // the LAST RESORT walked in reverse: a wrap is never applied up front
-        // — `the source silicon sees is whole` owns that law now.
+    fun `the ladder steps down until the photo is legal`() {
+        // the owner, 25/11: 3x when it fits. Here 3x is a 45:1 banner Telegram
+        // refuses, so 2x lands — one step down, same whole line.
+        val shots = PngShots()
+        val id = shots.register(PngRender.Shot("y".repeat(250), "kotlin"))
+        val calls = mutableListOf<List<String>>()
+        val uploaded = mutableListOf<File>()
+        val answer = runBlocking {
+            taps(shots, calls = calls, uploaded = uploaded, pngSeq = listOf(pngOf(9000, 200), pngOf(1200, 400)))
+                .shoot(id)
+        }
+        assertNull(answer, "the tap flew")
+        assertEquals(2, calls.size, "the refused 3x handed over to 2x")
+        assertEquals("Hack=52", calls.last()[calls.last().indexOf("--font") + 1], "2x doubles the face")
+        assertEquals(1, uploaded.size)
+    }
+
+    @Test
+    fun `a line no scale can hold wraps as the last resort`() {
+        // three scales refused, then the wrap pass: the tap still flies and
+        // wrapping never loses a character
         val shots = PngShots()
         val id = shots.register(PngRender.Shot("y".repeat(250), "kotlin"))
         val sources = mutableListOf<String>()
         val calls = mutableListOf<List<String>>()
-        runBlocking {
-            taps(shots, sources = sources, calls = calls, pngSeq = listOf(pngOf(9000, 200), pngOf(1200, 400))).shoot(id)
+        val uploaded = mutableListOf<File>()
+        val answer = runBlocking {
+            taps(
+                shots,
+                sources = sources,
+                calls = calls,
+                uploaded = uploaded,
+                pngSeq = listOf(pngOf(9000, 200), pngOf(9000, 200), pngOf(9000, 200), pngOf(1200, 400)),
+            ).shoot(id)
         }
-        assertEquals(3, sources.last().split('\n').size, "the retry wraps at the width law")
-        assertEquals(250, sources.last().replace("\n", "").length, "wrapping never loses a character")
+        assertNull(answer, "the tap flew")
+        assertEquals(4, calls.size, "3x, 2x, 1x, then the wrapped pass")
+        assertEquals(3, sources.last().split('\n').size, "the wrap pass cut at the width law")
+        assertEquals(250, sources.last().replace("\n", "").length, "nothing was lost")
+        assertEquals(1, uploaded.size)
     }
+
     @Test
     fun `the source silicon sees is whole - no wrapping up front`() {
         // the owner, 25/11: no image is wrapped. The render grows as wide as
@@ -219,8 +248,8 @@ class PngTapsTest {
 
     @Test
     fun `a render past the photo ceilings wraps and renders again`() {
-        // the last resort only: this render is 45:1 (Telegram refuses it), so
-        // the retry wraps at the width law and the tap still flies
+        // the last resort only: every scale is refused, so the retry wraps at
+        // the width law and the tap still flies
         val shots = PngShots()
         val id = shots.register(PngRender.Shot("y".repeat(250), "kotlin"))
         val sources = mutableListOf<String>()
@@ -232,11 +261,11 @@ class PngTapsTest {
                 uploaded = uploaded,
                 calls = calls,
                 sources = sources,
-                pngSeq = listOf(pngOf(9000, 200), pngOf(1200, 400)),
+                pngSeq = listOf(pngOf(9000, 200), pngOf(9000, 200), pngOf(9000, 200), pngOf(1200, 400)),
             ).shoot(id)
         }
         assertNull(answer, "the tap still flew")
-        assertEquals(2, calls.size, "the refused render was retried")
+        assertEquals(4, calls.size, "3x, 2x, 1x, then the wrapped pass")
         assertEquals(3, sources.last().split('\n').size, "the retry wrapped at 100 columns")
         assertEquals(1, uploaded.size)
     }
