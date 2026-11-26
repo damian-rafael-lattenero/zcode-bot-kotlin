@@ -5,15 +5,21 @@ import io.ktor.client.request.HttpRequestData
 import io.ktor.client.request.HttpResponseData
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
+import io.ktor.http.content.OutgoingContent
 import io.ktor.http.content.TextContent
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.test.runTest
+import kotlinx.io.readByteArray
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import io.ktor.utils.io.ByteChannel
+import io.ktor.utils.io.readRemaining
+import java.io.File
 import java.io.IOException
+import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertContains
 import kotlin.test.assertEquals
@@ -54,6 +60,36 @@ class TgApiTest {
         assertEquals("""{"chat_id":42,"text":"hola"}""", (req.body as TextContent).text)
         assertEquals(JsonPrimitive(true), (r as JsonObject)["ok"])
         assertEquals(JsonPrimitive(42), ((r as JsonObject)["result"] as JsonObject)["message_id"])
+    }
+
+    @Test
+    fun anAlbumNamesItsPartsAndCarriesTheManifest() = runTest {
+        // 25/11: sendMediaGroup wants ONE request — the `media` manifest names
+        // each photo `attach://fN` and the parts follow under the SAME names.
+        // Pinned at the wire because the shape is Telegram's, not ours.
+        val dir = Files.createTempDirectory("tg-album").toFile()
+        val first = File(dir, "a.png").apply { writeBytes(byteArrayOf(1)) }
+        val second = File(dir, "b.png").apply { writeBytes(byteArrayOf(2)) }
+        val api = api { respond("""{"ok": true, "result": []}""", HttpStatusCode.OK) }
+        api.uploadAlbum("sendMediaGroup", mapOf("chat_id" to "42"), listOf(first, second))
+        val req = seen.single()
+        assertTrue(req.url.toString().endsWith("/botTOKEN123/sendMediaGroup"), "${req.url}")
+        // the multipart body as Telegram receives it, serialized through the
+        // content's own writer: the plain field, the manifest, then one
+        // binary part per photo under its `fN` name with its filename
+        val channel = ByteChannel()
+        (req.body as OutgoingContent.WriteChannelContent).writeTo(channel)
+        channel.close()
+        val wire = String(channel.readRemaining().readByteArray(), Charsets.ISO_8859_1)
+        assertTrue("""name="chat_id"""" in wire, wire)
+        assertTrue(
+            """name="media"""" in wire &&
+                """[{"type":"photo","media":"attach://f0"},{"type":"photo","media":"attach://f1"}]""" in wire,
+            wire,
+        )
+        assertTrue("""name="f0"""" in wire && """filename="a.png"""" in wire, wire)
+        assertTrue("""name="f1"""" in wire && """filename="b.png"""" in wire, wire)
+        dir.deleteRecursively()
     }
 
     @Test

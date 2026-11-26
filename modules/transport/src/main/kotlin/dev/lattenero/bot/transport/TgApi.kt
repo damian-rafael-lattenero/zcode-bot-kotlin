@@ -97,58 +97,39 @@ class TgApi(
     }
 
     /**
-     * AN ALBUM OUT (25/11): sendMediaGroup needs its photos in ONE request —
-     * the `media` JSON names them `attach://f0…fn` and each part follows. Same
-     * redactor law as [upload]: the URL carries the token, nothing flies raw.
+     * FILES OUT (30/10): sendDocument/sendPhoto need multipart/form-data — a
+     * local file rides as binary, JSON can only carry URLs and file_ids.
+     * `fields` are the plain text parts (chat_id, caption); the file rides
+     * under [fileField]. One ≤20 MB file at a time in RAM is the bot's own
+     * scale; the filename rides the disposition (Telegram reads it for the
+     * document card).
      */
-    @Suppress("TooGenericExceptionCaught", "ThrowsCount") // the same redactor law as call()
-    suspend fun uploadAlbum(method: String, fields: Map<String, String>, files: List<File>): JsonElement {
-        val cfg = configProvider()
-        val url = "${cfg.apiBase}/bot${cfg.token}/$method"
-        val media = files.mapIndexed { i, _ ->
-            JsonObject(mapOf("type" to JsonPrimitive("photo"), "media" to JsonPrimitive("attach://f$i")))
-        }
-        val resp = try {
-            client.submitFormWithBinaryData(
-                url = url,
-                formData = formData {
-                    fields.forEach { (name, value) -> append(name, value) }
-                    append("media", JsonArray(media).toString())
-                    files.forEachIndexed { i, file ->
-                        append(
-                            "f$i",
-                            file.readBytes(),
-                            Headers.build {
-                                append(HttpHeaders.ContentType, "application/octet-stream")
-                                append(HttpHeaders.ContentDisposition, "filename=\"${file.name}\"")
-                            },
-                        )
-                    }
-                },
-            )
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            throw IOException(cfg.redact(e.message ?: e::class.simpleName.orEmpty()), e)
-        }
-        val body = resp.bodyAsText()
-        if (!resp.status.isSuccess()) throw TgHttpException(resp.status.value, body)
-        return Json.parseToJsonElement(body)
-    }
+    suspend fun upload(method: String, fields: Map<String, String>, fileField: String, file: File): JsonElement =
+        multipart(method, fields, listOf(fileField to file))
 
     /**
-     * FILES OUT (30/10): the upload leg — sendDocument/sendPhoto need
-     * multipart/form-data (a local file rides as binary, JSON can only
-     * carry URLs and file_ids). `fields` are the plain text parts (chat_id,
-     * caption); `fileField` + `file` is the binary part. The same redactor
-     * law: the URL carries the token, no exception flies raw.
+     * AN ALBUM OUT (25/11): sendMediaGroup needs its photos in ONE request —
+     * the `media` JSON names them `attach://f0…fn` and each part follows
+     * under its own field. Same multipart leg, same redactor law.
+     */
+    suspend fun uploadAlbum(method: String, fields: Map<String, String>, files: List<File>): JsonElement =
+        multipart(
+            method,
+            fields + ("media" to albumOf(files.size)),
+            files.mapIndexed { i, file -> "f$i" to file },
+        )
+
+    /**
+     * THE MULTIPART LEG: one request — the plain fields first, then one binary
+     * part per file under its own field name. The redactor law of [call]: the
+     * URL carries the token, nothing flies raw; cancellation is never
+     * laundered.
      */
     @Suppress("TooGenericExceptionCaught", "ThrowsCount") // the same redactor law as call()
-    suspend fun upload(
+    private suspend fun multipart(
         method: String,
         fields: Map<String, String>,
-        fileField: String,
-        file: File,
+        parts: List<Pair<String, File>>,
     ): JsonElement {
         val cfg = configProvider()
         val url = "${cfg.apiBase}/bot${cfg.token}/$method"
@@ -157,18 +138,7 @@ class TgApi(
                 url = url,
                 formData = formData {
                     fields.forEach { (name, value) -> append(name, value) }
-                    // The ByteArray part (ktor 3's public append): one ≤20 MB
-                    // file at a time in RAM is the bot's own scale; octet-stream
-                    // content type, the filename rides the disposition (Telegram
-                    // reads it for the document card)
-                    append(
-                        fileField,
-                        file.readBytes(),
-                        Headers.build {
-                            append(HttpHeaders.ContentType, "application/octet-stream")
-                            append(HttpHeaders.ContentDisposition, "filename=\"${file.name}\"")
-                        },
-                    )
+                    parts.forEach { (field, file) -> append(field, file.readBytes(), octetsOf(file.name)) }
                 },
             )
         } catch (e: CancellationException) {
@@ -180,6 +150,23 @@ class TgApi(
         if (!resp.status.isSuccess()) throw TgHttpException(resp.status.value, body)
         return Json.parseToJsonElement(body)
     }
+
+    /** The album's manifest: every photo named `attach://fN` in order. */
+    private fun albumOf(count: Int): String = JsonArray(
+        (0 until count).map { i ->
+            buildJsonObject {
+                put("type", "photo")
+                put("media", "attach://f$i")
+            }
+        },
+    ).toString()
+
+    /** A binary part's headers: octet-stream, the filename in the disposition. */
+    private fun octetsOf(name: String): Headers = Headers.build {
+        append(HttpHeaders.ContentType, "application/octet-stream")
+        append(HttpHeaders.ContentDisposition, "filename=\"$name\"")
+    }
+
 
     override fun close() = client.close()
 

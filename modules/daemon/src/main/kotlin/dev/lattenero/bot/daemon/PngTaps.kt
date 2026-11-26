@@ -111,15 +111,29 @@ class PngTaps(
     private enum class Drawn { IMAGE, TOO_BIG, NONE }
 
     /**
-     * THE IMAGE of one [page]: a diff rides the side-by-side drawer;
-     * everything else rides silicon at the LARGEST scale Telegram still
-     * accepts (the resolution ladder: 3x when it fits, 2x next, 1x last).
+     * THE IMAGE of one [page] — a sum with TWO constructors, dispatched on the
+     * shot's language: a diff rides the side-by-side drawer, everything else
+     * rides silicon's resolution ladder.
      */
-    @Suppress("ReturnCount") // three honest exits: the diff, a legal scale, or the verdict
-    private fun imageOf(shot: PngRender.Shot, page: String, source: File, output: File, pageAt: Int): Drawn {
-        if (shot.language == DIFF_LANGUAGE) {
-            return if (DiffPng.render(shot.text, output)) Drawn.IMAGE else Drawn.NONE
+    private fun imageOf(shot: PngRender.Shot, page: String, source: File, output: File, pageAt: Int): Drawn =
+        when (shot.language) {
+            DIFF_LANGUAGE -> if (DiffPng.render(shot.text, output)) Drawn.IMAGE else Drawn.NONE
+            else -> siliconImage(shot, page, source, output, pageAt)
         }
+
+    /**
+     * silicon at the LARGEST scale Telegram still accepts (3x when it fits, 2x
+     * next, 1x last). A scale that drew but broke the ceilings answers
+     * [Drawn.TOO_BIG] — the image exists, the photo does not.
+     */
+    @Suppress("ReturnCount") // three honest exits: a legal scale, too big, nothing
+    private fun siliconImage(
+        shot: PngRender.Shot,
+        page: String,
+        source: File,
+        output: File,
+        pageAt: Int,
+    ): Drawn {
         val compact = page.count { it == '\n' } + 1 > PngRender.COMPACT_AFTER
         var anyFile = false
         for (scale in PngRender.MAX_SCALE downTo 1) {
