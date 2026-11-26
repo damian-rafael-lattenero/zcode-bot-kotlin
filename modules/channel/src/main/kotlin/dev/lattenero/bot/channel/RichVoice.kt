@@ -121,17 +121,19 @@ object RichVoice {
     }
 
     /**
-     * THE THINKING (24/11, the owner): a PULLQUOTE — the pink background is
-     * the identity of the model's reasoning — with the Markdown shaped
-     * inline (code/bold/bullets/headings), never collapsed.
-     *
-     * THE HEADER (the owner, 25/11: the rich thinking reached the phone with
-     * no label at all — the 📖 only lived in the classic fallback): every
-     * block opens with `📖 CoT:` (numbered when the caller knows the block),
-     * the same first-line law the digest's `🧾 Digest:` obeys.
+     * THE THINKING (24/11, the owner; re-shaped 26/11 for legibility): the
+     * block opens with a bold `📖 CoT N` line and the reasoning rides a
+     * BLOCKQUOTE. The pink pullquote stayed the reasoning's identity for two
+     * days, but 2K characters of large italic were hard to read on a phone —
+     * the quote bar keeps the voice, the smaller upright text keeps the speed.
      */
-    fun thinkingBlocks(text: String, number: Int? = null): List<JsonObject> =
-        listOf(pullquote("📖 CoT" + (number?.let { " $it" } ?: "") + ":\n\n" + text))
+    fun thinkingBlocks(text: String, number: Int? = null): List<JsonObject> = listOf(
+        paragraph("**📖 CoT" + (number?.let { " $it" } ?: "") + "**"),
+        buildJsonObject {
+            put("type", "blockquote")
+            put("text", inline(PyText.take(text, BLOCK_CP)))
+        },
+    )
 
     /** Blank-line-separated chunks as paragraph blocks, each inline-formatted and capped. */
     internal fun paragraphsOf(text: String): List<JsonObject> = text
@@ -146,11 +148,6 @@ object RichVoice {
     }
 
     /** The pink quote: the thinking's own background. */
-    private fun pullquote(text: String): JsonObject = buildJsonObject {
-        put("type", "pullquote")
-        put("text", inline(PyText.take(text, BLOCK_CP)))
-    }
-
     private val PARAGRAPH_BREAK = Regex("\\n\\s*\\n")
 
     /**

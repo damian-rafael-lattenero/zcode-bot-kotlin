@@ -2,6 +2,7 @@ package dev.lattenero.bot.channel
 
 import dev.lattenero.bot.contracts.PyText
 import dev.lattenero.bot.transport.TgConfig
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -50,15 +51,21 @@ class RichVoiceTest {
         assertTrue(blocks.all { it["type"]!!.jsonPrimitive.content == "paragraph" })
     }
 
+    /** The thinking's LAST block is the quote; the first is its bold header. */
+    private fun quote(text: String): JsonObject = RichVoice.thinkingBlocks(text).last()
+
     @Test
-    fun theThinkingIsAPinkPullquoteCapped() {
-        val blocks = RichVoice.thinkingBlocks("p".repeat(4000))
-        assertEquals(1, blocks.size)
-        val block = blocks.single()
-        assertEquals("pullquote", block["type"]!!.jsonPrimitive.content)
+    fun theThinkingIsABoldHeaderPlusACappedQuote() {
+        // 26/11, the owner: the pink italic pullquote was hard to read — the
+        // header names the block and the reasoning rides an upright quote
+        val blocks = RichVoice.thinkingBlocks("p".repeat(4000), number = 3)
+        assertEquals(2, blocks.size, blocks.toString())
+        assertEquals("paragraph", blocks[0]["type"]!!.jsonPrimitive.content)
+        assertTrue(blocks[0].toString().contains("CoT 3"), "the header carries the number: ${blocks[0]}")
+        assertEquals("blockquote", blocks[1]["type"]!!.jsonPrimitive.content)
         // the cap speaks: 3500 CODE POINTS (the emoji's two UTF-16 units
         // must not steal a character), never a wall beyond the client's render
-        assertEquals(3500, PyText.cpLength(block["text"]!!.jsonPrimitive.content))
+        assertEquals(3500, PyText.cpLength(blocks[1]["text"]!!.jsonPrimitive.content))
     }
 
     @Test
@@ -101,7 +108,7 @@ class RichVoiceTest {
     // **bold** used to arrive as raw markers; balanced pairs become runs.
     @Test
     fun inlineMarkdownBecomesRichRuns() {
-        val block = RichVoice.thinkingBlocks("mirá `/tasks` y **esto** literal").single()
+        val block = quote("mirá `/tasks` y **esto** literal")
         val text = block["text"]!!.jsonArray
         assertEquals(5, text.size, text.toString())
         assertEquals("code", text[1].jsonObject["type"]!!.jsonPrimitive.content)
@@ -112,8 +119,8 @@ class RichVoiceTest {
 
     @Test
     fun plainTextStaysAStringAndAnUnpairedMarkerIsLeftVerbatim() {
-        assertTrue(RichVoice.thinkingBlocks("sin marcadores").single()["text"] is JsonPrimitive)
-        val lone = RichVoice.thinkingBlocks("un `backtick suelto").single()
+        assertTrue(quote("sin marcadores")["text"] is JsonPrimitive)
+        val lone = quote("un `backtick suelto")
         assertTrue(lone["text"] is JsonPrimitive, "no pair, no invention: ${lone["text"]}")
     }
 
@@ -121,13 +128,13 @@ class RichVoiceTest {
     // and a heading becomes a bold run — the CoT/answer look formatted, not raw.
     @Test
     fun bulletsAndHeadingsReadLikeThePhone() {
-        val block = RichVoice.thinkingBlocks("## Plan\n- uno\n- dos").single()
+        val block = quote("## Plan\n- uno\n- dos")
         val runs = block["text"]!!.jsonArray
         val flat = runs.joinToString("") { run ->
             if (run is JsonPrimitive) run.content else run.jsonObject["text"]!!.jsonPrimitive.content
         }
-        assertEquals("📖 CoT:\n\nPlan\n• uno\n• dos", flat, "the header leads, then the shaped lines")
-        assertEquals("bold", runs[1].jsonObject["type"]!!.jsonPrimitive.content, "the heading is the first bold run")
+        assertEquals("Plan\n• uno\n• dos", flat, "the quote carries the shaped lines, bare")
+        assertEquals("bold", runs[0].jsonObject["type"]!!.jsonPrimitive.content, "the heading is the first bold run")
     }
 
     // THE CLASSIC LANE (24/11): the same shaping as HTML — escaped text with

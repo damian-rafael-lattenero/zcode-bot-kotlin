@@ -187,48 +187,48 @@ class RenderFoldTest {
         assertEquals(2, s!!.cotBlocks.size, "the second flush is a no-op")
     }
 
-    // ---- the sentence seal (22/11): ~1K blocks that end at completed sentences ----
+    // ---- the sentence seal (22/11): ~2K blocks that end at completed sentences (26/11) ----
 
     /** A n-cp sentence unit whose end CONFIRMS in the pending (terminator + separator). */
     private fun sentence(n: Int): String = "s".repeat(n - 2) + ". "
 
     @Test
     fun theSealCutsAtTheLastSentenceUnderTheTarget() {
-        // 12 x 100-cp sentences: the last boundary at-or-under the 1K
-        // target is exactly 1000 — the block fills FULL, ends with its
-        // punctuation, and the next opens on sentence 11's first word
-        var s = reduce(null, thought(sentence(100).repeat(12)))
+        // 25 x 100-cp sentences: the last boundary at-or-under the 2K
+        // target is exactly 2000 — the block fills FULL, ends with its
+        // punctuation, and the next opens on sentence 21's first word
+        var s = reduce(null, thought(sentence(100).repeat(25)))
         s = assertNotNull(s)
         assertEquals(1, s.cotBlocks.size)
-        assertEquals(1000, s.cotBlocks[0].length, "the greedy fill: the LAST boundary under the target")
+        assertEquals(2000, s.cotBlocks[0].length, "the greedy fill: the LAST boundary under the target")
         assertTrue(s.cotBlocks[0].endsWith(". "), "the block ends at the completed sentence")
-        assertEquals(sentence(100).repeat(2), s.cotPending, "sentences 11 and 12 ride pending, whole")
+        assertEquals(sentence(100).repeat(5), s.cotPending, "the sentences past the target ride pending, whole")
     }
 
     @Test
     fun aSentenceCrossingTheTargetSealsWholePastIt() {
-        // a 100-cp opener then a 1.1K sentence with no inner end: sealing
+        // a 100-cp opener then a 2.1K sentence with no inner end: sealing
         // the opener alone would be a stub block — the crossing sentence
-        // seals WHOLE at its own end, past 1K but never cut mid-sentence
-        var s = reduce(null, thought(sentence(100) + "g".repeat(1098) + ". tail"))
+        // seals WHOLE at its own end, past 2K but never cut mid-sentence
+        var s = reduce(null, thought(sentence(100) + "g".repeat(2098) + ". tail"))
         s = assertNotNull(s)
         assertEquals(1, s.cotBlocks.size)
-        assertEquals(1200, s.cotBlocks[0].length, "the stub merges with the crossing sentence's own end")
+        assertEquals(2200, s.cotBlocks[0].length, "the stub merges with the crossing sentence's own end")
         assertTrue(s.cotBlocks[0].endsWith(". "), "the giant sentence closes intact")
         assertEquals("tail", s.cotPending)
     }
 
     @Test
     fun aTrailingTerminatorWithoutItsSeparatorIsNotYetABoundary() {
-        // 1100 cp ending in a bare '.': it may still grow into «3.14» —
+        // 2100 cp ending in a bare '.': it may still grow into «3.14» —
         // the seal WAITS; the next delta's separator confirms the end
-        var s = reduce(null, thought("w".repeat(1099) + "."))
+        var s = reduce(null, thought("w".repeat(2099) + "."))
         s = assertNotNull(s)
         assertEquals(0, s.cotBlocks.size, "unconfirmed: the sentence may still grow")
-        assertEquals(1100, s.cotPending.length)
+        assertEquals(2100, s.cotPending.length)
         s = reduce(s, thought(" next."))!!
         assertEquals(1, s.cotBlocks.size, "the separator confirms the end and the seal rings")
-        assertEquals(1101, s.cotBlocks[0].length, "the block swallows its confirming separator")
+        assertEquals(2101, s.cotBlocks[0].length, "the block swallows its confirming separator")
         assertTrue(s.cotBlocks[0].endsWith(". "))
         assertEquals("next.", s.cotPending)
     }
@@ -238,7 +238,7 @@ class RenderFoldTest {
         // «3.14159» — a '.' followed by a digit is a number, not an end;
         // the run carries NO boundary and the seal waits (never cuts a
         // number, never mind the commas — only point-final ends count)
-        var s = reduce(null, thought("pi is 3.14159 and e is 2.71828, so ".repeat(40)))
+        var s = reduce(null, thought("pi is 3.14159 and e is 2.71828, so ".repeat(60)))
         s = assertNotNull(s)
         assertEquals(0, s.cotBlocks.size, "a number's dot never confirms a sentence")
     }
@@ -248,24 +248,24 @@ class RenderFoldTest {
         // markdown-list thinking: no periods at all, every line a coherent
         // unit — the seal cuts after the line's newline
         val line = "-" + "x".repeat(98) + "\n" // 100 cp, boundary at its newline
-        var s = reduce(null, thought(line.repeat(12)))
+        var s = reduce(null, thought(line.repeat(25)))
         s = assertNotNull(s)
         assertEquals(1, s.cotBlocks.size)
-        assertEquals(1000, s.cotBlocks[0].length)
+        assertEquals(2000, s.cotBlocks[0].length)
         assertTrue(s.cotBlocks[0].endsWith("\n"), "the cut lands on the line's end")
-        assertEquals(line.repeat(2), s.cotPending)
+        assertEquals(line.repeat(5), s.cotPending)
     }
 
     @Test
     fun aCoalescedBurstSealsEveryBlockInOneFold() {
         // the fork coalesces same-key chunks: ONE delta can carry a whole
-        // window — the loop seals each ~1K block at its own sentence end.
+        // window — the loop seals each ~2K block at its own sentence end.
         // Each unit is UNIQUE: identical blocks are twins, and the content
         // keys would honestly skip them (the re-statement law)
-        val units = (1..35).map { n -> "n%02d".format(n) + "s".repeat(95) + ". " } // 100 cp each
+        val units = (1..45).map { n -> "n%02d".format(n) + "s".repeat(95) + ". " } // 100 cp each
         var s = reduce(null, thought(units.joinToString("")))
         s = assertNotNull(s)
-        assertEquals(listOf(1000, 1000, 1000), s.cotBlocks.map { it.length })
+        assertEquals(listOf(2000, 2000), s.cotBlocks.map { it.length })
         assertEquals(500, s.cotPending.length, "the last half-full block rides pending")
         assertTrue(s.cotBlocks.all { it.endsWith(". ") }, "every block closes its sentences")
     }

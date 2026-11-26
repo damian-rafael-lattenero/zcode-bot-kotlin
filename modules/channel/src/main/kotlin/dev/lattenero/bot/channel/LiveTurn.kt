@@ -568,23 +568,23 @@ object LiveTurn {
     const val ANSWER_TAIL_CP = 3200
 
     /**
-     * The CoT BLOCK's target — the owner's sentence law (22/11: «máximo 1k
-     * pero que no corten en cualquier lado… completos, con punto final»):
-     * a block fills to ~1K CODE POINTS and seals at the last COMPLETED
-     * sentence or paragraph end under it, so every block ends with its
-     * final punctuation and the next one opens on a fresh sentence. A
-     * sentence that crosses the target seals WHOLE — a block may run past
-     * 1K, never mid-sentence ([RenderFold.cotSealCut] owns the law).
+     * The CoT BLOCK's target — the owner's sentence law (22/11: never cut
+     * anywhere, always on a completed sentence; 26/11: every 2K, not 1K or
+     * 3K): a block fills to ~2K CODE POINTS and seals at the last COMPLETED
+     * sentence or paragraph end under it, so every block ends with its final
+     * punctuation and the next one opens on a fresh sentence. A sentence that
+     * crosses the target seals WHOLE — a block may run past 2K, never
+     * mid-sentence ([RenderFold.cotSealCut] owns the law).
      */
-    const val COT_BLOCK_TARGET_CP = 1000
+    const val COT_BLOCK_TARGET_CP = 2000
 
     /**
      * The sentence seal's floor — a boundary smaller than this is a stub
      * (the sentence after it crosses the target): it merges with that
-     * sentence's own end instead of sealing a noise block. Half the
-     * target, the owner's «mayores o menores» tolerance in numbers.
+     * sentence's own end instead of sealing a noise block. Half the target,
+     * the owner's tolerance in numbers.
      */
-    const val COT_SEAL_MIN_CP = 500
+    const val COT_SEAL_MIN_CP = 1000
 
     /**
      * The CoT BLOCK's valve — Python's COT_BOX_CAP (reasoning.py, the

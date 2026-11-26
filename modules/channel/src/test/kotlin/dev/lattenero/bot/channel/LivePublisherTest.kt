@@ -272,10 +272,11 @@ class LivePublisherTest {
         now += 31_000L // the swap's re-birth is a SECOND birth: the spacing applies
         publisher.tick() // the block sealed → the NATIVE expandable quote speaks, the card swaps
         // THE NATIVE THINKING (5/11): the whole block travels INSIDE the
-        // rich message — the client collapses/expands it, no custom button
-        val rich = blockBodies(wire).firstOrNull { "pullquote" in it.first }
+        // rich message — the client collapses/expands it, no custom button.
+        // 26/11: the reasoning rides a blockquote under its bold header.
+        val rich = blockBodies(wire).firstOrNull { "blockquote" in it.first }
         assertTrue(rich != null, "the block's violet message spoke")
-        assertTrue("pullquote" in rich!!.first)
+        assertTrue("blockquote" in rich!!.first)
         // the swap's order: the card dies, the voice speaks, the card is
         // REBORN — delete → sendRichMessage(blocks) → birth sendRichMessage(html)
         val methods = wire.bodies.drop(afterBirth).map { it.second }
@@ -1329,8 +1330,8 @@ class LivePublisherTest {
         )
         now += 31_000L
         publisher.tick()
-        val thinking = blockBodies(wire).firstOrNull { "pullquote" in it.first }
-        assertTrue(thinking != null, "the CoT is a NATIVE expandable quote: ${wire.bodies.map { it.second }}")
+        val thinking = blockBodies(wire).firstOrNull { "blockquote" in it.first }
+        assertTrue(thinking != null, "the CoT rides a native quote: ${wire.bodies.map { it.second }}")
     }
 
     @Test

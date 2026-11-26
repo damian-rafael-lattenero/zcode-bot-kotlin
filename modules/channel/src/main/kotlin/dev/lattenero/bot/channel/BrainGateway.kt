@@ -497,7 +497,11 @@ internal object BrainTexts {
  * rendering over the injected [BrainGateway]; every branch of the ladder
  * (down / timeout / HTTP error / unreadable / empty) says what happened.
  */
-class BrainCommands(private val brain: BrainGateway) {
+class BrainCommands(
+    private val brain: BrainGateway,
+    /** The clock — at the edge, so `/learn`'s week is a value the tests pin. */
+    private val now: () -> java.time.Instant = java.time.Instant::now,
+) {
 
     /** `/brain [pregunta | status]`. */
     suspend fun brain(rest: String): String {
@@ -559,7 +563,7 @@ class BrainCommands(private val brain: BrainGateway) {
             ?.let { BrainJson.costsToday(it.body) }
         return when {
             allDown -> BrainTexts.down(brain.url)
-            else -> BrainTexts.learn(memoryList, evalRows, costsToday, java.time.Instant.now())
+            else -> BrainTexts.learn(memoryList, evalRows, costsToday, now())
         }
     }
 

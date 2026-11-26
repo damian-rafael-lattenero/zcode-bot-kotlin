@@ -13,6 +13,13 @@ import kotlin.test.assertTrue
  */
 class BrainLearnTest {
 
+    /**
+     * THE PINNED CLOCK (26/11): the fixtures are dated 18–19/11 and the card
+     * counts a 7-day window. With the wall clock the suite went red a week
+     * later, on its own — the window is a value now.
+     */
+    private val pinnedNow = java.time.Instant.parse("2026-11-20T12:00:00Z")
+
     private val url = "http://127.0.0.1:8765"
 
     private val recentJson = """
@@ -69,7 +76,7 @@ class BrainLearnTest {
             evals = BrainReply.Response(200, evalLatestJson)
             costs = BrainReply.Response(200, costsTodayJson)
         }
-        val text = BrainCommands(fake.gateway()).learn("")
+        val text = BrainCommands(fake.gateway()) { pinnedNow }.learn("")
         assertTrue("aprendizaje de 7 días" in text)
         // The 2020 pair is OUTSIDE the window; the two fresh ones count.
         assertTrue("📝 hechos 1" in text)
@@ -94,7 +101,7 @@ class BrainLearnTest {
             evals = BrainReply.Response(200, "[]")
             costs = BrainReply.Response(200, costsTodayJson)
         }
-        val text = BrainCommands(fake.gateway()).learn("")
+        val text = BrainCommands(fake.gateway()) { pinnedNow }.learn("")
         assertTrue("📭 sin recuerdos nuevos esta semana" in text)
         assertTrue("📊 evals: 📭 sin corridas" in text)
         assertTrue("12 turnos" in text)
@@ -107,7 +114,7 @@ class BrainLearnTest {
             evals = BrainReply.Down(null)
             costs = BrainReply.Down(null)
         }
-        val text = BrainCommands(fake.gateway()).learn("")
+        val text = BrainCommands(fake.gateway()) { pinnedNow }.learn("")
         assertTrue("caído" in text)
     }
 
@@ -118,7 +125,7 @@ class BrainLearnTest {
             evals = BrainReply.Down(null)
             costs = BrainReply.Response(200, costsTodayJson)
         }
-        val text = BrainCommands(fake.gateway()).learn("")
+        val text = BrainCommands(fake.gateway()) { pinnedNow }.learn("")
         // The memories leg still speaks; the evals leg degrades alone.
         assertTrue("El cutover de LoRA espera el gate" in text)
         assertTrue("evals: 📭 sin corridas" in text)
@@ -127,7 +134,7 @@ class BrainLearnTest {
 
     @Test
     fun learnWithArgsIsTheUsageLine() = runBlocking {
-        val text = BrainCommands(FakeBrain().gateway()).learn("semana")
+        val text = BrainCommands(FakeBrain().gateway()) { pinnedNow }.learn("semana")
         assertTrue("/learn" in text)
     }
 }
