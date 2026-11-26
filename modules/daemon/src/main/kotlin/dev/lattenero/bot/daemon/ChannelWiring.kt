@@ -1092,7 +1092,6 @@ internal fun wireChannel(
         verbosity,
         workspaceOf = { sid -> workspacePathOf(cfg.baseDir, sid) },
         onSeal = notifs?.onSeal ?: NotificationsWire.noSeal,
-        fileMenu = fileMenu,
         richVoice = richVoice,
         speakPlain = { text, markup -> fireSpeakPlain(text, false, markup) },
         pngShots = pngShots,
@@ -1313,8 +1312,6 @@ private fun buildLiveView(
     workspaceOf: suspend (String) -> String?,
     /** 🔔 the seal tap — the notifications' hook on the card's own seal. */
     onSeal: suspend (SealFacts) -> Unit = NotificationsWire.noSeal,
-    /** The file viewer (5/11) — write/edit closes earn «📄 archivo completo». */
-    fileMenu: FileMenu? = null,
     /** The violet voice (5/11) — rich messages for the LLM's prose. */
     richVoice: Boolean = true,
     /** The CLASSIC throat (24/11) — code boxes ride sendMessage so long lines scroll. */
@@ -1383,7 +1380,6 @@ private fun buildLiveView(
             }
         },
         onSeal = onSeal,
-        fileMenu = fileMenu,
         pngShots = pngShots,
         pngShotOf = pngShotOf,
         richVoice = richVoice,

@@ -790,7 +790,9 @@ class LivePublisherTest {
         assertTrue("png:1" in markup && "png:2" in markup, "both doors carry their id: $markup")
         assertTrue("comando PNG" in markup, "the input door names what it shows: $markup")
         assertTrue("salida PNG" in markup, "the output door names what it shows: $markup")
-        assertTrue("Ver salida" in markup, "the pager's door keeps its place: $markup")
+        // 26/11, the owner: the outputs are IMAGES and nothing else — the
+        // text pager's door no longer rides the box
+        assertTrue("Ver salida" !in markup, "no non-PNG door: $markup")
     }
 
     private companion object {
@@ -1030,7 +1032,7 @@ class LivePublisherTest {
     }
 
     @Test
-    fun theEditCloseSpeaksItsDiffWithTheFileDoor() = runTest {
+    fun theEditCloseSpeaksItsDiffWithNoDoorButTheImage() = runTest {
         // THE FILE DOOR (the owner, 5/11): a write/edit close carries the
         // diff AND «📄 archivo completo» — the tap reads the file fresh
         val taskId = "task-9"
@@ -1041,15 +1043,6 @@ class LivePublisherTest {
         val spoken = mutableListOf<String>()
         val markups = mutableListOf<JsonObject?>()
         var now = 2_000L
-        val fileMenu = FileMenu(
-            read = { "el archivo entero" },
-            edit = { _, _, _ -> true },
-            send = { text, markup ->
-                spoken += text
-                markups += markup
-                99L
-            },
-        )
         val publisher = LivePublisher(
             hub = hub,
             telegram = LiveTelegram(
@@ -1066,7 +1059,6 @@ class LivePublisherTest {
             finalTurn = { null },
             clock = { now },
             toolBox = { lane -> "✏️ ${lane.input?.str("file_path")} listo" },
-            fileMenu = fileMenu,
         )
         publisher.tick() // the birth
         // the lane OPENS (pending) and then closes — a close without a lane is dropped by the fold
@@ -1089,10 +1081,13 @@ class LivePublisherTest {
         )
         now += 31_000L // the feed speaks; the card reclaims on the same tick
         publisher.tick()
-        val withDoor = spoken.zip(markups).any { (text, markup) ->
-            "Main.kt" in text && "📄 archivo completo" in (markup?.toString() ?: "")
-        }
-        assertTrue(withDoor, "the edit close carries the file door: ${spoken.joinToString(" | ")}")
+        val close = spoken.zip(markups).firstOrNull { (text, _) -> "Main.kt" in text }
+        assertNotNull(close, "the edit close speaks its diff: ${spoken.joinToString(" | ")}")
+        // 26/11, the owner: nothing that is not an image is shown — the file
+        // viewer's door is gone and only the 📸 rows may ride a close
+        val markup = close.second?.toString().orEmpty()
+        assertTrue("archivo completo" !in markup, "no file door: $markup")
+        assertTrue("bp:" !in markup, "no text pager: $markup")
     }
 
     @Test
@@ -1406,7 +1401,7 @@ class LivePublisherTest {
     // ---- the pager's bash fence + the long-command feed law (v2 §3/§5) --------
 
     @Test
-    fun theShellPagerOpensItsPagesInsideTheBashFence() = runTest {
+    fun theShellBoxKeepsItsLanguageAndTheTextDoorIsRetired() = runTest {
         val taskId = "task-9"
         val hub = LiveHub()
         hub.apply(frame(taskId, "task_run_started", at = 1_000), nowMs = 1_000)
@@ -1432,20 +1427,18 @@ class LivePublisherTest {
             nowMs = 1_600,
         )
         now += 31_000L // the close's card swap is a SECOND birth: the spacing applies
-        publisher.tick() // the close collapses behind its pager button
+        publisher.tick() // the close collapses behind its image door
         val box = hub.peek()?.boxes?.single()
         assertEquals("nu", box?.language, "the fold carries the fence language for a shell's box")
-        // THE TAP: the numbered page opens inside the bash code block (the
-        // wire body is JSON — the fence's quotes ride escaped)
-        assertEquals(null, publisher.open(box!!.boxId, 0))
-        val opened = wire.bodies.last { it.second == "editMessageText" }.first
-        assertTrue("language-nu" in opened, "the shell's page rides the bash fence: $opened")
-        assertTrue("<pre><code" in opened && "code></pre>" in opened, opened)
-        assertTrue("1│ out one" in opened, "the numbering law unchanged: $opened")
+        // 26/11, the owner: the text pager is retired — an old «Ver salida»
+        // tap answers the honest words and the fold never leaves the header
+        val edits = wire.bodies.count { it.second == "editMessageText" }
+        assertTrue(publisher.open(box!!.boxId, 0)!!.contains("📸"), "the retired door speaks")
+        assertEquals(edits, wire.bodies.count { it.second == "editMessageText" }, "and edits nothing")
     }
 
     @Test
-    fun theChildsReportIsBornOpenAndShellsStayFolded() = runTest {
+    fun everyBoxIsBornFoldedTheChildsReportToo() = runTest {
         val taskId = "task-9"
         val hub = LiveHub()
         hub.apply(frame(taskId, "task_run_started", at = 1_000), nowMs = 1_000)
@@ -1495,11 +1488,12 @@ class LivePublisherTest {
         now += 31_000L
         publisher.tick()
         val born = hub.peek()?.boxes?.last()
-        assertEquals(0, born?.page, "the report's box is born SHOWING page 1 (the fold's own proof)")
-        // the speak lane is in-memory in tests: the born body IS the page render
-        val bornBody = spoken.lastOrNull { "1│ the child's report line" in it }
-        assertNotNull(bornBody, "the report's page rides the birth body: $spoken")
-        assertTrue("the fixer" in bornBody, "the header names the spawn: $bornBody")
+        // 26/11, the owner: nothing that is not an image is shown — the
+        // child's report folds like every other box; its words ride the image
+        assertEquals(BoxLive.FOLDED, born?.page, "the report's box is born folded: no text door")
+        val bornBody = spoken.lastOrNull { "the fixer" in it }
+        assertNotNull(bornBody, "the header still names the spawn: $spoken")
+        assertTrue("the child's report line" !in bornBody, "the report's words wait behind the image")
     }
 
     @Test

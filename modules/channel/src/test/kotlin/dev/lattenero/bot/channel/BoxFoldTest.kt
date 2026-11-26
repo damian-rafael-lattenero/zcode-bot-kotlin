@@ -14,16 +14,15 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.add
-import kotlinx.serialization.json.buildJsonArray
-import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.put
-import kotlinx.serialization.json.putJsonArray
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -127,7 +126,7 @@ class BoxFoldTest {
     }
 
     /** The last edit's own fields — the wire bytes Telegram receives. */
-    private data class Edit(val messageId: Long, val text: String, val markup: JsonObject)
+    private data class Edit(val messageId: Long, val text: String, val markup: JsonObject?)
 
     /**
      * The rich envelope folds line breaks into `<br>` outside pre/code; the
@@ -135,46 +134,22 @@ class BoxFoldTest {
      */
     private fun lastEdit(wire: Wire): Edit {
         val body = Json.parseToJsonElement(wire.bodies.last { it.second == "editMessageText" }.first).jsonObject
-        val markup = (body["reply_markup"] as JsonPrimitive).content
+        // a doorless edit carries NO reply_markup (26/11: the box wears images only)
+        val markup = (body["reply_markup"] as? JsonPrimitive)?.content
         val rich = ((body["rich_message"] as? JsonObject)?.get("html") as? JsonPrimitive)?.content
         return Edit(
             messageId = body["message_id"]!!.jsonPrimitive.content.toLong(),
             text = rich?.replace("<br>", "\n") ?: body["text"]!!.jsonPrimitive.content,
-            markup = Json.parseToJsonElement(markup).jsonObject,
+            markup = markup?.let { Json.parseToJsonElement(it).jsonObject },
         )
     }
 
-    /** The expected button shape, built independently of the production builder. */
-    private fun buttonObject(text: String, data: String): JsonObject = buildJsonObject {
-        put("text", text)
-        put("callback_data", data)
-    }
-
-    /** The folded box's one door: `📜 Ver salida` → `bp:<id>:0`. */
-    private fun boxOpenMarkup(id: Int): JsonObject = buildJsonObject {
-        putJsonArray("inline_keyboard") {
-            add(buildJsonArray { add(buttonObject("📜 Ver salida", "bp:$id:0")) })
-        }
-    }
-
-    /** The opened page's navigator: one numbered button per page (▸ on the shown one) + `🔙 Cerrar`. */
-    private fun pagesMarkup(id: Int, index: Int, count: Int): JsonObject = buildJsonObject {
-        putJsonArray("inline_keyboard") {
-            (0 until count).toList().chunked(PAGES_PER_ROW).forEach { row ->
-                add(
-                    buildJsonArray {
-                        row.forEach { i ->
-                            add(buttonObject(if (i == index) "▸${i + 1}" else "${i + 1}", "bp:$id:$i"))
-                        }
-                    },
-                )
-            }
-            add(buildJsonArray { add(buttonObject("🔙 Cerrar", "bf:$id")) })
-        }
-    }
-
     @Test
-    fun theClosedBoxOpensInByteExactPagesAndFoldsBack() = runTest {
+    fun theOutputsAreImagesOnlyNoTextDoorIsBornOrAnswered() = runTest {
+        // THE OWNER, 26/11: the outputs are images and nothing that is not an
+        // image is shown. A box is born with NO keyboard, an old «Ver salida»
+        // tap answers the honest words and edits nothing, and the way back
+        // folds to the header — still doorless.
         val hub = LiveHub()
         hub.apply(frame(taskId, "task_run_started", at = 1_000), nowMs = 1_000)
         hub.apply(frame(taskId, "agent_thought_chunk", at = 1_050, "content" to JsonPrimitive("arranco")), nowMs = 1_050)
@@ -182,11 +157,9 @@ class BoxFoldTest {
         val spoke = mutableListOf<Pair<String, JsonObject?>>()
         val publisher = publisher(wire, hub, spoke)
         publisher.tick() // the birth — feedSeen snapshots here
-        val lines = (1..27).map(::lineOf)
-        bashClose(hub, lines.joinToString("\n"))
+        bashClose(hub, (1..27).joinToString("\n", transform = ::lineOf))
         publisher.tick() // the feed speaks the collapsed box
 
-        // ---- THE CLOSED BOX: the exact header + its one door, born closed ----
         val box = hub.peek()!!.boxes.single()
         assertEquals(BoxLive.FOLDED, box.page, "a box is born CLOSED")
         assertEquals(2, box.pages.size, "27 lines of 100 cp cut at the 2800-cp budget")
@@ -194,109 +167,33 @@ class BoxFoldTest {
         assertEquals(1, spoke.size)
         val (spokeText, spokeMarkup) = spoke.single()
         assertEquals(
-            "⚡ <b>Nushell</b> · 27 líneas\n<i>📜 tocar para ver</i>\n<pre><code class=\"language-nu\">ls</code></pre>",
-            spokeText, "the collapsed header, byte-exact",
+            "⚡ <b>Nushell</b> · 27 líneas\n<i>📸 tocar para ver la imagen</i>\n" +
+                "<pre><code class=\"language-nu\">ls</code></pre>",
+            spokeText,
+            "the collapsed header, byte-exact — its hint names the image",
         )
-        assertEquals(boxOpenMarkup(box.boxId), spokeMarkup, "the one 📜 door carries the fold's own id")
+        assertNull(spokeMarkup, "no keyboard rides a box: nothing that is not an image")
 
-        // ---- THE OPEN: page 1 (lines 1..26) in its exact numbered bytes ----
-        assertEquals(null, publisher.open(box.boxId, 0), "a working tap answers silence")
-        val opened = lastEdit(wire)
-        assertEquals(boxMessageId, opened.messageId, "the edit targets the born message")
-        assertEquals(
-            "⚡ <b>Nushell</b> · 27 líneas\n<i>📜 tocar para ver</i>\n<pre><code class=\"language-nu\">ls</code></pre>\n" +
-                "<pre><code class=\"language-nu\">" +
-                (1..26).joinToString("\n") { n -> "${n.toString().padStart(4)}│ ${lines[n - 1]}" } +
-                "</code></pre>",
-            opened.text, "page 1: the header + the numbered body, byte-exact",
-        )
-        assertEquals(pagesMarkup(box.boxId, 0, 2), opened.markup, "▸1 marks the shown page")
-        assertEquals(0, hub.peek()!!.boxes.single().page, "the fold mirrors the page the message shows")
+        // an old text door answers the honest words and edits NOTHING
+        val edits = wire.bodies.count { it.second == "editMessageText" }
+        assertTrue(publisher.open(box.boxId, 0)!!.contains("📸"), "the retired door speaks")
+        assertEquals(edits, wire.bodies.count { it.second == "editMessageText" }, "and edits nothing")
 
-        // ---- THE FLIP: page 2 (line 27 alone), ▸2 ----
-        assertEquals(null, publisher.open(box.boxId, 1))
-        val flipped = lastEdit(wire)
-        assertEquals(
-            "⚡ <b>Nushell</b> · 27 líneas\n<i>📜 tocar para ver</i>\n<pre><code class=\"language-nu\">ls</code></pre>\n" +
-                "<pre><code class=\"language-nu\">  27│ ${lines[26]}</code></pre>",
-            flipped.text, "page 2: line 27 with its REAL number, byte-exact",
-        )
-        assertEquals(pagesMarkup(box.boxId, 1, 2), flipped.markup, "▸2 marks the shown page")
-        assertEquals(1, hub.peek()!!.boxes.single().page)
-
-        // ---- THE CLAMP: an out-of-range page is the last one, same bytes ----
-        assertEquals(null, publisher.open(box.boxId, 99))
-        val clamped = lastEdit(wire)
-        assertEquals(flipped.text, clamped.text, "the tap edge clamps before the render")
-        assertEquals(pagesMarkup(box.boxId, 1, 2), clamped.markup)
-
-        // ---- THE FOLD-BACK: the header again + its one door ----
+        // the way back: the exact header, and it regains no door
         assertEquals(null, publisher.fold(box.boxId))
         val folded = lastEdit(wire)
         assertEquals(
-            "⚡ <b>Nushell</b> · 27 líneas\n<i>📜 tocar para ver</i>\n<pre><code class=\"language-nu\">ls</code></pre>",
-            folded.text, "the fold-back is the exact header, byte-exact",
+            "⚡ <b>Nushell</b> · 27 líneas\n<i>📸 tocar para ver la imagen</i>\n" +
+                "<pre><code class=\"language-nu\">ls</code></pre>",
+            folded.text,
+            "the fold-back is the exact header, byte-exact",
         )
-        assertEquals(boxOpenMarkup(box.boxId), folded.markup)
+        assertNull(folded.markup, "and it regains no door")
         assertEquals(BoxLive.FOLDED, hub.peek()!!.boxes.single().page, "the fold mirrors the fold-back")
-
-        // ---- THE MISS: an unknown box answers the honest words, edits NOTHING ----
-        val edits = wire.bodies.count { it.second == "editMessageText" }
-        assertEquals(BoxTaps.MISS, publisher.open(box.boxId + 999, 0))
-        assertEquals(BoxTaps.MISS, publisher.fold(box.boxId + 999))
-        assertEquals(edits, wire.bodies.count { it.second == "editMessageText" }, "a miss edits NOTHING")
-    }
-
-    @Test
-    fun aSealedTurnsBoxStillOpensItsPagesUntilNuclear() = runTest {
-        // THE OWNER'S USE (3/11): he taps a paged output AFTER the turn
-        // ended. The fold's live state resets at the seal; the MESSAGE (and
-        // its button) stays in the chat, so the box must stay readable.
-        val hub = LiveHub()
-        hub.apply(frame(taskId, "task_run_started", at = 1_000), nowMs = 1_000)
-        hub.apply(frame(taskId, "agent_thought_chunk", at = 1_050, "content" to JsonPrimitive("arranco")), nowMs = 1_050)
-        val wire = Wire()
-        val publisher = publisher(wire, hub, mutableListOf())
-        publisher.tick()
-        bashClose(hub, (1..27).joinToString("\n", transform = ::lineOf))
-        publisher.tick()
-        val box = hub.peek()!!.boxes.single()
-
-        // the seal: the live world dies, the chat's box does not
-        hub.clear(taskId)
-        assertEquals(null, hub.peek(), "the live state is gone — the seal's own law")
-        val edits = wire.bodies.count { it.second == "editMessageText" }
-        assertEquals(null, publisher.open(box.boxId, 0), "the sealed box still opens — no miss")
-        assertEquals(edits + 1, wire.bodies.count { it.second == "editMessageText" })
-        assertEquals(box.messageId, lastEdit(wire).messageId, "it edits the SAME message")
 
         // ☢️ nuclear: nothing survives it
         hub.clear()
-        assertEquals(BoxTaps.MISS, publisher.open(box.boxId, 0))
-    }
-
-    @Test
-    fun aThrottledTapFlipsNothingInTheFold() = runTest {
-        val hub = LiveHub()
-        hub.apply(frame(taskId, "task_run_started", at = 1_000), nowMs = 1_000)
-        hub.apply(frame(taskId, "agent_thought_chunk", at = 1_050, "content" to JsonPrimitive("arranco")), nowMs = 1_050)
-        val wire = Wire()
-        var nowSec = 2.0
-        val cooldown = Cooldown(now = { nowSec }, readFile = { null })
-        val publisher = publisher(wire, hub, mutableListOf(), cooldown = cooldown)
-        publisher.tick()
-        bashClose(hub, (1..27).joinToString("\n", transform = ::lineOf))
-        publisher.tick()
-        val box = hub.peek()!!.boxes.single()
-        cooldown.extend(raSeconds = 60) // Telegram named the window
-        val edits = wire.bodies.count { it.second == "editMessageText" }
-        assertEquals(null, publisher.open(box.boxId, 1), "the tap answers no miss — the edit just could not fly")
-        assertEquals(edits, wire.bodies.count { it.second == "editMessageText" }, "a throttled tap edits NOTHING")
-        assertEquals(BoxLive.FOLDED, hub.peek()!!.boxes.single().page, "and the fold keeps its truth — nothing flipped")
-        // the window lifts: the SAME tap lands and the fold mirrors it
-        nowSec = 5_000.0
-        assertEquals(null, publisher.open(box.boxId, 1))
-        assertEquals(1, hub.peek()!!.boxes.single().page)
+        assertEquals(BoxTaps.MISS, publisher.fold(box.boxId))
     }
 
     @Test
@@ -315,8 +212,4 @@ class BoxFoldTest {
         )
     }
 
-    private companion object {
-        /** Keyboards.PAGES_PER_ROW, pinned independently (the golden's own arithmetic). */
-        const val PAGES_PER_ROW = 5
-    }
 }

@@ -540,20 +540,21 @@ object Keyboards {
 
     /**
      * Any keyboard plus the 📸 row: the existing rows keep their order and
-     * the image door lands LAST (the pager's 🔙 and the vote row keep their
-     * places). A null markup becomes the one-row keyboard — the digest and
-     * the code boxes share this single combinator.
+     * the image door lands LAST. A null markup becomes the one-row keyboard —
+     * the shot is present, so the answer always carries a keyboard.
      */
     fun withPng(markup: JsonObject?, registryId: Int, label: String = PNG_LABEL): JsonObject =
-        withPngRows(markup, listOf(label to registryId))
+        withPngRows(markup, listOf(label to registryId))!!
 
     /**
      * One 📸 row per shot, in order: a shell box earns TWO doors (the owner,
-     * 25/11) — the INPUT command and the OUTPUT it printed — while the digest
-     * and the edit closes keep their single door.
+     * 25/11) — the INPUT command and the OUTPUT it printed. With no base and
+     * no shot the answer is NULL: a box with nothing to tap wears no keyboard
+     * at all (the owner, 26/11: nothing that is not an image is shown).
      */
-    fun withPngRows(markup: JsonObject?, shots: List<Pair<String, Int>>): JsonObject {
+    fun withPngRows(markup: JsonObject?, shots: List<Pair<String, Int>>): JsonObject? {
         val rows = markup?.get("inline_keyboard") as? JsonArray ?: JsonArray(emptyList())
+        if (rows.isEmpty() && shots.isEmpty()) return null
         return buildJsonObject {
             putJsonArray("inline_keyboard") {
                 rows.forEach { add(it) }

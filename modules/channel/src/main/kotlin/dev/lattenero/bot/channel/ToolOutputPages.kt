@@ -112,11 +112,11 @@ object ToolOutputPages {
                         PyText.esc(PyText.take(shown, COMMAND_CLOSE_CP)) +
                         "</code></pre>\n✂️ … el comando completo va en el feed"
             }
-            return "$kind · $noun\n<i>📜 tocar para ver</i>\n$block"
+            return "$kind · $noun\n<i>📸 tocar para ver la imagen</i>\n$block"
         }
         val shown = PathName.shaped(detail, HEADER_DETAIL_CP)
         val suffix = if (shown.isNotEmpty()) " — <code>${PyText.esc(shown)}</code>" else ""
-        return "$kind$suffix · $noun\n<i>📜 tocar para ver</i>"
+        return "$kind$suffix · $noun\n<i>📸 tocar para ver la imagen</i>"
     }
 
     /**

@@ -542,13 +542,6 @@ class LivePublisher(
      */
     private val onSeal: suspend (SealFacts) -> Unit = {},
     /**
-     * THE FILE VIEWER (the owner, 5/11): write/edit closes earn the
-     * «📄 archivo completo» button — the menu owns the path registry and
-     * the fresh-at-tap read; the publisher only attaches the door. Null =
-     * the closes stay buttonless (tests, unwired daemons).
-     */
-    private val fileMenu: FileMenu? = null,
-    /**
      * THE 📸 SHOTS (the owner, 25/11): every code-bearing message earns an
      * on-demand image door — the text rides the button's registry id and
      * silicon draws it ONLY when the owner taps (a stream of photos would
@@ -896,23 +889,18 @@ class LivePublisher(
      */
     private suspend fun speakFeed(feed: List<FeedMessage>, state: TurnLive) {
         feed.forEach { msg ->
-            // a COLLAPSED tool output: the header speaks with its one
-            // button; the fold keeps the numbered pages for the taps. THE
-            // CHILD'S REPORT (12/11) is the exception: born OPEN on page 1
-            // — the words arrive read, not behind one more tap — with the
-            // pager's buttons intact for the flips.
+            // a COLLAPSED tool output: the header speaks and the 📸 rows are
+            // its ONLY buttons (the owner, 26/11: the outputs are images and
+            // nothing that is not an image is shown). The words stay in the
+            // registry — the image is the door to them.
             msg.pages?.let { pages ->
-                val text = boxBody(msg, pages)
-                // CODE: classic send so a long line scrolls (the scroll law);
-                // the 📸 doors ride the same keyboard, registered only here
-                speakBox(state, pages, msg.bornOpen, boxDoors(msg)) { markup -> speakPlain(text, markup) }
+                speakBox(state, pages, boxDoors(msg)) { markup -> speakPlain(msg.text, markup) }
                 return@forEach
             }
-            // A WRITE/EDIT CLOSE: the diff speaks WITH the file door —
-            // «📄 archivo completo» reads the file fresh at tap time — plus
-            // the 📸 image door when the daemon handed the recipe
-            if (msg.editPath != null && fileMenu != null) {
-                val (markup, id) = pngMarkup(msg, fileMenu.buttonFor(msg.editPath))
+            // A WRITE/EDIT CLOSE: the diff speaks with its 📸 door — the file
+            // viewer went with every other non-PNG door
+            if (msg.editPath != null) {
+                val (markup, id) = pngMarkup(msg, null)
                 anchor(id, speakPlain(msg.text, markup))
                 return@forEach
             }
@@ -941,27 +929,6 @@ class LivePublisher(
         }
     }
 
-    /**
-     * A box message's birth body — the born-open report SHOWS page 1 (the
-     * words arrive read); every other box speaks its folded header.
-     */
-    private fun boxBody(msg: FeedMessage, pages: ToolOutputPages.Pages): String =
-        if (msg.bornOpen) {
-            ToolOutputPages.renderPage(pages.header, pages.pages, 0, pages.language)
-        } else {
-            msg.text
-        }
-
-    /**
-     * Speaks ONE collapsed output box and folds its birth (U5b): the fold
-     * names the wire id — turn-unique by construction (the task's hash
-     * base + the birth order, so an old turn's button can never alias a
-     * new turn's box) — the send flies, and the born fact (the message id
-     * included) folds. A send that never flew folds NOTHING: there is no
-     * message to edit, the tap on it is an honest miss. [bornOpen] births
-     * the box SHOWING page 1 (the child's report's own law): the fold
-     * carries the page so a tap on the born-open message flips from truth.
-     */
     /** Registers the message's shot (when the 📸 door is wired) and answers its id. */
     private fun pngIdOf(msg: FeedMessage): Int? = msg.png?.let { shot -> pngShots?.register(shot) }
 
@@ -993,21 +960,26 @@ class LivePublisher(
         if (pngId != null && mid != null) pngShots?.attach(pngId, mid)
     }
 
+    /**
+     * Speaks ONE collapsed output box (U5b): the fold names the wire id —
+     * turn-unique by construction (the task's hash base + the birth order,
+     * so an old turn's button can never alias a new turn's box) — the send
+     * flies, and the born fact (the message id included) folds. A send that
+     * never flew folds NOTHING: there is no message to edit, the tap on it is
+     * an honest miss.
+     *
+     * PNG DOORS ONLY (the owner, 26/11): the box wears the 📸 rows and nothing
+     * else — no «Ver salida», no pager. Its words stay registered for the image.
+     */
     private suspend fun speakBox(
         state: TurnLive,
         pages: ToolOutputPages.Pages,
-        bornOpen: Boolean,
-        doors: List<Pair<String, Int>> = emptyList(),
+        doors: List<Pair<String, Int>>,
         send: suspend (markup: JsonObject?) -> Long?,
     ) {
         val base = state.taskId.hashCode() and BOX_ID_MASK
         val boxId = (hub.peek()?.boxes?.maxOfOrNull { it.boxId } ?: base) + 1
-        val keyboard = if (bornOpen) {
-            Keyboards.boxPages(boxId, 0, pages.pages.size)
-        } else {
-            Keyboards.boxOpen(boxId)
-        }
-        val markup = if (doors.isEmpty()) keyboard else Keyboards.withPngRows(keyboard, doors)
+        val markup = Keyboards.withPngRows(null, doors)
         val mid = send(markup) ?: return
         // both photos reply to THIS box, never sinking to the bottom
         doors.forEach { (_, id) -> anchor(id, mid) }
@@ -1018,12 +990,11 @@ class LivePublisher(
             pages.pages,
             mid,
             pages.language,
-            if (bornOpen) 0 else BoxLive.FOLDED,
+            BoxLive.FOLDED,
         )
         logger.info {
             "box born: id=$boxId message_id=$mid pages=${pages.pages.size} " +
-                "language=${pages.language} png=${doors.map { it.second }.ifEmpty { listOf("none") }}" +
-                "${if (bornOpen) " BORN OPEN" else ""}"
+                "language=${pages.language} png=${doors.map { it.second }.ifEmpty { listOf("none") } }"
         }
     }
 
@@ -1045,39 +1016,16 @@ class LivePublisher(
     }
 
     /**
-     * The pager's tap (U5b): render FROM the fold — the box's own header,
-     * numbered pages and message id — edit the message in place, and fold
-     * the [RenderEvent.Page] fact on success (a throttled edit flips
-     * NOTHING: the message keeps its page, the fold keeps its truth). A
-     * box the fold does not know (an old turn, a restart) answers the
-     * honest miss; null = the toast is silence (the edit speaks).
+     * THE RETIRED DOOR (the owner, 26/11: the outputs are images and nothing
+     * that is not an image is shown): a tap on an old «Ver salida» button
+     * answers the honest words and edits NOTHING — the text pages are no
+     * longer a door. An in-flight dispatch keeps the fold's own law.
      */
-    override suspend fun open(registryId: Int, page: Int): String? = tickMutex.withLock {
-        val cfg = config()
-        if (!cfg.configured) {
-            "📡 Sin Telegram configurado — no hay mensaje que abrir."
-        } else {
-            val box = hub.box(registryId) ?: return@withLock BoxTaps.MISS
-            val index = page.coerceIn(0, box.pages.size - 1)
-            // a box was BORN classic: its taps stay classic (the scroll law)
-            val ok = telegram.editPlain(
-                cfg,
-                box.messageId,
-                ToolOutputPages.renderPage(box.header, box.pages, index, box.language),
-                Keyboards.boxPages(registryId, index, box.pages.size),
-            )
-            if (ok) hub.page(registryId, index) // the mirror: the message shows page `index` now
-            logger.info {
-                val verdict = if (ok) "open" else "edit BLOCKED (throttle)"
-                "box tap: id=$registryId page=${index + 1}/${box.pages.size} -> $verdict"
-            }
-            null
-        }
-    }
+    override suspend fun open(registryId: Int, page: Int): String? = RETIRED_DOOR
 
     /**
-     * The pager's way back: the message folds to its one-line header and
-     * the fold mirrors it ([BoxLive.FOLDED]) — same fact law as [open].
+     * The way back: the message folds to its one-line header with NO
+     * keyboard — the box never regains a door it no longer has.
      */
     override suspend fun fold(registryId: Int): String? = tickMutex.withLock {
         val cfg = config()
@@ -1085,7 +1033,7 @@ class LivePublisher(
             "📡 Sin Telegram configurado — no hay mensaje que abrir."
         } else {
             val box = hub.box(registryId) ?: return@withLock BoxTaps.MISS
-            val ok = telegram.editPlain(cfg, box.messageId, box.header, Keyboards.boxOpen(registryId))
+            val ok = telegram.editPlain(cfg, box.messageId, box.header, null)
             if (ok) hub.page(registryId, BoxLive.FOLDED)
             logger.info { "box tap: id=$registryId -> ${if (ok) "folded" else "fold BLOCKED (throttle)"}" }
             null
@@ -1393,6 +1341,10 @@ class LivePublisher(
 
     private companion object {
         val EDIT_CADENCE = 3.seconds
+
+        /** What an old text door answers now: the outputs are images (26/11). */
+        const val RETIRED_DOOR =
+            "📭 Ese botón ya no existe: la salida va en la imagen — tocá el 📸 de la caja."
 
         /** The progress pings' cadence (v2 §4) — one ping per 5s per turn, max. */
         val PING_CADENCE = 5.seconds
