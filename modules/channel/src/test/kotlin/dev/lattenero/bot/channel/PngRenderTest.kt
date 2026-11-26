@@ -26,7 +26,7 @@ class PngRenderTest {
         assertEquals(PngRender.PAD_VERT.toString(), args[args.indexOf("--pad-vert") + 1])
         assertEquals(PngRender.LINE_PAD.toString(), args[args.indexOf("--line-pad") + 1])
         assertEquals(PngRender.CODE_PAD_RIGHT.toString(), args[args.indexOf("--code-pad-right") + 1])
-        assertTrue("--no-line-number" in args, "the text bubble keeps the gutter; the image is the pretty view")
+        assertTrue("--line-offset" in args, "the image numbers its lines (the owner, 26/11)")
         assertTrue("--no-window-controls" in args, "no traffic lights: a clean card, like the diff drawer")
     }
 
@@ -45,6 +45,26 @@ class PngRenderTest {
         assertEquals(3, pages.size, "two full pages and the remainder")
         assertEquals(tall, pages.joinToString("\n"), "paging loses nothing")
         assertEquals(listOf("a\nb"), PngRender.pages("a\nb"), "a short body stays whole")
+    }
+
+    @Test
+    fun `the code images carry their line numbers and a paged body keeps counting`() {
+        // the owner, 26/11: every code image shows its line numbers
+        val clean = PngRender.arguments(PngRender.Shot("fun main() = 1", "kotlin"), "in", "out", lineOffset = 121)
+        assertTrue("--line-offset" in clean, "the gutter rides: $clean")
+        assertEquals("121", clean[clean.indexOf("--line-offset") + 1], "page 2 opens at 121")
+    }
+
+    @Test
+    fun `a text that already carries a gutter keeps silicon's numbers off`() {
+        // a Read arrives numbered — a second number column would read as a bug
+        val read = (1..10).joinToString("\n") { "$it\tval line$it = $it" }
+        assertTrue(PngRender.guttered(read), "ten numbered lines are a gutter")
+        assertFalse(PngRender.guttered("fun a() = 1\nfun b() = 2"), "code is not a gutter")
+        assertFalse(PngRender.guttered(""), "nothing is not a gutter")
+        assertFalse(PngRender.guttered("1\tone\nfun b() = 2"), "one numbered line is not a gutter")
+        val argv = PngRender.arguments(PngRender.Shot(read, "kotlin"), "in", "out")
+        assertTrue("--no-line-number" in argv, "the text's own numbers stay the only ones: $argv")
     }
 
     @Test

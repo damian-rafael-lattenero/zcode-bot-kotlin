@@ -46,9 +46,14 @@ object PngRender {
     data class Shot(val text: String, val language: String?)
 
     /**
-     * silicon's argv for this shot. `--no-line-number`: the text bubble keeps
-     * the numbered gutter when it needs one — the image is the pretty view.
-     * The file name carries no meaning (the language is explicit).
+     * silicon's argv for this shot. The file name carries no meaning (the
+     * language is explicit).
+     *
+     * THE GUTTER (the owner, 26/11: code images carry their line numbers):
+     * silicon numbers the lines itself, and a paged body keeps counting —
+     * page N opens at N × [PAGE_LINES] + 1. A text that ALREADY carries a
+     * gutter (a Read's `cat -n`) keeps silicon's numbers off: two number
+     * columns would read as a bug.
      *
      * [scale] multiplies the font and every pad together: silicon has no
      * `--scale`, so 2x resolution IS a 2x font with 2x margins. Measured
@@ -60,6 +65,7 @@ object PngRender {
         output: String,
         compact: Boolean = false,
         scale: Int = 1,
+        lineOffset: Int = 1,
     ): List<String> = buildList {
         add(SILICON)
         add("--theme")
@@ -70,7 +76,12 @@ object PngRender {
         add((PAD_HORIZ * scale).toString())
         add("--pad-vert")
         add((PAD_VERT * scale).toString())
-        add("--no-line-number")
+        if (guttered(shot.text)) {
+            add("--no-line-number")
+        } else {
+            add("--line-offset")
+            add(lineOffset.toString())
+        }
         // NO WINDOW CHROME (the owner, 25/11): the traffic lights and the
         // rounded window were silicon's decoration — every image door paints
         // a clean card, like the diff drawer
@@ -125,6 +136,28 @@ object PngRender {
 
     /** Lines a dense page holds under [SERVER_LONG_SIDE] (≈19.8 px per line). */
     const val PAGE_LINES: Int = 120
+
+    /** A line that already opens with a number and its separator (a `cat -n` gutter). */
+    private val GUTTERED_LINE = Regex("""^\s*\d+[\t│]""")
+
+    /**
+     * DOES THE TEXT CARRY ITS OWN GUTTER? (the owner, 26/11): a Read's output
+     * arrives numbered; silicon would paint a second number column beside it.
+     * The verdict is a share, not a single line — one numbered line in a file
+     * is not a gutter, eight in ten are.
+     */
+    fun guttered(text: String): Boolean {
+        val lines = text.split('\n').filter { it.isNotBlank() }
+        if (lines.isEmpty()) return false
+        val share = lines.count { GUTTERED_LINE.containsMatchIn(it) } * WHOLE / lines.size
+        return share >= GUTTER_SHARE
+    }
+
+    /** A share is a percentage — the whole it is measured against. */
+    private const val WHOLE = 100
+
+    /** The share of numbered lines that makes a text «already guttered». */
+    private const val GUTTER_SHARE = 80
 
     /** Splits the body into per-image pages; a body that fits stays whole. */
     fun pages(text: String, pageLines: Int = PAGE_LINES): List<String> {

@@ -63,7 +63,7 @@ class PngTaps(
         return try {
             val files = pages.mapIndexed { index, page ->
                 sources[index].writeText(page)
-                when (imageOf(shot, page, sources[index], outputs[index])) {
+                when (imageOf(shot, page, sources[index], outputs[index], index)) {
                     Drawn.IMAGE -> outputs[index]
                     // THE SILENT ZERO (measured 25/11): silicon exits 0 and
                     // writes NOTHING when it cannot read its input — the exit
@@ -78,7 +78,7 @@ class PngTaps(
                     // the photo cannot exist at this width: the text wraps and
                     // silicon draws once more — a wrapped line beats a lost tap
                     Drawn.TOO_BIG -> {
-                        if (!wrapped(shot, page, sources[index], outputs[index])) {
+                        if (!wrapped(shot, page, sources[index], outputs[index], index)) {
                             logger.warn { "png $id: the wrapped retry wrote no image" }
                             return RENDER_FAILED
                         }
@@ -104,6 +104,9 @@ class PngTaps(
         if (files.size == 1) upload(fieldsOf(id), files.single()) else uploadAlbum(fieldsOf(id), files)
     }
 
+    /** THE CONTINUING GUTTER: page N opens at N × PAGE_LINES + 1, never at 1. */
+    private fun offsetOf(pageAt: Int): Int = pageAt * PngRender.PAGE_LINES + 1
+
     /** What the image attempt answered: a legal photo, a photo too big, or nothing. */
     private enum class Drawn { IMAGE, TOO_BIG, NONE }
 
@@ -113,14 +116,14 @@ class PngTaps(
      * accepts (the resolution ladder: 3x when it fits, 2x next, 1x last).
      */
     @Suppress("ReturnCount") // three honest exits: the diff, a legal scale, or the verdict
-    private fun imageOf(shot: PngRender.Shot, page: String, source: File, output: File): Drawn {
+    private fun imageOf(shot: PngRender.Shot, page: String, source: File, output: File, pageAt: Int): Drawn {
         if (shot.language == DIFF_LANGUAGE) {
             return if (DiffPng.render(shot.text, output)) Drawn.IMAGE else Drawn.NONE
         }
         val compact = page.count { it == '\n' } + 1 > PngRender.COMPACT_AFTER
         var anyFile = false
         for (scale in PngRender.MAX_SCALE downTo 1) {
-            val drew = draw(shot, source, output, compact, scale) == 0 && output.exists()
+            val drew = draw(shot, source, output, compact, scale, pageAt) == 0 && output.exists()
             if (!drew) continue
             anyFile = true
             if (PngRender.fitsPhoto(output.readBytes())) return Drawn.IMAGE
@@ -133,12 +136,23 @@ class PngTaps(
      * on the plain grammar when the slug is one silicon does not know (a bad
      * language must never cost the tap).
      */
-    private fun draw(shot: PngRender.Shot, source: File, output: File, compact: Boolean, scale: Int): Int {
+    @Suppress("LongParameterList") // the render's address: source, output, density, scale, page
+    private fun draw(
+        shot: PngRender.Shot,
+        source: File,
+        output: File,
+        compact: Boolean,
+        scale: Int,
+        pageAt: Int,
+    ): Int {
         output.delete() // a stale file from the previous scale is not a receipt
-        val code = exec(PngRender.arguments(shot, source.absolutePath, output.absolutePath, compact, scale))
+        val src = source.absolutePath
+        val out = output.absolutePath
+        val offset = offsetOf(pageAt)
+        val code = exec(PngRender.arguments(shot, src, out, compact, scale, offset))
         if (code == 0 && output.exists()) return 0
         val plain = shot.copy(language = null)
-        return exec(PngRender.arguments(plain, source.absolutePath, output.absolutePath, compact, scale))
+        return exec(PngRender.arguments(plain, src, out, compact, scale, offset))
     }
 
     /**
@@ -151,9 +165,10 @@ class PngTaps(
         page: String,
         source: File,
         output: File,
+        pageAt: Int,
     ): Boolean {
         source.writeText(PngRender.fit(PngRender.wrap(page)))
-        val code = exec(PngRender.arguments(shot, source.absolutePath, output.absolutePath, false))
+        val code = exec(PngRender.arguments(shot, source.absolutePath, output.absolutePath, false, 1, offsetOf(pageAt)))
         return code == 0 && output.exists()
     }
 
