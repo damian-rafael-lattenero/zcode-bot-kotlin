@@ -252,6 +252,9 @@ fired, the judge spoke, or the eval row landed in the ledger.
 - **Fake equivalences** — laziness and higher-kinded types have no counterpart in Kotlin; the map says so.
 - **Oracle latency** — advisory only, capped, skipped when slow; a gate must never stall the stream.
 - **Scope** — one active unit at a time; the book is written inside each phase, never as a separate marathon.
+- **Spanish fichas in the RAG** — `~/.zcode/agent-brain/corpus.txt` indexes no agent-brain docs today (the
+  belief that v4 was indexed was wrong); Spanish fichas may add retrieval noise, as the 20/11 blog removal
+  showed. Probe against `recall-core` before adding the book folder.
 - **Stale notes** — the earlier audit recorded `kap-detekt-rules` as wired nowhere; they are wired in all
   three consumers. Verify before citing.
 
