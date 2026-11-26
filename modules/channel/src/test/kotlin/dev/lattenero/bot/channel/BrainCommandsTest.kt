@@ -19,7 +19,7 @@ class BrainCommandsTest {
     private val ragQueryJson = """
         {"query":"bridge y memoria","embedModel":"bge-m3",
          "hits":[
-           {"chunkId":11,"docId":3,"uri":"repo://zcode-bot-kotlin/docs/plan-brujula.md",
+           {"chunkId":11,"docId":3,"uri":"repo://zcode-bot-kotlin/docs/plan-compass.md",
             "title":"plan compass","heading":"U1b — Turn on bus and memory","ordinal":5,
             "content":"el daemon publica BusEvent","score":0.91,"vectorRank":1,"textRank":2},
            {"chunkId":12,"docId":3,"uri":"repo://zcode-bot-kotlin/README.md",
@@ -27,7 +27,7 @@ class BrainCommandsTest {
             "content":"the bot","score":0.44,"vectorRank":2,"textRank":null}
          ],
          "citations":[
-           {"uri":"repo://zcode-bot-kotlin/docs/plan-brujula.md","title":"plan compass",
+           {"uri":"repo://zcode-bot-kotlin/docs/plan-compass.md","title":"plan compass",
             "heading":"U1b — Turn on bus and memory","ordinal":5,"score":0.91}
          ]}
     """.trimIndent()
@@ -111,7 +111,7 @@ class BrainCommandsTest {
         val text = BrainCommands(fake().gateway()).brain("bridge y memoria")
         assertTrue("2 results" in text)
         assertTrue("U1b — Turn on bus and memory" in text)
-        assertTrue("repo://zcode-bot-kotlin/docs/plan-brujula.md" in text)
+        assertTrue("repo://zcode-bot-kotlin/docs/plan-compass.md" in text)
         assertTrue("0.91" in text)
         // a blank heading falls back to the title, never to an empty citation
         assertTrue("README" in text)

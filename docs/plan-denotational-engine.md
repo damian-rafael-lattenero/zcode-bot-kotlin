@@ -1,7 +1,7 @@
 # Plan — The Denotational Engine
 
 > Created: 2026-11-26 · Status: v1.2 (in execution since the owner's order of 2026-11-26: P0 done, P1 written, reviewed and indexed; one open item — the Canon must rank first)
-> Sits next to [plan-brujula-v2.md](plan-brujula-v2.md): that plan built the five pillars; this one makes the
+> Sits next to [plan-compass-v2.md](plan-compass-v2.md): that plan built the five pillars; this one makes the
 > whole fleet teach and enforce one style of programming — the owner's.
 
 ## 1. Context
@@ -159,7 +159,7 @@ teaches. Hooks follow the census law (every `.nu` has its test, `~/Scripts/tests
       causes, both read on that answer: (1) five of the nine slots above it are SPANISH documents
       already in the store, at 0.556–0.578, the noise floor — `fp-kb/notes/README.md`,
       `questionnaire-1-domain-types-errors.md`, the v4 book (`agent-brain/docs`, which the
-      `index-repos` leg indexes), `bot/.zcode/plans/plan-session_…md` and `docs/plan-brujula.md`; they
+      `index-repos` leg indexes), `bot/.zcode/plans/plan-session_…md` and `docs/plan-compass.md`; they
       win the Spanish leg because they are Spanish. On disk, a stopword estimate finds at least 10 of
       the 26 `fp-kb/notes` files and 5 of the 33 `nushell-kb/notes` files in Spanish. (2) Nothing ranks
       a curated note before the fragments of the manuals it curates: a search of the `rag` package for

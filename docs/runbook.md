@@ -943,7 +943,7 @@ means by each one and whether the meaning was **carried** unchanged,
 **drifted** (reused for a related-but-different law), or **retired**.
 
 Read a tag with its repository — the same label can mean something else
-in a sibling repo (`docs/plan-brujula.md` calls agent-brain's anti-while
+in a sibling repo (`docs/plan-compass.md` calls agent-brain's anti-while
 gate "F1", while Python's F1 was "one single source per concept").
 
 | Tag | What THIS repo means by it | Owner file | Status |

@@ -3,7 +3,7 @@
 The per-command, per-unit work plan agreed with the owner after the full
 reconnaissance of the retired Python bot (`~/Projects/bot`, byte-exact
 behavioral spec), the live Kotlin daemon, and the fork's channel surface.
-Companion of `plan-brujula.md` (the U0–U11 roadmap — this batch is the
+Companion of `plan-compass.md` (the U0–U11 roadmap — this batch is the
 post-U2.5 hot-fix queue, NOT a re-order of the compass) and
 `parity-and-engineering.md` (the verdict matrix this plan executes).
 
