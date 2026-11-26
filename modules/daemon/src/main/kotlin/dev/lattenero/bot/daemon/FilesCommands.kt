@@ -33,7 +33,11 @@ internal object FilesCommands {
             )
         }
         val f = File(path)
-        if (!f.exists()) return FilePlan(null, "⚠️ Does not exist: «$path» — check the path (/file neither lists nor guesses).")
+        if (!f.exists()) return FilePlan(
+            null,
+            "⚠️ Does not exist: «$path» — " +
+                "check the path (/file neither lists nor guesses).",
+        )
         if (!f.isFile) {
             return FilePlan(null, "⚠️ Not a file: «$path» (a directory?) — I send files, not folders.")
         }
