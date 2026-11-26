@@ -287,7 +287,9 @@ internal object BrainTexts {
     const val UNWIRED =
         "⚠️ /brain and /memory are not wired in this daemon (no agent-brain HTTP client)."
 
-    fun down(url: String): String = "📡 brain down — it does not answer at <code>${PyText.esc(url)}</code> (is it running?)"
+    fun down(url: String): String =
+        "📡 brain down — it does not answer at <code>${PyText.esc(url)}</code>" +
+            " (is it running?)"
 
     fun timeout(seconds: Int): String = "⏱️ brain did not answer in ${seconds}s — try again."
 

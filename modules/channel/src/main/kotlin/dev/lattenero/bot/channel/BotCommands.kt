@@ -858,7 +858,11 @@ class BotCommands(
     ): String {
         val summary = triple(pick)
         val head = when (conversation) {
-            is Write.Ok -> if (conversationInForce) "⭐ Default already in force: $summary" else "⭐ Default applied: $summary"
+            is Write.Ok -> if (conversationInForce) {
+                "⭐ Default already in force: $summary"
+            } else {
+                "⭐ Default applied: $summary"
+            }
             is Write.Unavailable -> "$DEGRADED\nThe automatic default could not apply: $summary"
             is Write.Failed -> writeFailure(conversation.answer)
         }
@@ -1317,9 +1321,15 @@ class BotCommands(
             is QueryAnswer.Ok -> {
                 val backgrounded = parseStringsOf(answer.resultJson, "backgrounded")
                 if (lane.toolId in backgrounded) {
-                    BotReply("🌙 «${PyText.esc(name)}» moved to the background — it keeps running and the result arrives when it ends.")
+                    BotReply(
+                        "🌙 «${PyText.esc(name)}» moved to the background — " +
+                            "it keeps running and the result arrives when it ends.",
+                    )
                 } else {
-                    BotReply("🌙 Nothing to move to the background — «${PyText.esc(name)}» no longer runs in the foreground.")
+                    BotReply(
+                        "🌙 Nothing to move to the background — " +
+                            "«${PyText.esc(name)}» no longer runs in the foreground.",
+                    )
                 }
             }
             is QueryAnswer.Unavailable -> BotReply(DEGRADED)
@@ -2705,7 +2715,8 @@ class BotCommands(
             )
             sid = lane.subagentAgentId?.let { "$SUBAGENT_SESSION_PREFIX$it" }
                 ?: return BotReply(
-                    "🤔 «${PyText.esc(name)}» does not give a session yet (its ACK is missing) — the ✍️ does not arm blindly.",
+                    "🤔 «${PyText.esc(name)}» does not give a session yet (its ACK is missing) — " +
+                        "the ✍️ does not arm blindly.",
                 )
         } else {
             val row = rows.firstOrNull { it.sid.endsWith(tail) }
@@ -2862,7 +2873,8 @@ class BotCommands(
                     if (row != null && clock() - row.lastMs >= Keyboards.SUB_STALE_MIN * MS_PER_MINUTE) {
                         logger.info { "callback 🔵 sa: $sess is a GHOST (store row frozen) — honest refusal" }
                         return BotReply(
-                            "💀 «${PyText.esc(row.title.ifBlank { sess.takeLast(SID_TAIL) })}» died without closing — " +
+                            "💀 «${PyText.esc(row.title.ifBlank { sess.takeLast(SID_TAIL) })}» " +
+                                "died without closing — " +
                                 "its store row has been frozen for more than ${Keyboards.SUB_STALE_MIN} min and " +
                                 "there is no stream to show. Its result: 📄 /last or /tasks.",
                         )
@@ -3598,7 +3610,9 @@ class BotCommands(
 
     /** The vb: tap: set the level — the toast's reply is the confirmation. */
     private fun verbosityTap(arg: String): BotReply {
-        val level = FeedVerbosity.of(arg) ?: return BotReply("🤷 That level does not exist — nothing changed. /verbosity.")
+        val level = FeedVerbosity.of(arg) ?: return BotReply(
+            "🤷 That level does not exist — nothing changed. /verbosity.",
+        )
         verbosity.set(level)
         logger.info { "callback 📣 vb:$arg — level=${level.name}" }
         return BotReply(verbosityLine(level) + "\n✅ Applied — the feed's next message already obeys.")
