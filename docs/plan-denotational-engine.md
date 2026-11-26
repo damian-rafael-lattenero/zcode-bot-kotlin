@@ -1,6 +1,6 @@
 # Plan — The Denotational Engine
 
-> Created: 2026-11-26 · Status: v1.1 (in execution since the owner's order of 2026-11-26: P0 done, P1 running)
+> Created: 2026-11-26 · Status: v1.2 (in execution since the owner's order of 2026-11-26: P0 done, P1 written, reviewed and indexed; one open item — the Canon must rank first)
 > Sits next to [plan-brujula-v2.md](plan-brujula-v2.md): that plan built the five pillars; this one makes the
 > whole fleet teach and enforce one style of programming — the owner's.
 
@@ -144,10 +144,29 @@ teaches. Hooks follow the census law (every `.nu` has its test, `~/Scripts/tests
       Canon reports 25 notes, 0 findings.
 - [x] DONE 26/11 — indexed in the brain, one source at a time with the evals after each: Canon notes
       (53 chunks), the Typeclassopedia (71), LYAH (300), wiwinwlh (192). recall-core 33/33 with recall@1
-      29 of 33 (baseline 28), brain-eval 11/11. Live receipt: Monad, `Either` and free-monad queries
-      answer from the Canon; Nushell and kap queries still answer from their own KBs. Measured on the
-      way: the `real-questions` suite is not deterministic — its ranks move a place or two between
-      identical runs, so a one-question change there is not a signal.
+      29 of 33 (baseline 28), brain-eval 11/11. Live receipt, for the phrasings tried: Monad, `Either`
+      and free-monad queries answer from the Canon; Nushell and kap queries still answer from their own
+      KBs. Measured on the way: the `real-questions` suite is not deterministic — its ranks move a place
+      or two between identical runs, so a one-question change there is not a signal.
+- [ ] OPEN, measured 26/11 after the P1 report: the Canon is in the brain, but it is not reliably FIRST.
+      Fifteen live questions (`agent-brain query`, k = 10; the Spanish one again through MCP). Nine
+      English concept questions: the Canon note is in the top 3 for 8 (first for 4) — rank 2 for
+      "difference between applicative and monad", rank 5 for the bare word "monad", rank 9 for "what
+      does Monad denote in Haskell and which laws must it keep". Spanish, the way the owner asks: "qué
+      es una mónada y para qué sirve" returns `concepts/monad.md` tenth of ten through MCP (absent
+      from the ten through the CLI), with a similarity of 0.70 — the fourth highest of the ten. Two
+      causes, both read on that answer: (1) five of the nine slots above it are SPANISH documents
+      already in the store, at 0.556–0.578, the noise floor — `fp-kb/notes/README.md`,
+      `questionnaire-1-domain-types-errors.md`, the v4 book (`agent-brain/docs`, which the
+      `index-repos` leg indexes), `bot/.zcode/plans/plan-session_…md` and `docs/plan-brujula.md`; they
+      win the Spanish leg because they are Spanish. On disk, a stopword estimate finds at least 10 of
+      the 26 `fp-kb/notes` files and 5 of the 33 `nushell-kb/notes` files in Spanish. (2) Nothing ranks
+      a curated note before the fragments of the manuals it curates: a search of the `rag` package for
+      `boost|weight|curated|priorit` matches two comments only; so far the one lever used was removing
+      a source. This comes BEFORE P2 and P3: the design-guard of P3 injects the top 4 of `rag_query`,
+      and a map that ranks tenth teaches nothing. The fix is the owner's call (brain code and corpus):
+      the Spanish documents translated or out of the index, curated notes ranked first, and a retrieval
+      suite of concept questions in the ledger with the before and after.
 - [ ] `~/Projects/ECOSISTEMA.md` lists no KB today — decide whether it should.
 - [x] DONE 26/11 — the Theory (owner's order, 2026-11-26: "launch one more subagent for category theory… the
       categories that then come down to Haskell and then pass to other languages… always the latest on
@@ -292,9 +311,12 @@ fired, the judge spoke, or the eval row landed in the ledger.
 - **Fake equivalences** — laziness and higher-kinded types have no counterpart in Kotlin; the map says so.
 - **Oracle latency** — advisory only, capped, skipped when slow; a gate must never stall the stream.
 - **Scope** — one active unit at a time; the book is written inside each phase, never as a separate marathon.
-- **Spanish fichas in the RAG** — `~/.zcode/agent-brain/corpus.txt` indexes no agent-brain docs today (the
-  belief that v4 was indexed was wrong); Spanish fichas may add retrieval noise, as the 20/11 blog removal
-  showed. Probe against `recall-core` before adding the book folder.
+- **Spanish in the RAG** — the corpus is English by law (2026-11-06; the owner restated it on
+  2026-11-26), and it is not. `corpus.txt` still lists the Spanish notes written before the law (at
+  least 10 files of `fp-kb/notes`, 5 of `nushell-kb/notes`), and the `index-repos` leg indexes
+  `agent-brain/docs` — so the Spanish v4 book IS in the store, which contradicts what this risk said
+  until 26/11 — and the plan files. They are what answers a Spanish question (the P1 open item).
+  Settle the Spanish already there before adding the book folder; probe against `recall-core`.
 - **Stale notes** — the earlier audit recorded `kap-detekt-rules` as wired nowhere; they are wired in all
   three consumers. Verify before citing.
 - **Fabricated sources** — the Theory cites papers and the web, where an identifier remembered by a model
