@@ -1,6 +1,6 @@
 # Plan — The Denotational Engine
 
-> Created: 2026-11-26 · Status: v1.0 (proposal, awaiting the owner's execution order)
+> Created: 2026-11-26 · Status: v1.1 (in execution since the owner's order of 2026-11-26: P0 done, P1 running)
 > Sits next to [plan-brujula-v2.md](plan-brujula-v2.md): that plan built the five pillars; this one makes the
 > whole fleet teach and enforce one style of programming — the owner's.
 
@@ -25,6 +25,7 @@ is also something the owner learns by building.
 | Piece | Denotes (one sentence) | Lives in |
 |---|---|---|
 | `Concept` | One idea of the Haskell canon: what it denotes, its type, its laws, its sources | `haskell-kb/notes/concepts/` |
+| `Theory` | One categorical concept above the Canon: its shape, where it comes down to Haskell, what other languages make of it, where a cited source finds it in architecture | `theory-kb/notes/category-theory/` |
 | `Mapping` | For one concept and one language: the equivalent construct, an example, the gap, the trap | `*-kb/notes/canon-map.md` |
 | `Law` | A rule the owner stated | `fp-kb/notes`, the KBs, `AGENTS.md` |
 | `Gate` | A pure predicate from an action to a verdict: `Allow · Guide(text) · Ask(card) · Deny(reason)` | `~/Scripts/scripts/hooks/*.nu` |
@@ -97,8 +98,9 @@ completion verifier — it never inspects an action before it happens.
 
 ## 4. Target architecture — five layers
 
-1. **Knowledge** — the Canon (Haskell concepts, sourced from the manuals) + the Maps (one per
-   language) + the official docs mirror per language.
+1. **Knowledge** — the Theory (the categorical shapes, sourced from books and papers) above the Canon
+   (Haskell concepts, sourced from the manuals) + the Maps (one per language) + the official docs
+   mirror per language.
 2. **Application** — gates at write time + the oracle after the write.
 3. **Rumbo** — the typed witness of the request + a semantic judge fired by the measured triggers.
 4. **Learning** — corrections captured as data, proposed as rules, promoted through the owner's ladder.
@@ -136,6 +138,16 @@ teaches. Hooks follow the census law (every `.nu` has its test, `~/Scripts/tests
       parametricity, `IO` and effects at the edge, total functions, property laws. Tier 3 (applied):
       free monad / tagless final (`Kap`), streaming and backpressure (`KapStream`).
 - [ ] `~/Projects/ECOSISTEMA.md` gets the repo; `~/.zcode/agent-brain/corpus.txt` indexes it; `agent-brain index`.
+- [ ] The Theory (owner's order, 2026-11-26: "launch one more subagent for category theory… the
+      categories that then come down to Haskell and then pass to other languages… always the latest on
+      the web, in papers, in books"). New repo `theory-kb`: `official/` (text sources whose license
+      allows a mirror) + `notes/category-theory/<id>.md`, 20 concepts in learning order, fichas H01–H20:
+      category · functor · natural transformation · limit and colimit · adjunction · monoidal functor ·
+      monoid object · Kleisli category · F-algebra · free and forgetful · exponential and CCC · Yoneda ·
+      Kan extension · contravariant functor · profunctor · comonad · monoidal category · sheaf ·
+      optics · category theory and AI (a dated survey). Every note: the shape, the Haskell landing,
+      what Kotlin, TypeScript and Nushell make of it (seeds for P2), and where a cited source finds
+      it in architecture. A connection nobody published is an open thread, never a claim.
 
 ### P2 — The Maps: one per language (2 sessions)
 
@@ -145,6 +157,8 @@ teaches. Hooks follow the census law (every `.nu` has its test, `~/Scripts/tests
 - [ ] `nushell-kb/notes/canon-map.md` — concept → `nushell-fp`, folding the Elixir/Ramda table already
       in `fp-kb/notes/dynamic-fp-discipline.md`.
 - [ ] New repo `typescript-kb`: `official/` (the Handbook, Apache-2.0) + `notes/canon-map.md`.
+- [ ] Every map starts from the Theory: the language table of each `theory-kb` note says what a library
+      documents; the probe in this phase turns it into a verified row or a gap.
 - [ ] Every row carries a snippet that compiles in the drills repo. The owner's first example is the
       model: `Maybe` → `T?` with `?.let {}` covers `bind`, but `T?` has no `map`/`pure`, so it does not
       compose like the monad — that nuance is the teaching.
@@ -224,7 +238,8 @@ material, chained so a hyperfocus session can continue. Fixed order:
 ficha each) · C Tu sistema por dentro (RAG, memoria, evals, MCP, harness — v4's architecture parts
 rewritten as fichas) · D El harness como capa de leyes (new: hooks, skills, the ladder, gates, the judge,
 promotion) · E Los números (recall, MRR, gates, and the three new ones) · F El método y las trampas ·
-G Respuestas.
+G Respuestas · H La teoría (the 20 categorical concepts above the Canon, fichas H01–H20, written after
+B so that each one can point at its Canon note).
 
 **Drills repo** `~/Projects/canonical-drills`: one module per language, types-first (the test and the
 signature exist, the body is the exercise), one command per language, a CI gate.
@@ -268,6 +283,9 @@ fired, the judge spoke, or the eval row landed in the ledger.
   showed. Probe against `recall-core` before adding the book folder.
 - **Stale notes** — the earlier audit recorded `kap-detekt-rules` as wired nowhere; they are wired in all
   three consumers. Verify before citing.
+- **Fabricated sources** — the Theory cites papers and the web, where an identifier remembered by a model
+  is often wrong: every arXiv id is checked against its abstract page, every cited path against the
+  disk, and the father re-runs both checks before a merge.
 
 ## 9. Order
 
