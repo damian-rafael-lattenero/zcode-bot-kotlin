@@ -11,7 +11,7 @@ before `saveCursor` runs → after the restart Telegram RE-DELIVERS the same
 update → the nuclear ladder / deploy runs AGAIN. The in-process single-flight
 gate (`nuclearGate`, the deploy machine's consumed arm) dies with the process —
 it cannot protect across the restart. Measured behavior: nuclear fired twice;
-deploy announces chained «muchas veces».
+deploy announces chained «muchas veces» [translated: "many times"].
 
 THE FIX — PRE-COMMIT for self-killing updates: in the dispatch loop, BEFORE
 `dispatch(cfg, message)`, when the update is one that can kill this process,
@@ -53,13 +53,14 @@ button row cannot be pressed again"].
 - THE BUTTON ROW DIES: the flow remembers the targets card's born message id
   (the `say` receipt when the card went out) and, when a target fires, EDITS
   that message to strip the inline keyboard and mark the chosen row
-  (e.g. «🤖 Bot Kotlin — ▶️ en vuelo»). The wiring must inject an edit closure
+  (e.g. «🤖 Bot Kotlin — ▶️ en vuelo» [translated: "in flight"]). The wiring must inject an edit closure
   (the transport's editMessageText path — find the existing `EditRequest`
   machinery; if the send leg lacks an edit, add the thinnest one). The edit is
   best-effort: if it fails, the flow says the deploy is in flight and the
   spawn edge's busy-guard is the backstop.
 - IN-FLIGHT refusal: after a successful launch, further target taps/texts say
-  «ya hay un deploy en vuelo» until process death (honest, best-effort — the
+  «ya hay un deploy en vuelo» [translated: "a deploy is already in
+  flight"] until process death (honest, best-effort — the
   script-side guard is the durable one). Taps while IN FLIGHT never re-arm,
   never re-fire.
 - Copy: the targets card names each pipeline in one line each (the confirm
@@ -77,7 +78,8 @@ button row cannot be pressed again"].
 - `ModeMenu.MODES` keeps the five for vocabulary, but the KEYBOARD renders
   four — plan never appears in /mode (normalize keeps accepting `plan` so old
   spellings and /plan_mode's write still work).
-- DEFAULT = Full access («por defecto siempre Full access»): a conversation
+- DEFAULT = Full access («por defecto siempre Full access» [translated: "Full access always by
+  default"]): a conversation
   whose snapshot has NO `meta.mode` renders the card with «Full access» as the
   mode in force (🎯 on the yolo row, the label said as default — never «—»).
 - ENFORCEMENT: on `task_run_started` for a task the wiring watches, read the
