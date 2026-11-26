@@ -1,89 +1,91 @@
 #!/Users/lattenero/.local/bin/nu-nightly
-# deploy-fork-and-retire.nu — el autómata one-shot del cutover, en Nushell
-# TIPADO (port del deploy-fork-and-retire.sh original, borrado el 2026-11-02
-# tras demostrar paridad: el canónico es este .nu y no queda fallback bash).
+# deploy-fork-and-retire.nu — the cutover's one-shot automaton, in TYPED
+# Nushell (port of the original deploy-fork-and-retire.sh, deleted 2026-11-02
+# after proving parity: this .nu file is the canonical one and no bash
+# fallback remains).
 #
-# La prueba conceptual: TODO el script queda tipado con `type` de nu 0.116 —
-# los errores de tipo son de PARSER (nu::parser::type_mismatch con span exacto),
-# no de runtime. Verificable rompiendo a propósito cualquier call-site.
+# The conceptual proof: the WHOLE script is typed with nu 0.116's `type` —
+# type errors are PARSER errors (nu::parser::type_mismatch with an exact
+# span), not runtime ones. Verifiable by breaking any call site on purpose.
 #
-# Intérprete: este script REQUIERE el nightly (0.116.2-nightly.24+) — el `nu`
-# 0.116.1 de brew NO tiene el keyword `type`. Shebang absoluto por eso.
+# Interpreter: this script REQUIRES the nightly (0.116.2-nightly.24+) — brew's
+# `nu` 0.116.1 does NOT have the `type` keyword. The shebang is absolute for
+# that reason.
 #
-# Modos:
-#   --dryrun  default en desarrollo: la fase 0 (sanity, read-only) corre de
-#             verdad; las fases 1-6 se NARRAN sin tocar nada (ni quit, ni
-#             build/swap, ni open, ni retire, ni Telegram real — los anuncios
-#             caen al log como [dryrun] telegram-suppressed).
-#   --real    el run de verdad.
+# Modes:
+#   --dryrun  the development default: phase 0 (sanity, read-only) really
+#             runs; phases 1-6 are NARRATED without touching anything (no
+#             quit, no build/swap, no open, no retire, no real Telegram — the
+#             announcements land in the log as [dryrun] telegram-suppressed).
+#   --real    the real run.
 #
-# Lanzarlo DETACHADO en --real (tiene que sobrevivir a la muerte del propio
-# ZCode):
+# Launch it DETACHED in --real (it has to survive ZCode's own death):
 #   nohup scripts/deploy-fork-and-retire.nu --real >/tmp/deploy-fork.log 2>&1 & disown
 #
-# Fases (cada una anunciada por Telegram en --real):
-#   0 sanity   fork en origin/damian (git fetch + HEAD local == origin/damian),
-#              daemon del bot cargado (launchctl), retire-python.nu presente.
-#   1 quit     osascript graceful (≤30 s) → ÚLTIMO RECURSO: kill de los pids →
-#              hasta 120 s esperando cero proceso.
-#   2 build    cd ~/Projects/ZCode && scripts/build-install.nu --yes (swap de
-#              /Applications/ZCode.app; ese script REABRE el app y manda su
-#              propio anuncio «Fork instalado» — esperado, no duplicado).
-#   3 reopen   barrido de socket/token huérfanos + open -a ZCode si hiciera
-#              falta → poll ≤90 s (c/2 s) al socket Y al token.
-#   4 verify   scripts/verify-deploy.nu + smoke hello→hello_ok del canal.
-#   5 retire   scripts/retire-python.nu (solo si verify OK y retire=on).
-#   6 final    «Kotlin bot 100% — Python retirado» o el estado real.
+# Phases (each one announced over Telegram in --real):
+#   0 sanity   fork on origin/damian (git fetch + local HEAD == origin/damian),
+#              bot daemon loaded (launchctl), retire-python.nu present.
+#   1 quit     graceful osascript (≤30 s) → LAST RESORT: kill the pids →
+#              up to 120 s waiting for zero processes.
+#   2 build    cd ~/Projects/ZCode && scripts/build-install.nu --yes (swap of
+#              /Applications/ZCode.app; that script REOPENS the app and sends
+#              its own announcement «Fork installed» — expected, not duplicated).
+#   3 reopen   sweep of orphan socket/token + open -a ZCode if needed →
+#              poll ≤90 s (every 2 s) for the socket AND the token.
+#   4 verify   scripts/verify-deploy.nu + the channel's hello→hello_ok smoke.
+#   5 retire   scripts/retire-python.nu (only if verify OK and retire=on).
+#   6 final    «Kotlin bot 100% — Python retired» or the real state.
 #
-# El estado fluye como VALOR tipado (RunState): cada fase recibe el estado y
-# devuelve record<state, outcome> — nada de globales mutables. Los externales
-# se invocan como programas (git/launchctl/osascript/open/python3/scripts del
-# repo); CERO bash -c con lógica embebida.
+# The state flows as a TYPED VALUE (RunState): every phase receives the state
+# and returns record<state, outcome> — no mutable globals. Externals are
+# invoked as programs (git/launchctl/osascript/open/python3/the repo's
+# scripts); ZERO bash -c with embedded logic.
 #
-# Decisiones de la migración (todo medido en REPL, ver commit):
-#   · Detección del app: `ps | where name == ZCode` — NATIVO y superior al
-#     pothole del .sh: pgrep/pkill NO ven el main process de ZCode (app de
-#     LaunchServices que reescribe su argv; pgrep matchea pbi_name ≠ comm —
-#     probado fallando con -x/-i/-f). El `ps` de nu ve los 7 procesos,
-#     incluido el main. El pothole muere nativo.
-#   · Modo: nu no tiene enums ni tipos literal (falló `enum` y `oneof<"a","b">`
-#     en REPL) → `type Mode = string` + guard en init-state con error make.
-#   · Telegram: `open` del JSON tipado como TgCfg (adiós python3 -c json) +
-#     `http post` nativo con body JSON y --max-time (bash usaba curl
-#     form-urlencoded; la Bot API acepta ambos — mismo contrato sendMessage).
-#     Envuelto en try/do -i: NUNCA rompe el run.
-#   · Log: def log tipado con el MISMO formato que el .sh
-#     ([YYYY-MM-DD HH:MM:SS] línea) + append a /tmp/deploy-fork-and-retire-<ts>.log.
-#     std/log de nu se evaluó y rechazó: formato ISO con millis (|INF|) —
-#     la paridad línea a línea manda.
-#   · Externales largos (build-install/verify-deploy/retire-python): stream
-#     VIVO stdout+stderr al log vía `tee`/`tee --stderr` (el análogo del
-#     `exec > >(tee)` del bash) + `complete` para el exit code exacto.
-#   · Smoke: nu no tiene sockets crudos → handshake python3 AF_UNIX externo
-#     (extraído textual del .sh, timeout 10 s propio). El camino nc -U del
-#     .sh se deja caer: un solo camino determinístico.
-#   · Exit codes: 0 todo · 3 fase falló · 4 verify OK pero retire=skip. El
-#     «2 uso» del bash NO es replicable: flags desconocidos los rechaza el
-#     parser de nu (rc 1) antes de correr el script; --help lo genera nu.
-#   · Duraciones nativas (sleep 2sec) para los waits; loops con contador en
-#     segundos, como el .sh.
+# Migration decisions (all measured in the REPL, see the commit):
+#   · App detection: `ps | where name == ZCode` — NATIVE and better than the
+#     .sh pothole: pgrep/pkill do NOT see ZCode's main process (a LaunchServices
+#     app that rewrites its argv; pgrep matches pbi_name ≠ comm — proven
+#     failing with -x/-i/-f). nu's `ps` sees all 7 processes, the main one
+#     included. The pothole dies natively.
+#   · Mode: nu has no enums or literal types (`enum` and `oneof<"a","b">`
+#     failed in the REPL) → `type Mode = string` + a guard in init-state with
+#     error make.
+#   · Telegram: the typed JSON read as TgCfg (goodbye python3 -c json) +
+#     native `http post` with a JSON body and --max-time (bash used curl
+#     form-urlencoded; the Bot API accepts both — the same sendMessage
+#     contract). Wrapped in try/do -i: it NEVER breaks the run.
+#   · Log: a typed log def with the SAME format as the .sh
+#     ([YYYY-MM-DD HH:MM:SS] line) + append to
+#     /tmp/deploy-fork-and-retire-<ts>.log. nu's std/log was evaluated and
+#     rejected: ISO format with millis (|INF|) — line-by-line parity rules.
+#   · Long externals (build-install/verify-deploy/retire-python): a LIVE
+#     stdout+stderr stream to the log through `tee`/`tee --stderr` (the
+#     analogue of bash's `exec > >(tee)`) + `complete` for the exact exit code.
+#   · Smoke: nu has no raw sockets → an external python3 AF_UNIX handshake
+#     (extracted verbatim from the .sh, its own 10 s timeout). The .sh's
+#     nc -U path is dropped: one deterministic path only.
+#   · Exit codes: 0 all good · 3 a phase failed · 4 verify OK but retire=skip.
+#     bash's «2 usage» is NOT replicable: nu's parser rejects unknown flags
+#     (rc 1) before running the script; --help is generated by nu.
+#   · Native durations (sleep 2sec) for the waits; loops with a counter in
+#     seconds, like the .sh.
 #
-# Doctrina de fallo (NUNCA deja el sistema a medias) — idéntica al .sh:
-#   · falla ANTES del retire (fases 0-4) → Python intocado: announce con la
-#     fase fallida + «Python sigue vivo, rollback no necesario».
-#   · falla DESPUÉS del quit → el sistema igual queda usable: si el build
-#     falló, el app viejo sigue en /Applications y este script lo REABRE
-#     (best-effort); si el app abre pero el canal no, el daemon degrada loud
-#     sin socket — modo headless automático, no error.
-#   · falla el propio retire (fase 5) → el fork ya está deployado y verificado;
-#     el announce dice revisar el estado de Python.
+# Failure doctrine (NEVER leaves the system half-done) — identical to the .sh:
+#   · a failure BEFORE the retire (phases 0-4) → Python untouched: announce
+#     with the failed phase + «Python stays alive, no rollback needed».
+#   · a failure AFTER the quit → the system stays usable anyway: if the build
+#     failed, the old app is still in /Applications and this script REOPENS it
+#     (best-effort); if the app opens but the channel does not, the daemon
+#     degrades loudly without a socket — automatic headless mode, not an error.
+#   · the retire itself fails (phase 5) → the fork is already deployed and
+#     verified; the announcement says to check Python's state.
 type Mode = string
 type TgCfg = record<token: string, chat_id: int>
 type PhaseOutcome = record<ok: bool, note: string>
 type RunState = record<mode: Mode, retire: string, quit_done: bool, retire_result: string, report: string, exit_code: int, log_path: string, repo: string, fork_dir: string, sock: string, token_file: string, tg_cfg: string, retire_script: string, drytag: string>
 type PhaseResult = record<state: RunState, outcome: PhaseOutcome>
 
-# ─────────────────────────── utilidades tipadas ───────────────────────────
+# ────────────────────────── typed utilities ──────────────────────────
 def log [st: RunState, msg: string]: nothing -> nothing {
     let line = $"[(date now | format date "%Y-%m-%d %H:%M:%S")] ($msg)"
     print $line
@@ -102,11 +104,11 @@ def note-or-log [n: string]: nothing -> string {
     if ($n | is-empty) { "check the log" } else { $n }
 }
 
-# Detección del app — el pothole del .sh muere acá: ps de nu ve el main.
-# Detección de procesos VIVOS del app — ZOMBIE-PROOF (medido, incidente 17:36):
-# el ps builtin de nu le pone el nombre viejo a los procesos muertos-sin-enterrar
-# (el defunct 20078 contestaba name==ZCode); el ps EXTERNO responde <defunct> para
-# zombies y el comm exacto "ZCode" excluye a los Helpers. Solo cuenta lo vivo.
+# App detection — the .sh pothole dies here: nu's ps sees the main process.
+# Detection of LIVE app processes — ZOMBIE-PROOF (measured, 17:36 incident):
+# nu's builtin ps keeps the old name on dead-but-unburied processes (the
+# defunct 20078 answered name==ZCode); the EXTERNAL ps answers <defunct> for
+# zombies and the exact comm "ZCode" excludes the Helpers. Only the live count.
 def zcode-running []: nothing -> bool {
     (^ps -axo comm= | lines | any {|c| ($c | str trim) == "ZCode"})
 }
@@ -115,9 +117,10 @@ def zcode-pids []: nothing -> list<int> {
     (^ps -axo pid=,comm= | lines | parse "{pid} {comm}" | where comm == ZCode | get pid)
 }
 
-# El app corre como JOB de launchd (application.dev.zcode.app.<nums que cambian>)
-# y launchd LO RESUCITA ~8 s después de matarlo (medido: SIGKILL 17:36:43 → nueva
-# instancia 17:36:51). La única muerte que pega es bootout: mata Y desregistra.
+# The app runs as a launchd JOB (application.dev.zcode.app.<changing numbers>)
+# and launchd RESURRECTS it ~8 s after killing it (measured: SIGKILL 17:36:43 →
+# new instance 17:36:51). The only death that sticks is bootout: it kills AND
+# unregisters.
 def app-job-label []: nothing -> string {
     (^launchctl list | lines | where {|l| $l | str contains "application.dev.zcode"} | first | str trim | split row "\t" | last)
 }
@@ -139,13 +142,13 @@ def bootout-app [st: RunState]: nothing -> nothing {
 def plist-autorun [path: string]: nothing -> bool {
     if not ($path | path exists) { return false }
     let rows = (open --raw $path | lines)
-    # la LÍNEA de la clave exacta (el comentario del repo también dice
-    # «RunAtLoad» — sin el tag <key> no cuenta)
+    # the exact key LINE (the repo's comment also says «RunAtLoad» — without
+    # the <key> tag it does not count)
     let hit = ($rows | enumerate | where {|r|
         ($r.item | str contains "<key>RunAtLoad</key>")
     } | get -o 0)
     if $hit == null { return false }
-    # el valor puede vivir en la misma línea o en la siguiente
+    # the value may live on the same line or on the next one
     if ($hit.item | str contains "<true/>") { return true }
     let tail = ($rows | skip ($hit.index + 1) | first 1 | str join " ")
     ($tail | str contains "<true/>")
@@ -155,9 +158,9 @@ def is-exec [p: string]: nothing -> bool {
     (do { ^test -x $p } | complete | get exit_code) == 0
 }
 
-# Runner de scripts largos: stdout Y stderr streameados en vivo al log (el
-# tee del bash), exit code exacto vía complete. Si el script ni siquiera
-# lanza (bash daría 127), se loguea y se devuelve 127.
+# Long-script runner: stdout AND stderr streamed live to the log (bash's
+# tee), exact exit code through complete. If the script does not even
+# launch (bash would give 127), it is logged and 127 is returned.
 def run-script [st: RunState, dir: string, script: string, ...args: string]: nothing -> int {
     let r: record<exit_code: int> = try {
         do {
@@ -168,19 +171,19 @@ def run-script [st: RunState, dir: string, script: string, ...args: string]: not
             | complete
         }
     } catch {|e|
-        log $st $"⚠ no pude lanzar ($script) en ($dir): ($e.msg)"
+        log $st $"⚠ could not launch ($script) in ($dir): ($e.msg)"
         {exit_code: 127}
     }
     $r.exit_code
 }
 
-# La ventana de cooldown COMPARTIDA (Cooldown.kt, utils/http.py F8/F83): la
-# 429 de Telegram nombra una ventana del CHAT, no del proceso que la pisó —
-# el mtime del archivo ES el epoch de expiración y toda lane la lee con un
-# stat. Si cualquiera de las dos lanes tiene ventana viva, el anuncio se
-# SUPRIME: un curl directo aquí no pasa por ningún throttler propio y mandar
-# dentro de la ventana agrava la penalización (la 4ª: 10465s). La verdad
-# queda en el log; cuando la ventana expira, los canales del bot vuelven solos.
+# The SHARED cooldown window (Cooldown.kt, utils/http.py F8/F83): Telegram's
+# 429 names a CHAT window, not the window of the process that hit it — the
+# file's mtime IS the expiry epoch and every lane reads it with a stat. If
+# either lane holds a live window, the announcement is SUPPRESSED: a direct
+# curl here bypasses any throttler of ours and sending inside the window
+# makes the penalty worse (the 4th one: 10465s). The truth stays in the log;
+# when the window expires, the bot's channels come back on their own.
 def cooldown-active []: nothing -> bool {
     let files = [
         $"($env.HOME)/.zcode/hooks/state/tg-cooldown"
@@ -195,65 +198,65 @@ def cooldown-active []: nothing -> bool {
 def announce [st: RunState, msg: string]: nothing -> nothing {
     if $st.mode == "real" {
         if not ($st.tg_cfg | path exists) {
-            log $st $"WARN: falta ($st.tg_cfg) — anuncio descartado"
+            log $st $"WARN: missing ($st.tg_cfg) — announcement discarded"
             return
         }
         try {
             let cfg: TgCfg = (open $st.tg_cfg)
             if ($cfg.token | is-empty) or ($cfg.chat_id | is-empty) { return }
             if (cooldown-active) {
-                log $st $"🔇 cooldown de Telegram activo — anuncio suprimido, queda en este log: ($msg)"
+                log $st $"🔇 Telegram cooldown active — announcement suppressed, it stays in this log: ($msg)"
                 return
             }
             let body = ({chat_id: $cfg.chat_id, text: $msg} | to json)
             do -i { http post -m 10sec -t application/json $"https://api.telegram.org/bot($cfg.token)/sendMessage" $body -r | ignore }
-        } catch {|_err| }   # el anuncio NUNCA rompe el run (doctrina del .sh)
+        } catch {|_err| }   # the announcement NEVER breaks the run (the .sh doctrine)
     } else {
         log $st $"[dryrun] telegram-suppressed: ($msg)"
     }
 }
 
-# El handler de fallo: announce según doctrina + reopen best-effort + estado
-# + exit_code 3 en el estado (main hace el exit único y loguea la línea final).
-def fail [st: RunState, fase: string, detalle: string]: nothing -> RunState {
-    log $st $"✗ FAIL [($fase)] ($detalle)"
-    if $fase == "fase 5 (retire)" {
-        announce $st $"❌ Auto deploy FAILED at ($fase) — ($detalle). The fork is already deployed and verified; check the state of Python \(the retire failed midway\)."
+# The failure handler: announce per doctrine + best-effort reopen + state
+# + exit_code 3 in the state (main does the single exit and logs the final line).
+def fail [st: RunState, phase: string, detail: string]: nothing -> RunState {
+    log $st $"✗ FAIL [($phase)] ($detail)"
+    if $phase == "phase 5 (retire)" {
+        announce $st $"❌ Auto deploy FAILED at ($phase) — ($detail). The fork is already deployed and verified; check the state of Python \(the retire failed midway\)."
     } else {
-        announce $st $"❌ Auto deploy FAILED at ($fase) — ($detalle). Python stays alive, no rollback needed."
+        announce $st $"❌ Auto deploy FAILED at ($phase) — ($detail). Python stays alive, no rollback needed."
     }
     let st = if ($st.mode == "real") and $st.quit_done {
         if (zcode-running) {
             log $st "the app is already running — nothing to reopen"
             $st
         } else {
-            log $st "best-effort: reabro el app (el de /Applications, el que sea) para no dejar a Damian sin ZCode"
-            try { ^open -a ZCode } catch {|_e| }   # best-effort: || true del .sh
+            log $st "best-effort: reopening the app (the one in /Applications, whatever it is) so Damian is not left without ZCode"
+            try { ^open -a ZCode } catch {|_e| }   # best-effort: the .sh's || true
             $st
         }
     } else {
         $st
     }
-    let st = (rpt $st $"($fase) FAIL")
-    announce $st $"estado: ($st.report)"
+    let st = (rpt $st $"($phase) FAIL")
+    announce $st $"state: ($st.report)"
     $st | update exit_code 3
 }
 
-# ────────────────────────────── fase 0: sanity ──────────────────────────────
+# ───────────────────────────── phase 0: sanity ─────────────────────────────
 def phase0-sanity [st: RunState]: nothing -> PhaseResult {
-    log $st "── fase 0/6: sanity"
+    log $st "── phase 0/6: sanity"
     if (($st.fork_dir + "/.git") | path type) != "dir" {
-        let note = $"($st.fork_dir) no es un repo git"
+        let note = $"($st.fork_dir) is not a git repo"
         log $st $"✗ ($note)"
         return {state: $st, outcome: {ok: false, note: $note}}
     }
     if not (is-exec ($st.fork_dir + "/scripts/build-install.nu")) {
-        let note = "falta build-install.nu ejecutable en el fork"
+        let note = "missing an executable build-install.nu in the fork"
         log $st $"✗ ($note)"
         return {state: $st, outcome: {ok: false, note: $note}}
     }
     if not (is-exec ($st.fork_dir + "/scripts/verify-deploy.nu")) {
-        let note = "falta verify-deploy.nu ejecutable en el fork"
+        let note = "missing an executable verify-deploy.nu in the fork"
         log $st $"✗ ($note)"
         return {state: $st, outcome: {ok: false, note: $note}}
     }
@@ -280,7 +283,7 @@ def phase0-sanity [st: RunState]: nothing -> PhaseResult {
     }
     let remr = (do { ^git -C $st.fork_dir rev-parse origin/damian } | complete)
     if $remr.exit_code != 0 {
-        let note = "no existe origin/damian"
+        let note = "origin/damian does not exist"
         log $st $"✗ ($note)"
         return {state: $st, outcome: {ok: false, note: $note}}
     }
@@ -289,26 +292,26 @@ def phase0-sanity [st: RunState]: nothing -> PhaseResult {
     let rem = ($remr.stdout | str trim)
     log $st $"fork: branch=($br) HEAD=($loc | str substring 0..8) origin/damian=($rem | str substring 0..8)"
     if $br != "damian" {
-        let note = $"the fork is on '($br)', no en damian"
+        let note = $"the fork is on '($br)', not on damian"
         log $st $"✗ ($note)"
         return {state: $st, outcome: {ok: false, note: $note}}
     }
     if $loc != $rem {
-        let note = "HEAD local != origin/damian — pushear/actualizar antes del deploy"
+        let note = "local HEAD != origin/damian — push/update before the deploy"
         log $st $"✗ ($note)"
         return {state: $st, outcome: {ok: false, note: $note}}
     }
     let porc = (do { ^git -C $st.fork_dir status --porcelain } | complete | get stdout)
     if not ($porc | is-empty) {
-        log $st "WARN: working tree del fork sucio — build-install compila el TREE actual, no solo el commit"
+        log $st "WARN: the fork's working tree is dirty — build-install compiles the CURRENT TREE, not only the commit"
     }
 
-    # launchctl: el .sh evitaba grep -q por una carrera de SIGPIPE con
-    # pipefail; en nu `lines | where` consume todo el input por diseño — la
-    # carrera no existe.
+    # launchctl: the .sh avoided grep -q because of a SIGPIPE race with
+    # pipefail; in nu `lines | where` consumes all the input by design — the
+    # race does not exist.
     let lc = (do { ^launchctl list } | complete)
     if ($lc.stdout | lines | where {|l| $l | str contains "com.zcode.bot-daemon"} | length) > 0 {
-        log $st "daemon del bot (com.zcode.bot-daemon): cargado en launchctl ✓"
+        log $st "bot daemon (com.zcode.bot-daemon): loaded in launchctl ✓"
     } else {
         let note = "com.zcode.bot-daemon is NOT loaded — retiring Python would leave Telegram with no bot"
         log $st $"✗ ($note)"
@@ -316,36 +319,36 @@ def phase0-sanity [st: RunState]: nothing -> PhaseResult {
     }
 
     let st = if (is-exec $st.retire_script) {
-        log $st "retire-python.nu presente y ejecutable → retire=on"
+        log $st "retire-python.nu present and executable → retire=on"
         $st | update retire "on"
     } else {
         log $st $"WARN: ($st.retire_script) missing \(B3b?\) → retire=skip: the run STOPS after the verification, saying so"
         $st | update retire "skip"
     }
     if not ($st.tg_cfg | path exists) {
-        log $st $"WARN: falta ($st.tg_cfg) — los anuncios de Telegram se descartan"
+        log $st $"WARN: missing ($st.tg_cfg) — the Telegram announcements are discarded"
     }
 
-    # El propio job launchd del cutover converge al repo (30/10: RunAtLoad
-    # era true y CADA boot disparaba el --real solo — el dueño lo vivió).
-    # La copia cargada se re-arma desde el repo SI su RunAtLoad difiere:
-    # el deploy queda disparable por kickstart, jamás por un bootstrap.
+    # The cutover's own launchd job converges to the repo (30/10: RunAtLoad
+    # was true and EVERY boot fired --real by itself — the owner lived it).
+    # The loaded copy re-arms from the repo IF its RunAtLoad differs: the
+    # deploy stays kickstart-triggerable, never bootstrap-triggered.
     let plist_repo = ($st.repo + "/scripts/com.zcode.deploy-fork.plist")
     let plist_loaded = ($env.HOME + "/Library/LaunchAgents/com.zcode.deploy-fork.plist")
-    # LA CONVERGENCIA ES UN EFECTO SECUNDARIO: jamás puede matar un deploy
-    # (30/10: un cell-path sobre el XML del plist reventó el sanity entero —
-    # medido y corregido; ahora todo el bloque va en try y lee texto crudo).
+    # THE CONVERGENCE IS A SIDE EFFECT: it can never kill a deploy
+    # (30/10: a cell-path over the plist XML blew up the whole sanity —
+    # measured and fixed; now the whole block runs in try and reads raw text).
     let convergence = (try {
         if ($env.HOME | is-empty) or not ($plist_repo | path exists) {
-            "WARN: no pude verificar el plist del cutover (repo o HOME ausentes)"
+            "WARN: could not verify the cutover's plist (repo or HOME absent)"
         } else {
-            # el plist es XML: el RunAtLoad se lee por LÍNEAS (un cell path
-            # estructural sobre el XML parseado revienta — medido; y el
-            # str contains de esta nu no tiene -r)
+            # the plist is XML: RunAtLoad is read by LINES (a structural cell
+            # path over the parsed XML blows up — measured; and this nu's
+            # str contains has no -r)
             let repo_autorun = (plist-autorun $plist_repo)
             let loaded_autorun = (plist-autorun $plist_loaded)
             if $loaded_autorun != $repo_autorun {
-                let note = $"plist del cutover diverge (cargado RunAtLoad=($loaded_autorun), repo=($repo_autorun)) — re-armando desde el repo"
+                let note = $"the cutover's plist diverges (loaded RunAtLoad=($loaded_autorun), repo=($repo_autorun)) — re-arming from the repo"
                 let dst_dir = ($plist_loaded | path dirname)
                 mkdir $dst_dir
                 cp $plist_repo $plist_loaded
@@ -354,12 +357,12 @@ def phase0-sanity [st: RunState]: nothing -> PhaseResult {
                 sleep 1sec
                 let bs = (do { ^launchctl bootstrap $"gui/($uid)" $plist_loaded } | complete)
                 if $bs.exit_code == 0 {
-                    $"plist del cutover re-armado desde el repo (RunAtLoad=($repo_autorun) — kickstart-only) ✓"
+                    $"the cutover's plist re-armed from the repo (RunAtLoad=($repo_autorun) — kickstart-only) ✓"
                 } else {
                     $"WARN: plist bootstrap failed ($bs.stderr | str trim) — the deploy continues; check by hand"
                 }
             } else {
-                "plist del cutover: copia cargada == repo ✓"
+                "the cutover's plist: loaded copy == repo ✓"
             }
         }
     } catch {|err|
@@ -368,11 +371,11 @@ def phase0-sanity [st: RunState]: nothing -> PhaseResult {
     {state: $st, outcome: {ok: true, note: ""}}
 }
 
-# ────────────────────────────── fase 1: quit ────────────────────────────────
-# La escalera de muerte, reutilizable (fase 1 y el retry de fase 2 cuando el
-# app reaparece durante el build — medido: el humano lo reabre para mirar).
+# ────────────────────────────── phase 1: quit ────────────────────────────────
+# The death ladder, reusable (phase 1 and phase 2's retry when the app
+# reappears during the build — measured: the human reopens it to look).
 def quit-ladder [st: RunState]: nothing -> record<ok: bool, note: string> {
-    log $st "quit graceful (osascript) — en este app suele solo cerrar la ventana..."
+    log $st "quit graceful (osascript) — in this app it usually only closes the window..."
     let osa = (do { ^osascript -e 'tell application "ZCode" to quit' } | complete)
     if $osa.exit_code != 0 {
         log $st "WARN: osascript failed (was it already closed?)"
@@ -399,8 +402,8 @@ def quit-ladder [st: RunState]: nothing -> record<ok: bool, note: string> {
             }
         }
     }
-    # Vigilancia anti-resurrección: launchd revivió el app 8 s después de un
-    # SIGKILL (medido). Si reaparece, un bootout más lo apaga para siempre.
+    # Anti-resurrection watch: launchd revived the app 8 s after a
+    # SIGKILL (measured). If it reappears, one more bootout turns it off for good.
     while ($w < 50) {
         if not (zcode-running) { break }
         sleep 1sec; $w += 1
@@ -411,18 +414,18 @@ def quit-ladder [st: RunState]: nothing -> record<ok: bool, note: string> {
         while ($w < 65) and (zcode-running) { sleep 1sec; $w += 1 }
     }
     if (zcode-running) {
-        let note = $"ZCode sigue viva tras ($w)s, bootout, SIGTERM y SIGKILL"
+        let note = $"ZCode is still alive after ($w)s, bootout, SIGTERM and SIGKILL"
         log $st $"✗ ($note)"
         return {ok: false, note: $note}
     }
-    log $st $"cero proceso ZCode vivo ✓ \(total ($w)s\)"
+    log $st $"zero live ZCode process ✓ \(total ($w)s\)"
     {ok: true, note: ""}
 }
 
 def phase1-quit [st: RunState]: nothing -> PhaseResult {
     if $st.mode != "real" {
-        let viva = if (zcode-running) { "YES it is running (it would close it)" } else { "it is not running (nothing to close)" }
-        log $st $"[dryrun] SKIP fase 1: osascript quit \(solo cierra ventana\) → ≤15 s → bootout del job de launchd \(muerte sin resurrección\) → SIGTERM → SIGKILL → 15 s de vigilancia anti-resurrección. Hoy ZCode ($viva)."
+        let running = if (zcode-running) { "YES it is running (it would close it)" } else { "it is not running (nothing to close)" }
+        log $st $"[dryrun] SKIP phase 1: osascript quit \(only closes the window\) → ≤15 s → bootout of the launchd job \(death without resurrection\) → SIGTERM → SIGKILL → 15 s of anti-resurrection watch. Today ZCode ($running)."
         return {state: $st, outcome: {ok: true, note: ""}}
     }
     let r = (quit-ladder $st)
@@ -433,13 +436,13 @@ def phase1-quit [st: RunState]: nothing -> PhaseResult {
     {state: $st, outcome: {ok: true, note: ""}}
 }
 
-# ──────────────────────────── fase 2: build + swap ──────────────────────────
+# ──────────────────────────── phase 2: build + swap ──────────────────────────
 def phase2-build [st: RunState]: nothing -> PhaseResult {
     if $st.mode != "real" {
-        log $st $"[dryrun] SKIP fase 2: \(cd ($st.fork_dir) && scripts/build-install.nu --yes\) — bundle del tree actual + swap de /Applications/ZCode.app \(minutos\). Ese script REABRE el app y manda su propio anuncio «Fork instalado» — esperado. Si el app reaparece durante el build \(medido: pasa\) → re-quit y retry del swap."
+        log $st $"[dryrun] SKIP phase 2: \(cd ($st.fork_dir) && scripts/build-install.nu --yes\) — bundle of the current tree + swap of /Applications/ZCode.app \(minutes\). That script REOPENS the app and sends its own announcement «Fork installed» — expected. If the app reappears during the build \(measured: it happens\) → re-quit and retry the swap."
         return {state: $st, outcome: {ok: true, note: ""}}
     }
-    log $st "build+swap: scripts/build-install.nu --yes (esto toma minutos)..."
+    log $st "build+swap: scripts/build-install.nu --yes (this takes minutes)..."
     let rc = (run-script $st $st.fork_dir "./scripts/build-install.nu" -- --yes)
     if ($rc != 0) and (zcode-running) {
         log $st "the app REAPPEARED during the build (someone opened it to look 😉 — incident 17:48) — re-quit and retry the swap \(cached build\)"
@@ -451,7 +454,7 @@ def phase2-build [st: RunState]: nothing -> PhaseResult {
         }
         let rc2 = (run-script $st $st.fork_dir "./scripts/build-install.nu" -- --yes)
         if $rc2 != 0 {
-            let note = $"build-install.nu exit ($rc2) en el retry \(el app viejo queda en /Applications — lo reabro\)"
+            let note = $"build-install.nu exit ($rc2) on the retry \(the old app stays in /Applications — I reopen it\)"
             log $st $"✗ ($note)"
             return {state: $st, outcome: {ok: false, note: $note}}
         }
@@ -459,7 +462,7 @@ def phase2-build [st: RunState]: nothing -> PhaseResult {
         return {state: $st, outcome: {ok: true, note: "retry after reappearance"}}
     }
     if $rc != 0 {
-        let note = $"build-install.nu exit ($rc) \(el app viejo queda en /Applications — lo reabro\)"
+        let note = $"build-install.nu exit ($rc) \(the old app stays in /Applications — I reopen it\)"
         log $st $"✗ ($note)"
         return {state: $st, outcome: {ok: false, note: $note}}
     }
@@ -467,22 +470,22 @@ def phase2-build [st: RunState]: nothing -> PhaseResult {
     {state: $st, outcome: {ok: true, note: ""}}
 }
 
-# ───────────────────────────── fase 3: reopen ───────────────────────────────
+# ───────────────────────────── phase 3: reopen ───────────────────────────────
 def phase3-reopen [st: RunState]: nothing -> PhaseResult {
     if $st.mode != "real" {
-        let es = if ($st.sock | path exists) { "PRESENT (pre-deploy orphan: the real run sweeps it)" } else { "absent" }
-        let et = if ($st.token_file | path exists) { "PRESENT (pre-deploy orphan: the real run sweeps it)" } else { "absent" }
-        log $st $"[dryrun] SKIP fase 3: open -a ZCode \(build-install ya lo abre; belt-and-suspenders\) + poll ≤90 s \(c/2 s\) a daemon-local.sock Y daemon-local.token. Hoy: sock ($es), token ($et)."
+        let sock_state = if ($st.sock | path exists) { "PRESENT (pre-deploy orphan: the real run sweeps it)" } else { "absent" }
+        let token_state = if ($st.token_file | path exists) { "PRESENT (pre-deploy orphan: the real run sweeps it)" } else { "absent" }
+        log $st $"[dryrun] SKIP phase 3: open -a ZCode \(build-install already opens it; belt-and-suspenders\) + poll ≤90 s \(every 2 s\) for daemon-local.sock AND daemon-local.token. Today: sock ($sock_state), token ($token_state)."
         return {state: $st, outcome: {ok: true, note: ""}}
     }
-    # Barrida de huérfanos: el app está muerta (fase 1) — si estos archivos
-    # viven son restos de un host muerto; el host nuevo crea los suyos.
+    # Orphan sweep: the app is dead (phase 1) — if these files live on they are
+    # the remains of a dead host; the new host creates its own.
     rm --force $st.sock $st.token_file
     if not (zcode-running) {
         log $st "the app did not stay open (did build-install change?) — open -a ZCode"
         ^open -a ZCode
     }
-    log $st "esperando socket+token del daemon-local (≤90 s, poll 2 s)..."
+    log $st "waiting for the daemon-local socket+token (≤90 s, poll 2 s)..."
     mut w = 0
     mut found = false
     while $w < 90 {
@@ -497,18 +500,18 @@ def phase3-reopen [st: RunState]: nothing -> PhaseResult {
         log $st $"socket+token present ✓ \(($w)s\) — the fork host raised the channel"
         return {state: $st, outcome: {ok: true, note: ""}}
     }
-    let note = "the host did not create daemon-local.sock/token in 90 s (¿ZCODE_DAEMON_LOCAL_CHANNEL=0? ¿gate cerrada en el diálogo de Bots?)"
+    let note = "the host did not create daemon-local.sock/token in 90 s (ZCODE_DAEMON_LOCAL_CHANNEL=0? gate closed in the Bots dialog?)"
     log $st $"✗ ($note)"
     {state: $st, outcome: {ok: false, note: $note}}
 }
 
-# ───────────────────────────── fase 4: verify ───────────────────────────────
-# nu no tiene sockets crudos → handshake python3 AF_UNIX externo, extraído
-# textual del .sh (mismo protocolo hello→hello_ok, timeout 10 s propio).
+# ───────────────────────────── phase 4: verify ───────────────────────────────
+# nu has no raw sockets → an external python3 AF_UNIX handshake, extracted
+# verbatim from the .sh (same hello→hello_ok protocol, its own 10 s timeout).
 def smoke-hello [st: RunState]: nothing -> PhaseResult {
     let token = (try { open $st.token_file | str trim } catch {|_e| "" })
     if ($token | is-empty) {
-        let note = $"no pude leer ($st.token_file)"
+        let note = $"could not read ($st.token_file)"
         log $st $"✗ ($note)"
         return {state: $st, outcome: {ok: false, note: $note}}
     }
@@ -525,28 +528,28 @@ except Exception as e:
     print("smoke error: %s" % e)
     sys.exit(1)
 '
-    let tool = "python3 AF_UNIX (handshake de la spec §5 con timeout propio — nu no tiene sockets crudos, ver header; token por stdin)"
+    let tool = "python3 AF_UNIX (the spec §5 handshake with its own timeout — nu has no raw sockets, see the header; token through stdin)"
     let r = (do { $token | ^/usr/bin/python3 -c $py $st.sock } | complete)
     let out = ($r.stdout | str trim)
     log $st $"smoke via ($tool)"
-    let shown = if ($out | is-empty) { "(sin respuesta)" } else { $out }
+    let shown = if ($out | is-empty) { "(no response)" } else { $out }
     log $st $"smoke ← ($shown)"
     if ($out | str contains '"type":"hello_ok"') {
-        log $st "handshake hello_ok ✓ — el canal daemon-local vive"
+        log $st "handshake hello_ok ✓ — the daemon-local channel is alive"
         return {state: $st, outcome: {ok: true, note: ""}}
     }
-    let note = $"el smoke no vio hello_ok \(respuesta: ($shown)\)"
+    let note = $"the smoke did not see hello_ok \(response: ($shown)\)"
     log $st $"✗ ($note)"
     {state: $st, outcome: {ok: false, note: $note}}
 }
 
 def phase4-verify [st: RunState]: nothing -> PhaseResult {
     if $st.mode != "real" {
-        log $st $"[dryrun] SKIP fase 4a: \(cd ($st.fork_dir) && scripts/verify-deploy.nu\) — corre contra el app INSTALADO; solo tiene sentido tras el swap real."
-        log $st $"[dryrun] SKIP fase 4b: smoke hello→hello_ok por ($st.sock) con el token de ($st.token_file) \(python3 AF_UNIX, ver header\) — idem: canal recién tras el deploy."
+        log $st $"[dryrun] SKIP phase 4a: \(cd ($st.fork_dir) && scripts/verify-deploy.nu\) — runs against the INSTALLED app; it only makes sense after the real swap."
+        log $st $"[dryrun] SKIP phase 4b: hello→hello_ok smoke over ($st.sock) with the token from ($st.token_file) \(python3 AF_UNIX, see the header\) — same: the channel only exists after the deploy."
         return {state: $st, outcome: {ok: true, note: ""}}
     }
-    log $st "verify-deploy.nu del fork..."
+    log $st "the fork's verify-deploy.nu..."
     let rc = (run-script $st $st.fork_dir "./scripts/verify-deploy.nu")
     if $rc != 0 {
         let note = $"verify-deploy.nu FAIL \(exit ($rc)\)"
@@ -556,86 +559,86 @@ def phase4-verify [st: RunState]: nothing -> PhaseResult {
     smoke-hello $st
 }
 
-# ───────────────────────────── fase 5: retire ───────────────────────────────
+# ───────────────────────────── phase 5: retire ───────────────────────────────
 def phase5-retire [st: RunState]: nothing -> PhaseResult {
     if $st.mode != "real" {
         if $st.retire == "on" {
-            log $st $"[dryrun] SKIP fase 5: \(cd ($st.repo) && scripts/retire-python.nu\) — presente y ejecutable; capturaría su salida acá mismo y su exit code."
+            log $st $"[dryrun] SKIP phase 5: \(cd ($st.repo) && scripts/retire-python.nu\) — present and executable; it would capture its output right here and its exit code."
         } else {
-            log $st "[dryrun] SKIP fase 5: retire=skip (falta scripts/retire-python.nu de B3b) — en --real el run se detiene ACÁ, tras la verificación, avisando por Telegram."
+            log $st "[dryrun] SKIP phase 5: retire=skip (the B3b scripts/retire-python.nu is missing) — in --real the run stops HERE, after the verification, telling the owner over Telegram."
         }
         return {state: ($st | update retire_result "skip (dryrun)"), outcome: {ok: true, note: ""}}
     }
     if $st.retire != "on" {
-        log $st $"retire=skip — I stop after the verification: ($st.retire_script) MISSING \(B3b\). The fork stays deployed and verificado; Python sigue vivo."
+        log $st $"retire=skip — I stop after the verification: ($st.retire_script) MISSING \(B3b\). The fork stays deployed and verified; Python stays alive."
         announce $st "⚠️ Fork deployed and verified ✓, but scripts/retire-python.nu is MISSING — I stop here: Python stays alive."
-        return {state: ($st | update retire_result "skip (falta script)"), outcome: {ok: true, note: ""}}
+        return {state: ($st | update retire_result "skip (missing script)"), outcome: {ok: true, note: ""}}
     }
-    log $st "retire: scripts/retire-python.nu (salida capturada abajo)..."
+    log $st "retire: scripts/retire-python.nu (output captured below)..."
     let rc = (run-script $st $st.repo "./scripts/retire-python.nu")
     if $rc != 0 {
         let note = $"retire-python.nu exit ($rc)"
         log $st $"✗ ($note)"
         return {state: $st, outcome: {ok: false, note: $note}}
     }
-    log $st "Python retirado ✓"
-    {state: ($st | update retire_result "hecho"), outcome: {ok: true, note: ""}}
+    log $st "Python retired ✓"
+    {state: ($st | update retire_result "done"), outcome: {ok: true, note: ""}}
 }
 
-# ───────────────────────────── fase 6: final ────────────────────────────────
+# ───────────────────────────── phase 6: final ────────────────────────────────
 def phase6-final [st: RunState]: nothing -> RunState {
     let m: record<msg: string, code: int> = match {retire_result: $st.retire_result, mode: $st.mode} {
-        {retire_result: "hecho"} => {msg: $"🏁 Kotlin bot 100% — Python retired. [($st.report)]", code: 0}
+        {retire_result: "done"} => {msg: $"🏁 Kotlin bot 100% — Python retired. [($st.report)]", code: 0}
         {mode: "real"} => {msg: $"⚠️ Fork deployed and verified; retire PENDING \(retire-python.nu missing\) — Python stays alive. [($st.report)]", code: 4}
         _ => {msg: $"full rehearsal — nothing was touched. [($st.report)]", code: 0}
     }
-    log $st $"── fase 6/6: ($m.msg)"
+    log $st $"── phase 6/6: ($m.msg)"
     announce $st $m.msg
     $st | update exit_code $m.code
 }
 
-# ─────────────────────────── el cutover (main loop) ─────────────────────────
+# ─────────────────────────── the cutover (main loop) ─────────────────────────
 def cutover [st0: RunState]: nothing -> RunState {
     let r0 = (phase0-sanity $st0)
-    if not $r0.outcome.ok { return (fail $r0.state "fase 0 (sanity)" (note-or-log $r0.outcome.note)) }
+    if not $r0.outcome.ok { return (fail $r0.state "phase 0 (sanity)" (note-or-log $r0.outcome.note)) }
     let st = (rpt $r0.state $"f0 sanity OK \(retire=($r0.state.retire)\)")
     announce $st $"✅ Sanity OK: fork on origin/damian, Kotlin daemon running, retire=($st.retire). Phase 1/6: closing ZCode."
 
     let r1 = (phase1-quit $st)
-    if not $r1.outcome.ok { return (fail $r1.state "fase 1 (quit)" (note-or-log $r1.outcome.note)) }
+    if not $r1.outcome.ok { return (fail $r1.state "phase 1 (quit)" (note-or-log $r1.outcome.note)) }
     let st = (rpt $r1.state $"f1 quit OK($st.drytag)")
     announce $st "✅ ZCode closed. Phase 2/6: fork build+swap (minutes — do NOT open ZCode until the next notice; if you do, I close it and retry on my own)."
 
     let r2 = (phase2-build $st)
-    if not $r2.outcome.ok { return (fail $r2.state "fase 2 (build+swap)" (note-or-log $r2.outcome.note)) }
+    if not $r2.outcome.ok { return (fail $r2.state "phase 2 (build+swap)" (note-or-log $r2.outcome.note)) }
     let st = (rpt $r2.state $"f2 build+swap OK($st.drytag)")
     announce $st "✅ Fork installed. Phase 3/6: reopen and wait for the daemon-local socket (≤90 s)."
 
     let r3 = (phase3-reopen $st)
-    if not $r3.outcome.ok { return (fail $r3.state "fase 3 (reopen)" (note-or-log $r3.outcome.note)) }
+    if not $r3.outcome.ok { return (fail $r3.state "phase 3 (reopen)" (note-or-log $r3.outcome.note)) }
     let st = (rpt $r3.state $"f3 reopen OK \(sock+token\)($st.drytag)")
     announce $st "✅ App reopened, socket+token present. Phase 4/6: verify-deploy + hello smoke."
 
     let r4 = (phase4-verify $st)
-    if not $r4.outcome.ok { return (fail $r4.state "fase 4 (verify)" (note-or-log $r4.outcome.note)) }
+    if not $r4.outcome.ok { return (fail $r4.state "phase 4 (verify)" (note-or-log $r4.outcome.note)) }
     let st = (rpt $r4.state $"f4 verify+smoke OK($st.drytag)")
 
     let r5 = (phase5-retire $st)
-    if not $r5.outcome.ok { return (fail $r5.state "fase 5 (retire)" (note-or-log $r5.outcome.note)) }
+    if not $r5.outcome.ok { return (fail $r5.state "phase 5 (retire)" (note-or-log $r5.outcome.note)) }
     let st = match $r5.state.retire_result {
-        "hecho" => {
+        "done" => {
             let s = (rpt $r5.state "f5 retire OK")
             announce $s "✅ Python retired. Phase 6/6: close-out."
             $s
         }
-        "skip (falta script)" => (rpt $r5.state "f5 retire SKIP (falta script)")
+        "skip (missing script)" => (rpt $r5.state "f5 retire SKIP (missing script)")
         _ => (rpt $r5.state "f5 retire SKIP (dryrun)")
     }
     phase6-final $st
 }
 
 def init-state [mode: Mode]: nothing -> RunState {
-    # nu no tiene enums (medido: `enum`/literales fallan en parser) → guard.
+    # nu has no enums (measured: `enum`/literals fail in the parser) → guard.
     if not ($mode in [dryrun real]) {
         error make {msg: $"invalid mode: ($mode) — expected dryrun or real"}
     }
@@ -646,7 +649,7 @@ def init-state [mode: Mode]: nothing -> RunState {
         mode: $mode,
         retire: "skip",
         quit_done: false,
-        retire_result: "pendiente",
+        retire_result: "pending",
         report: "",
         exit_code: 0,
         log_path: $"/tmp/deploy-fork-and-retire-($ts).log",
@@ -660,31 +663,31 @@ def init-state [mode: Mode]: nothing -> RunState {
     }
 }
 
-# El parseo de flags lo hace nu (main): --help auto; flag desconocido → error
-# de parser (rc 1 — el «2 uso» del bash no es replicable, ver header). El
-# default es dryrun: cero acciones destructivas salvo --real explícito.
+# nu (main) parses the flags: --help auto; an unknown flag → a parser error
+# (rc 1 — bash's «2 usage» is not replicable, see the header). The default
+# is dryrun: zero destructive actions unless --real is explicit.
 def main [
-    --real    # el run de verdad (quit→build→reopen→verify→retire + Telegram)
-    --dryrun  # default: fase 0 real (read-only), fases 1-6 narradas sin tocar nada
+    --real    # the real run (quit→build→reopen→verify→retire + Telegram)
+    --dryrun  # default: phase 0 real (read-only), phases 1-6 narrated without touching anything
 ]: nothing -> nothing {
     let mode: Mode = if $real { "real" } else { "dryrun" }
     let st: RunState = (init-state $mode)
     let st = if $st.mode == "dryrun" { $st | update drytag " (SKIP dryrun)" } else { $st }
-    log $st $"════ deploy-fork-and-retire — modo: ($st.mode) ════"
-    log $st $"fork: ($st.fork_dir) · repo bot: ($st.repo) · log: ($st.log_path)"
+    log $st $"════ deploy-fork-and-retire — mode: ($st.mode) ════"
+    log $st $"fork: ($st.fork_dir) · bot repo: ($st.repo) · log: ($st.log_path)"
     if $st.mode == "dryrun" {
         log $st "DRYRUN: real (read-only) sanity + narration — NO quit, NO build/swap, NO open, NO retire, NO Telegram."
     }
     announce $st $"🤖 Auto deploy \(($st.mode)\): daemon-local channel — phase 0/6 sanity..."
 
-    # El equivalente del trap EXIT del bash: una sola línea final, para TODOS
-    # los exits (0/3/4 del autómata; 1 para lo inesperado, como el set -e).
+    # The equivalent of bash's EXIT trap: one single final line, for ALL
+    # the exits (0/3/4 of the automaton; 1 for the unexpected, like set -e).
     let code = try {
         let st2 = (cutover $st)
         log $st2 $"── exit rc=($st2.exit_code) \(log: ($st2.log_path)\)"
         $st2.exit_code
     } catch {|e|
-        log $st $"── exit rc=1 \(log: ($st.log_path)\) — error inesperado: ($e.msg)"
+        log $st $"── exit rc=1 \(log: ($st.log_path)\) — unexpected error: ($e.msg)"
         1
     }
     exit $code
