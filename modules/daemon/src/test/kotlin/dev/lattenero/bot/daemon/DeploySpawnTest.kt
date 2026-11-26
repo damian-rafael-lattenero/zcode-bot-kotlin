@@ -129,7 +129,7 @@ class DeploySpawnTest {
             beat = {},
         )
         val e = assertFailsWith<IllegalStateException> { spawn.spawn() }
-        assertContains(e.message.orEmpty(), "ya está CORRIENDO")
+        assertContains(e.message.orEmpty(), "already RUNNING")
         assertContains(e.message.orEmpty(), DeploySpawn.JOB_LABEL)
         // NOTHING touched launchd beyond the pre-check: no bootout, no bootstrap
         assertEquals(0, calls.count { it.first() == "bootout" })
@@ -137,7 +137,7 @@ class DeploySpawnTest {
     }
 
     // 2026-11-10 — THE OWNER'S FALSE POSITIVE: the second fork deploy
-    // finished at 17:19 and the next tap was refused «ya está CORRIENDO»
+    // finished at 17:19 and the next tap was refused «already RUNNING»
     // because the log was still fresh. The EXIT RECEIPT outranks the log.
 
     @Test
@@ -196,7 +196,7 @@ class DeploySpawnTest {
             beat = {},
         )
         val e = assertFailsWith<IllegalStateException> { spawn.spawn() }
-        assertContains(e.message.orEmpty(), "ya está CORRIENDO")
+        assertContains(e.message.orEmpty(), "already RUNNING")
         assertEquals(0, calls.count { it.first() == "bootout" })
         assertEquals(0, calls.count { it.first() == "bootstrap" })
     }

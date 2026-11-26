@@ -11,9 +11,9 @@ import kotlinx.serialization.json.JsonPrimitive
 
 /**
  * The live view's VERBS, backed by the SPECTATOR's own classification
- * (the owner, 29/10: «cada thinking debe ser distinto: el thinking
- * general, el thinking por read, por write, y por cada accion que tenga
- * zcode, mcps, shell etc») — REUSED, never duplicated: [ToolBox.familyOf]
+ * (the owner, 29/10: «each thinking must be different: the general
+ * thinking, the thinking per read, per write, and per each action zcode
+ * has, mcps, shell etc» [translated]) — REUSED, never duplicated: [ToolBox.familyOf]
  * is the SAME table the final boxes render by.
  */
 val LIVE_VERBS: ToolVerbifier = ToolVerbifier { name, input, isMcp ->
@@ -22,14 +22,14 @@ val LIVE_VERBS: ToolVerbifier = ToolVerbifier { name, input, isMcp ->
             ToolVerb("🔌", "mcp", name.substringAfter("mcp__", name))
 
         else -> when (ToolBox.familyOf(name)) {
-            // the owner's 5/11 words: «Ejecutando Bash, o Haciendo Lectura,
-            // o haciendo escritura» — the card's NOW line speaks Spanish
-            ToolBox.Family.READ -> ToolVerb("📖", "leyendo", input?.let(ToolBox::filePathOf).orEmpty())
-            ToolBox.Family.WRITE -> ToolVerb("✏️", "escribiendo", input?.let(ToolBox::filePathOf).orEmpty())
-            ToolBox.Family.EDIT -> ToolVerb("✏️", "editando", input?.let(ToolBox::filePathOf).orEmpty())
-            ToolBox.Family.SHELL -> ToolVerb("⚡", "ejecutando bash", input?.let(::cmdOf).orEmpty())
-            ToolBox.Family.SUBAGENT -> ToolVerb("🤖", "subagente")
-            ToolBox.Family.SEARCH -> ToolVerb("🔎", "buscando", input?.let(::patternOf).orEmpty())
+            // the owner's 5/11 words: «Executing Bash, or Doing Reading,
+            // or doing writing» [translated] — the card's NOW line speaks English
+            ToolBox.Family.READ -> ToolVerb("📖", "reading", input?.let(ToolBox::filePathOf).orEmpty())
+            ToolBox.Family.WRITE -> ToolVerb("✏️", "writing", input?.let(ToolBox::filePathOf).orEmpty())
+            ToolBox.Family.EDIT -> ToolVerb("✏️", "editing", input?.let(ToolBox::filePathOf).orEmpty())
+            ToolBox.Family.SHELL -> ToolVerb("⚡", "running bash", input?.let(::cmdOf).orEmpty())
+            ToolBox.Family.SUBAGENT -> ToolVerb("🤖", "subagent")
+            ToolBox.Family.SEARCH -> ToolVerb("🔎", "searching", input?.let(::patternOf).orEmpty())
             ToolBox.Family.TODO -> ToolVerb("📋", "todos")
             ToolBox.Family.OTHER -> ToolVerb("🔧", name, input?.let(ToolBox::filePathOf).orEmpty())
         }

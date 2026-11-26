@@ -108,15 +108,15 @@ class SteerTest {
         val (bc, fake) = commands(ops(active = listOf("task-77")))
         val reply = bc.handle("/steer cambiá el enfoque a la API", 1L)!!
         assertEquals("task-77" to "cambiá el enfoque a la API", fake.steered.single())
-        assertTrue("Steer entregado" in reply.text, reply.text)
-        assertTrue("DENTRO del turno" in reply.text)
+        assertTrue("Steer delivered" in reply.text, reply.text)
+        assertTrue("INSIDE the running turn" in reply.text)
     }
 
     @Test
     fun steerOnAnIdleConversationSpeaksTheTruth() = runBlocking {
         val (bc, _) = commands(ops(active = emptyList()))
         val reply = bc.handle("/steer arrancá por la config", 2L)!!
-        assertTrue("no tenía turno corriendo" in reply.text, reply.text)
+        assertTrue("had no turn running" in reply.text, reply.text)
     }
 
     @Test
@@ -128,7 +128,7 @@ class SteerTest {
         val bc = BotCommands(ops = fake, hub = hub, daemonReset = { "noop" })
         val reply = bc.handle("/steer cambiá el rumbo", 9L)!!
         assertEquals("sess_subagent_agent_9" to "cambiá el rumbo", fake.steered.single())
-        assertTrue("subagente" in reply.text, reply.text)
+        assertTrue("subagent" in reply.text, reply.text)
         assertTrue("agent_9" in reply.text, "the child must be NAMED: ${reply.text}")
     }
 
@@ -136,8 +136,8 @@ class SteerTest {
     fun steerOnAnOldForkRefusesByTheHostsName() = runBlocking {
         val (bc, _) = commands(ops().apply { steerAnswer = SteerAnswer.Failed("unknown_request", "unknown request type") })
         val reply = bc.handle("/steer probando", 3L)!!
-        assertTrue("no conoce el frame «steer»" in reply.text, reply.text)
-        assertTrue("falta deployar el fork" in reply.text)
+        assertTrue("does not know the «steer» frame" in reply.text, reply.text)
+        assertTrue("the updated fork needs a deploy" in reply.text)
     }
 
     @Test
@@ -158,7 +158,7 @@ class SteerTest {
     fun bareSteerSpeaksTheUsage() = runBlocking {
         val (bc, fake) = commands(ops())
         val reply = bc.handle("/steer", 6L)!!
-        assertTrue("/steer &lt;texto&gt;" in reply.text, reply.text) // ESCAPED — a raw <texto> was the 2/11 poison (400 forever)
+        assertTrue("/steer &lt;text&gt;" in reply.text, reply.text) // ESCAPED — a raw <texto> was the 2/11 poison (400 forever)
         assertEquals(0, fake.steered.size) // nothing fired on a bare command
     }
 

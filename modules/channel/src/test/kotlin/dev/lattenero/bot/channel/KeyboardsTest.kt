@@ -84,7 +84,7 @@ class KeyboardsTest {
     fun tasksKeyboardSkipsTheStoreGhostsAndCarriesTheFreshOnes() {
         // the owner's 3/11: two «MISSION:» ghosts of a killed batch rode
         // every /tasks as blue buttons — a stale store row is a DEAD agent
-        // the CLI never closed; /subagents «inactivos» is its only home
+        // the CLI never closed; /subagents «inactive» is its only home
         val kb = Keyboards.tasksKeyboard(
             rows = emptyList(),
             running = emptySet(),
@@ -221,7 +221,7 @@ class KeyboardsTest {
         assertEquals("dep:whatsapp", row[2].jsonObject["callback_data"]!!.jsonPrimitive.content)
         assertEquals("🧠 Brain", row[3].jsonObject["text"]!!.jsonPrimitive.content)
         assertEquals("dep:brain", row[3].jsonObject["callback_data"]!!.jsonPrimitive.content)
-        assertEquals("🚀 Todos", row[4].jsonObject["text"]!!.jsonPrimitive.content)
+        assertEquals("🚀 All", row[4].jsonObject["text"]!!.jsonPrimitive.content)
         assertEquals("dep:all", row[4].jsonObject["callback_data"]!!.jsonPrimitive.content)
         // the datas ride the 64-byte law with room to spare
         assertTrue(Keyboards.callbackDataValid("dep:bot"))
@@ -246,7 +246,7 @@ class KeyboardsTest {
         val rows = kb.jsonObject["inline_keyboard"]!!.jsonArray
         assertEquals(3, rows.size)
         assertEquals(
-            "✅ 🔉 normal — bloques CoT + cierres de tools",
+            "✅ 🔉 normal — CoT blocks + tool closes",
             rows[1].jsonArray[0].jsonObject["text"]!!.jsonPrimitive.content,
         )
         assertEquals("vb:normal", rows[1].jsonArray[0].jsonObject["callback_data"]!!.jsonPrimitive.content)
@@ -324,10 +324,10 @@ class KeyboardsTest {
 
     @Test
     fun theDetailCardActionRowIsTheGuideSReferenceOrder() {
-        // 👁 attach · ✍️ orden · ⏹️ stop — the reference row every other row aligns to
+        // 👁 attach · ✍️ order · ⏹️ stop — the reference row every other row aligns to
         val row = rowsOf(Keyboards.subagentDetailKeyboard(alive = true, tail = "abc")!!).single()
         assertEquals(
-            listOf("👁 attach" to "sa:abc", "✍️ orden" to "so:abc", "⏹️" to "sst:abc"),
+            listOf("👁 attach" to "sa:abc", "✍️ order" to "so:abc", "⏹️" to "sst:abc"),
             row,
         )
     }

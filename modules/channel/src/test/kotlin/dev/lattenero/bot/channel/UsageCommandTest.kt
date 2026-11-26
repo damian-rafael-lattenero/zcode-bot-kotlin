@@ -15,7 +15,7 @@ import kotlin.test.assertTrue
  * degradation: no bound conversation → 📭, channel down → 📡, zero total →
  * the fresh-conversation truth, a broken shape → the ⚠️ — zero invented
  * numbers, ever. Python's /usage was today-across-sessions; the query has
- * no time filter, so the card says «acumulado» — the honest word.
+ * no time filter, so the card says «cumulative» — the honest word.
  */
 class UsageCommandTest {
 
@@ -111,9 +111,9 @@ class UsageCommandTest {
         o.answers["taskUsage"] = usage
         val text = commands(o, OneRowHistory()).handle("/usage", 1L)!!.text
         assertEquals(
-            "📈 <b>Uso de «B4 pair»</b> — acumulado de la conversación\n" +
+            "📈 <b>Usage of «B4 pair»</b> — cumulative for the conversation\n" +
                 "• input 30.2M · output 5.24M · reasoning 12M\n" +
-                "• cache creación 90M · lectura 29.16M\n" +
+                "• cache creation 90M · read 29.16M\n" +
                 "<b>Total: 1,234 req · 166.6M tokens</b>",
             text,
         )
@@ -149,12 +149,12 @@ class UsageCommandTest {
     @Test
     fun errorsAppearOnlyWhenNonZero() {
         val clean = BotCommands.renderUsage(usage, "t")
-        assertFalse("errores" in clean)
+        assertFalse("errors" in clean)
         val failing = BotCommands.renderUsage(
             usage.replace("\"modelErrorCount\":0", "\"modelErrorCount\":7"),
             "t",
         )
-        assertTrue("· 7 errores" in failing)
+        assertTrue("· 7 errors" in failing)
     }
 
     // ---- the honesty ladder ---------------------------------------------------
@@ -179,7 +179,7 @@ class UsageCommandTest {
             "t",
         )
         assertEquals(
-            "📈 <b>Uso de «t»</b>\n" + BotCommands.USAGE_EMPTY,
+            "📈 <b>Usage of «t»</b>\n" + BotCommands.USAGE_EMPTY,
             text,
         )
     }

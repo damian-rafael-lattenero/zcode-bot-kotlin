@@ -5,7 +5,7 @@ package dev.lattenero.bot.channel
  * tail>`) resolved against the facts the caller already holds — the live
  * dispatch lanes FIRST (the exact `sa:` attach order), then the store's
  * running rows. The Stop itself (the awaited `ChannelQuery.Stop`) is the
- * edge's business ([BotCommands.subagentStop]); this núcleo stays
+ * edge's business ([BotCommands.subagentStop]); this core stays
  * testable with no channel, no store, no clock beyond the given nowMs.
  */
 sealed interface SubagentStopTarget {

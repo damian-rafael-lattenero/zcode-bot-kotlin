@@ -11,8 +11,8 @@ private const val OWNER = 7L
 
 /**
  * The /tasks row tap (`t:<sid>`): ATTACH to that task's live pipe — the
- * owner's 30/10 rule («yo quiero seleccionar cualquier task y empezar a
- * leer la tubería... es el feature principal casi»). The watch is pure
+ * owner's 30/10 rule («I want to select any task and start
+ * reading the pipe... it is almost the main feature» [translated]). The watch is pure
  * reading: no ownership, refused by nothing, even mid-turn of ANOTHER
  * conversation; the bind attempt rides along and may refuse honestly.
  * The subscribe frame is the contract — the fork streams ANY subscribed
@@ -110,7 +110,7 @@ class TaskAttachTest {
     private val app = "/Users/damian/Projects/app"
 
     private val rows = listOf(
-        TaskRow(sid = "task-77", title = "unificador", ws = app),
+        TaskRow(sid = "task-77", title = "unifier", ws = app),
         TaskRow(sid = "task-02", title = "otra", ws = app),
     )
 
@@ -167,11 +167,11 @@ class TaskAttachTest {
         // THE feature: the pipe attach happened, whatever the bind did
         assertEquals(listOf("task-77" to app), ops.subscribed)
         assertTrue("👁" in reply.text)
-        assertTrue("«unificador» en vivo" in reply.text)
+        assertTrue("«unifier» live" in reply.text)
         assertTrue("/last" in reply.text) // the honest history note
         // the bind confirmed BY READ-BACK (it was already the active task —
         // the 5/11 law: the tap's next message is the 100%-sure confirmation)
-        assertTrue("✅ CONFIRMADO: «unificador» es la conversación activa" in reply.text)
+        assertTrue("✅ CONFIRMED: «unifier» is the active conversation" in reply.text)
     }
 
     @Test
@@ -181,9 +181,9 @@ class TaskAttachTest {
         val ops = FakeOps(draftStatus).apply { answers["activeTaskIds"] = """[]""" }
         val reply = commands(ops).onCallback("t:task-77", 5L, OWNER)!!
         assertEquals(listOf("task-77" to app), ops.subscribed)
-        assertTrue("«unificador» suscripto" in reply.text)
-        assertTrue("próximo turno" in reply.text)
-        assertTrue("✅ CONFIRMADO" in reply.text) // the bind read back from the fork's own state
+        assertTrue("«unifier» subscribed" in reply.text)
+        assertTrue("next turn" in reply.text)
+        assertTrue("✅ CONFIRMED" in reply.text) // the bind read back from the fork's own state
     }
 
     @Test
@@ -229,7 +229,7 @@ class TaskAttachTest {
         assertEquals(listOf("task-77" to app), ops.subscribed) // the attach happened
         assertTrue("👁" in reply.text)
         assertTrue("🚧" in reply.text, "the project boundary speaks, not the routing boilerplate")
-        assertTrue("no reconoce ese workspace" in reply.text)
+        assertTrue("does not recognize that workspace" in reply.text)
         assertTrue(ops.inbound.any { it.startsWith("/project ") }, "the ladder tried the workspace move")
         assertTrue("send text first" !in reply.text, "the router's line NEVER rides a tap")
     }
@@ -422,8 +422,8 @@ class TaskAttachTest {
         hub.apply(streamEvent("task-02", """{"type":"tool_call","toolId":"$laneId","toolName":"Task"}""", 1), 1_000_000L)
         val reply = bc.onCallback("sa:$laneTail", 7L, OWNER)!!
         assertEquals(laneId, hub.watchedLaneId())
-        assertTrue("Subagente" in reply.text)
-        assertTrue("misma carta que una task" in reply.text)
+        assertTrue("Subagent" in reply.text)
+        assertTrue("the same card as a task" in reply.text)
     }
 
     @Test
@@ -464,7 +464,7 @@ class TaskAttachTest {
         // the REAL link: subscribed to the CHILD's session, card pinned to it
         assertEquals(listOf("sess_subagent_$agentId" to app), ops.subscribed)
         assertEquals("sess_subagent_$agentId", hub.peekPin())
-        assertTrue("su turno COMPLETO" in reply.text)
+        assertTrue("its WHOLE turn" in reply.text)
     }
 
     @Test
@@ -489,7 +489,7 @@ class TaskAttachTest {
             defaultWorkspacePath = "/Users/damian/.zcode/workspace/default",
         )
         val reply = bc.onCallback("sa:ghost", 5L, OWNER)!!
-        assertTrue("💀" in reply.text && "murió sin cerrar" in reply.text)
+        assertTrue("💀" in reply.text && "died without closing" in reply.text)
         assertEquals(emptyList(), ops.subscribed, "nothing subscribes to a dead agent")
         assertNull(hub.peekPin(), "the silence is never pinned")
     }
@@ -554,7 +554,7 @@ class TaskAttachTest {
         assertTrue(ops.subscribed.isEmpty())
         assertEquals(laneId, hub.watchedLaneId())
         assertNull(hub.peekPin())
-        assertTrue("mirando solo su stream" in reply.text)
+        assertTrue("watching only its stream" in reply.text)
     }
 
     @Test
@@ -621,7 +621,7 @@ class TaskAttachTest {
         assertTrue("fix the /plan menu" in kb)
         assertTrue("Task" in kb) // no description → the honest fallback
         // the name tap opens the DETAIL CARD (the full name + the actions —
-        // the row label caps, the missions are longísimos)
+        // the row label caps, the missions are very long)
         assertTrue("sn:${"toolu_dispatchaaaa1111".takeLast(16)}" in kb)
         assertTrue("sn:${"toolu_dispatchbbbb2222".takeLast(16)}" in kb)
         assertTrue("sao:" in kb) // the view switch rides along
@@ -656,19 +656,19 @@ class TaskAttachTest {
             1_000_000L,
         )
         val arm = bc.onCallback("so:$laneTail", 9L, OWNER)!!
-        assertTrue("Armado" in arm.text) // the arm rides the attach
+        assertTrue("Armed" in arm.text) // the arm rides the attach
         assertEquals(1, ops.subscribed.size) // the tap ALSO attaches
         // the FIRST free text after the arm is the ORDER — a BUSY child
         // earns the ⚡/⏳ question first, then the tap flies
-        val question = bc.handle("cambiale el título a la carta", 10L)!!
-        assertTrue("Empujar" in question.text, "got: $question")
+        val question = bc.handle("change the card's title", 10L)!!
+        assertTrue("Push" in question.text, "got: $question")
         val ack = bc.onCallback("odp:1", 10L, OWNER)!!
-        assertTrue("Orden entregada" in ack.text, "got: $ack")
-        assertEquals(listOf("cambiale el título a la carta" to "sess_subagent_agent_x"), ops.orders)
+        assertTrue("Order delivered" in ack.text, "got: $ack")
+        assertEquals(listOf("change the card's title" to "sess_subagent_agent_x"), ops.orders)
         // the arm is ONE shot: the next text rides the normal routing again
-        val second = bc.handle("esto ya va a la conversación", 11L)
+        val second = bc.handle("this now goes to the conversation", 11L)
         assertEquals(1, ops.orders.size)
-        assertTrue("Orden entregada" !in (second?.text ?: ""))
+        assertTrue("Order delivered" !in (second?.text ?: ""))
     }
 
     @Test
@@ -704,14 +704,14 @@ class TaskAttachTest {
         )
         bc.onCallback("so:$laneTail", 9L, OWNER)!!
         // BUSY → the bot ASKS (the owner's 23:12 law), never cuts on its own
-        val question = bc.handle("cortá y leé esto", 10L)!!
-        assertTrue("Empujar" in question.text, "got: $question")
-        assertTrue("Encolar" in question.text, question.text)
+        val question = bc.handle("cut and read this", 10L)!!
+        assertTrue("Push" in question.text, "got: $question")
+        assertTrue("Queue" in question.text, question.text)
         assertEquals(0, ops.orders.size, "nothing flew before the owner's choice")
         val ack = bc.onCallback("odp:1", 11L, OWNER)!!
-        assertTrue("Le corté el turno" in ack.text, "got: $ack")
-        assertTrue("AHORA" in ack.text, ack.text)
-        assertEquals(listOf("cortá y leé esto" to "sess_subagent_agent_x"), ops.orders)
+        assertTrue("I cut" in ack.text, "got: $ack")
+        assertTrue("NOW" in ack.text, ack.text)
+        assertEquals(listOf("cut and read this" to "sess_subagent_agent_x"), ops.orders)
     }
 
     @Test
@@ -744,11 +744,11 @@ class TaskAttachTest {
             1_000_000L,
         )
         bc.onCallback("so:$laneTail", 9L, OWNER)!!
-        bc.handle("dejalo para después", 10L)!!
+        bc.handle("leave it for later", 10L)!!
         val ack = bc.onCallback("odq:1", 11L, OWNER)!!
-        assertTrue("Orden entregada" in ack.text, "got: $ack")
-        assertTrue("Le corté el turno" !in ack.text)
-        assertEquals(listOf("dejalo para después" to "sess_subagent_agent_x"), ops.orders)
+        assertTrue("Order delivered" in ack.text, "got: $ack")
+        assertTrue("I cut" !in ack.text)
+        assertEquals(listOf("leave it for later" to "sess_subagent_agent_x"), ops.orders)
     }
 
     @Test
@@ -761,7 +761,7 @@ class TaskAttachTest {
             runningSubs = listOf(sess)
             // a REAL running row: the store touches lastMs continuously — a
             // frozen one is the GHOST the ghost law refuses (its own test)
-            runningTitled = listOf(RunningSubagent(sess, "cazar la causa raíz del bus", lastMs = 999_000))
+            runningTitled = listOf(RunningSubagent(sess, "hunt the bus's root cause", lastMs = 999_000))
         }
         val hub = LiveHub() // an EMPTY hub — the stream never saw the lane
         val bc = BotCommands(
@@ -775,15 +775,15 @@ class TaskAttachTest {
         )
         val reply = bc.handle("/subagents", 3L)!!
         val data = reply.markup.toString()
-        assertTrue("cazar la causa raíz" in data, "the store's row must render: $data")
+        assertTrue("hunt the bus's root cause" in data, "the store's row must render: $data")
         assertTrue("sn:${sess.takeLast(16)}" in data) // the name tap carries the session tail
         // the name tap: the DETAIL CARD — then the card's attach subscribes
         val card = bc.onCallback("sn:${sess.takeLast(16)}", 4L, OWNER)!!
-        assertTrue("cazar la causa raíz del bus" in card.text, "the full title: ${card.text}")
+        assertTrue("hunt the bus's root cause" in card.text, "the full title: ${card.text}")
         val attach = bc.onCallback("sa:${sess.takeLast(16)}", 5L, OWNER)!!
         assertEquals(listOf(sess to app), ops.subscribed)
         assertEquals(sess, hub.peekPin())
-        assertTrue("attachado" in attach.text)
+        assertTrue("attached" in attach.text)
     }
 
     @Test
@@ -793,10 +793,10 @@ class TaskAttachTest {
         val arm = bc.onCallback("so:task-77", 8L, OWNER)!!
         // the task's OWN session: subscribed (the pipe) + armed (the order)
         assertEquals(listOf("task-77" to app), ops.subscribed)
-        assertTrue("sin bind" in arm.text)
-        val ack = bc.handle("la orden directa", 9L)!!
-        assertTrue("Orden entregada" in ack.text)
-        assertEquals(listOf("la orden directa" to "task-77"), ops.orders)
+        assertTrue("no bind" in arm.text)
+        val ack = bc.handle("the direct order", 9L)!!
+        assertTrue("Order delivered" in ack.text)
+        assertEquals(listOf("the direct order" to "task-77"), ops.orders)
     }
 
     @Test
@@ -840,11 +840,11 @@ class TaskAttachTest {
             defaultWorkspacePath = "/Users/damian/.zcode/workspace/default",
         )
         val arm = bc.onCallback("so:zzzzzzzzzzzzzzzz", 9L, OWNER)!!
-        assertTrue("no da señal viva" in arm.text, "got: ${arm.text}")
+        assertTrue("gives no live signal" in arm.text, "got: ${arm.text}")
         assertTrue(ops.subscribed.isEmpty(), "a refused arm attaches no pipe")
         assertEquals(0, ops.orders.size)
         // the next text is the OWNER's own words, routed normally
-        bc.handle("esto va a la conversación abierta", 10L)
+        bc.handle("this goes to the open conversation", 10L)
         assertEquals(0, ops.orders.size)
         assertTrue(ops.inbound.isNotEmpty(), "the text rode the router, not a ghost inbox")
     }
@@ -877,18 +877,18 @@ class TaskAttachTest {
             1_000_000L,
         )
         val arm = bc.onCallback("so:$laneTail", 9L, OWNER)!!
-        assertTrue("Armado" in arm.text, "got: ${arm.text}")
+        assertTrue("Armed" in arm.text, "got: ${arm.text}")
         // the child ENDS while the arm sits armed: the card is pinned to
         // the child's stream (the sa: full form — the hub drops the
         // parent's close frame whole), so the STORE is the signal that
         // remains, and it goes quiet
         history.runningTitled = emptyList()
         history.runningSubs = emptyList()
-        val ack = bc.handle("tarde — ya murió", 10L)!!
-        assertTrue("no da señal viva" in ack.text, "got: $ack")
+        val ack = bc.handle("late — it already died", 10L)!!
+        assertTrue("gives no live signal" in ack.text, "got: $ack")
         assertEquals(0, ops.orders.size, "the order NEVER flies into a dead inbox")
         // the shot is spent: the next text rides the router
-        bc.handle("y esto ya es texto normal", 11L)
+        bc.handle("and this is normal text now", 11L)
         assertEquals(0, ops.orders.size)
     }
 
@@ -910,18 +910,18 @@ class TaskAttachTest {
             history = history,
             defaultWorkspacePath = "/Users/damian/.zcode/workspace/default",
         )
-        history.runningTitled = listOf(RunningSubagent(sess, "mission larga", lastMs = 1_000_000L - 60_000))
+        history.runningTitled = listOf(RunningSubagent(sess, "long mission", lastMs = 1_000_000L - 60_000))
         val arm = bc.onCallback("so:zzzzzzzzzzzzzzzz", 9L, OWNER)!!
-        assertTrue("Armado" in arm.text, "a fresh row arms: ${arm.text}")
-        history.runningTitled = listOf(RunningSubagent(sess, "mission larga", lastMs = 1_000_000L - 16 * 60_000))
-        val ack = bc.handle("se te congeló?", 10L)!!
-        assertTrue("no da señal viva" in ack.text, "got: $ack")
+        assertTrue("Armed" in arm.text, "a fresh row arms: ${arm.text}")
+        history.runningTitled = listOf(RunningSubagent(sess, "long mission", lastMs = 1_000_000L - 16 * 60_000))
+        val ack = bc.handle("did it freeze?", 10L)!!
+        assertTrue("gives no live signal" in ack.text, "got: $ack")
         assertEquals(0, ops.orders.size)
     }
 
     @Test
     fun theDetailCardShowsTheFullNameAndTheFreshActionRow() = runBlocking {
-        // the 2/11 complaint: the spawn descriptions are longísimos and the
+        // the 2/11 complaint: the spawn descriptions are very long and the
         // row label caps — the sn: tap answers the FULL name + the actions
         val ops = FakeOps(boundStatus).apply { answers["activeTaskIds"] = """[]""" }
         val hub = LiveHub()
@@ -934,7 +934,7 @@ class TaskAttachTest {
             history = FakeHistory(rows),
             defaultWorkspacePath = "/Users/damian/.zcode/workspace/default",
         )
-        val longMission = "investigar la causa raíz del bus caído y proponer el ratchet del outbox"
+        val longMission = "investigate the downed bus's root cause and propose the outbox ratchet"
         hub.apply(
             streamEvent(
                 "task-02",
@@ -952,7 +952,7 @@ class TaskAttachTest {
         assertTrue(longMission !in rowLabel, "the row label stays capped")
         val card = bc.onCallback("sn:$laneTail", 9L, OWNER)!!
         assertTrue(longMission in card.text, "the FULL mission in the card: ${card.text}")
-        assertTrue("⏳ vivo hace" in card.text)
+        assertTrue("⏳ alive for" in card.text)
         val datas = card.markup.toString()
         assertTrue("sa:${laneId.takeLast(16)}" in datas, "attach lives on the card: $datas")
         assertTrue("so:${laneId.takeLast(16)}" in datas)
@@ -991,14 +991,14 @@ class TaskAttachTest {
             1_000_000L,
         )
         val card = bc.onCallback("sn:$laneTail", 9L, OWNER)!!
-        assertTrue("💀 terminó" in card.text, "got: ${card.text}")
+        assertTrue("💀 ended" in card.text, "got: ${card.text}")
         assertEquals(null, card.markup, "a dead card earns no buttons")
     }
 
     @Test
-    fun aForkRejectionRidesBackHonestNeverAsEntregada() = runBlocking {
+    fun aForkRejectionRidesBackHonestNeverAsDelivered() = runBlocking {
         // the 2/11 lie, typed: the fork rejected the order 7ms after the
-        // wire (proto.sessionNotFound) while the bot said «Orden entregada».
+        // wire (proto.sessionNotFound) while the bot said «Order delivered».
         // The awaited order speaks the fork's verdict VERBATIM instead.
         val ops = FakeOps(boundStatus).apply { answers["activeTaskIds"] = """[]""" }
         val history = FakeHistory(rows).apply {
@@ -1024,18 +1024,18 @@ class TaskAttachTest {
             1_000_000L,
         )
         val arm = bc.onCallback("so:$laneTail", 9L, OWNER)!!
-        assertTrue("Armado" in arm.text)
+        assertTrue("Armed" in arm.text)
         ops.orderAnswer = InboundAnswer.Failed(
             code = "internal",
             message = "order to sess_subagent_agent_x failed: v4 command sendText rejected (proto.sessionNotFound)",
         )
         // the child is BUSY: the bot asks first (⚡/⏳) — the ⚡ tap flies
-        val question = bc.handle("hace un resumen", 10L)!!
-        assertTrue("Empujar" in question.text, "got: $question")
+        val question = bc.handle("summarize it", 10L)!!
+        assertTrue("Push" in question.text, "got: $question")
         val ack = bc.onCallback("odp:1", 11L, OWNER)!!
-        assertTrue("NO entró" in ack.text, "got: $ack")
+        assertTrue("did NOT go in" in ack.text, "got: $ack")
         assertTrue("sessionNotFound" in ack.text, "the verbatim rides: ${ack.text}")
-        assertTrue("NO voló" in ack.text)
+        assertTrue("did NOT fly" in ack.text)
         assertEquals(1, ops.orders.size, "the attempt happened")
     }
 
@@ -1062,6 +1062,6 @@ class TaskAttachTest {
         val lane = laneWith("Agent", laneId, longMission)
         val text = Keyboards.subagentDetailText(lane, nowMs = 1_060_000L)
         assertTrue(longMission in text, text)
-        assertTrue("⏳ vivo hace 1m" in text, text)
+        assertTrue("⏳ alive for 1m" in text, text)
     }
 }

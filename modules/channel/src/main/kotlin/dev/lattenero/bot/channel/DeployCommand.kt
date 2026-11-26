@@ -2,8 +2,8 @@ package dev.lattenero.bot.channel
 
 /**
  * B6 — /deploy's pure core, THE ONE-TAP LAW (the owner's order, 4/11:
- * «command deploy, elegir que deployar y esa eleccion ya empieza el
- * deploy… una única vez… no se puede volver a apretar esa botonera»).
+ * «command deploy, choose what to deploy and that choice already starts the
+ * deploy… a single time… that button row cannot be pressed again» [translated]).
  * The two-step machine DIED: no arm, no window, no confirm half — the tap
  * IS the confirmation. What stays:
  *
@@ -62,7 +62,7 @@ class DeployCommand(
          * is its own launchd job, and siblings survive each other's
          * bootouts; the order is the survival law, not a style choice — the
          * same wave `zcode-deploy-all` runs). The owner's rename, 10/11:
-         * «no debería decir "ambos", sino "todos"».
+         * «it should not say "both", but "all"» [translated].
          */
         ALL,
     }

@@ -44,9 +44,9 @@ class ToolOutputPagesTest {
         val header = ToolOutputPages.headerOf("⚡ <b>Bash</b>", "ls -la", 42)
         assertTrue("⚡ <b>Bash</b>" in header)
         assertTrue("<code>ls -la</code>" in header)
-        assertTrue("42 líneas" in header)
-        assertTrue("tocar para ver" in header)
-        assertTrue("1 línea" in ToolOutputPages.headerOf("⚡ <b>Bash</b>", "", 1), "the singular speaks")
+        assertTrue("42 lines" in header)
+        assertTrue("tap to see" in header)
+        assertTrue("1 line" in ToolOutputPages.headerOf("⚡ <b>Bash</b>", "", 1), "the singular speaks")
     }
 
     @Test
@@ -54,7 +54,7 @@ class ToolOutputPagesTest {
         val text = (1..5000).joinToString("\n") { "x$it" }
         val pages = ToolOutputPages.pages(text, pageCp = 50)
         assertEquals(ToolOutputPages.MAX_PAGES + 1, pages.size)
-        assertTrue("no entra en Telegram" in pages.last())
+        assertTrue("does not fit in Telegram" in pages.last())
     }
 
     // ---- live card v2 §5/§6: the bash fence and the filename law ----
@@ -84,15 +84,15 @@ class ToolOutputPagesTest {
 
     @Test
     fun aMultilineInlineDetailNeverCollapsesIntoOneBlob() {
-        val header = ToolOutputPages.headerOf("⚡ <b>Bash</b>", "primera línea\nsegunda línea", 2)
-        assertTrue("<code>primera línea</code>" in header, header)
+        val header = ToolOutputPages.headerOf("⚡ <b>Bash</b>", "first line\nsegunda línea", 2)
+        assertTrue("<code>first line</code>" in header, header)
         assertTrue("segunda" !in header, "the blob is dead: $header")
     }
 
     @Test
     fun aFencedCommandRidesItsOwnBashBlockNeverInline() {
         val header = ToolOutputPages.headerOf("⚡ <b>Bash</b>", "", 27, fence = "ls\ndos líneas", language = "bash")
-        assertTrue("27 líneas" in header, header)
+        assertTrue("27 lines" in header, header)
         assertTrue(
             "<pre><code class=\"language-bash\">ls\ndos líneas</code></pre>" in header,
             "the command IS the block: $header",
@@ -100,7 +100,7 @@ class ToolOutputPagesTest {
         assertTrue("<code>ls" !in header, "the command never rides inline anymore: $header")
         // beyond the close cap: the head + the scissors, never a cut lie
         val capped = ToolOutputPages.headerOf("⚡ <b>Bash</b>", "", 1, fence = "y".repeat(1500), language = "bash")
-        assertTrue("✂️ … el comando completo va en el feed" in capped, "the head capped at 1000 cp: $capped")
+        assertTrue("✂️ … the full command goes in the feed" in capped, "the head capped at 1000 cp: $capped")
         assertTrue("y".repeat(1500) !in capped, "nothing beyond the cap rode: $capped")
     }
 

@@ -94,21 +94,21 @@ object QuotaAlerts {
         val label = snapshot.labels[plan] ?: plan
         val windows = (snapshot.marks[plan] as? PlanQuota.Mark.Seen)?.windows.orEmpty()
         val body = windows.joinToString(" · ") { w -> "${w.glyph} ${w.remainingPct ?: "?"}%" }
-        val inUse = if (plan == snapshot.plan) " — <b>es el plan en uso</b>" else ""
-        return "⚠️ Queda poco en <b>${dev.lattenero.bot.contracts.PyText.esc(label)}</b> ($body libre) — " +
-            "umbral ${thresholdPct}%$inUse"
+        val inUse = if (plan == snapshot.plan) " — <b>it is the plan in use</b>" else ""
+        return "⚠️ Running low on <b>${dev.lattenero.bot.contracts.PyText.esc(label)}</b> ($body free) — " +
+            "threshold ${thresholdPct}%$inUse"
     }
 
     private fun exhaustedText(snapshot: QuotaSnapshot, plan: String): String {
         val label = snapshot.labels[plan] ?: plan
         val note = (snapshot.marks[plan] as? PlanQuota.Mark.Seen)?.let { PlanQuota.blockedNote(it) }.orEmpty()
-        return "⛔ El plan en uso (<b>${dev.lattenero.bot.contracts.PyText.esc(label)}</b>) quedó sin tokens — " +
-            "$note · tocá ⭐ en /plan para pasar al primero con tokens"
+        return "⛔ The plan in use (<b>${dev.lattenero.bot.contracts.PyText.esc(label)}</b>) ran out of tokens — " +
+            "$note · tap ⭐ in /plan to move to the first one with tokens"
     }
 
     private fun limitText(reason: String): String {
         val text = reason.take(LIMIT_REASON_CAP)
-        return "🚫 El proveedor cortó el servicio: ${dev.lattenero.bot.contracts.PyText.esc(text)}"
+        return "🚫 The provider cut the service: ${dev.lattenero.bot.contracts.PyText.esc(text)}"
     }
 
     private const val LIMIT_REASON_CAP = 150

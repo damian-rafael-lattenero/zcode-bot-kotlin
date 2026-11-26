@@ -166,7 +166,8 @@ runbook refresh (B5).
 | Performance budgets | JMH where hot (render core), load smoke for the daemon |
 | Dependency hygiene | version catalog + versions plugin + Renovate/Dependabot |
 
-The last four were the ones missing from the list ("¿me falta algo más?"):
+The last four were the ones missing from the list ("¿me falta algo más?"
+[translated: "am I missing anything else?"]):
 chaos drills, golden replay, security of the new surfaces, and
 release/truth-gate discipline. The rest you already practiced in Python —
 this plan just gives each practice a tier or a tool.

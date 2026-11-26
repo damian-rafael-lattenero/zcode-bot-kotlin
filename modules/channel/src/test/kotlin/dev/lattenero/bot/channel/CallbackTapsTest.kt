@@ -143,7 +143,7 @@ class CallbackTapsTest {
             clock = { 1_000_000L },
         )
         val reply = bare.onCallback("cb:1", 2L, OWNER)!!
-        assertTrue("botón quedó de otro turno" in reply.text)
+        assertTrue("button belongs to another turn" in reply.text)
         assertTrue(o.queries.isEmpty())
         // one block sealed in the hub: the tap never touches it (the
         // registry is the publisher's world, the hub is the stream's)
@@ -168,7 +168,7 @@ class CallbackTapsTest {
             answers["stop"] = """{"stopped":["task-77"]}"""
         }
         val reply = commands(o).onCallback("intr:task-77", 1L, OWNER)!!
-        assertEquals("⚡ Interrumpido — tu mensaje entra ya.", reply.text)
+        assertEquals("⚡ Interrupted — your message goes in now.", reply.text)
         assertEquals(
             listOf<ChannelQuery>(ChannelQuery.Stop("task-77")),
             o.queries,
@@ -180,17 +180,17 @@ class CallbackTapsTest {
     fun aRefusedPushPointsAtTheHardWay() = runBlocking {
         val o = FakeOps().apply { answers["botStatus"] = status } // no canned stop -> Failed
         val reply = commands(o).onCallback("intr:task-77", 2L, OWNER)!!
-        assertTrue("⚠️ No pude interrumpir (internal)" in reply.text, reply.text)
-        assertTrue("/stop go es la vía dura" in reply.text)
+        assertTrue("⚠️ Could not interrupt (internal)" in reply.text, reply.text)
+        assertTrue("/stop go is the hard door" in reply.text)
     }
 
     @Test
     fun theEnqueueTapSteersTheParkedTextIntoTheRunningTurn() = runBlocking {
         val o = FakeOps().apply { answers["botStatus"] = status }
-        o.enqueueInbound("probá redis", "tg-3", 1_000L)
+        o.enqueueInbound("try redis", "tg-3", 1_000L)
         val reply = commands(o).onCallback("qgo:task-77:3", 3L, OWNER)!!
-        assertTrue("Encolado como steer" in reply.text, reply.text)
-        assertEquals(listOf("task-77" to "probá redis"), o.steered, "the tap IS the steer frame")
+        assertTrue("Queued as a steer" in reply.text, reply.text)
+        assertEquals(listOf("task-77" to "try redis"), o.steered, "the tap IS the steer frame")
         assertTrue(o.queue.isEmpty(), "the text LEFT the queue — the fork holds it now")
     }
 
@@ -200,10 +200,10 @@ class CallbackTapsTest {
             answers["botStatus"] = status
             steerAnswer = SteerAnswer.Unavailable
         }
-        o.enqueueInbound("probá redis", "tg-3", 1_000L)
+        o.enqueueInbound("try redis", "tg-3", 1_000L)
         val reply = commands(o).onCallback("qgo:task-77:3", 3L, OWNER)!!
         assertTrue("📡" in reply.text, reply.text)
-        assertTrue("volvió a la cola" in reply.text, reply.text)
+        assertTrue("went back to the queue" in reply.text, reply.text)
         assertEquals(1, o.queue.size, "a tap never loses the text — it went back to the queue")
         assertTrue(o.steered.isNotEmpty(), "the steer was attempted before the honest degrade")
     }
@@ -212,7 +212,7 @@ class CallbackTapsTest {
     fun theEnqueueTapOnADrainedTextAnswersHonestly() = runBlocking {
         val o = FakeOps().apply { answers["botStatus"] = status }
         val reply = commands(o).onCallback("qgo:task-77:3", 3L, OWNER)!!
-        assertTrue("Ya no está" in reply.text, reply.text)
+        assertTrue("Gone" in reply.text, reply.text)
         assertTrue(o.steered.isEmpty(), "nothing to steer — the drain took the text first")
     }
 
@@ -221,7 +221,7 @@ class CallbackTapsTest {
         val o = FakeOps().apply { answers["botStatus"] = status }
         // a card printed before the soft-steer law: data without the parked id
         val reply = commands(o).onCallback("qgo:task-77", 3L, OWNER)!!
-        assertTrue("versión anterior" in reply.text, reply.text)
+        assertTrue("older version" in reply.text, reply.text)
         assertTrue(o.steered.isEmpty(), "nothing flies without the text's identity")
     }
 
@@ -229,7 +229,7 @@ class CallbackTapsTest {
     fun theBackgroundTapSendsTheDemote() = runBlocking {
         val o = FakeOps().apply { answers["backgroundTurn"] = """{"backgrounded":["task-77"]}""" }
         val reply = commands(o).onCallback("bgd:task-77", 1L, OWNER)!!
-        assertEquals("🌙 Al fondo — sigue corriendo y el resultado llega al terminar.", reply.text)
+        assertEquals("🌙 In the background — it keeps running and the result arrives when it ends.", reply.text)
         assertEquals(
             listOf<ChannelQuery>(ChannelQuery.BackgroundTurn("task-77")),
             o.queries,
@@ -243,7 +243,7 @@ class CallbackTapsTest {
         // empty `backgrounded` is the honest «nothing to demote»
         val o = FakeOps().apply { answers["backgroundTurn"] = """{"backgrounded":[]}""" }
         val reply = commands(o).onCallback("bgd:task-77", 1L, OWNER)!!
-        assertEquals("🌙 Nada que pasar al fondo — la conversación no tiene un turno corriendo ahora.", reply.text)
+        assertEquals("🌙 Nothing to move to the background — the conversation has no turn running now.", reply.text)
     }
 
     @Test
@@ -263,7 +263,7 @@ class CallbackTapsTest {
         }
         val reply = commands(o, hubWithLane("toolu_dispatch1"))
             .onCallback("bgc:toolu_dispatch1", 1L, OWNER)!!
-        assertEquals("🌙 «Agent» al fondo — sigue corriendo y el resultado llega al terminar.", reply.text)
+        assertEquals("🌙 «Agent» moved to the background — it keeps running and the result arrives when it ends.", reply.text)
         assertEquals(
             listOf<ChannelQuery>(ChannelQuery.BackgroundToolCall("task-77", "toolu_dispatch1")),
             o.queries,
@@ -280,14 +280,14 @@ class CallbackTapsTest {
         }
         val reply = commands(o, hubWithLane("toolu_dispatch1"))
             .onCallback("bgc:toolu_dispatch1", 1L, OWNER)!!
-        assertEquals("🌙 Nada que pasar al fondo — «Agent» ya no corre en primer plano.", reply.text)
+        assertEquals("🌙 Nothing to move to the background — «Agent» no longer runs in the foreground.", reply.text)
     }
 
     @Test
     fun theLaneBackgroundTapWithoutARunningLaneIsHonestGone() = runBlocking {
         val o = FakeOps()
         val reply = commands(o).onCallback("bgc:toolu_gone", 1L, OWNER)!!
-        assertEquals("🌙 Ese agente ya no está corriendo en primer plano.", reply.text)
+        assertEquals("🌙 That agent is no longer running in the foreground.", reply.text)
         assertTrue(o.queries.isEmpty(), "no lane answers the tail — nothing flies to the channel")
     }
 
@@ -344,7 +344,7 @@ class CallbackTapsTest {
         val second = bc.handle("/nuclear go", 8L)!!
         val one = first.await()!!
         assertTrue(one.text.contains("slow ladder"), one.text)
-        assertEquals("☢️ Ya hay un nuclear corriendo — esperá el resumen antes de lanzar otro.", second.text)
+        assertEquals("☢️ A nuclear run is already going — wait for the summary before launching another.", second.text)
         // the gate LIFTS when the ladder ends: a third trigger runs again
         val third = bc.handle("/nuclear go", 9L)!!
         assertTrue(third.text.contains("slow ladder"), third.text)
@@ -408,9 +408,9 @@ class CallbackTapsTest {
             daemonReset = { "" },
             ownerUserId = { OWNER },
             clock = { 1L },
-            png = { "📡 no voló" },
+            png = { "📡 did not fly" },
         )
-        assertEquals("📡 no voló", failing.onCallback("png:9", 2L, OWNER)!!.text)
+        assertEquals("📡 did not fly", failing.onCallback("png:9", 2L, OWNER)!!.text)
         // unwired or unparseable ids answer the honest registry miss
         val bare = BotCommands(
             ops = FakeOps(),

@@ -71,8 +71,8 @@ class DeploySpawn(
 
     /** The honest busy answer — both detectors name what they saw. */
     private fun busyMessage(): String =
-        "el deploy job $label ya está CORRIENDO — hay un deploy en curso (launchd lo dice, " +
-            "o su log sigue vivo); esperá a que termine (el fork tarda ~15 min) y volvé a tocar"
+        "the deploy job $label is already RUNNING — a deploy is in flight (launchd says so, " +
+            "or its log is still alive); wait for it to end (the fork takes ~15 min) and tap again"
 
     /** The job's own log is being written RIGHT NOW: a mid-build deploy job. */
     private fun jobLogAlive(): Boolean =
@@ -86,7 +86,7 @@ class DeploySpawn(
      * 2. `last exit code` present — the job RAN AND EXITED: launchd's own
      *    receipt beats the log's freshness. THE OWNER'S LIVE FALSE POSITIVE,
      *    10/11: the second fork deploy finished at 17:19 and the third tap
-     *    at ~17:2x was refused «ya está CORRIENDO» because the log was
+     *    at ~17:2x was refused «already RUNNING» because the log was
      *    still fresh — a just-finished deploy is NOT a running one, and a
      *    finished one-shot re-bootouts cleanly.
      * 3. no exit receipt + a log written within [JOB_LOG_ALIVE_MS] — BUSY:

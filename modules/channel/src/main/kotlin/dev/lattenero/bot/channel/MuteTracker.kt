@@ -58,8 +58,8 @@ data class MuteWindow(val fromMs: Long, val toMs: Long, private val zone: ZoneId
         } else {
             "${mins} min"
         }
-        return "🔌 estuve desconectado ${from.format(TIME)}→${to.format(TIME)} " +
-            "($lasted — lo que escribiste en ese rato llega igual, Telegram lo guardó)"
+        return "🔌 I was disconnected ${from.format(TIME)}→${to.format(TIME)} " +
+            "($lasted — what you wrote in that stretch arrives anyway, Telegram saved it)"
     }
 
     private companion object {

@@ -227,7 +227,7 @@ class LastCompactQueueTest {
 
     @Test
     fun launchAnswersHonestlyWhenTheDrainBeatTheTap() = runBlocking {
-        assertTrue("Ya no está" in commands(ops()).onCallback("ql:tg-404", 1L, OWNER)!!.text)
+        assertTrue("Gone" in commands(ops()).onCallback("ql:tg-404", 1L, OWNER)!!.text)
     }
 
     @Test

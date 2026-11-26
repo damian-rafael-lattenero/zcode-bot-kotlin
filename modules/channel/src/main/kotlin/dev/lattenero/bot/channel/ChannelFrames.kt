@@ -64,8 +64,8 @@ sealed interface ChannelQuery {
      * The /context_window command's read: the conversation's REAL context
      * meter (used tokens + the model's window), the same source the fork's
      * own desktop meter restores — never estimated on either side. Wire
-     * shape is the fork's contextWindow query (9cfb39a9; aditivo:
-     * servidores viejos dicen unknown_query — el comando lo habla honesto).
+     * shape is the fork's contextWindow query (9cfb39a9; additive:
+     * old servers say unknown_query — the command speaks it honestly).
      */
     data class ContextWindow(val taskId: String, val workspacePath: String? = null) : ChannelQuery
 
@@ -96,8 +96,8 @@ sealed interface ChannelQuery {
      * The /plan command's read: the CURRENT selection (plan/model/effort)
      * for the conversation plus the app's global default and the available
      * plans with their models (the tap-to-change rows' source). Wire shapes
-     * are the fork's 3d07cace (aditivo: servidores viejos dicen
-     * unknown_query — el comando lo habla honesto).
+     * are the fork's 3d07cace (additive: old servers say
+     * unknown_query — the command speaks it honestly).
      */
     data class ModelSelection(val workspacePath: String? = null) : ChannelQuery
 
@@ -213,17 +213,17 @@ sealed interface ClientFrame {
         val text: String,
         val messageId: String?,
         val receivedAt: Long?,
-        /** La sesión DESTINO (una ORDEN del dueño a un subagente attachado) — null = el routing de siempre. */
+        /** The DESTINATION session (an ORDER from the owner to an attached subagent) — null = the usual routing. */
         val taskId: String? = null,
         /** ATTACHMENTS IN (30/10): the owner's photo/document, already on the daemon's disk. */
         val attachments: List<InboundAttachment> = emptyList(),
         /**
-         * EL BIND ATÓMICO (aditivo, fork d8510c23): presente → el host apunta
-         * el contexto con la ley del /task (frontera de proyecto + veredicto
-         * taskRunning) y entrega el texto DESPUÉS, en el MISMO frame; el
-         * refusal viaja como única reply del inbound_result. Solo se envía
-         * cuando el hello anunció el cap «bind» — un servidor viejo IGNORARÍA
-         * el campo y el texto caería en la conversación equivocada.
+         * THE ATOMIC BIND (additive, fork d8510c23): present → the host aims
+         * the context with /task's law (project boundary + the taskRunning
+         * verdict) and delivers the text AFTERWARDS, in the SAME frame; the
+         * refusal rides as the inbound_result's only reply. It is sent ONLY
+         * when the hello announced the «bind» cap — an old server would
+         * IGNORE the field and the text would land in the wrong conversation.
          */
         val bindTaskId: String? = null,
     ) : ClientFrame
@@ -233,20 +233,20 @@ sealed interface ClientFrame {
     data class Unsubscribe(val id: String, val taskId: String) : ClientFrame
 
     /**
-     * STEER (aditivo, 30/10): redirigir el turno EN CURSO — el texto entra
-     * al CLI con delivery «guide» (v4 sendText requestedDelivery=guide) y
-     * el admission lo inyecta DENTRO del turno vivo (turn.steerQueued →
-     * turn.steerDrained en el próximo límite de herramienta). El servidor
-     * responde con el MISMO ack que el inbound (inbound_result / error).
+     * STEER (additive, 30/10): redirect the turn IN FLIGHT — the text enters
+     * the CLI with delivery «guide» (v4 sendText requestedDelivery=guide) and
+     * the admission injects it INSIDE the live turn (turn.steerQueued →
+     * turn.steerDrained at the next tool boundary). The server
+     * answers with the SAME ack as the inbound (inbound_result / error).
      */
     data class Steer(val id: String, val taskId: String, val text: String) : ClientFrame
 
     /**
-     * LA RESPUESTA del dueño a una pregunta pendiente (el loop cerrado, el
-     * fork's respond frame — 6993d7e8): permission lleva el optionId de la
-     * opción del evento (+ su response devuelta tal cual); elicitation lleva
-     * action+content; plan (ExitPlanMode) viaja sin action — el fork la
-     * toma como accept. El messageId arma el dedupe del lado del host.
+     * THE OWNER'S ANSWER to a pending question (the closed loop, the
+     * fork's respond frame — 6993d7e8): permission carries the event
+     * option's optionId (+ its response returned as-is); elicitation carries
+     * action+content; plan (ExitPlanMode) travels without action — the fork
+     * takes it as accept. The messageId arms the dedupe on the host's side.
      */
     data class Respond(
         val id: String,
@@ -498,9 +498,9 @@ sealed interface ServerFrame {
     data class InboundResult(val id: String, val duplicate: Boolean, val replies: List<String>) : ServerFrame
 
     /**
-     * El ACK honesto del respond (el fork's 6993d7e8): ok=true SOLO tras el
-     * ACK del v4 command del host; el fallo viaja COMO ChannelError (con el
-     * mismo id) — el tap edita el mensaje de la pregunta con la verdad.
+     * The respond's honest ACK (the fork's 6993d7e8): ok=true ONLY after the
+     * host's v4 command ACK; the failure travels AS a ChannelError (with the
+     * same id) — the tap edits the question's message with the truth.
      */
     data class RespondResult(
         val id: String,

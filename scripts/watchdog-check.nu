@@ -105,7 +105,7 @@ def main [--loop-seconds: int = 0, --simulate-stale-minutes: int = 0]: nothing -
     # The forced path proves the whole circuit (runner → gist read →
     # Telegram send) without needing a real outage.
     if $simulate_stale_minutes > 0 {
-        if not (send $"[TEST] 💀 watchdog: simulación — la Mac llevaría ($simulate_stale_minutes) min sin latir. Si ves esto, el circuito Mac→gist→GitHub→Telegram está vivo.") {
+        if not (send $"[TEST] 💀 watchdog: simulation — the Mac would go ($simulate_stale_minutes) min without a beat. If you see this, the Mac→gist→GitHub→Telegram circuit is alive.") {
             error make {msg: "CIRCUIT TEST FAILED — could not deliver test message to Telegram"}
         }
         return
@@ -129,7 +129,7 @@ def main [--loop-seconds: int = 0, --simulate-stale-minutes: int = 0]: nothing -
             # One 💀 per job (~every 5 min while dead — never radio
             # silence, bounded to 12/hour); the next job re-alerts.
             if not $alerted_dead {
-                if (send $"💀 watchdog: la Mac no late hace ($mins) min — último beacon ($beacon.iso). Internet cortado, Mac dormida o muerta: el bot de Telegram cayó con ella.") {
+                if (send $"💀 watchdog: the Mac has not beaten for ($mins) min — last beacon ($beacon.iso). Internet cut, Mac asleep or dead: the Telegram bot fell with it.") {
                     $alerted_dead = true
                     $undelivered = false
                 } else {
@@ -141,7 +141,7 @@ def main [--loop-seconds: int = 0, --simulate-stale-minutes: int = 0]: nothing -
             # The Mac reaches GitHub but not Telegram: different disease,
             # different message.
             if not $warned_poll {
-                if (send $"⚠️ watchdog: Mac viva — beacon hace ($mins) min — pero su poller a Telegram falla. La Mac llega a GitHub pero no a Telegram.") {
+                if (send $"⚠️ watchdog: Mac alive — beacon ($mins) min old — but its Telegram poller fails. The Mac reaches GitHub but not Telegram.") {
                     $warned_poll = true
                     $undelivered = false
                 } else {
@@ -150,7 +150,7 @@ def main [--loop-seconds: int = 0, --simulate-stale-minutes: int = 0]: nothing -
             }
         } else {
             if $alerted_dead {
-                if (send $"🔌 watchdog: la Mac volvió a latir — beacon hace ($mins) min.") {
+                if (send $"🔌 watchdog: the Mac beats again — beacon ($mins) min old.") {
                     $alerted_dead = false
                     $undelivered = false
                 } else {

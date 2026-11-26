@@ -76,7 +76,7 @@ class PlanLadderTest {
         )
         val verdict = PlanLadder.pick(catalog(), quota)
         assertEquals("account:zai-individual-coding-plan", verdict.pick!!.plan.providerId)
-        assertTrue("⛔ sin tokens" in verdict.notes.first(), verdict.notes.toString())
+        assertTrue("⛔ no tokens" in verdict.notes.first(), verdict.notes.toString())
     }
 
     @Test
@@ -103,7 +103,7 @@ class PlanLadderTest {
         assertEquals("opencode-go-chat", verdict.pick!!.plan.providerId, "the first plan with EVERY gate open")
         assertEquals("deepseek-v4.1-flash", verdict.pick.model.id)
         assertTrue(
-            verdict.notes.any { "la ventana 📅 está agotada" in it },
+            verdict.notes.any { "the 📅 window is exhausted" in it },
             verdict.notes.toString(),
         )
     }
@@ -122,7 +122,7 @@ class PlanLadderTest {
         assertEquals("glm-next", verdict.pick!!.model.id)
         assertEquals("high", verdict.pick.effort, "the model's HIGHEST published tier")
         assertTrue(
-            verdict.notes.any { "«GLM-5.3-Flash» no está en el plan" in it },
+            verdict.notes.any { "«GLM-5.3-Flash» is not in the plan" in it },
             verdict.notes.toString(),
         )
     }
@@ -138,7 +138,7 @@ class PlanLadderTest {
         )
         assertNull(verdict.pick!!.effort, "no invented tier — the fork selects by identity")
         assertTrue(
-            verdict.notes.any { "sin niveles de effort" in it },
+            verdict.notes.any { "no effort levels" in it },
             verdict.notes.toString(),
         )
     }
@@ -157,7 +157,7 @@ class PlanLadderTest {
         )
         assertEquals("account:zai-individual-coding-plan", verdict.pick!!.plan.providerId)
         assertTrue(
-            verdict.notes.any { "opencode-go-chat no está en el catálogo" in it },
+            verdict.notes.any { "opencode-go-chat is not in the app's catalog" in it },
             verdict.notes.toString(),
         )
     }
@@ -172,7 +172,7 @@ class PlanLadderTest {
         val verdict = PlanLadder.pick(catalog(), quota)
         assertEquals("account:zai-start-plan", verdict.pick!!.plan.providerId, "his first rung, quota unknown")
         assertTrue(
-            verdict.notes.any { "quota desconocida — elegido por el orden del dueño" in it },
+            verdict.notes.any { "quota unknown — picked by the owner's order" in it },
             verdict.notes.toString(),
         )
     }

@@ -100,7 +100,7 @@ interface ChannelOps {
      * An ORDER direct to one session (the fork's inbound taskId — the ✍️
      * armed shot at an attached subagent), AWAITED: the answer is the
      * fork's own truth — [InboundAnswer.Failed] carries the v4 rejection
-     * verbatim (the 2/11 lie: fire-and-forget said «entregada» while the
+     * verbatim (the 2/11 lie: fire-and-forget said «delivered» while the
      * fork rejected 7ms later). The honest default for wiring that never
      * learned orders: UNAVAILABLE — an order must NEVER ride the ordinary
      * inbound and land in the wrong conversation.
@@ -109,25 +109,26 @@ interface ChannelOps {
         InboundAnswer.Unavailable
 
     /**
-     * STEER: redirigir el turno EN CURSO (la frame `steer` del canal —
-     * delivery guide del CLI). Default UNAVAILABLE: un steer jamás viaja
-     * como texto libre ni como orden — sin wiring que lo hable, el
-     * comando dice la verdad y nada más.
+     * STEER: redirect the turn IN FLIGHT (the channel's `steer` frame —
+     * the CLI's delivery guide). Default UNAVAILABLE: a steer never rides
+     * as free text nor as an order — with no wiring to speak it, the
+     * command tells the truth and nothing else.
      */
     suspend fun steer(taskId: String, text: String): SteerAnswer = SteerAnswer.Unavailable
 
     /**
-     * LA RESPUESTA del dueño a una pregunta (el fork's respond frame —
-     * 6993d7e8): awaited, la verdad del host. Default UNAVAILABLE: un tap
-     * sin wiring deja la pregunta armada y lo dice — nunca un tap mudo.
+     * THE OWNER'S ANSWER to a question (the fork's respond frame —
+     * 6993d7e8): awaited, the host's truth. Default UNAVAILABLE: a tap
+     * with no wiring leaves the question armed and says so — never a mute
+     * tap.
      */
     suspend fun respondQuestion(frame: ClientFrame.Respond): RespondAnswer = RespondAnswer.Unavailable
 
     /**
      * The bind's send: the inbound's own answer (replies = the botsService's
-     * words). [bindTaskId] (the fork's atomic bind, cap «bind»): el host
-     * apunta el contexto con la ley del /task y entrega el texto en el MISMO
-     * frame — el refusal viaja como única reply.
+     * words). [bindTaskId] (the fork's atomic bind, cap «bind»): the host
+     * aims the context with /task's law and delivers the text in the SAME
+     * frame — the refusal rides as the only reply.
      */
     suspend fun sendInboundAwait(
         text: String,
@@ -224,9 +225,9 @@ class BotCommands(
      */
     private val authDismiss: (String) -> Unit = {},
     /**
-     * /quota's DIRECT rung, PROVIDER-AWARE (owner's 3/11: «estoy usando la
-     * api de open code… me gustaría que me muestre los límites disponibles
-     * de opencode go» — the old z.ai-hardcoded leg answered the retired
+     * /quota's DIRECT rung, PROVIDER-AWARE (owner's 3/11: «I am using the
+     * open code api… I would like it to show me the available limits of
+     * opencode go» [translated] — the old z.ai-hardcoded leg answered the retired
      * coding plan): the argument is the ACTIVE conversation's providerId,
      * and the daemon's wiring serves that provider's own meter (z.ai's
      * monitor endpoint or OpenCode Go's /usage). A null answer (no key,
@@ -265,7 +266,7 @@ class BotCommands(
     private val boxTaps: BoxTaps? = null,
     /**
      * THE FILE VIEWER's taps (the `fvm:`/`fvp:` buttons, the owner's 5/11):
-     * a write/edit close's «📄 archivo completo» reads the file FRESH AT
+     * a write/edit close's «📄 full file» reads the file FRESH AT
      * TAP TIME and pages it in place. Null (unwired) = the honest miss.
      */
     private val fileTaps: FileTaps? = null,
@@ -280,7 +281,7 @@ class BotCommands(
     /**
      * The last fired prompt's store (Python's F22): the SAVE rides the
      * free-text fire path's success branch, /retry reads it back. Null =
-     * unwired (tests): /retry answers the honest «nada» and the save is
+     * unwired (tests): /retry answers the honest «nothing» and the save is
      * a no-op — never a crash.
      */
     private val lastPrompt: LastPrompt? = null,
@@ -378,7 +379,7 @@ class BotCommands(
      * selects ANY task and reads its stream from that moment, even
      * mid-turn, even while another task owns the conversation). The F17
      * pair is the owner's push-or-enqueue («que me pregunte interrumpir o
-     * encolar»): ⚡ stops the busy turn (the queued text then fires on its
+     * queue» [translated]): ⚡ stops the busy turn (the queued text then fires on its
      * own), ⏳ IS ZCode's enqueue — a soft steer into the running turn
      * (queueSteer); no tap and the natural wait stands. The tap's toast
      * (answerCallbackQuery) is the wiring's effect, not ours.
@@ -445,7 +446,7 @@ class BotCommands(
         // is never touched
         data.startsWith("fb:") -> feedbackTap(data)
 
-        // LA PREGUNTA's taps (the answer round-trip): qa:<sid>:<i> answers
+        // THE QUESTION's taps (the answer round-trip): qa:<sid>:<i> answers
         // the option; qf:<sid> arms the next line as the free-text answer.
         data.startsWith("qa:") -> questionTap(data.removePrefix("qa:"), updateId)
 
@@ -504,7 +505,7 @@ class BotCommands(
             val id = data.removePrefix("cb:").toIntOrNull()
             if (id == null || blockTaps == null) {
                 logger.info { "callback cb: UNWIRED — no CoT registry behind this button" }
-                BotReply("📖 Ese botón quedó de otro turno — los bloques CoT se abren en sus propios mensajes.")
+                BotReply("📖 That button belongs to another turn — CoT blocks open in their own messages.")
             } else {
                 blockTaps.toggle(id)?.let { BotReply(it) }
             }
@@ -554,7 +555,7 @@ class BotCommands(
         data.startsWith("fvm:") -> {
             val id = data.removePrefix("fvm:").toIntOrNull()
             if (id == null || fileTaps == null) {
-                BotReply("🤷 Ese botón quedó de otro turno — el registro de archivos ya no lo tiene.")
+                BotReply("🤷 That button belongs to another turn — the file registry no longer has it.")
             } else {
                 fileTaps.open(id)?.let { BotReply(it) }
             }
@@ -565,7 +566,7 @@ class BotCommands(
             val id = parts.getOrNull(0)?.toIntOrNull()
             val page = parts.getOrNull(1)?.toIntOrNull() ?: 0
             if (id == null || fileTaps == null) {
-                BotReply("🤷 Ese botón quedó de otro turno — el registro de archivos ya no lo tiene.")
+                BotReply("🤷 That button belongs to another turn — the file registry no longer has it.")
             } else {
                 fileTaps.page(id, page)?.let { BotReply(it) }
             }
@@ -591,16 +592,16 @@ class BotCommands(
         return when {
             id == null || id < 0 -> {
                 logger.info { "callback auth: malformed pid \"$pid\" — nothing written" }
-                BotReply("🔐 Marca fuera de lugar — no escribí nada.")
+                BotReply("🔐 Marker out of place — nothing was written.")
             }
             id == 0 -> {
                 logger.info { "callback auth: channel test probe answered" }
-                BotReply("✅ Prueba recibida — el canal anda.")
+                BotReply("✅ Probe received — the channel works.")
             }
             else -> {
                 authDismiss(pid)
                 logger.info { "callback auth: episode $id dismissed by the owner" }
-                BotReply("✅ Anotado — silencio para ese diálogo.")
+                BotReply("✅ Noted — silence for that dialog.")
             }
         }
     }
@@ -648,7 +649,7 @@ class BotCommands(
             )
         ) {
             is QueryAnswer.Ok -> PlanMenu.parse(set.resultJson)
-                ?.let { planCardReply(it, ctx!!.value, "✅ Plan aplicado") }
+                ?.let { planCardReply(it, ctx!!.value, "✅ Plan applied") }
                 ?: appliedBlind()
 
             is QueryAnswer.Unavailable -> BotReply(DEGRADED)
@@ -676,13 +677,13 @@ class BotCommands(
                     val card = v?.let { PlanMenu.modelCard(it, title) }
                     when {
                         card != null -> BotReply(
-                            "✅ Modelo aplicado\n${card.text}",
+                            "✅ Model applied\n${card.text}",
                             markup = card.markup,
                             mirror = ctx.value.activeTaskId
                                 ?.let { MenuMirror.Mark(it, ctx.value.workspacePath, MenuMirror.Kind.MODEL) },
                         )
 
-                        v != null -> BotReply("✅ Modelo aplicado\n${PlanMenu.statusLine(v, title)}")
+                        v != null -> BotReply("✅ Model applied\n${PlanMenu.statusLine(v, title)}")
                         else -> appliedBlind()
                     }
                 }
@@ -713,13 +714,13 @@ class BotCommands(
                     val card = v?.let { PlanMenu.effortCard(it, title) }
                     when {
                         card != null -> BotReply(
-                            "✅ Effort aplicado\n${card.text}",
+                            "✅ Effort applied\n${card.text}",
                             markup = card.markup,
                             mirror = ctx.value.activeTaskId
                                 ?.let { MenuMirror.Mark(it, ctx.value.workspacePath, MenuMirror.Kind.EFFORT) },
                         )
 
-                        v != null -> BotReply("✅ Effort aplicado\n${PlanMenu.statusLine(v, title)}")
+                        v != null -> BotReply("✅ Effort applied\n${PlanMenu.statusLine(v, title)}")
                         else -> appliedBlind()
                     }
                 }
@@ -772,7 +773,7 @@ class BotCommands(
                 planCardReply(
                     PlanMenu.parse(set.resultJson) ?: v,
                     ctx.value,
-                    "📌 default de la app actualizado",
+                    "📌 app default updated",
                 )
             is QueryAnswer.Unavailable -> BotReply(DEGRADED)
             is QueryAnswer.Failed -> BotReply(writeFailure(set))
@@ -780,8 +781,8 @@ class BotCommands(
     }
 
     /**
-     * THE DEFAULT LADDER (the owner's 11/11 + his 17/11 «resolvelo siempre,
-     * al iniciar el bot y en mitad de una conversación»): the ⭐ tap and the
+     * THE DEFAULT LADDER (the owner's 11/11 + his 17/11 «solve it always,
+     * when the bot starts and in the middle of a conversation» [translated]): the ⭐ tap and the
      * boot-time apply share ONE path — [PlanLadder.pick] against the live
      * catalog + the per-plan quota, then BOTH writes: the conversation's
      * selection and the APP DEFAULT (new conversations inherit the default
@@ -831,7 +832,7 @@ class BotCommands(
         val defaultInForce = pick.plan.providerId == v.defaultPlan && pick.model.id == v.defaultModel &&
             pick.effort == v.defaultEffort
         if (conversationInForce && defaultInForce) {
-            return LadderOutcome(speak = false, text = "⭐ Default ya vigente: ${triple(pick)}")
+            return LadderOutcome(speak = false, text = "⭐ Default already in force: ${triple(pick)}")
         }
         val conversation =
             if (conversationInForce) Write.Ok else writeSelection(value.workspacePath, "conversation", pick)
@@ -857,8 +858,8 @@ class BotCommands(
     ): String {
         val summary = triple(pick)
         val head = when (conversation) {
-            is Write.Ok -> if (conversationInForce) "⭐ Default ya vigente: $summary" else "⭐ Default aplicado: $summary"
-            is Write.Unavailable -> "$DEGRADED\nEl default automático no pudo aplicar: $summary"
+            is Write.Ok -> if (conversationInForce) "⭐ Default already in force: $summary" else "⭐ Default applied: $summary"
+            is Write.Unavailable -> "$DEGRADED\nThe automatic default could not apply: $summary"
             is Write.Failed -> writeFailure(conversation.answer)
         }
         val notesText = if (conversation is Write.Ok && !conversationInForce) notesBlock(notes) else ""
@@ -867,16 +868,16 @@ class BotCommands(
             is Write.Unavailable -> if (conversation is Write.Unavailable) {
                 ""
             } else {
-                "\n• ⚠️ Default de la app sin cambios: el canal no respondió"
+                "\n• ⚠️ App default unchanged: the channel did not answer"
             }
 
             is Write.Ok -> if (defaultInForce) {
-                "\n• Default de la app: ya estaba en $summary"
+                "\n• App default: it was already at $summary"
             } else {
-                "\n• Default de la app: $summary"
+                "\n• App default: $summary"
             }
             is Write.Failed ->
-                "\n• ⚠️ Default de la app sin cambios (${appDefault.answer.code}): " +
+                "\n• ⚠️ App default unchanged (${appDefault.answer.code}): " +
                     "${PyText.esc(appDefault.answer.message ?: "?")}"
         }
         return "$head$notesText$defaultText"
@@ -892,8 +893,8 @@ class BotCommands(
     }
 
     /**
-     * THE BOOT LADDER (the owner's «cuando inicializa el bot… se debe
-     * elegir en ese orden»): the wiring awaits the channel and speaks the
+     * THE BOOT LADDER (the owner's «when the bot initializes… it must
+     * pick in that order» [translated]): the wiring awaits the channel and speaks the
      * [LadderOutcome.speak] outcomes.
      */
     suspend fun applyDefaultLadder(): LadderOutcome = ladderOutcome()
@@ -908,11 +909,11 @@ class BotCommands(
             p.providerId to when {
                 p.providerId.contains("opencode", ignoreCase = true) ->
                     directQuotaMark?.invoke(p.providerId)
-                        ?: PlanQuota.Mark.Missing("el medidor directo de OpenCode no respondió")
+                        ?: PlanQuota.Mark.Missing("OpenCode's direct meter did not answer")
 
                 ops.speaksQuotaProvider() -> planQuotaFromChannel(p.providerId)
 
-                else -> PlanQuota.Mark.Missing("el fork no habla quota por plan — falta deploy del fork")
+                else -> PlanQuota.Mark.Missing("the fork does not speak per-plan quota — fork deploy missing")
             }
         }
 
@@ -920,9 +921,9 @@ class BotCommands(
     private suspend fun planQuotaFromChannel(providerId: String): PlanQuota.Mark =
         when (val answer = ops.query(ChannelQuery.Quota(providerId = providerId))) {
             is QueryAnswer.Ok -> PlanQuota.fromChannel(answer.resultJson)
-                ?: PlanQuota.Mark.Missing("respuesta ilegible")
+                ?: PlanQuota.Mark.Missing("unreadable answer")
 
-            is QueryAnswer.Unavailable -> PlanQuota.Mark.Missing("el canal no respondió")
+            is QueryAnswer.Unavailable -> PlanQuota.Mark.Missing("the channel did not answer")
             is QueryAnswer.Failed -> PlanQuota.Mark.Missing("(${answer.code})")
         }
 
@@ -934,12 +935,12 @@ class BotCommands(
      */
     private fun writeFailure(set: QueryAnswer.Failed): String = when (set.code) {
         "timeout" ->
-            "📡 El canal no respondió a tiempo (se cayó justo en ese momento o el host está saturado) — " +
-                "la selección vigente quedó intacta; reintentá el tap."
+            "📡 The channel did not answer in time (it went down right then, or the host is saturated) — " +
+                "the selection in force is intact; retry the tap."
 
         else ->
-            "⚠️ No pude aplicar (${set.code}): ${PyText.esc(set.message ?: "?")}" +
-                " — la selección vigente quedó intacta."
+            "⚠️ Could not apply (${set.code}): ${PyText.esc(set.message ?: "?")}" +
+                " — the selection in force is intact."
     }
 
     // ── THE MIRROR'S ONE RENDER PATH (the byte-identical law) ─────────────
@@ -978,7 +979,7 @@ class BotCommands(
         return (answer as? QueryAnswer.Ok)?.let { PlanMenu.parse(it.resultJson) }
     }
 
-    /** /plan — el plan y CADA uno con su quota restante al lado (the owner's 11/11 order). */
+    /** /plan — the plan and EACH one with its remaining quota beside it (the owner's 11/11 order). */
     @Suppress("ReturnCount") // one guard per honest state (no context, degraded, unreadable, card)
     private suspend fun plan(): BotReply {
         val ctx = contextAnswer()
@@ -988,10 +989,10 @@ class BotCommands(
         if (ctx is ContextAnswer.None) return BotReply(PLAN_NO_CONTEXT)
         val value = (ctx as? ContextAnswer.Ctx)?.value ?: return BotReply(DEGRADED)
         val v = planViews(value.workspacePath) ?: return BotReply(PLAN_OLD_FORK)
-        return planCardReply(v, value, "📊 La selección vigente y la quota de cada plan:")
+        return planCardReply(v, value, "📊 The selection in force and each plan's quota:")
     }
 
-    /** /model — los modelos DEL PLAN VIGENTE (the owner's split, second step). */
+    /** /model — the models OF THE PLAN IN FORCE (the owner's split, second step). */
     @Suppress("ReturnCount") // one guard per honest state
     private suspend fun modelPicker(): BotReply {
         val ctx = contextAnswer()
@@ -1006,7 +1007,7 @@ class BotCommands(
         )
     }
 
-    /** /effort — los niveles DEL PLAN Y MODELO VIGENTES (the owner's split, third step). */
+    /** /effort — the levels OF THE PLAN AND MODEL IN FORCE (the owner's split, third step). */
     @Suppress("ReturnCount") // one guard per honest state
     private suspend fun effortPicker(): BotReply {
         val ctx = contextAnswer()
@@ -1022,7 +1023,7 @@ class BotCommands(
     }
 
     /**
-     * /mode — la conversación y su modo de colaboración (Python's
+     * /mode — the conversation and its collaboration mode (Python's
      * `_cmd_mode`): bare shows the mode IN FORCE (read from the session's
      * own `meta.mode`, never remembered) with the five tap rows; typed
      * applies through the fork's `setMode` cap — the SAME switch the
@@ -1068,7 +1069,7 @@ class BotCommands(
             is QueryAnswer.Failed -> if (answer.code == UNKNOWN_QUERY_CODE) {
                 BotReply(MODE_OLD_FORK)
             } else {
-                BotReply("⚠️ No pude aplicar el modo (${answer.code}): ${PyText.esc(answer.message ?: "?")}")
+                BotReply("⚠️ Could not apply the mode (${answer.code}): ${PyText.esc(answer.message ?: "?")}")
             }
         }
 
@@ -1117,7 +1118,7 @@ class BotCommands(
                 if (answer.code == UNKNOWN_QUERY_CODE) {
                     BotReply(MODE_OLD_FORK)
                 } else {
-                    BotReply("⚠️ No pude aplicar Plan mode (${answer.code}): ${PyText.esc(answer.message ?: "?")}")
+                    BotReply("⚠️ Could not apply Plan mode (${answer.code}): ${PyText.esc(answer.message ?: "?")}")
                 }
         }
     }
@@ -1149,7 +1150,7 @@ class BotCommands(
     @Suppress("ReturnCount") // one guard per honest tier (gone, already captcha-gated, armed)
     private suspend fun giftClaimConfirm(planId: String): BotReply {
         val offer = giftsFor(activeTaskId()).offers.firstOrNull { it.planId == planId }
-            ?: return BotReply("🤷 Esa oferta ya no está — corré /quota de nuevo.")
+            ?: return BotReply("🤷 That offer is gone — run /quota again.")
         // already learned: this plan needs a captcha the build cannot make —
         // skip the doomed attempt and hand the browser door directly
         if (planId in captchaGatedPlans) return webDoor()
@@ -1171,7 +1172,7 @@ class BotCommands(
                 if (answer.message?.contains("captcha", ignoreCase = true) == true) {
                     p.planId?.let(captchaGatedPlans::add)
                 }
-                giftFailure("reclamar", answer)
+                giftFailure("claim", answer)
             }
         }
     }
@@ -1179,13 +1180,13 @@ class BotCommands(
     /** The browser door: ONE line + a real url button (the only way a bot opens a browser). */
     private fun webDoor(): BotReply = BotReply(
         GIFT_CAPTCHA,
-        markup = GiftsMenu.webDoorKeyboard("🌐 Abrir la web (planes)", GIFT_CLAIM_URL),
+        markup = GiftsMenu.webDoorKeyboard("🌐 Open the web (plans)", GIFT_CLAIM_URL),
     )
 
     /** `gf:<type>` — how many are left and how soon the earliest dies; then the ✅. */
     private suspend fun giftResetConfirm(type: String): BotReply {
         val alive = giftsFor(activeTaskId()).resets.filter { it.type == type }
-        if (alive.isEmpty()) return BotReply("🤷 Ese reset ya no está — corré /quota de nuevo.")
+        if (alive.isEmpty()) return BotReply("🤷 That reset is gone — run /quota again.")
         pendingGift = PendingGift(
             kind = "reset",
             planId = null,
@@ -1213,18 +1214,18 @@ class BotCommands(
             )
         ) {
             is QueryAnswer.Ok -> BotReply(
-                "✅ Reset usado (${if (p.resetType == GiftsMenu.WEEK) "semanal" else "5h"}). " +
-                    "Corré /quota en un momento para ver el pool nuevo.",
+                "✅ Reset used (${if (p.resetType == GiftsMenu.WEEK) "weekly" else "5h"}). " +
+                    "Run /quota in a moment to see the new pool.",
             )
             is QueryAnswer.Unavailable -> BotReply(DEGRADED)
-            is QueryAnswer.Failed -> giftFailure("usar el reset", answer)
+            is QueryAnswer.Failed -> giftFailure("use the reset", answer)
         }
     }
 
     /** `gxn:` — nothing was touched; say exactly that. */
     private fun giftCancel(): BotReply {
         pendingGift = null
-        return BotReply("📬 Cancelado — no se tocó nada.")
+        return BotReply("📬 Cancelled — nothing was touched.")
     }
 
     private fun giftFailure(verb: String, answer: QueryAnswer.Failed): BotReply {
@@ -1238,7 +1239,7 @@ class BotCommands(
         return if (answer.code == UNKNOWN_QUERY_CODE) {
             BotReply(GIFT_OLD_FORK)
         } else {
-            BotReply("⚠️ No pude $verb (${answer.code}): ${PyText.esc(message.ifBlank { "?" })}")
+            BotReply("⚠️ Could not $verb (${answer.code}): ${PyText.esc(message.ifBlank { "?" })}")
         }
     }
 
@@ -1250,11 +1251,11 @@ class BotCommands(
     private suspend fun interruptNow(sid: String, updateId: Long): BotReply {
         logger.info { "callback ⚡ intr: stopping $sid — the parked text (update=$updateId) fires on turn end" }
         return when (val answer = ops.query(ChannelQuery.Stop(sid))) {
-            is QueryAnswer.Ok -> BotReply("⚡ Interrumpido — tu mensaje entra ya.")
+            is QueryAnswer.Ok -> BotReply("⚡ Interrupted — your message goes in now.")
             is QueryAnswer.Unavailable -> BotReply(DEGRADED)
             is QueryAnswer.Failed -> BotReply(
-                "⚠️ No pude interrumpir (${answer.code}): ${PyText.esc(answer.message ?: "?")}" +
-                    " — /stop go es la vía dura.",
+                "⚠️ Could not interrupt (${answer.code}): ${PyText.esc(answer.message ?: "?")}" +
+                    " — /stop go is the hard door.",
             )
         }
     }
@@ -1273,14 +1274,14 @@ class BotCommands(
             is QueryAnswer.Ok -> {
                 val backgrounded = parseStringsOf(answer.resultJson, "backgrounded")
                 if (sid in backgrounded) {
-                    BotReply("🌙 Al fondo — sigue corriendo y el resultado llega al terminar.")
+                    BotReply("🌙 In the background — it keeps running and the result arrives when it ends.")
                 } else {
-                    BotReply("🌙 Nada que pasar al fondo — la conversación no tiene un turno corriendo ahora.")
+                    BotReply("🌙 Nothing to move to the background — the conversation has no turn running now.")
                 }
             }
             is QueryAnswer.Unavailable -> BotReply(DEGRADED)
             is QueryAnswer.Failed -> BotReply(
-                "⚠️ No pude pasar al fondo (${answer.code}): ${PyText.esc(answer.message ?: "?")}",
+                "⚠️ Could not move it to the background (${answer.code}): ${PyText.esc(answer.message ?: "?")}",
             )
         }
     }
@@ -1303,27 +1304,27 @@ class BotCommands(
         val lane = dispatchLanes(turn).lastOrNull { it.toolId.endsWith(tail) }
         if (lane == null || lane.status != null) {
             logger.info { "callback 🌙 bgc: tail=$tail resolves to nothing running — honest gone" }
-            return BotReply("🌙 Ese agente ya no está corriendo en primer plano.")
+            return BotReply("🌙 That agent is no longer running in the foreground.")
         }
         val name = Keyboards.subagentName(lane)
         val parentSid = turn?.taskId
         if (parentSid.isNullOrBlank()) {
             logger.info { "callback 🌙 bgc: «$name» (${lane.toolId}) has no parent session — honest refusal" }
-            return BotReply("🌙 No sé en qué conversación corre «${PyText.esc(name)}» — refrescá /tasks.")
+            return BotReply("🌙 I don't know which conversation «${PyText.esc(name)}» runs in — refresh /tasks.")
         }
         logger.info { "callback 🌙 bgc: demoting «$name» (${lane.toolId}) of $parentSid to background" }
         return when (val answer = ops.query(ChannelQuery.BackgroundToolCall(parentSid, lane.toolId))) {
             is QueryAnswer.Ok -> {
                 val backgrounded = parseStringsOf(answer.resultJson, "backgrounded")
                 if (lane.toolId in backgrounded) {
-                    BotReply("🌙 «${PyText.esc(name)}» al fondo — sigue corriendo y el resultado llega al terminar.")
+                    BotReply("🌙 «${PyText.esc(name)}» moved to the background — it keeps running and the result arrives when it ends.")
                 } else {
-                    BotReply("🌙 Nada que pasar al fondo — «${PyText.esc(name)}» ya no corre en primer plano.")
+                    BotReply("🌙 Nothing to move to the background — «${PyText.esc(name)}» no longer runs in the foreground.")
                 }
             }
             is QueryAnswer.Unavailable -> BotReply(DEGRADED)
             is QueryAnswer.Failed -> BotReply(
-                "⚠️ No pude pasar «${PyText.esc(name)}» al fondo (${answer.code}): " +
+                "⚠️ Could not move «${PyText.esc(name)}» to the background (${answer.code}): " +
                     PyText.esc(answer.message ?: "?"),
             )
         }
@@ -1358,28 +1359,28 @@ class BotCommands(
      * stopGeneration is goal-pause — the ack says the generation stops,
      * never a promised kill). Every outcome is the honest one: the real
      * error verbatim on failure, the refuso when the fork has not named
-     * the child's session yet, «ya no está vivo» when nothing answers.
+     * the child's session yet, «no longer alive» when nothing answers.
      */
     private suspend fun subagentStop(tail: String): BotReply {
         val lanes = dispatchLanes(hub.peek())
         return when (val target = SubagentStop.resolve(lanes, runningRows(), tail, clock())) {
             is SubagentStopTarget.Gone -> {
                 logger.info { "callback ⏹️ sst: tail=$tail resolves to nothing alive — honest gone" }
-                BotReply("⏹️ Ese subagente ya no está vivo.")
+                BotReply("⏹️ That subagent is no longer alive.")
             }
 
             is SubagentStopTarget.Unnamed -> {
                 logger.info { "callback ⏹️ sst: «${target.name}» alive but unnamed (no launch ACK yet)" }
-                BotReply("⏹️ «${PyText.esc(target.name)}» — todavía no sé su sesión — probá en un momento.")
+                BotReply("⏹️ «${PyText.esc(target.name)}» — I don't know its session yet — try in a moment.")
             }
 
             is SubagentStopTarget.Ready -> {
                 logger.info { "callback ⏹️ sst: STOP ${target.sid} («${target.name}»)" }
                 when (val answer = ops.query(ChannelQuery.Stop(target.sid))) {
-                    is QueryAnswer.Ok -> BotReply("⏹️ «${PyText.esc(target.name)}» — generación detenida.")
+                    is QueryAnswer.Ok -> BotReply("⏹️ «${PyText.esc(target.name)}» — generation stopped.")
                     is QueryAnswer.Unavailable -> BotReply(DEGRADED)
                     is QueryAnswer.Failed -> BotReply(
-                        "⚠️ No pude detener «${PyText.esc(target.name)}» (${answer.code}): " +
+                        "⚠️ Could not stop «${PyText.esc(target.name)}» (${answer.code}): " +
                             PyText.esc(answer.message ?: "?"),
                     )
                 }
@@ -1399,8 +1400,8 @@ class BotCommands(
     }
 
     /**
-     * THE OWNER'S «EMPUJAR» (2/11 23:00: «que detenga lo que está haciendo
-     * y me lea el mensaje»). The fork's steer delivery is `guide` — the
+     * THE OWNER'S «PUSH» (2/11 23:00: «stop what it is doing
+     * and read the message to me» [translated]). The fork's steer delivery is `guide` — the
      * text enters at the current tool's safe boundary, so a child inside a
      * nine-minute tool stays deaf for nine minutes. A busy child's turn is
      * therefore CANCELLED first (the ⏹️ door) and the delivery that
@@ -1426,7 +1427,7 @@ class BotCommands(
                 clock(),
             ) == OrderPulse.Alive
         val stopped = alive && ops.query(ChannelQuery.Stop(sid)) is QueryAnswer.Ok
-        if (stopped) logger.info { "route: ⚡ child $sid INTERRUPTED before the delivery (empujar)" }
+        if (stopped) logger.info { "route: ⚡ child $sid INTERRUPTED before the delivery (push)" }
         return stopped
     }
 
@@ -1464,10 +1465,10 @@ class BotCommands(
      */
     @Suppress("ReturnCount") // one branch per plan — the router's honest outcomes
     private suspend fun routeCore(text: String, updateId: Long): BotReply? {
-        // LA ORDEN ARMADA PRECEDE AL ROUTER (2/11: el park de F17 se comía
-        // sus textos y la orden nunca volaba): un tiro DIRECTO a una sesión
-        // nombrada — el fork lo entrega en ESA sesión sin tocar la ocupada,
-        // así que ni el busy-park ni los refusals le aplican.
+        // THE ARMED ORDER PRECEDES THE ROUTER (2/11: the F17 park ate
+        // its texts and the order never flew): a DIRECT shot at a named
+        // session — the fork delivers it in THAT session without touching the
+        // busy one, so neither the busy park nor the refusals apply.
         armedOrder?.let { return fireArmedOrder(it, text, updateId) }
         val facts = routeFacts()
         val plan = planRoute(facts, newIntent)
@@ -1507,8 +1508,8 @@ class BotCommands(
     }
 
     /**
-     * La orden armada VUELA: directo a la sesión nombrada, el router ni se
-     * entera. ONE SHOT: the arm is consumed HERE, before the wire — a
+     * The armed order FLIES: straight to the named session, the router does
+     * not even hear about it. ONE SHOT: the arm is consumed HERE, before the wire — a
      * second text rides the normal route (the 2/11 law the test pins; an
      * arm that survives its shot would silently redirect the owner's next
      * line to a subagent). The flight ALSO re-asks the target's pulse
@@ -1518,18 +1519,18 @@ class BotCommands(
      */
     @Suppress("ReturnCount") // gate, the ⚡/⏳ question, the flight — one exit each
     private suspend fun fireArmedOrder(order: ArmedOrder, text: String, updateId: Long): BotReply {
-        armedOrder = null // ONE shot: se consume al volar — el siguiente texto vuelve al router
+        armedOrder = null // ONE shot: consumed on flight — the next text goes back to the router
         val gate: BotReply? = when (
             SubagentStop.orderTarget(hub.peek()?.tools.orEmpty(), runningRows(), order.sessionId, clock())
         ) {
             OrderPulse.Alive -> null
             OrderPulse.Ended -> BotReply(
-                "💀 «${PyText.esc(order.title)}» ya terminó — la orden NO voló a nadie (el ✍️ queda libre).",
+                "💀 «${PyText.esc(order.title)}» already ended — the order did NOT fly to anyone (the ✍️ is free).",
             )
 
             OrderPulse.Unknown -> BotReply(
-                "🤔 «${PyText.esc(order.title)}» no da señal viva ahora — la orden NO voló. " +
-                    "Reabrí su carta y volvé a armar si sigue ahí.",
+                "🤔 «${PyText.esc(order.title)}» gives no live signal now — the order did NOT fly. " +
+                    "Reopen its card and arm it again if it is still there.",
             )
         }
         if (gate != null) {
@@ -1539,13 +1540,13 @@ class BotCommands(
         logger.info {
             "route: ORDER to ${order.sessionId} («${order.title}»): ${text.take(ORDER_LOG_PREVIEW)}"
         }
-        // THE OWNER'S CHOICE (2/11 23:12: «quiero que me pregunte empujar o
-        // encolar»): a BUSY child never gets an automatic interrupt — the
+        // THE OWNER'S CHOICE (2/11 23:12: «I want it to ask me push or
+        // queue» [translated]): a BUSY child never gets an automatic interrupt — the
         // question IS the door. An idle child is delivered at once (there
         // is nothing to cut and nothing to wait for).
         if (isBusyChild(order.sessionId)) {
             pendingDelivery = PendingDelivery(order.sessionId, order.title, text, steer = false, updateId, clock())
-            logger.info { "route: ORDER to ${order.sessionId} HELD — asking empujar/encolar" }
+            logger.info { "route: ORDER to ${order.sessionId} HELD — asking push/queue" }
             return BotReply(askPushOrQueue(order.title), markup = Keyboards.pushOrQueue())
         }
         return deliverOrder(order.sessionId, order.title, text, updateId, interrupted = false)
@@ -1569,23 +1570,23 @@ class BotCommands(
         ) {
             is InboundAnswer.Answered -> BotReply(
                 if (interrupted) {
-                    "⚡ Le corté el turno a «${PyText.esc(title)}» y le entregué la orden — la lee AHORA."
+                    "⚡ I cut «${PyText.esc(title)}»'s turn and delivered the order — it reads it NOW."
                 } else {
-                    "⚔️ Orden entregada a «${PyText.esc(title)}» — su respuesta llega en la carta attachada."
+                    "⚔️ Order delivered to «${PyText.esc(title)}» — its answer arrives in the attached card."
                 },
             )
 
             is InboundAnswer.Failed -> BotReply(
-                "⚠️ La orden NO entró («${PyText.esc(title)}»): ${PyText.esc(answer.code)} — " +
+                "⚠️ The order did NOT go in («${PyText.esc(title)}»): ${PyText.esc(answer.code)} — " +
                     // the verdict sits at the message's TAIL (…sendText rejected
                     // (proto.sessionNotFound)) — the head is just the echo
                     PyText.esc((answer.message ?: "?").takeLast(ORDER_FAIL_TAIL)) +
-                    "\nLa orden NO voló; el ✍️ queda libre.",
+                    "\nThe order did NOT fly; the ✍️ is free.",
             )
 
             is InboundAnswer.TimedOut -> BotReply(
-                "🤔 El fork no contestó en ${answer.waitedMs}ms — estado de la orden desconocido. " +
-                    "Mirá la carta antes de reintentar.",
+                "🤔 The fork did not answer in ${answer.waitedMs}ms — the order's state is unknown. " +
+                    "Check the card before retrying.",
             )
 
             InboundAnswer.Unavailable -> BotReply(RouteTexts.CHANNEL_DOWN)
@@ -1593,11 +1594,11 @@ class BotCommands(
     }
 
     /**
-     * EL BIND ATÓMICO (the fork's bindTaskId, cap «bind»): una sola ida —
-     * el host apunta el contexto con la ley completa del /task y entrega el
-     * texto en el MISMO frame; el refusal viaja como única reply (el mismo
-     * veredicto que leía el bind en dos pasos). Sin orden armada: una orden
-     * vuela DIRECTO por su propio camino y el bind sería basura.
+     * THE ATOMIC BIND (the fork's bindTaskId, cap «bind»): one round trip —
+     * the host aims the context with /task's whole law and delivers the
+     * text in the SAME frame; the refusal rides as the only reply (the same
+     * verdict the two-step bind read). No armed order: an order
+     * flies DIRECTLY on its own path and the bind would be garbage.
      */
     @Suppress("ReturnCount") // one guard per verdict
     private suspend fun fireAtomicBind(plan: RoutePlan.Fire, text: String, updateId: Long): BotReply? =
@@ -1699,7 +1700,7 @@ class BotCommands(
             fireLegacyBind(plan, text, updateId, facts)?.let { return it }
         }
         newIntent = false
-        // LA ORDEN ARMADA (the owner's loop: tap a subagent → read its stream →
+        // THE ARMED ORDER (the owner's loop: tap a subagent → read its stream →
         // write an order): one armed shot — the next free text goes DIRECT to
         // that session (the fork's inbound taskId), then the arm disarms. The
         // reply lands on the attached card's own stream.
@@ -1736,7 +1737,7 @@ class BotCommands(
      * resolves as if the owner typed it), so a busy conversation PARKS
      * with the push-or-enqueue question — strictly better than Python's
      * flat refusal. Nothing saved (or the store unwired) → the honest
-     * «nada para relanzar».
+     * «nothing to relaunch».
      *
      * THE ARMED ORDER IS NEVER /retry's AMMO (2/11): the one-shot is the
      * owner's TYPED words' privilege — the ✍️ loop (tap a subagent → read
@@ -1766,7 +1767,7 @@ class BotCommands(
             ?.takeIf { it.isNotEmpty() }
             ?: active?.takeLast(SID_TAIL)?.takeIf { it.isNotEmpty() }
             ?: "?"
-        return "🔁 Re-lanzado a «${PyText.esc(title)}» el prompt guardado ${fmtEndClock(ts)}."
+        return "🔁 Relaunched to «${PyText.esc(title)}» the prompt saved at ${fmtEndClock(ts)}."
     }
 
     /**
@@ -1791,8 +1792,8 @@ class BotCommands(
         armedOrder?.let { order ->
             logger.info { "run: REFUSED — an armed order to ${order.sessionId} is live; the shot stays the owner's" }
             return BotReply(
-                "✍️ Tenés una orden armada para «${PyText.esc(order.title)}» — mandala primero; " +
-                    "/run no se la roba y después lo corré de nuevo.",
+                "✍️ You have an armed order for «${PyText.esc(order.title)}» — send it first; " +
+                    "/run will not steal it, then run /run again.",
             )
         }
         return when (val fresh = prepareFreshDraft(updateId)) {
@@ -1858,8 +1859,8 @@ class BotCommands(
 
     /** /run's confirm: the new conversation's project + the untouched-open law. */
     private fun runFiredLine(workspacePath: String): String =
-        "🚀 /run: conversación NUEVA en «${PyText.esc(workspacePath.substringAfterLast('/'))}» — " +
-            "el prompt ya entró ahí (la que tenías abierta no se tocó)."
+        "🚀 /run: NEW conversation in «${PyText.esc(workspacePath.substringAfterLast('/'))}» — " +
+            "the prompt went in there (the one you had open was not touched)."
 
     /**
      * The router's frozen inputs, each one named in the log. The open
@@ -1978,7 +1979,7 @@ class BotCommands(
         }
         return BotReply(
             "⏳ The Mac is busy with «${PyText.esc(title)}» — your message stayed in the " +
-                "queue ($n waiting). ⏳ Encolar = soft steer: it enters the RUNNING turn when " +
+                "queue ($n waiting). ⏳ Queue = soft steer: it enters the RUNNING turn when " +
                 "the current execution ends; no tap and it runs when the whole turn finishes.",
             markup = Keyboards.interruptQuestion(active, updateId),
         )
@@ -1988,7 +1989,7 @@ class BotCommands(
      * The bind's four outcomes. [Confirmed] carries HOW (the reply's own
      * read-back or the botStatus poll — both count); [ConfirmedUnverified]
      * is the host's bare word when the read-back couldn't run at all (the
-     * reply must never claim «verificado» then); [Refused] is the
+     * reply must never claim «verified» then); [Refused] is the
      * server's own word (taskRunning/taskMissing — locale texts matched
      * by their stable markers); [Failed] is transport-level or a
      * read-back that contradicts the command.
@@ -2275,7 +2276,7 @@ class BotCommands(
         val ws = row?.ws ?: ctx?.value?.workspacePath
         if (ws == null) {
             logger.info { "callback 🟢 t: attach refused: $sid is in no known index/context" }
-            return BotReply("🤷 No encuentro esa task en el índice — /tasks para ver las que hay.")
+            return BotReply("🤷 I can't find that task in the index — /tasks lists the ones there are.")
         }
         // M2: THE SWITCH'S ORDER — the hub OWNS the new task BEFORE the
         // subscribe flies. The fork answers a subscribe with a burst; if the
@@ -2293,10 +2294,10 @@ class BotCommands(
         logger.info { "callback 🟢 t: pipe ATTACHED to $sid (running=$live) — bind attempt rides along" }
         val title = row?.title?.takeIf { it.isNotEmpty() } ?: sid.takeLast(SID_TAIL)
         val watchLine = if (live) {
-            "👁 «${PyText.esc(title)}» en vivo — la tubería es tuya desde ahora; " +
-                "lo anterior quedó atrás (📄 /last trae la respuesta final)."
+            "👁 «${PyText.esc(title)}» live — the pipe is yours from now on; " +
+                "what came before is behind (📄 /last brings the final answer)."
         } else {
-            "👁 «${PyText.esc(title)}» suscripto — la carta en vivo entra cuando arranque su próximo turno."
+            "👁 «${PyText.esc(title)}» subscribed — the live card goes in when its next turn starts."
         }
         return BotReply("$watchLine\n${bindAttempt(sid, updateId, title, row?.ws)}")
     }
@@ -2320,35 +2321,35 @@ class BotCommands(
             is BindOutcome.Confirmed -> {
                 selectedSid = sid // THE TAP IS INTENT (5/11): it survives until he chooses otherwise
                 selectedTitle = title
-                "✅ CONFIRMADO: «${PyText.esc(title)}» es la conversación activa " +
-                    "(verificado leyendo el fork — ${PyText.esc(sid.takeLast(SID_TAIL))}). " +
-                    "Todo tu texto va ahí — tu elección se mantiene hasta que elijas otra."
+                "✅ CONFIRMED: «${PyText.esc(title)}» is the active conversation " +
+                    "(verified by reading the fork — ${PyText.esc(sid.takeLast(SID_TAIL))}). " +
+                    "All your text goes there — your choice holds until you pick another."
             }
 
             is BindOutcome.ConfirmedUnverified -> {
                 selectedSid = sid
                 selectedTitle = title
-                "🎯 Tu texto va a «${PyText.esc(title)}» — la conversación activa es esa " +
-                    "(el fork lo confirmó; el canal no dejó releer el estado)."
+                "🎯 Your text goes to «${PyText.esc(title)}» — that is the active conversation " +
+                    "(the fork confirmed it; the channel did not let the state be re-read)."
             }
 
             is BindOutcome.Refused ->
                 if (TASK_MISSING_MARKER in bind.reply) {
                     crossProjectLadder(sid, updateId, title, rowWs)
                 } else {
-                    "⏳ ${PyText.esc(bind.reply)} — tu texto sigue yendo a la activa; el 👁 ya está puesto."
+                    "⏳ ${PyText.esc(bind.reply)} — your text still goes to the active one; the 👁 is already set."
                 }
 
             is BindOutcome.Failed ->
-                "⚠️ El bind no pudo confirmarse: ${PyText.esc(bind.reason)} — " +
-                    "el 👁 ya está puesto; probá de nuevo con /tasks."
+                "⚠️ The bind could not be confirmed: ${PyText.esc(bind.reason)} — " +
+                    "the 👁 is already set; try again with /tasks."
         }
 
     /** The «Task not found» second chance: move the fork to the task's own project, bind again. */
     private suspend fun crossProjectLadder(sid: String, updateId: Long, title: String, rowWs: String?): String {
         if (rowWs == null) {
-            return "🚧 «${PyText.esc(title)}» vive en otro proyecto/workspace — la leés en vivo (👁), " +
-                "pero tu texto no puede apuntarla: la frontera de proyecto del fork es deliberada."
+            return "🚧 «${PyText.esc(title)}» lives in another project/workspace — you read it live (👁), " +
+                "but your text cannot aim at it: the fork's project boundary is deliberate."
         }
         return when (val ws = bindWorkspace(rowWs, updateId)) {
             // ConfirmedUnverified cannot arise here (no read-back runs in the
@@ -2356,26 +2357,26 @@ class BotCommands(
             is BindOutcome.Confirmed, is BindOutcome.ConfirmedUnverified ->
                 when (val rebind = bindTo(sid, updateId)) {
                     is BindOutcome.Confirmed ->
-                        "✅ CONFIRMADO: «${PyText.esc(title)}» es la conversación activa — también moví " +
-                            "el fork a su proyecto «${PyText.esc(rowWs.substringAfterLast('/'))}» " +
-                            "(verificado leyendo el fork — ${PyText.esc(sid.takeLast(SID_TAIL))}). Todo tu texto va ahí."
+                        "✅ CONFIRMED: «${PyText.esc(title)}» is the active conversation — I also moved " +
+                            "the fork to its project «${PyText.esc(rowWs.substringAfterLast('/'))}» " +
+                            "(verified by reading the fork — ${PyText.esc(sid.takeLast(SID_TAIL))}). All your text goes there."
 
                     is BindOutcome.ConfirmedUnverified ->
-                        "🎯 «${PyText.esc(title)}» quedó activa tras mudar el fork a su proyecto " +
-                            "(el fork lo confirmó; sin relectura). Tu texto va ahí."
+                        "🎯 «${PyText.esc(title)}» became active after moving the fork to its project " +
+                            "(the fork confirmed it; no re-read). Your text goes there."
 
-                    is BindOutcome.Refused -> "⏳ ${PyText.esc(rebind.reply)} — el 👁 ya está puesto."
+                    is BindOutcome.Refused -> "⏳ ${PyText.esc(rebind.reply)} — the 👁 is already set."
                     is BindOutcome.Failed -> RouteTexts.BIND_FAILED
                 }
 
             is BindOutcome.Refused ->
                 if (TASK_RUNNING_MARKER in ws.reply) {
-                    "⏳ Para activar «${PyText.esc(title)}» tengo que mudar el fork a su proyecto " +
-                        "(«${PyText.esc(rowWs.substringAfterLast('/'))}»), pero la task actual sigue corriendo — " +
-                        "/stop primero o esperá a que termine. Nada cambió; el 👁 ya está puesto."
+                    "⏳ To activate «${PyText.esc(title)}» I have to move the fork to its project " +
+                        "(«${PyText.esc(rowWs.substringAfterLast('/'))}»), but the current task still runs — " +
+                        "/stop first or wait for it to end. Nothing changed; the 👁 is already set."
                 } else {
-                    "🚧 «${PyText.esc(title)}» vive en «${PyText.esc(rowWs.substringAfterLast('/'))}» y el fork " +
-                        "no reconoce ese workspace — la leés en vivo (👁); el texto no puede apuntarla."
+                    "🚧 «${PyText.esc(title)}» lives in «${PyText.esc(rowWs.substringAfterLast('/'))}» and the fork " +
+                        "does not recognize that workspace — you read it live (👁); the text cannot aim at it."
                 }
 
             is BindOutcome.Failed -> RouteTexts.BIND_FAILED
@@ -2386,7 +2387,7 @@ class BotCommands(
     private data class ArmedOrder(val sessionId: String, val title: String)
 
     /**
-     * LA RESPUESTA por botón (the answer round-trip's flight): the option's
+     * THE ANSWER by button (the answer round-trip's flight): the option's
      * respond frame flies AWAITED and the question message's edit tells the
      * truth — Resolved seals with the option's label, Failed seals with the
      * host's verbatim error (a stale question never lies ok), Unavailable
@@ -2405,7 +2406,7 @@ class BotCommands(
         val active = board ?: return null
         val shortId = arg.substringBeforeLast(':')
         val index = arg.substringAfterLast(':').toIntOrNull() ?: return null
-        val q = active.byShortId(shortId) ?: return BotReply("⏳ Esa pregunta ya no está pendiente.")
+        val q = active.byShortId(shortId) ?: return BotReply("⏳ That question is no longer pending.")
         val option = q.options.getOrNull(index) ?: return null
         logger.info { "question tap: ${q.kind} «${option.label}» → ${q.requestId.take(REQUEST_ID_LOG)}…" }
         if (q.kind == "elicitation") {
@@ -2413,16 +2414,16 @@ class BotCommands(
                 // a MULTI-SELECT option tap TOGGLES (the redraw is the feedback);
                 // the 📨 submit is the one that advances.
                 val toggled = active.toggle(shortId, option.optionId)
-                return if (toggled == null) BotReply("⏳ Esa pregunta ya no está pendiente.") else null
+                return if (toggled == null) BotReply("⏳ That question is no longer pending.") else null
             }
             return when (val step = active.answer(shortId, option.optionId)) {
                 is QuestionFlow.Advanced -> null // the edit IS the feedback — the next question is on screen
 
                 is QuestionFlow.Completed -> {
                     val resolvedSeal = if (step.question.questionCount > 1) {
-                        "✅ Respondidas las ${step.question.questionCount} preguntas"
+                        "✅ Answered all ${step.question.questionCount} questions"
                     } else {
-                        "✅ Respondido: <b>${PyText.esc(option.label)}</b>"
+                        "✅ Answered: <b>${PyText.esc(option.label)}</b>"
                     }
                     flyRespond(
                         frame = elicitationFrame(step.question, "tg-$updateId-qa"),
@@ -2432,7 +2433,7 @@ class BotCommands(
                     )
                 }
 
-                null -> BotReply("⏳ Esa pregunta ya no está pendiente.")
+                null -> BotReply("⏳ That question is no longer pending.")
             }
         }
         val frame = when (q.kind) {
@@ -2465,7 +2466,7 @@ class BotCommands(
             frame = frame,
             shortId = shortId,
             active = active,
-            resolvedSeal = "✅ Respondido: <b>${PyText.esc(option.label)}</b>",
+            resolvedSeal = "✅ Answered: <b>${PyText.esc(option.label)}</b>",
         )
     }
 
@@ -2488,11 +2489,11 @@ class BotCommands(
         }
 
         RespondAnswer.Unavailable ->
-            BotReply("📡 El canal está caído — la pregunta sigue esperando, probá de nuevo.")
+            BotReply("📡 The channel is down — the question is still waiting, try again.")
 
         is RespondAnswer.Failed -> {
             val detail = answer.message?.takeIf { it.isNotBlank() } ?: answer.code
-            val seal = "⚠️ El tap no entró (${PyText.esc(answer.code)}): " +
+            val seal = "⚠️ The tap did not go in (${PyText.esc(answer.code)}): " +
                 PyText.esc(PyText.take(detail, ORDER_LOG_PREVIEW))
             active.resolve(shortId, seal)
             null
@@ -2524,7 +2525,7 @@ class BotCommands(
     @Suppress("ReturnCount") // one guard per outcome — the submit's honest shapes
     private suspend fun questionSubmit(shortId: String, updateId: Long): BotReply? {
         val active = board ?: return null
-        val q = active.byShortId(shortId) ?: return BotReply("⏳ Esa pregunta ya no está pendiente.")
+        val q = active.byShortId(shortId) ?: return BotReply("⏳ That question is no longer pending.")
         logger.info {
             "question submit: ${q.kind} «${q.answers[q.questionIndex].joinToString(", ")}» → " +
                 "${q.requestId.take(REQUEST_ID_LOG)}…"
@@ -2535,9 +2536,9 @@ class BotCommands(
             is QuestionFlow.Completed -> {
                 val picked = step.question.answers[step.question.questionIndex].joinToString(", ")
                 val resolvedSeal = when {
-                    step.question.questionCount > 1 -> "✅ Respondidas las ${step.question.questionCount} preguntas"
-                    picked.isBlank() -> "✅ Respondido (sin opciones marcadas)"
-                    else -> "✅ Respondido: <b>${PyText.esc(picked)}</b>"
+                    step.question.questionCount > 1 -> "✅ Answered all ${step.question.questionCount} questions"
+                    picked.isBlank() -> "✅ Answered (no options marked)"
+                    else -> "✅ Answered: <b>${PyText.esc(picked)}</b>"
                 }
                 flyRespond(
                     frame = elicitationFrame(step.question, "tg-$updateId-qs"),
@@ -2547,15 +2548,15 @@ class BotCommands(
                 )
             }
 
-            null -> BotReply("⏳ Esa pregunta ya no está pendiente.")
+            null -> BotReply("⏳ That question is no longer pending.")
         }
     }
 
     /** The ✍️ arm: the NEXT free text IS the elicitation's answer (one shot, ArmedOrder's mechanics). */
     private suspend fun answerArm(shortId: String): BotReply {
-        val q = board?.byShortId(shortId) ?: return BotReply("⏳ Esa pregunta ya no está pendiente.")
+        val q = board?.byShortId(shortId) ?: return BotReply("⏳ That question is no longer pending.")
         pendingAnswerFor = shortId
-        return BotReply("✍️ Escribí la respuesta — tu próxima línea vuela como respuesta a «${PyText.esc(q.header)}».")
+        return BotReply("✍️ Type the answer — your next line flies as the answer to «${PyText.esc(q.header)}».")
     }
 
     /**
@@ -2593,20 +2594,20 @@ class BotCommands(
                         ops.respondQuestion(elicitationFrame(step.question, "tg-$updateId-qf"))
                 ) {
                     RespondAnswer.Resolved -> {
-                        active.resolve(shortId, "✅ Tu respuesta entró.")
+                        active.resolve(shortId, "✅ Your answer went in.")
                         true to null
                     }
 
                     RespondAnswer.Unavailable -> {
                         pendingAnswerFor = shortId
                         true to BotReply(
-                            RouteTexts.CHANNEL_DOWN + "\nLa respuesta sigue armada — reintentá con tu próxima línea.",
+                            RouteTexts.CHANNEL_DOWN + "\nThe answer is still armed — retry with your next line.",
                         )
                     }
 
                     is RespondAnswer.Failed -> {
                         val detail = answer.message?.takeIf { it.isNotBlank() } ?: answer.code
-                        val seal = "⚠️ La respuesta no entró (${PyText.esc(answer.code)}): " +
+                        val seal = "⚠️ The answer did not go in (${PyText.esc(answer.code)}): " +
                             PyText.esc(PyText.take(detail, ORDER_LOG_PREVIEW))
                         active.resolve(shortId, seal)
                         true to null
@@ -2622,8 +2623,8 @@ class BotCommands(
     private var armedOrder: ArmedOrder? = null
 
     /**
-     * A delivery waiting on the owner's choice (2/11 23:12: «quiero que me
-     * pregunte empujar o encolar»): the text, its address and its kind —
+     * A delivery waiting on the owner's choice (2/11 23:12: «I want it to
+     * ask me push or queue» [translated]): the text, its address and its kind —
      * ONE shot, like the arm. The buttons (`odp:` ⚡ / `odq:` ⏳) answer it.
      */
     private data class PendingDelivery(
@@ -2639,8 +2640,8 @@ class BotCommands(
     private var pendingDelivery: PendingDelivery? = null
 
     /**
-     * The 🎁 confirmation's one-shot state (A5): the owner tapped Reclamar
-     * or Usar reset — the NEXT tap is the ✅/❌. The planId/type/key live
+     * The 🎁 confirmation's one-shot state (A5): the owner tapped Claim
+     * or Use reset — the NEXT tap is the ✅/❌. The planId/type/key live
      * HERE, never in the callback (Telegram's 64-byte law), and the TTL
      * keeps a stale confirmation from firing hours later.
      */
@@ -2689,8 +2690,8 @@ class BotCommands(
     private suspend fun orderGateRefusal(tail: String): BotReply? {
         // THE TAPPED ROW IS THE TARGET (measured 2/11 23:04: the gate read
         // the hub's PIN instead — the owner tapped ✍️ on the fresh dummy
-        // while pinned to the PREVIOUS one, and the arm bounced «💀 ya
-        // terminó» about an agent he never pointed at).
+        // while pinned to the PREVIOUS one, and the arm bounced «💀 it
+        // already ended» about an agent he never pointed at).
         val state = hub.peek()
         val rows = runningRows()
         val raw = state?.tools.orEmpty()
@@ -2700,11 +2701,11 @@ class BotCommands(
         if (lane != null) {
             name = Keyboards.subagentName(lane)
             if (lane.status != null) return BotReply(
-                "💀 «${PyText.esc(name)}» ya terminó — el ✍️ no arma órdenes a subagentes muertos.",
+                "💀 «${PyText.esc(name)}» already ended — the ✍️ does not arm orders to dead subagents.",
             )
             sid = lane.subagentAgentId?.let { "$SUBAGENT_SESSION_PREFIX$it" }
                 ?: return BotReply(
-                    "🤔 «${PyText.esc(name)}» todavía no da una sesión (falta su ACK) — el ✍️ no arma a ciegas.",
+                    "🤔 «${PyText.esc(name)}» does not give a session yet (its ACK is missing) — the ✍️ does not arm blindly.",
                 )
         } else {
             val row = rows.firstOrNull { it.sid.endsWith(tail) }
@@ -2723,12 +2724,12 @@ class BotCommands(
         return when (pulse) {
             OrderPulse.Alive -> null
             OrderPulse.Ended -> BotReply(
-                "💀 «${PyText.esc(name)}» ya terminó — el ✍️ no arma órdenes a subagentes muertos.",
+                "💀 «${PyText.esc(name)}» already ended — the ✍️ does not arm orders to dead subagents.",
             )
 
             OrderPulse.Unknown -> BotReply(
-                "🤔 «${PyText.esc(name)}» no da señal viva — el ✍️ no arma a ciegas. " +
-                    "Reabrí su carta y probá de nuevo.",
+                "🤔 «${PyText.esc(name)}» gives no live signal — the ✍️ does not arm blindly. " +
+                    "Reopen its card and try again.",
             )
         }
     }
@@ -2753,8 +2754,8 @@ class BotCommands(
 
             lane != null && pin != null -> pin to Keyboards.subagentName(lane)
             lane != null -> return BotReply(
-                "👁 «${PyText.esc(Keyboards.subagentName(lane))}» attachada por lane, pero el fork no nombra su " +
-                    "sesión — la orden directa no puede ir (fork viejo).",
+                "👁 «${PyText.esc(Keyboards.subagentName(lane))}» attached by lane, but the fork does not name its " +
+                    "session — the direct order cannot go (old fork).",
             )
 
             pin != null -> {
@@ -2778,8 +2779,8 @@ class BotCommands(
                 armedOrder = ArmedOrder(row.sid, title)
                 logger.info { "callback ✍️ so: TASK ORDER ARMED for ${row.sid}" }
                 return BotReply(
-                    "👁 «${PyText.esc(title)}» en vivo — la tubería es tuya.\n" +
-                        "✍️ Armado: tu PRÓXIMO texto va como orden directo a esa task (sin bind).",
+                    "👁 «${PyText.esc(title)}» live — the pipe is yours.\n" +
+                        "✍️ Armed: your NEXT text goes as a direct order to that task (no bind).",
                 )
             }
         }
@@ -2787,15 +2788,15 @@ class BotCommands(
         logger.info { "callback ✍️ so: ORDER ARMED for $sessionId («$title»)" }
         return BotReply(
             "👁 ${attachReply.text}\n" +
-                "✍️ Armado: tu PRÓXIMO texto va como orden a «${PyText.esc(title)}».",
+                "✍️ Armed: your NEXT text goes as an order to «${PyText.esc(title)}».",
         )
     }
 
     /**
      * The DETAIL CARD (the sn: tap — the row label caps at TITLE_CAP and
-     * the spawn descriptions are longísimos, the 2/11 complaint): the
+     * the spawn descriptions are very long, the 2/11 complaint): the
      * FULL name, one honest status line, and — only while it lives — the
-     * action row (👁 attach · ✍️ orden · ⏹️ stop) built FRESH at tap
+     * action row (👁 attach · ✍️ order · ⏹️ stop) built FRESH at tap
      * time. A finished agent still shows its full name: reading what the
      * mission was survives the agent; ordering into its dead inbox never
      * happens again (the fire gate holds regardless).
@@ -2813,8 +2814,8 @@ class BotCommands(
         val row = runningRows().firstOrNull { it.sid.endsWith(tail) }
         return when (row) {
             null -> BotReply(
-                "🔍 Ese subagente no está — ni lane viva ni fila en el store. " +
-                    "Refrescá la lista con /subagents.",
+                "🔍 That subagent is not there — no live lane and no store row. " +
+                    "Refresh the list with /subagents.",
             )
 
             else -> BotReply(
@@ -2826,8 +2827,8 @@ class BotCommands(
 
     /**
      * A subagent lane's tap (`sa:<tail>`): the SAME card as a task — the
-     * owner's model, 30/10: «si yo hago attach a un subagent debo ver la ui
-     * exactamente igual a la de una task». FULL FORM: the fork's additive
+     * owner's model, 30/10: «if I attach to a subagent I must see the ui
+     * exactly like a task's». FULL FORM: the fork's additive
      * launch-ACK field names the child's session
      * (`sess_subagent_<agentId>`, the store's own convention) — constructed,
      * VERIFIED against the running store, then subscribed and pinned: the
@@ -2854,16 +2855,16 @@ class BotCommands(
                     // THE GHOST LAW (measured 4/11: an attach to a KILLED
                     // agent's store row — the store never closes it — born a
                     // blank card no event would ever fill, and the owner read
-                    // «queda en blanco»): a row frozen longer than the ghost
+                    // «it stays blank»): a row frozen longer than the ghost
                     // mark is a DEAD agent, not a stream. Honest refusal
                     // instead of pinning silence.
                     val row = history.subagentsRunning(parentSid ?: "").firstOrNull { it.sid == sess }
                     if (row != null && clock() - row.lastMs >= Keyboards.SUB_STALE_MIN * MS_PER_MINUTE) {
                         logger.info { "callback 🔵 sa: $sess is a GHOST (store row frozen) — honest refusal" }
                         return BotReply(
-                            "💀 «${PyText.esc(row.title.ifBlank { sess.takeLast(SID_TAIL) })}» murió sin cerrar — " +
-                                "su fila del store lleva congelada más de ${Keyboards.SUB_STALE_MIN} min y " +
-                                "no hay stream que mostrar. Su resultado: 📄 /last o /tasks.",
+                            "💀 «${PyText.esc(row.title.ifBlank { sess.takeLast(SID_TAIL) })}» died without closing — " +
+                                "its store row has been frozen for more than ${Keyboards.SUB_STALE_MIN} min and " +
+                                "there is no stream to show. Its result: 📄 /last or /tasks.",
                         )
                     }
                     ops.subscribeChild(sess, ws)
@@ -2874,10 +2875,10 @@ class BotCommands(
                     hub.watchTaskId(sess, clock())
                     hub.requestTick() // M2/M5: the child card is born NOW
                     logger.info { "callback 🔵 sa: STORED session ATTACHED $sess — pinned" }
-                    return BotReply("👁 Subagente attachado — su turno completo fluye acá; se sella cuando cierra.")
+                    return BotReply("👁 Subagent attached — its whole turn flows here; it seals when it closes.")
                 }
             }
-            return BotReply("🤷 Ese subagente ya no está en la tubería — /tasks para re-engancharte.")
+            return BotReply("🤷 That subagent is no longer in the pipe — /tasks to re-attach.")
         }
         return laneAttachLane(lane)
     }
@@ -2899,8 +2900,8 @@ class BotCommands(
                     "callback 🔵 sa: SESSION ATTACHED $sessId (${lane.name}) — the card IS the subagent's turn"
                 }
                 return BotReply(
-                    "👁 Subagente «${PyText.esc(lane.name)}» en vivo — su turno COMPLETO fluye acá " +
-                        "(misma carta que una task); se sella cuando cierra.",
+                    "👁 Subagent «${PyText.esc(lane.name)}» live — its WHOLE turn flows here " +
+                        "(same card as a task); it seals when it closes.",
                 )
             }
             logger.info { "callback 🔵 sa: $sessId not in the running store — honest lane-scope fallback" }
@@ -2909,15 +2910,15 @@ class BotCommands(
         hub.requestTick() // M5: the lane-scoped card speaks NOW
         logger.info { "callback 🔵 sa: lane ATTACHED ${lane.toolId} (${lane.name}) — the card speaks only its stream" }
         return BotReply(
-            "👁 Subagente «${PyText.esc(lane.name)}» en vivo — la misma carta que una task, " +
-                "mirando solo su stream; se sella cuando cierra.",
+            "👁 Subagent «${PyText.esc(lane.name)}» live — the same card as a task, " +
+                "watching only its stream; it seals when it closes.",
         )
     }
 
     /**
      * /status — what runs NOW (sessions-index) + the daemon's own live view.
      * ONE pass feeds both lanes: the honest sentences keep their shape and
-     * the rich body is the same fields as a Campo/Valor table (24/11).
+     * the rich body is the same fields as a Field/Value table (24/11).
      */
     private suspend fun status(): BotReply {
         val lines = mutableListOf("📊 <b>Status</b>")
@@ -2937,7 +2938,7 @@ class BotCommands(
         // A single row is no grid: the honest sentences stay the whole answer
         // (a degraded channel or a lone live view never gets a table).
         val rich = if (rows.size >= 2) {
-            "📊 <b>Status</b>\n\n" + Tables.html(listOf("Campo", "Valor"), rows)
+            "📊 <b>Status</b>\n\n" + Tables.html(listOf("Field", "Value"), rows)
         } else {
             null
         }
@@ -2956,10 +2957,10 @@ class BotCommands(
             rows.add(listOf(label, cell))
         }
         val context = "${ctx.value.workspacePath.substringAfterLast('/')} · ${ctx.value.mode}"
-        row("Contexto", "context: ${PyText.esc(context)}", context)
+        row("Context", "context: ${PyText.esc(context)}", context)
         val activeId = ctx.value.activeTaskId
         if (activeId == null) {
-            row("Activa", ACTIVE_NONE, ACTIVE_NONE_VALUE)
+            row("Active", ACTIVE_NONE, ACTIVE_NONE_VALUE)
         } else {
             val title = activeName(activeId, ctx.value.workspacePath)
             val plain = if (title != null) {
@@ -2967,16 +2968,16 @@ class BotCommands(
             } else {
                 "<code>${PyText.esc(activeId.takeLast(SID_TAIL))}</code>"
             }
-            row("Activa", "🎯 Active: $plain", if (title != null) "«$title»" else activeId.takeLast(SID_TAIL))
+            row("Active", "🎯 Active: $plain", if (title != null) "«$title»" else activeId.takeLast(SID_TAIL))
             modelValue(activeId, ctx.value.mode)?.let { model ->
-                row("Modelo", "🤖 ${PyText.esc(model)}", model)
+                row("Model", "🤖 ${PyText.esc(model)}", model)
             }
         }
         // THE OWNER'S SELECTION (5/11): the choice that outranks the heuristics
         selectedSid?.let { chosen ->
             val selected = "«${selectedTitle ?: chosen.takeLast(SID_TAIL)}» — " +
-                "tu texto va ahí hasta que elijas otra"
-            row("Elegida", "🎯 elegida: ${PyText.esc(selected)}", selected)
+                "your text goes there until you pick another"
+            row("Selected", "🎯 selected: ${PyText.esc(selected)}", selected)
         }
         when (val answer = ops.query(ChannelQuery.ActiveTaskIds(ctx.value.workspacePath))) {
             is QueryAnswer.Ok -> {
@@ -3035,10 +3036,10 @@ class BotCommands(
     }
 
     /**
-     * /nuclear — Python's two-step (the owner, 29/10: «con go de una, sin
-     * go soft y botón»): `go` = the FULL ladder (the owner's order:
-     * «reiniciar todo a lo duro — el bot de kotlin y todo zcode habido y
-     * por haber»); bare = the ☢️ card + Python's EXACT confirmation row
+     * /nuclear — Python's two-step (the owner, 29/10: «with go at once, without
+     * go soft and button» [translated]): `go` = the FULL ladder (the owner's order:
+     * «restart everything the hard way — the kotlin bot and all zcode there is
+     * and ever was» [translated]); bare = the ☢️ card + Python's EXACT confirmation row
      * (☢️ Confirm / 🙅 Cancel, `nuc:go`/`nuc:no`); `no` = the exact
      * cancellation.
      */
@@ -3070,7 +3071,7 @@ class BotCommands(
         // indistinguishable from a loop. One at a time, honestly refused.
         if (!nuclearGate.compareAndSet(false, true)) {
             logger.warn { "nuclear: already running — extra trigger REFUSED (single-flight)" }
-            return "☢️ Ya hay un nuclear corriendo — esperá el resumen antes de lanzar otro."
+            return "☢️ A nuclear run is already going — wait for the summary before launching another."
         }
         try {
             val summary = daemonReset()
@@ -3145,7 +3146,7 @@ class BotCommands(
             !text.startsWith("⚠️ Quota failed")
 
     /**
-     * /usage — el consumo REAL de la conversación activa (the fork's
+     * /usage — the REAL consumption of the active conversation (the fork's
      * taskUsage query: the agent usage db's own aggregate — the same source
      * the desktop's panel reads; in the channel since B3a, so no
      * fork-deploy excuse lives here). Python's /usage summed TODAY across
@@ -3173,7 +3174,7 @@ class BotCommands(
     }
 
     /**
-     * /ctx — el medidor de contexto por conversación, EN LISTA (Python's
+     * /ctx — the context meter per conversation, AS A LIST (Python's
      * `context_report`, one numbered line per usage-backed conversation of
      * the tasks-index, sidebar order). The SUPERIOR data: Python estimated
      * the window from a model→tokens map and could show a STALE pre-compact
@@ -3228,7 +3229,7 @@ class BotCommands(
     /**
      * The meter's read (pure): used+window → the emoji/pct line (Python's
      * 🔴 ≥80 · 🟡 ≥50 · 🟢 law); window unknown → the used count with a
-     * «ventana ?» and NO invented percent; nothing reported → the honest ❔.
+     * «window ?» and NO invented percent; nothing reported → the honest ❔.
      * Every token count through [tokenRaw] — the number law.
      */
     private fun ctxMeter(json: String): String {
@@ -3237,7 +3238,7 @@ class BotCommands(
         val window = root?.long("windowTokens")?.takeIf { it > 0 }
         val body = when {
             used == null -> CTX_NO_DATA
-            window == null -> "${tokenRaw(used.toDouble())} · ventana ?"
+            window == null -> "${tokenRaw(used.toDouble())} · window ?"
             else -> {
                 val pct = ((used * CTX_PERCENT_SCALE + window / 2) / window).toInt()
                 val emoji = if (pct >= CTX_HOT_PCT) "🔴" else if (pct >= CTX_WARM_PCT) "🟡" else "🟢"
@@ -3316,8 +3317,8 @@ class BotCommands(
 
     /**
      * /context_window — the active conversation's REAL context meter, the
-     * owner's order: «que te marque eso, la ventana de tokens usada hasta
-     * el momento por nK segun el modelo y el porcentaje que representa».
+     * owner's order: «mark that for me, the window of tokens used so far
+     * by nK according to the model and the percentage it represents» [translated].
      * Every number rides the fork's contextWindow query (the desktop
      * meter's own source, 9cfb39a9) — NOTHING is estimated here. An old
      * host refuses the query BY NAME (unknown_query) and the refusal says
@@ -3340,8 +3341,8 @@ class BotCommands(
     /** The honest failure: an old host refuses the query by name — the fork deploy is the fix. */
     private fun contextWindowFailure(code: String, message: String?): String =
         if (code == UNKNOWN_QUERY_CODE) {
-            "⚠️ La app conectada no conoce la query «contextWindow» — falta deployar el fork " +
-                "actualizado (ZCode damian, commit 9cfb39a9+); el bot ya la habla."
+            "⚠️ The connected app does not know the «contextWindow» query — the updated fork needs a deploy " +
+                "(ZCode damian, commit 9cfb39a9+); the bot already speaks it."
         } else {
             "⚠️ Context window failed ($code): ${PyText.esc(message ?: "?")}"
         }
@@ -3363,7 +3364,7 @@ class BotCommands(
      */
     private suspend fun queueLaunch(messageId: String, updateId: Long): BotReply {
         val item = ops.queueTake(messageId)
-            ?: return BotReply("🤷 Ya no está — el drenaje del turno se la llevó (o se descartó antes).")
+            ?: return BotReply("🤷 Gone — the turn's drain took it (or it was discarded earlier).")
         return when (ops.sendInbound(item.text, "$messageId-manual", clock())) {
             InboundReceipt.FIRED -> {
                 logger.info { "queue: $messageId fired BY HAND (update=$updateId)" }
@@ -3381,14 +3382,14 @@ class BotCommands(
     /** 🗑 qd: — one parked text is dropped, honestly counted. */
     private suspend fun queueDiscard(messageId: String, updateId: Long): BotReply {
         val dropped = ops.queueTake(messageId)
-            ?: return BotReply("🤷 Ya no está — nada que descartar.")
+            ?: return BotReply("🤷 Gone — nothing to discard.")
         val left = ops.queueEntries().size
         logger.info { "queue: $messageId DISCARDED by hand (update=$updateId) — $left left" }
         return BotReply("🗑 Discarded («${PyText.esc(dropped.text.take(DISCARD_PREVIEW))}…») — $left left.")
     }
 
     /**
-     * ⏳ qgo — THE OWNER'S 18/11 LAW: encolar is ZCode's enqueue, a SOFT
+     * ⏳ qgo — THE OWNER'S 18/11 LAW: queueing is ZCode's enqueue, a SOFT
      * STEER — never a command waiting for the whole turn. The tap takes
      * the parked text OUT of the F17 queue and rides the steer frame to
      * the conversation it was parked for: a RUNNING turn injects it at
@@ -3404,49 +3405,49 @@ class BotCommands(
         val sid = arg.substringBefore(':')
         val parkedId = arg.substringAfter(':', "")
         if (sid.isBlank() || parkedId.isBlank()) {
-            return BotReply("🤷 Esa pregunta es de una versión anterior — mandá el mensaje de nuevo.")
+            return BotReply("🤷 That question is from an older version — send the message again.")
         }
         val item = ops.queueTake("tg-$parkedId")
-            ?: return BotReply("🤷 Ya no está — el drenaje del turno se la llevó (o se descartó antes).")
+            ?: return BotReply("🤷 Gone — the turn's drain took it (or it was discarded earlier).")
         val title = history.ctxTasks(SCOPE_FOR_PICK).firstOrNull { it.sid == sid }
             ?.title?.takeIf { it.isNotEmpty() } ?: sid.takeLast(SID_TAIL)
         return when (val answer = ops.steer(sid, item.text)) {
             SteerAnswer.Delivered -> {
                 logger.info { "callback ⏳ qgo: parked text steered to $sid (update=$updateId)" }
                 BotReply(
-                    "⏳ Encolado como steer — «${PyText.esc(title)}» lo lee al terminar la ejecución " +
-                        "actual (se inyecta DENTRO del turno que corre; si ya terminó, arrancó uno normal).",
+                    "⏳ Queued as a steer — «${PyText.esc(title)}» reads it when the current execution " +
+                        "ends (it is injected INSIDE the running turn; if that already ended, a normal one started).",
                 )
             }
 
             is SteerAnswer.Failed -> {
                 ops.enqueueInbound(item.text, item.messageId, item.receivedAt)
                 if (answer.code == UNKNOWN_REQUEST_CODE) {
-                    BotReply("$STEER_OLD_FORK\n📬 El texto volvió a la cola — corre al terminar el turno.")
+                    BotReply("$STEER_OLD_FORK\n📬 The text went back to the queue — it runs when the turn ends.")
                 } else {
                     BotReply(
-                        "⚠️ No pude encolar como steer (${answer.code}): ${PyText.esc(answer.message ?: "?")}" +
-                            " — el texto volvió a la cola.",
+                        "⚠️ Could not queue it as a steer (${answer.code}): ${PyText.esc(answer.message ?: "?")}" +
+                            " — the text went back to the queue.",
                     )
                 }
             }
 
             SteerAnswer.Unavailable -> {
                 ops.enqueueInbound(item.text, item.messageId, item.receivedAt)
-                BotReply("$DEGRADED\n📬 El texto volvió a la cola.")
+                BotReply("$DEGRADED\n📬 The text went back to the queue.")
             }
         }
     }
 
     /**
-     * /steer <texto> — redirigí el turno que corre (STEER, la frame
-     * aditiva del canal): el texto entra con delivery guide y el CLI lo
-     * inyecta DENTRO del turno vivo en el próximo límite de herramienta
-     * (turn.steerQueued → turn.steerDrained). Es OTRO intento que el
-     * texto libre (ese se ESTACIONA en la F17 cuando hay turno). Honesto
-     * por contrato: idle → el texto arranca un turno normal (la guía no
-     * se pierde — y se lo decimos); fork viejo → el nombre del fix; canal
-     * caído → degradado; nada inventado.
+     * /steer <text> — redirect the running turn (STEER, the channel's
+     * additive frame): the text rides with delivery guide and the CLI
+     * injects it INSIDE the live turn at the next tool boundary
+     * (turn.steerQueued → turn.steerDrained). It is ANOTHER attempt than
+     * free text (that one PARKS in F17 when a turn runs). Honest
+     * by contract: idle → the text starts a normal turn (the guide is not
+     * lost — and we say so); old fork → the fix's name; channel
+     * down → degraded; nothing invented.
      */
     @Suppress("ReturnCount") // one guard per honest outcome
     private suspend fun steer(rest: String): BotReply {
@@ -3467,12 +3468,12 @@ class BotCommands(
                 logger.info { "steer: ${text.length} chars to $taskId (was running=$running)" }
                 if (running) {
                     BotReply(
-                        "🌀 Steer entregado a «${PyText.esc(title)}» — entra DENTRO del turno que corre " +
-                            "(se inyecta en el próximo límite de herramienta).",
+                        "🌀 Steer delivered to «${PyText.esc(title)}» — it goes INSIDE the running turn " +
+                            "(injected at the next tool boundary).",
                     )
                 } else {
                     BotReply(
-                        "🌀 «${PyText.esc(title)}» no tenía turno corriendo — el texto arrancó un turno normal.",
+                        "🌀 «${PyText.esc(title)}» had no turn running — the text started a normal turn.",
                     )
                 }
             }
@@ -3481,7 +3482,7 @@ class BotCommands(
                 if (answer.code == UNKNOWN_REQUEST_CODE) {
                     BotReply(STEER_OLD_FORK)
                 } else {
-                    BotReply("⚠️ Steer falló (${answer.code}): ${PyText.esc(answer.message ?: "?")}")
+                    BotReply("⚠️ Steer failed (${answer.code}): ${PyText.esc(answer.message ?: "?")}")
                 }
 
             SteerAnswer.Unavailable -> BotReply(DEGRADED)
@@ -3504,7 +3505,7 @@ class BotCommands(
         // THE OWNER'S CHOICE: a BUSY child is never cut on our own judgment
         if (isBusyChild(child)) {
             pendingDelivery = PendingDelivery(child, name, text, steer = true, updateId = 0L, atMs = clock())
-            logger.info { "steer: to SUBAGENT $child HELD — asking empujar/encolar" }
+            logger.info { "steer: to SUBAGENT $child HELD — asking push/queue" }
             return BotReply(askPushOrQueue(name), markup = Keyboards.pushOrQueue())
         }
         return deliverSteer(child, name, text, interrupted = false)
@@ -3521,10 +3522,10 @@ class BotCommands(
             logger.info { "steer: ${text.length} chars to SUBAGENT $child (interrupted=$interrupted)" }
             BotReply(
                 if (interrupted) {
-                    "⚡ Le corté el turno a «${PyText.esc(name)}» y le pasé el steer — lo lee AHORA."
+                    "⚡ I cut «${PyText.esc(name)}»'s turn and passed the steer — it reads it NOW."
                 } else {
-                    "🌀 Steer entregado a «${PyText.esc(name)}» — entra DENTRO del turno del subagente " +
-                        "(se inyecta en el próximo límite de herramienta)."
+                    "🌀 Steer delivered to «${PyText.esc(name)}» — it goes INSIDE the subagent's turn " +
+                        "(injected at the next tool boundary)."
                 },
             )
         }
@@ -3533,7 +3534,7 @@ class BotCommands(
             if (answer.code == UNKNOWN_REQUEST_CODE) {
                 BotReply(STEER_OLD_FORK)
             } else {
-                BotReply("⚠️ Steer al subagente falló (${answer.code}): ${PyText.esc(answer.message ?: "?")}")
+                BotReply("⚠️ Steer to the subagent failed (${answer.code}): ${PyText.esc(answer.message ?: "?")}")
             }
 
         SteerAnswer.Unavailable -> BotReply(DEGRADED)
@@ -3541,17 +3542,17 @@ class BotCommands(
 
     /** The ⚡/⏳ question's words — the title rides escaped. */
     private fun askPushOrQueue(title: String): String =
-        "🕹 «${PyText.esc(title)}» está trabajando. ¿Cómo le va el mensaje?\n" +
-            "⚡ Empujar — le corto el turno y lo lee ya.\n" +
-            "⏳ Encolar — lo lee cuando termine."
+        "🕹 «${PyText.esc(title)}» is working. How does the message get there?\n" +
+            "⚡ Push — I cut its turn and it reads it now.\n" +
+            "⏳ Queue — it reads it when the turn ends."
 
     /** The ⚡/⏳ tap: the pending delivery's ONE shot. */
     @Suppress("ReturnCount") // expired, stale, the flight — one exit each
     private suspend fun resolvePending(push: Boolean): BotReply {
-        val p = pendingDelivery ?: return BotReply("⌛ Esa pregunta ya venció — mandá el mensaje de nuevo.")
+        val p = pendingDelivery ?: return BotReply("⌛ That question expired — send the message again.")
         pendingDelivery = null
         if (clock() - p.atMs > PENDING_DELIVERY_TTL_MS) {
-            return BotReply("⌛ Pasaron más de 5 minutos — mandá el mensaje de nuevo.")
+            return BotReply("⌛ More than 5 minutes passed — send the message again.")
         }
         val interrupted = push && interruptChild(p.sid)
         logger.info {
@@ -3582,25 +3583,25 @@ class BotCommands(
             if (level != null) {
                 verbosity.set(level)
                 logger.info { "verbosity: ${level.name} set via /verbosity $arg" }
-                return BotReply(verbosityLine(level) + "\n✅ Aplicado.")
+                return BotReply(verbosityLine(level) + "\n✅ Applied.")
             }
             return BotReply(
-                "🤷 «${PyText.esc(arg)}» no es un nivel — elegilo de la lista:",
+                "🤷 «${PyText.esc(arg)}» is not a level — pick it from the list:",
                 markup = Keyboards.verbosityPicker(verbosity.current()),
             )
         }
         return BotReply(
-            verbosityLine(verbosity.current()) + "\nElegí el nivel:",
+            verbosityLine(verbosity.current()) + "\nPick the level:",
             markup = Keyboards.verbosityPicker(verbosity.current()),
         )
     }
 
     /** The vb: tap: set the level — the toast's reply is the confirmation. */
     private fun verbosityTap(arg: String): BotReply {
-        val level = FeedVerbosity.of(arg) ?: return BotReply("🤷 Ese nivel no existe — nada cambió. /verbosity.")
+        val level = FeedVerbosity.of(arg) ?: return BotReply("🤷 That level does not exist — nothing changed. /verbosity.")
         verbosity.set(level)
         logger.info { "callback 📣 vb:$arg — level=${level.name}" }
-        return BotReply(verbosityLine(level) + "\n✅ Aplicado — el próximo mensaje del feed ya obedece.")
+        return BotReply(verbosityLine(level) + "\n✅ Applied — the feed's next message already obeys.")
     }
 
     /** The command's one line: the level's word + what it lets through. */
@@ -3611,17 +3612,17 @@ class BotCommands(
             FeedVerbosity.VERBOSE -> "🔊 verbose"
         }
         val meaning = when (level) {
-            FeedVerbosity.SUMMARY -> "solo el cartel de estado y la respuesta final"
-            FeedVerbosity.NORMAL -> "cada bloque CoT sellado y cada cierre de tool, en mensajes separados"
-            FeedVerbosity.VERBOSE -> "todo lo anterior, más el aviso de cada tool al abrirse"
+            FeedVerbosity.SUMMARY -> "only the status sign and the final answer"
+            FeedVerbosity.NORMAL -> "each sealed CoT block and each tool close, in separate messages"
+            FeedVerbosity.VERBOSE -> "everything above, plus a notice for each tool as it opens"
         }
-        return "📣 Feed en vivo: <b>$word</b> — $meaning"
+        return "📣 Live feed: <b>$word</b> — $meaning"
     }
 
     /**
      * /subagents — TWO views, ONE button each (the owner's contract,
-     * 30/10: «/subagents no muestra el subagente activo… y no mezclar los
-     * inactivos»). DEFAULT: ONLY the ACTIVE subagent groups of the watched
+     * 30/10: «/subagents does not show the active subagent… and do not mix
+     * the inactive ones» [translated]). DEFAULT: ONLY the ACTIVE subagent groups of the watched
      * turn. THE DIAGNOSED GAP: the live subagent IS the open Agent/Task
      * DISPATCH lane (parentToolUseId == null — the fork streams
      * tool_input_start → tool_call the instant the subagent spawns), which
@@ -3670,7 +3671,7 @@ class BotCommands(
     internal fun subagentsView(rest: String): Pair<Boolean, String?> = when (rest.trim().lowercase()) {
         "", "now", "activos", "active" -> false to null
         "inactivos", "old", "inactive" -> true to null
-        else -> false to "\n⚠️ Args: /subagents · /subagents inactivos (today's ended) · /subagents activos"
+        else -> false to "\n⚠️ Args: /subagents · /subagents inactive (today's ended) · /subagents active"
     }
 
     /** One ACTIVE subagent: its dispatch lane (when streamed) + open inner lanes + live child chars. */
@@ -3728,7 +3729,7 @@ class BotCommands(
                 append('\n')
                 g.openLanes.forEach { lane ->
                     append(
-                        "   ⚡ ${PyText.esc(lane.name)} · ${lane.lines} líneas · " +
+                        "   ⚡ ${PyText.esc(lane.name)} · ${lane.lines} lines · " +
                             LiveTurn.fmtDur(nowMs - lane.openedAtMs) + "\n",
                     )
                 }
@@ -3736,7 +3737,7 @@ class BotCommands(
         }.trimEnd()
     }
 
-    /** «inactivos»'s render: today's ENDED subagents, newest first, MAX 10 — real rows only. */
+    /** «inactive»'s render: today's ENDED subagents, newest first, MAX 10 — real rows only. */
     private fun renderSubagentsInactive(rows: List<SubagentRow>): String {
         val capped = rows.sortedByDescending { it.endedMs }.take(SUBAGENTS_INACTIVE_CAP)
         if (capped.isEmpty()) return "📭 No subagents ended today."
@@ -3850,11 +3851,11 @@ class BotCommands(
             ops.subscribe(target, ws) // rebase + focus move happen inside (the wiring's law)
         }
         hub.requestTick() // the draw is NOW, not on the next 3s beat
-        val head = if (pin != null) "👁 Subagente" else "👁"
+        val head = if (pin != null) "👁 Subagent" else "👁"
         val outcome = if (card == null) {
-            "re-suscrito — su próximo turno abre la carta."
+            "re-subscribed — its next turn opens the card."
         } else {
-            "re-enganchado — la próxima ráfaga re-lista la carta."
+            "re-attached — the next burst re-lists the card."
         }
         return BotReply("$head «${PyText.esc(title)}» — $outcome")
     }
@@ -3958,50 +3959,48 @@ class BotCommands(
 
         /**
          * The destructive tap's refusal — /deploy's NotOwner vocabulary
-         * (🚫, «solo el dueño», nothing touched), said in the taps' own
+         * (🚫, «owner only», nothing touched), said in the taps' own
          * voice. The tap answered it and ran NOTHING behind it.
          */
-        internal const val NOT_OWNER = "🚫 Solo el dueño toca ese botón — no se ejecutó nada."
+        internal const val NOT_OWNER = "🚫 Only the owner touches that button — nothing was executed."
 
         /** /retry's honest refusal — nothing fired yet, so nothing to relaunch (F22). */
         internal const val RETRY_NOTHING =
-            "🤔 Nada para relanzar — no hay prompt guardado. " +
-                "Todo texto que entra a una conversación queda guardado y /retry lo vuelve a lanzar."
+            "🤔 Nothing to relaunch — no saved prompt. " +
+                "Every text that enters a conversation is saved and /retry launches it again."
 
         /** /watch with no card and no active conversation: the cable needs a target. */
         internal const val WATCH_NOTHING =
-            "🤷 /watch: no hay carta en vivo ni conversación activa que re-enganchar — /tasks y tocá una fila."
+            "🤷 /watch: no live card and no active conversation to re-attach — /tasks and tap a row."
 
         /** /watch's target exists but no workspace is known — the wire needs one to subscribe. */
         internal const val WATCH_NO_WORKSPACE =
-            "🤷 No sé el workspace de esa tarea — tocá su fila en /tasks y probá /watch de nuevo."
+            "🤷 I don't know that task's workspace — tap its row in /tasks and try /watch again."
 
         /** /run's usage (Python's line; the project tag honestly retired — /tasks new's law). */
         internal const val RUN_USAGE =
-            "⚠️ /run «prompt» — abre una conversación NUEVA en el proyecto activo y manda el prompt. " +
-                "(Cambiar de proyecto desde el phone es el próximo hot-fix.)"
+            "⚠️ /run «prompt» — opens a NEW conversation in the active project and sends the prompt. " +
+                "(Switching projects from the phone is the next hot-fix.)"
 
         /** /run with no bot context at all: nothing to spawn from (the fork's inbound needs the context). */
         internal const val RUN_NO_CONTEXT =
-            "📭 No hay contexto del bot en la app — /run no puede abrir nada. " +
-                "Mandá /tasks y tocá una fila primero."
+            "📭 No bot context in the app — /run cannot open anything. " +
+                "Send /tasks and tap a row first."
 
         /** /run with the active turn running: the /new was gated — the open conversation is NOT touched. */
         internal const val RUN_BUSY =
-            "🔄 Hay un turno corriendo y el /new no entró — /run no toca esa conversación. " +
-                "/stop primero o esperá a que termine."
+            "🔄 A turn is running and /new did not go in — /run does not touch that conversation. " +
+                "/stop first or wait for it to end."
 
         /** /run when the draft never confirmed: the honest gap — nothing fired, try again. */
         internal const val RUN_NOT_FRESH =
-            "⚠️ No pude garantizar una conversación nueva (el /new no aterrizó) — NADA voló. " +
-                "La conversación abierta está intacta; probá de nuevo."
+            "⚠️ I could not guarantee a new conversation (/new did not land) — NOTHING flew. " +
+                "The open conversation is intact; try again."
 
         /** The botsService's own refusal replies, matched by their stable markers (en-US). */
         const val TASK_RUNNING_MARKER = "still running"
         const val TASK_MISSING_MARKER = "Task not found"
         const val WS_MISSING_MARKER = "No available workspace found."
-
-        /** Python's status: «🎯 Active: none (/task n to pick one)» — buttons are the picker now. */
 
         /** Python's status: «🎯 Active: none (/task n to pick one)» — buttons are the picker now. */
         /** The value behind [ACTIVE_NONE] — the plain line and the table cell share it. */
@@ -4045,20 +4044,20 @@ class BotCommands(
         /**
          * The eight — the SINGLE source of both the «/» menu (BotMenu)
          * and /help's list, so they can never drift apart again (the
-         * owner, 29/10: «la lista de commands no corresponde con la lista
-         * real»). Descriptions in Python's menu_desc tone.
+         * owner, 29/10: «the list of commands does not match the real
+         * list» [translated]). Descriptions in Python's menu_desc tone.
          */
         val MENU: List<MenuCommand> = listOf(
             MenuCommand("tasks", "conversations by project — tap a row to watch it live"),
             MenuCommand("all_tasks", "all conversations, loose ones included"),
             MenuCommand("status", "what is running + the active conversation"),
-            MenuCommand("plan", "elige el plan — cada uno con su quota restante al lado"),
-            MenuCommand("model", "los modelos del plan vigente"),
-            MenuCommand("effort", "los niveles de effort del plan y modelo vigentes"),
+            MenuCommand("plan", "pick the plan — each one with its remaining quota beside it"),
+            MenuCommand("model", "the models of the plan in force"),
+            MenuCommand("effort", "the effort levels of the plan and model in force"),
             MenuCommand("mode", "the conversation's mode — yolo · build · edit · guarded"),
             MenuCommand("plan_mode", "Plan mode ON/OFF — the separate toggle (/mode no longer offers plan)"),
             MenuCommand("last", "re-sends the active conversation's last answer"),
-            MenuCommand("watch", "re-engancha el streaming de la carta en vivo — el cable cuando se queda muda"),
+            MenuCommand("watch", "re-attaches the live card's streaming — the cable for when it goes mute"),
             MenuCommand("compact", "shrinks the active conversation's context"),
             MenuCommand("context_window", "context window used — tokens, model window and percent"),
             MenuCommand("queue", "the parked texts — launch or discard"),
@@ -4069,28 +4068,28 @@ class BotCommands(
             MenuCommand("quota", "the active plan's limits — z.ai pools or OpenCode Go windows"),
             MenuCommand("usage", "token usage of the active conversation — real, cumulative"),
             MenuCommand("ctx", "context % per conversation — the real meter list"),
-            MenuCommand("subagents", "the active subagents · «inactivos» shows today's ended"),
-            MenuCommand("verbosity", "cuánto habla el feed en vivo — summary / normal / verbose"),
-            MenuCommand("ram_clean", "limpia la Mac ahora (idle islands + caches) · «report» = solo lectura"),
+            MenuCommand("subagents", "the active subagents · «inactive» shows today's ended"),
+            MenuCommand("verbosity", "how much the live feed talks — summary / normal / verbose"),
+            MenuCommand("ram_clean", "cleans the Mac now (idle islands + caches) · «report» = read only"),
             MenuCommand(
                 "fleet_healthcheck",
-                "batería del ecosistema (colima, pg, brain, bots) · «check» = solo lectura",
+                "the ecosystem's battery (colima, pg, brain, bots) · «check» = read only",
             ),
-            MenuCommand("fleet", "TODOS los scripts nu de la Mac — /fleet_list · /fleet <verbo> [args]"),
-            MenuCommand("fleet_list", "la lista completa: verbo, argumentos y para qué sirve"),
+            MenuCommand("fleet", "EVERY nu script on the Mac — /fleet_list · /fleet <verb> [args]"),
+            MenuCommand("fleet_list", "the full list: verb, arguments and what each is for"),
             // The usage-picked few (usage-report, 14 real days): each is ALSO a
             // real tap in the «/» menu. Every other verb works via /fleet <verb>.
-            MenuCommand("fleet_ram_clean", "limpia la Mac AHORA (--clean por defecto) · «report» = solo lectura"),
-            MenuCommand("fleet_brain", "pregunta al RAG: /fleet brain «pregunta»"),
-            MenuCommand("fleet_fleet_errors", "errores frescos del fleet · «--since 2h»"),
-            MenuCommand("fleet_deploy_status", "cómo terminó cada deploy y su pid"),
-            MenuCommand("fleet_deploy_brain", "deploy del brain (launchd)"),
-            MenuCommand("fleet_deploy_bot", "deploy del bot (launchd)"),
-            MenuCommand("fleet_deploy_all", "los cuatro legs, en su orden"),
-            MenuCommand("fleet_worktree_sweep", "worktrees/branches — auditoría · «--clean» limpia"),
-            MenuCommand("brain", "pregunta al RAG de agent-brain — /brain status para el pulso"),
-            MenuCommand("memory", "recuerdos del brain — /memory «texto» · recent [k] · status"),
-            MenuCommand("learn", "aprendizaje de 7 días — memorias, evals y costos del brain"),
+            MenuCommand("fleet_ram_clean", "cleans the Mac NOW (--clean by default) · «report» = read only"),
+            MenuCommand("fleet_brain", "asks the RAG: /fleet brain «question»"),
+            MenuCommand("fleet_fleet_errors", "fresh fleet errors · «--since 2h»"),
+            MenuCommand("fleet_deploy_status", "how each deploy ended and its pid"),
+            MenuCommand("fleet_deploy_brain", "brain deploy (launchd)"),
+            MenuCommand("fleet_deploy_bot", "bot deploy (launchd)"),
+            MenuCommand("fleet_deploy_all", "the four legs, in their order"),
+            MenuCommand("fleet_worktree_sweep", "worktrees/branches — audit · «--clean» cleans"),
+            MenuCommand("brain", "asks the agent-brain RAG — /brain status for the pulse"),
+            MenuCommand("memory", "brain memories — /memory «text» · recent [k] · status"),
+            MenuCommand("learn", "7-day learning — the brain's memories, evals and costs"),
             MenuCommand("help", "all commands"),
         )
 
@@ -4139,7 +4138,7 @@ class BotCommands(
         /**
          * The context meter's render (pure — /context_window's body): the
          * header, one model line, the ▰▱ bar. Honesty ladder: used+window →
-         * the full meter; used only → «ventana desconocida» with NO percent
+         * the full meter; used only → «window unknown» with NO percent
          * and NO bar (you cannot scale without the window); neither → the
          * honest ⚠️. Zero invented numbers, ever.
          */
@@ -4150,11 +4149,11 @@ class BotCommands(
             val model = root.str("model")?.takeIf { it.isNotEmpty() } ?: CTX_MODEL_UNKNOWN
             val used = root.long("usedTokens") ?: return CTX_WINDOW_NO_DATA
             if (used < 0) return CTX_WINDOW_NO_DATA
-            val header = "🪟 <b>Ventana de contexto «${PyText.esc(title)}»</b>"
+            val header = "🪟 <b>Context window «${PyText.esc(title)}»</b>"
             val window = root.long("windowTokens")
             val windowSource = root.str("windowSource")
             val line = if (window == null || window <= 0) {
-                "Modelo <b>${PyText.esc(model)}</b>: ${fmtTokens(used)} · ventana desconocida"
+                "Model <b>${PyText.esc(model)}</b>: ${fmtTokens(used)} · window unknown"
             } else {
                 // Rounded to the nearest whole percent; >100% is honest (the window is gone).
                 val pct = ((used * CTX_PERCENT_SCALE + window / 2) / window).toInt()
@@ -4165,14 +4164,14 @@ class BotCommands(
                 // the owner's own 1M calibration when nothing exposes the
                 // window — rendered approximate, never as a hard fact
                 val approx = if (windowSource == "owner_default") " (~)" else ""
-                "Modelo <b>${PyText.esc(model)}</b>: ${fmtTokens(used)} de ${fmtTokens(window)}$approx ($pct%)\n$bar"
+                "Model <b>${PyText.esc(model)}</b>: ${fmtTokens(used)} of ${fmtTokens(window)}$approx ($pct%)\n$bar"
             }
             return "$header\n$line"
         }
 
         /**
-         * The meter's number ladder (owner's 3/11: «en vez de 1000k me
-         * gustaría que diga 1M»): ≥1M renders as M (1M, 1.2M — one
+         * The meter's number ladder (owner's 3/11: «instead of 1000k I
+         * would like it to say 1M» [translated]): ≥1M renders as M (1M, 1.2M — one
          * decimal, trimmed when whole), ≥100K as whole K (123K), below as
          * one-decimal K (45.3K). The unit moves up only when the value
          * IS that magnitude — never a rounded lie at a lower rung.
@@ -4199,69 +4198,69 @@ class BotCommands(
          */
         internal const val UNKNOWN_REQUEST_CODE = "unknown_request"
         internal const val STEER_USAGE =
-            "🌀 /steer &lt;texto&gt; — redirigí el turno que corre: el texto entra DENTRO del turno vivo " +
-                "(no se estaciona en la cola)."
+            "🌀 /steer &lt;text&gt; — redirect the running turn: the text goes INSIDE the live turn " +
+                "(it does not park in the queue)."
         internal const val STEER_OLD_FORK =
-            "⚠️ La app conectada no conoce el frame «steer» — falta deployar el fork actualizado " +
-                "(ZCode damian, commit 7ae1a972+); el bot ya lo habla."
+            "⚠️ The connected app does not know the «steer» frame — the updated fork needs a deploy " +
+                "(ZCode damian, commit 7ae1a972+); the bot already speaks it."
 
         /** /mode's by-name refusal from a host that predates the A4 cap. */
         internal const val MODE_OLD_FORK =
-            "⚠️ La app conectada no conoce el frame «setMode» — falta deployar el fork actualizado " +
-                "(ZCode damian, A4); el bot ya lo habla."
+            "⚠️ The connected app does not know the «setMode» frame — the updated fork needs a deploy " +
+                "(ZCode damian, A4); the bot already speaks it."
 
         /** /mode needs a conversation: the mode is PER conversation, not a global knob. */
         internal const val MODE_NO_CONTEXT =
-            "📭 No hay conversación activa — /tasks y tocá una fila: el modo es POR conversación."
+            "📭 No active conversation — /tasks and tap a row: the mode is PER conversation."
 
         /**
          * A tap from a menu born BEFORE the 11/11 split — nothing rides,
          * the fresh commands are one /plan away.
          */
         internal const val PLAN_OLD_MENU =
-            "ℹ️ Este menú es de una versión anterior — abrí /plan (el plan y su quota), /model o /effort."
+            "ℹ️ This menu is from an older version — open /plan (the plan and its quota), /model or /effort."
 
         /** /plan's degrade: the fork predates the modelSelection frame. */
         internal const val PLAN_OLD_FORK =
-            "📡 No pude leer la selección — ¿el fork está deployado con los frames de /plan? " +
-                "(commits 3d07cace+, falta el deploy del fork)."
+            "📡 Could not read the selection — is the fork deployed with the /plan frames? " +
+                "(commits 3d07cace+, the fork deploy is missing)."
 
         /** No conversation: /plan, /model and /effort read the ACTIVE conversation's selection. */
         internal const val PLAN_NO_CONTEXT =
-            "📭 No hay conversación activa — abrí una en ZCode o usá /tasks n. " +
-                "/plan lee el plan, el modelo y el effort de la conversación activa."
+            "📭 No active conversation — open one in ZCode or use /tasks n. " +
+                "/plan reads the active conversation's plan, model and effort."
 
         /** /model with no plan to list against. */
         internal const val MODEL_NO_PLAN =
-            "📭 No hay plan vigente — tocá uno en /plan primero: los modelos se listan SEGÚN el plan."
+            "📭 No plan in force — tap one in /plan first: models are listed ACCORDING to the plan."
 
         /** /effort with no tiers to offer. */
         internal const val EFFORT_NO_LEVELS =
-            "🤷 El modelo vigente no publica niveles de effort — el fork lo selecciona por identidad."
+            "🤷 The model in force publishes no effort levels — the fork selects it by identity."
 
         /** The ladder found every rung tokenless. */
         internal const val LADDER_EXHAUSTED =
-            "⛔ Quota limit reached for all — ningún plan tiene tokens (en el orden del dueño):"
+            "⛔ Quota limit reached for all — no plan has tokens (in the owner's order):"
 
         /** The ladder with no conversation to apply to. */
         internal const val LADDER_NO_CONTEXT =
-            "📭 No hay conversación activa — el default automático no tiene dónde aplicarse."
+            "📭 No active conversation — the automatic default has nowhere to apply."
 
         /** The server confirmed the write but its snapshot was unrenderable. */
         internal const val PLAN_APPLIED_BLIND =
-            "✅ Aplicado (el servidor lo confirmó) — la respuesta no se pudo renderizar; abrí /plan."
+            "✅ Applied (the server confirmed it) — the answer could not be rendered; open /plan."
 
         /** A 📌 default write with no model in force. */
         internal const val NO_MODEL_IN_FORCE =
-            "⚠️ No hay modelo vigente — abrí /model primero."
+            "⚠️ No model in force — open /model first."
 
         /** No armed 🎁 (or its 5-minute window closed) — the honest nudge, not a silent no-op. */
         internal const val GIFT_NOTHING_ARMED =
-            "🤔 No hay un 🎁 armado — corré /quota y tocá el botón de nuevo."
+            "🤔 No 🎁 is armed — run /quota and tap the button again."
 
         /** /quota's gift rung against a host that predates A5. */
         internal const val GIFT_OLD_FORK =
-            "⚠️ La app conectada no conoce el frame de regalos — falta deployar el fork actualizado " +
+            "⚠️ The connected app does not know the gifts frame — the updated fork needs a deploy " +
                 "(ZCode damian, A5)."
 
         /**
@@ -4272,8 +4271,8 @@ class BotCommands(
          * browser door (the app's own trusted URL, params included).
          */
         internal const val GIFT_CAPTCHA =
-            "🛡 Requiere CAPTCHA y este build no lo tiene — la vía segura es la app oficial. " +
-                "La web, por si la oferta aparece ahí:"
+            "🛡 It requires a CAPTCHA and this build does not have one — the safe door is the official app. " +
+                "The web, in case the offer shows up there:"
 
         /** The app's OWN rewards URL (its trusted-URL contract requires both params). */
         internal const val GIFT_CLAIM_URL =
@@ -4282,15 +4281,15 @@ class BotCommands(
         /** The confirmation's one-shot window (the pending slot's TTL). */
         internal const val PENDING_GIFT_TTL_MS = 5 * 60 * 1000L
         internal const val CTX_WINDOW_UNPARSEABLE =
-            "⚠️ No pude leer la respuesta de la ventana de contexto"
+            "⚠️ Could not read the context window answer"
 
         /** No usedTokens at all: the conversation never reported usage — ask, don't invent. */
         internal const val CTX_WINDOW_NO_DATA =
-            "⚠️ La conversación aún no reporta uso de contexto — mandá un mensaje y volvé a probar."
+            "⚠️ The conversation does not report context usage yet — send a message and try again."
 
         /** The taskUsage answer the daemon cannot parse — a broken host, said out loud. */
         internal const val USAGE_UNPARSEABLE =
-            "⚠️ No pude leer la respuesta de uso (shape inesperado del host)"
+            "⚠️ Could not read the usage answer (unexpected host shape)"
 
         /**
          * An OpenCode provider whose own meter could not be read (3/11):
@@ -4298,22 +4297,22 @@ class BotCommands(
          * provider key or the network is the real suspect.
          */
         internal const val QUOTA_OPENCODE_UNREADABLE =
-            "📊 <b>OpenCode</b>: no pude leer el uso — revisá la key del proveedor o la red, y reintentá."
+            "📊 <b>OpenCode</b>: could not read the usage — check the provider key or the network, and retry."
 
         /** A zero TOTAL is a fresh conversation's truth — no tokens spent yet. */
         internal const val USAGE_EMPTY =
-            "📭 Aún sin uso registrado — cuando la conversación consuma tokens, el total aparece acá."
+            "📭 No usage recorded yet — when the conversation consumes tokens, the total shows up here."
 
         /** /ctx's card: Python's cap (8 rows), header, footer and the honest no-data word. */
         private const val CTX_CAP = 8
-        internal const val CTX_HEADER = "🧠 <b>Contexto por conversación</b> (el medidor real del fork)"
-        internal const val CTX_NO_ROWS = "🧠 No hay conversaciones con uso registrado."
-        internal const val CTX_NO_DATA = "❔ sin datos"
+        internal const val CTX_HEADER = "🧠 <b>Context per conversation</b> (the fork's real meter)"
+        internal const val CTX_NO_ROWS = "🧠 No conversations with recorded usage."
+        internal const val CTX_NO_DATA = "❔ no data"
         internal const val CTX_FOOTER =
-            "🗜 /compact compacta la conversación activa · /context_window su medidor completo."
+            "🗜 /compact compacts the active conversation · /context_window its full meter."
         private const val CTX_HOT_PCT = 80
         private const val CTX_WARM_PCT = 50
-        private const val CTX_MODEL_UNKNOWN = "desconocido"
+        private const val CTX_MODEL_UNKNOWN = "unknown"
         private const val CTX_BAR_FULL = "▰"
         private const val CTX_BAR_EMPTY = "▱"
 
@@ -4362,8 +4361,8 @@ class BotCommands(
         /**
          * Python's task_list_report — the text half of the tappable list:
          * header, `{stamp} {n}. {title}[ · 📁ws]` per row, footer. The stamp
-         * carries BOTH marks when they co-occur (Damian, 26/10: «quiero los
-         * dos emojis»); the buttons themselves are a next hot-fix (the
+         * carries BOTH marks when they co-occur (Damian, 26/10: «I want the
+         * two emojis» [translated]); the buttons themselves are a next hot-fix (the
          * daemon's send path has no markup yet).
          */
         fun renderTaskList(
@@ -4402,8 +4401,8 @@ class BotCommands(
                 val watchedTitle = rows.firstOrNull { it.sid == watchedSid }
                     ?.title?.takeIf { it.isNotEmpty() } ?: watchedSid.takeLast(SID_TAIL)
                 lines.add(
-                    "👁 Viendo en vivo: «${PyText.esc(watchedTitle)}» — tu texto sigue yendo a la " +
-                        "activa (el bind se niega mientras ese turno corre; el attach es solo lectura).",
+                    "👁 Watching live: «${PyText.esc(watchedTitle)}» — your text still goes to the " +
+                        "active one (the bind refuses while that turn runs; the attach is read-only).",
                 )
             }
             return lines.joinToString("\n")
@@ -4429,7 +4428,7 @@ class BotCommands(
                 "💬 <b>Conversations by project</b> — tap a row to watch it live"
             }
             val table = Tables.html(
-                header = listOf("#", "Conversación", "Proyecto", "Estado"),
+                header = listOf("#", "Conversation", "Project", "State"),
                 rows = rows.mapIndexed { i, t ->
                     val stamp = buildString {
                         if (t.sid in running) append(STAMP_RUNNING)
@@ -4446,8 +4445,8 @@ class BotCommands(
                     val watchedTitle = rows.firstOrNull { it.sid == watchedSid }
                         ?.title?.takeIf { it.isNotEmpty() } ?: watchedSid.takeLast(SID_TAIL)
                     append(
-                        "\n👁 Viendo en vivo: «${PyText.esc(watchedTitle)}» — tu texto sigue yendo a la " +
-                            "activa (el bind se niega mientras ese turno corre; el attach es solo lectura).",
+                        "\n👁 Watching live: «${PyText.esc(watchedTitle)}» — your text still goes to the " +
+                            "active one (the bind refuses while that turn runs; the attach is read-only).",
                     )
                 }
             }
@@ -4492,7 +4491,7 @@ class BotCommands(
                 )
             }
             return "📊 <b>Coding plan</b>\n\n" +
-                Tables.html(listOf("Ventana", "Usado", "Libre", "Reset"), rows)
+                Tables.html(listOf("Window", "Used", "Free", "Reset"), rows)
         }
 
         @Suppress("CyclomaticComplexMethod") // one guard per bucket field
@@ -4505,7 +4504,7 @@ class BotCommands(
             val rows = limits.map { lim ->
                 val total = lim.num("unit")
                 val used = lim.num("usage") ?: 0.0
-                val label = lim.str("period") ?: lim.str("meter") ?: "cuota"
+                val label = lim.str("period") ?: lim.str("meter") ?: "quota"
                 val usedPct = if (total != null && total > 0) ((used / total) * 100).toInt() else null
                 val free = usedPct
                     ?.let { "${(REMAINING_FULL - it).coerceIn(0, REMAINING_FULL)}%" + if (it >= 75) " ⚠️" else "" }
@@ -4513,13 +4512,13 @@ class BotCommands(
                 val usedText = if (total != null && total > 0) {
                     "${tokenRaw(used)}/${tokenRaw(total)}"
                 } else {
-                    "${tokenRaw(used)} usados"
+                    "${tokenRaw(used)} used"
                 }
                 val reset = lim.long("nextResetTime")?.let { fmtReset(it, nowMs) } ?: "—"
                 listOf(label, usedText, free, reset)
             }
             return "📊 <b>Start plan</b>\n\n" +
-                Tables.html(listOf("Ventana", "Usado", "Libre", "Reset"), rows)
+                Tables.html(listOf("Window", "Used", "Free", "Reset"), rows)
         }
 
         /**
@@ -4558,9 +4557,9 @@ class BotCommands(
         }
 
         /**
-         * The Start Plan's buckets (30/10's owner order: «necesito saber
-         * cuántos tokens me quedan en las próximas 5 horas y en la semana» —
-         * the 2/11 law v4: RAW token counts climb the ladder —
+         * The Start Plan's buckets (30/10's owner order: «I need to know
+         * how many tokens I have left in the next 5 hours and in the week»
+         * [translated] — the 2/11 law v4: RAW token counts climb the ladder —
          * «300,000,000 → 300,000K → 300M»).
          * One line per REAL balance bucket: used/total through the owner's
          * ladder with the REMAINING percent (the owner's 23/11 order) and
@@ -4579,15 +4578,15 @@ class BotCommands(
             limits.forEach { lim ->
                 val total = lim.num("unit")
                 val used = lim.num("usage") ?: 0.0
-                val label = lim.str("period") ?: lim.str("meter") ?: "cuota"
+                val label = lim.str("period") ?: lim.str("meter") ?: "quota"
                 val body = when {
                     total != null && total > 0 -> {
                         val usedPct = ((used / total) * 100).toInt()
-                        "${tokenRaw(used)}/${tokenRaw(total)} usado · " +
-                            "${(REMAINING_FULL - usedPct).coerceIn(0, REMAINING_FULL)}% libre"
+                        "${tokenRaw(used)}/${tokenRaw(total)} used · " +
+                            "${(REMAINING_FULL - usedPct).coerceIn(0, REMAINING_FULL)}% free"
                     }
 
-                    else -> "${tokenRaw(used)} usados"
+                    else -> "${tokenRaw(used)} used"
                 }
                 val reset = lim.long("nextResetTime")?.let { " · resets ${fmtReset(it, nowMs)}" } ?: ""
                 val pctAlert = if (total != null && total > 0 && (used / total) >= 0.75) " ⚠️" else ""
@@ -4612,9 +4611,9 @@ class BotCommands(
                 }
                 val usedPct = lim.int("percentage")
                 // the owner's 23/11 order: the NUMBER is what REMAINS (the free share),
-                // the alert stays used-based — one vocabulary with PlanQuota's «libre»
+                // the alert stays used-based — one vocabulary with PlanQuota's «free»
                 val pctText = usedPct
-                    ?.let { " (${(REMAINING_FULL - it).coerceIn(0, REMAINING_FULL)}% libre)" }
+                    ?.let { " (${(REMAINING_FULL - it).coerceIn(0, REMAINING_FULL)}% free)" }
                     ?: ""
                 val alert = if ((usedPct ?: 0) >= 75) " ⚠️" else ""
                 val reset = lim.long("nextResetTime")?.let { " · resets ${fmtReset(it, nowMs)}" } ?: ""
@@ -4629,8 +4628,8 @@ class BotCommands(
         /**
          * taskUsage → the usage card (pure — /usage's body). The fork's REAL
          * aggregate (the agent usage db — the desktop panel's own source),
-         * rendered honest about WHAT it is: acumulado de la conversación,
-         * never a «hoy» the query cannot know. Every token count climbs the
+         * rendered honest about WHAT it is: cumulative for the conversation,
+         * never a «today» the query cannot know. Every token count climbs the
          * owner's ladder ([tokenRaw] — the number law: 166603400 → «166.6M»,
          * 850500 → «850.5K»); the request counts are NOT tokens — [fmtNum]'s
          * grouping only. A missing field renders «?», never an invented
@@ -4643,7 +4642,7 @@ class BotCommands(
                 root == null || total == null -> listOf(USAGE_UNPARSEABLE)
 
                 total == 0L -> listOf(
-                    "📈 <b>Uso de «${PyText.esc(title)}»</b>",
+                    "📈 <b>Usage of «${PyText.esc(title)}»</b>",
                     USAGE_EMPTY,
                 )
 
@@ -4654,12 +4653,12 @@ class BotCommands(
 
         /** The card's rows for a conversation WITH usage (the ladder's happy tier). */
         private fun usageLines(root: JsonObject, total: Long, title: String): List<String> = listOf(
-            "📈 <b>Uso de «${PyText.esc(title)}»</b> — acumulado de la conversación",
+            "📈 <b>Usage of «${PyText.esc(title)}»</b> — cumulative for the conversation",
             "• input ${tokenRaw(root.long("inputTokens")?.toDouble())} · " +
                 "output ${tokenRaw(root.long("outputTokens")?.toDouble())} · " +
                 "reasoning ${tokenRaw(root.long("reasoningTokens")?.toDouble())}",
-            "• cache creación ${tokenRaw(root.long("cacheCreationTokens")?.toDouble())} · " +
-                "lectura ${tokenRaw(root.long("cacheReadTokens")?.toDouble())}",
+            "• cache creation ${tokenRaw(root.long("cacheCreationTokens")?.toDouble())} · " +
+                "read ${tokenRaw(root.long("cacheReadTokens")?.toDouble())}",
             usageTotalLine(root, total),
         )
 
@@ -4677,21 +4676,21 @@ class BotCommands(
                 listOf("input", tokenRaw(root.long("inputTokens")?.toDouble())),
                 listOf("output", tokenRaw(root.long("outputTokens")?.toDouble())),
                 listOf("reasoning", tokenRaw(root.long("reasoningTokens")?.toDouble())),
-                listOf("cache creación", tokenRaw(root.long("cacheCreationTokens")?.toDouble())),
-                listOf("cache lectura", tokenRaw(root.long("cacheReadTokens")?.toDouble())),
+                listOf("cache creation", tokenRaw(root.long("cacheCreationTokens")?.toDouble())),
+                listOf("cache read", tokenRaw(root.long("cacheReadTokens")?.toDouble())),
                 listOf(
                     "Total",
                     "${fmtNum(root.long("modelRequestCount")?.toDouble())} req · ${tokenRaw(total.toDouble())} tokens",
                 ),
             )
-            return "📈 <b>Uso de «${PyText.esc(title)}»</b> — acumulado de la conversación\n\n" +
-                Tables.html(listOf("Concepto", "Tokens"), rows)
+            return "📈 <b>Usage of «${PyText.esc(title)}»</b> — cumulative for the conversation\n\n" +
+                Tables.html(listOf("Concept", "Tokens"), rows)
         }
 
         /** Python's bold total — requests through [fmtNum] (grouping only), tokens through [tokenRaw]. */
         private fun usageTotalLine(root: JsonObject, total: Long): String {
             val errors = root.long("modelErrorCount")?.takeIf { it > 0 }
-                ?.let { " · ${fmtNum(it.toDouble())} errores" } ?: ""
+                ?.let { " · ${fmtNum(it.toDouble())} errors" } ?: ""
             return "<b>Total: ${fmtNum(root.long("modelRequestCount")?.toDouble())} req · " +
                 "${tokenRaw(total.toDouble())} tokens</b>$errors"
         }
@@ -4700,7 +4699,7 @@ class BotCommands(
         private fun JsonObject.num(key: String): Double? =
             (this[key] as? JsonPrimitive)?.content?.toDoubleOrNull()
 
-        /** Miles con coma (el dueño 2/11: «300,000.4» — ínfimo pero ayuda a leer). */
+        /** Thousands with a comma (the owner 2/11: «300,000.4» — tiny, but it helps reading). */
         private fun group(digits: String): String {
             val dot = digits.indexOf('.')
             val head = if (dot >= 0) digits.substring(0, dot) else digits
@@ -4774,7 +4773,7 @@ class BotCommands(
 
         /** The percent rendered as the FREE share — the owner's 23/11 order:
          *  the number reads as what REMAINS, never the burned share (one
-         *  vocabulary with PlanQuota's «libre»). Alerts stay used-based. */
+         *  vocabulary with PlanQuota's «free»). Alerts stay used-based. */
         private const val REMAINING_FULL = 100
         private val TIME_FMT = DateTimeFormatter.ofPattern("HH:mm")
         private val DATE_TIME_FMT = DateTimeFormatter.ofPattern("dd/MM HH:mm")

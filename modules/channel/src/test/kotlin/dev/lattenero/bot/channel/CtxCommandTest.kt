@@ -12,7 +12,7 @@ import kotlin.test.assertTrue
  * law is Python's (🔴 ≥80 · 🟡 ≥50 · 🟢), the numbers obey the owner's law
  * (tokenRaw: 820000000 → «820M», 340000000 → «340M»), the percents are
  * pinned exact. Honest degradation: a conversation that reports nothing
- * reads ❔ sin datos, a window-less one shows NO invented percent, an old
+ * reads ❔ no data, a window-less one shows NO invented percent, an old
  * host refuses the query BY NAME and the whole card says the fork deploy
  * is the fix.
  */
@@ -91,7 +91,7 @@ class CtxCommandTest {
         TaskRow(sid = "task-a1", title = "unificador", ws = "/ws", whenMs = 4L),
         TaskRow(sid = "task-b2", title = "retry fork", ws = "/ws", whenMs = 3L),
         TaskRow(sid = "task-c3", title = "experimento", ws = "/other", whenMs = 2L),
-        TaskRow(sid = "task-d4", title = "sin reporte", ws = "/ws", whenMs = 1L),
+        TaskRow(sid = "task-d4", title = "no report", ws = "/ws", whenMs = 1L),
     )
 
     private fun FakeOps.canRealMeters() {
@@ -109,11 +109,11 @@ class CtxCommandTest {
         o.canRealMeters()
         val text = commands(o, rows).handle("/ctx", 1L)!!.text
         assertEquals(
-            "🧠 <b>Contexto por conversación</b> (el medidor real del fork)\n" +
+            "🧠 <b>Context per conversation</b> (the fork's real meter)\n" +
                 "1. 🔴 820M (82%) — unificador\n" +
                 "2. 🟡 530M (53%) — retry fork\n" +
                 "3. 🟢 340M (34%) · 📁other — experimento\n" +
-                "4. ❔ sin datos — sin reporte\n" +
+                "4. ❔ no data — no report\n" +
                 BotCommands.CTX_FOOTER,
             text,
         )
@@ -153,7 +153,7 @@ class CtxCommandTest {
         val o = ops()
         o.byTask["task-a1"] = """{"model":"m","usedTokens":45300,"windowTokens":null}"""
         val text = commands(o, rows.take(1)).handle("/ctx", 1L)!!.text
-        assertTrue("1. 45.3K · ventana ?" in text)
+        assertTrue("1. 45.3K · window ?" in text)
         assertTrue("%" !in text)
     }
 
@@ -171,7 +171,7 @@ class CtxCommandTest {
         o.failCode = BotCommands.UNKNOWN_QUERY_CODE // the fork's by-name refusal
         val text = commands(o, rows.take(1)).handle("/ctx", 1L)!!.text
         assertTrue(text.startsWith("⚠️"))
-        assertTrue("deployar el fork" in text)
+        assertTrue("needs a deploy" in text)
         assertTrue("9cfb39a9" in text)
         assertTrue("❔" !in text) // one loud truth, not 8 quiet ones
     }

@@ -103,7 +103,7 @@ class RetryCommandTest {
     private val app = "/Users/damian/Projects/app"
 
     private val rows = listOf(
-        TaskRow(sid = "task-77", title = "unificador", ws = app),
+        TaskRow(sid = "task-77", title = "unifier", ws = app),
         TaskRow(sid = "task-02", title = "otra", ws = app),
     )
 
@@ -149,14 +149,14 @@ class RetryCommandTest {
     // ---- the honest «nada» — nothing fired yet, nothing to relaunch ----
 
     @Test
-    fun retryWithoutAStoreAnswersTheHonestNada() = runBlocking {
+    fun retryWithoutAStoreAnswersTheHonestNothing() = runBlocking {
         val (bc, _, dir) = commands(FakeOps(boundStatus), wired = false)
         assertEquals(BotCommands.RETRY_NOTHING, bc.reply("/retry", 1L))
         cleanup(dir)
     }
 
     @Test
-    fun retryWithAnEmptyStoreAnswersTheHonestNada() = runBlocking {
+    fun retryWithAnEmptyStoreAnswersTheHonestNothing() = runBlocking {
         val (bc, _, dir) = commands(FakeOps(boundStatus), wired = true)
         assertEquals(BotCommands.RETRY_NOTHING, bc.reply("/retry", 1L), "no fire yet: the file does not even exist")
         assertTrue(!dir!!.resolve("last-prompt.json").toFile().exists(), "«nada» never invents a save")
@@ -169,14 +169,14 @@ class RetryCommandTest {
     fun retryRefiresTheSavedPromptVerbatimAndConfirms() = runBlocking {
         val (bc, o, dir) = commands(FakeOps(boundStatus))
         // the first text fires (idle bound task) and the FIRED path saves it
-        assertNull(bc.reply("arreglá el login del bot", 1L), "a FIRED text speaks via the live view, no ack")
-        assertEquals(listOf("arreglá el login del bot"), o.inbound)
+        assertNull(bc.reply("fix the bot login", 1L), "a FIRED text speaks via the live view, no ack")
+        assertEquals(listOf("fix the bot login"), o.inbound)
         // /retry: the saved text rides the router AGAIN, verbatim
         val ack = bc.reply("/retry", 2L)!!
-        assertTrue("Re-lanzado a" in ack, "got: $ack")
-        assertTrue("unificador" in ack, "the fired target's own title: $ack")
+        assertTrue("Relaunched to" in ack, "got: $ack")
+        assertTrue("unifier" in ack, "the fired target's own title: $ack")
         assertEquals(
-            listOf("arreglá el login del bot", "arreglá el login del bot"),
+            listOf("fix the bot login", "fix the bot login"),
             o.inbound,
             "the SAME plan router re-delivered the text verbatim",
         )
@@ -186,14 +186,14 @@ class RetryCommandTest {
     @Test
     fun retryOnABusyConversationParksTheSavedTextNeverFlatRefuses() = runBlocking {
         val (bc, o, dir) = commands(FakeOps(boundStatus))
-        assertNull(bc.reply("arreglá el login del bot", 1L))
+        assertNull(bc.reply("fix the bot login", 1L))
         // the turn went live: the retry's saved text must PARK (F17), not refuse
         o.answers["activeTaskIds"] = """["task-77"]"""
         val ack = bc.reply("/retry", 2L)!!
         assertTrue("The Mac is busy" in ack, "got: $ack")
         assertTrue("queue" in ack, "the push-or-enqueue offer rides along: $ack")
         assertEquals(1, o.queued.size, "the parked text is the SAVED one")
-        assertEquals("arreglá el login del bot", o.queued.first())
+        assertEquals("fix the bot login", o.queued.first())
         assertEquals(1, o.inbound.size, "no second delivery — it parked")
         cleanup(dir)
     }
@@ -244,29 +244,29 @@ class RetryCommandTest {
     fun retryNeverSpendsTheArmedOrderTheNextTypedTextFliesAsTheOrder() = runBlocking {
         val (bc, o, dir) = commands(FakeOps(boundStatus))
         // 1) a prompt fires and saves (the fire's own watchContext subscribes once)
-        assertNull(bc.reply("arreglá el login del bot", 1L))
+        assertNull(bc.reply("fix the bot login", 1L))
         assertEquals(listOf("task-77" to app), o.subscribed)
         // 2) the owner arms the ✍️ order on task-77 (tap → read → write the order)
         val arm = bc.onCallback("so:task-77", 8L, OWNER)!!
-        assertTrue("Armado" in arm.text, "got: $arm")
+        assertTrue("Armed" in arm.text, "got: $arm")
         assertEquals(2, o.subscribed.size, "the arm's attach rode along")
         // 3) /retry with the arm live: the ack is the RETRY's — the saved prompt
         //    must NOT ride as the order, the one-shot must NOT be consumed
         val ack = bc.reply("/retry", 9L)!!
-        assertTrue("Re-lanzado a" in ack, "got: $ack")
-        assertTrue("Orden entregada" !in ack, "the armed order was never spent by the retry")
+        assertTrue("Relaunched to" in ack, "got: $ack")
+        assertTrue("Order delivered" !in ack, "the armed order was never spent by the retry")
         assertTrue(o.orders.isEmpty(), "ops.orders received NOTHING from the retry")
         assertEquals(2, o.inbound.size, "the retry re-fired via the plain inbound, not via sendOrder")
         assertEquals(3, o.subscribed.size, "the retry watches like ANY fired line (the SAME path)")
         // 4) the NEXT free text still flies as the order — AFTER the retry
         val orderAck = bc.reply("la orden directa", 10L)!!
-        assertTrue("Orden entregada" in orderAck, "got: $orderAck")
+        assertTrue("Order delivered" in orderAck, "got: $orderAck")
         assertEquals(listOf("la orden directa" to "task-77"), o.orders, "the order survived for the typed line")
         assertEquals(3, o.subscribed.size, "the order flies DIRECT — no subscribe, no watch")
         // 5) the order's flight saved nothing: the retry's own prompt is still the last
         val store = LastPrompt(dir!!.resolve("last-prompt.json").toFile())
         val saved = store.load()
-        assertEquals("arreglá el login del bot", saved?.text, "an armed order never overwrites the saved prompt")
+        assertEquals("fix the bot login", saved?.text, "an armed order never overwrites the saved prompt")
         assertEquals("task-77", saved?.sid)
         cleanup(dir)
     }
@@ -275,11 +275,11 @@ class RetryCommandTest {
     fun aFailedRetryKeepsTheArmedOrderUntouched() = runBlocking {
         val (bc, o, dir) = commands(FakeOps(boundStatus))
         val arm = bc.onCallback("so:task-77", 8L, OWNER)!!
-        assertTrue("Armado" in arm.text)
+        assertTrue("Armed" in arm.text)
         // nothing saved: the honest «nada» must not even touch the arm
         assertEquals(BotCommands.RETRY_NOTHING, bc.reply("/retry", 9L))
         val orderAck = bc.reply("la orden directa", 10L)!!
-        assertTrue("Orden entregada" in orderAck, "the arm survived the empty retry: $orderAck")
+        assertTrue("Order delivered" in orderAck, "the arm survived the empty retry: $orderAck")
         assertEquals(listOf("la orden directa" to "task-77"), o.orders)
         cleanup(dir)
     }

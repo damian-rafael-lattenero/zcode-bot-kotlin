@@ -1,7 +1,7 @@
-# Plan Brujula v2 — What Is Left to Learn
+# Plan Compass v2 — What Is Left to Learn
 
 > Created: 2026-11-14 · Status: v2.0
-> Supersedes the open units of [plan-brujula.md](plan-brujula.md) (v1, Spanish, stays as historical record).
+> Supersedes the open units of [plan-compass.md](plan-compass.md) (v1, the historical record).
 > The compass, updated: the 2026 hiring skills for AI engineers are exactly the five things v1 built, **deepened** — evals + observability as products, RAG evolution (rerank, GraphRAG), agent memory as a discipline (Mem0/Zep/Letta, graph variants, LoCoMo-class benchmarks), and MCP Apps. Verified via serper searches on 2026-11-14.
 
 ## State real at 2026-11-14 (verified against repos, not against wishes)

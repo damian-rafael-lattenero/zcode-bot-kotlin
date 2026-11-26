@@ -115,7 +115,7 @@ object PngRender {
         val lines = text.split('\n')
         if (lines.size <= maxLines) return text
         val rest = lines.size - maxLines
-        return lines.take(maxLines).joinToString("\n") + "\n… ($rest líneas más en el texto de arriba)"
+        return lines.take(maxLines).joinToString("\n") + "\n… ($rest more lines in the text above)"
     }
 
     /** Past this many lines the render goes dense. */

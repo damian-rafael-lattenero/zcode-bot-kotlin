@@ -168,14 +168,14 @@ internal object FleetCommands {
     internal fun gate(fromId: Long?, owner: Long?): String? =
         if (fromId == null || owner == null || fromId != owner) NOT_OWNER else null
 
-    internal const val NOT_OWNER = "🚫 Solo el dueño corre comandos de la Mac."
+    internal const val NOT_OWNER = "🚫 Only the owner runs Mac commands."
 
     internal const val DISCOVERY_FAILED =
-        "⚠️ No pude leer la lista de comandos (`fleet list --json` falló) — el daemon sigue vivo."
+        "⚠️ Could not read the command list (`fleet list --json` failed) — the daemon is still alive."
 
     internal const val USAGE =
-        "🧰 /fleet_<verbo> — TODO comando nu de la Mac.\n" +
-            "🧰 /fleet_list — la lista completa (verbo, argumentos, para qué sirve)."
+        "🧰 /fleet_<verb> — EVERY nu command on the Mac.\n" +
+            "🧰 /fleet_list — the full list (verb, arguments, what it is for)."
 
     /**
      * The phone sends with parse_mode=HTML, so every `<`, `>` and `&` in DATA
@@ -200,20 +200,20 @@ internal object FleetCommands {
             val takes = if (v.arguments == "-") "" else " ${v.arguments}"
             "• /fleet_${v.name.replace('-', '_')}${escapeHtml(takes)} — ${escapeHtml(desc)}"
         }
-        return (listOf("🧰 <b>${verbs.size} comandos nu</b> — /fleet_&lt;verbo&gt; [args]:", "") + lines)
+        return (listOf("🧰 <b>${verbs.size} nu commands</b> — /fleet_&lt;verb&gt; [args]:", "") + lines)
             .joinToString("\n")
     }
 
     internal fun unknown(verb: String, verbs: List<Verb>): String {
         val near = verbs.map { it.name }.filter { it.startsWith(verb.take(4)) }
-        val hint = if (near.isEmpty()) "" else "\n¿querías: ${near.joinToString(" · ") { it.replace('-', '_') }}?"
-        return "🤷 No existe el verbo «${escapeHtml(verb)}» — /fleet_list tiene los ${verbs.size}.$hint"
+        val hint = if (near.isEmpty()) "" else "\ndid you mean: ${near.joinToString(" · ") { it.replace('-', '_') }}?"
+        return "🤷 The verb «${escapeHtml(verb)}» does not exist — /fleet_list has the ${verbs.size}.$hint"
     }
 
     /** The timeout words — the shared edge names the budget it burned. */
     internal fun timeout(verb: String, budgetSeconds: Long): String =
-        "⏱ /fleet_${verb.replace('-', '_')} no terminó en $budgetSeconds s — lo maté; " +
-            "algo lo trabó (¿red? ¿lock?): probá de nuevo en un momento."
+        "⏱ /fleet_${verb.replace('-', '_')} did not finish in $budgetSeconds s — I killed it; " +
+            "something wedged it (network? lock?): try again in a moment."
 
     /**
      * Does this verb NEED an argument the phone did not send? The signature's
@@ -231,12 +231,12 @@ internal object FleetCommands {
 
     /** The one-verb usage: what it takes and what it does. */
     internal fun usageOf(v: Verb): String {
-        val takes = if (v.arguments == "-") "sin argumentos" else escapeHtml(v.arguments)
+        val takes = if (v.arguments == "-") "no arguments" else escapeHtml(v.arguments)
         return "🧰 <b>/fleet_${v.name.replace('-', '_')}</b> — $takes\n${escapeHtml(v.description)}\n" +
-            "Tip: /fleet ${v.name} <args> también funciona."
+            "Tip: /fleet ${v.name} <args> works too."
     }
 
-    internal const val ERRORED = "⚠️ El comando no pudo correr — el daemon sigue vivo: "
+    internal const val ERRORED = "⚠️ The command could not run — the daemon is still alive: "
 
     /** 4096 chars is Telegram's ceiling; 26 verbs × ~120 chars fit with air. */
     private const val DESCRIPTION_MAX = 110

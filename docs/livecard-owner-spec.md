@@ -1,7 +1,7 @@
 # Live card v2 — the owner's 6-point order (2026-11-04)
 
 The owner rejected the current card («no puedo entender a golpe de vista qué está
-pasando»). Six requirements, all BOT-SIDE — the fork already ships every field
+pasando» [translated: "I cannot understand at a glance what is going on"]). Six requirements, all BOT-SIDE — the fork already ships every field
 (`task_run_started.startedAt`, `tool_call_update.status:"in_progress"`, streaming
 partial `input`). Verified in the fork: `packages/shared/src/zcode-task-types-core.ts:606`
 (status union), `:740` (`task_run_started` + `startedAt`), and
@@ -86,7 +86,7 @@ On completion:
 
 - A sealed CoT block (COT_BLOCK_CP) already speaks via the feed — make sure its
   message reads `📖 CoT <n> generado Xk` (fmtKDecimal) and keeps its collapsed
-  box button (the «muestro botón» of the owner's example). Check
+  box button (the «show the button» [translated] of the owner's example). Check
   TranscriptFeed/speakFeed for today's exact shape and align.
 - No new completion message for edits/bash — the card's stamp carries the
   verdict.
@@ -103,7 +103,7 @@ Max one ping per 5 s per turn.
 - Output boxes (`ToolOutputPages`): shell-tool pages render inside
   `<pre><code class="language-bash">…</code></pre>`; non-shell pages keep plain
   `<pre>`. Numbered-line law unchanged. Keep `PyText.esc` on all content.
-- Stamp line gains the runtime: `⚡ Bash · 12s · 34 líneas` (runtime =
+- Stamp line gains the runtime: `⚡ Bash · 12s · 34 lines` (runtime =
   `lastUpdateAtMs - openedAtMs`, real measured, frozen-clock-safe because both
   anchors are real events).
 

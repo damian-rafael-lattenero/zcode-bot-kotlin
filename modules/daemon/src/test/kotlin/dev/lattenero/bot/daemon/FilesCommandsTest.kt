@@ -23,26 +23,26 @@ class FilesCommandsTest {
     fun bareFileSpeaksTheUsage() {
         val plan = FilesCommands.planFileSend("")
         assertNull(plan.file)
-        assertTrue("/file <ruta-absoluta>" in plan.refusal!!, plan.refusal)
+        assertTrue("/file <absolute-path>" in plan.refusal!!, plan.refusal)
     }
 
     @Test
     fun aRelativePathIsRefusedByTheAbsoluteLaw() {
         val plan = FilesCommands.planFileSend("etc/passwd")
-        assertTrue("ABSOLUTAS" in plan.refusal!!, plan.refusal)
+        assertTrue("ABSOLUTE" in plan.refusal!!, plan.refusal)
     }
 
     @Test
     fun aMissingFileIsSaid() {
-        val plan = FilesCommands.planFileSend("/no/existe/nada.txt")
-        assertTrue("No existe" in plan.refusal!!, plan.refusal)
+        val plan = FilesCommands.planFileSend("/no/such/thing.txt")
+        assertTrue("Does not exist" in plan.refusal!!, plan.refusal)
     }
 
     @Test
     fun aDirectoryIsNotAFile() {
         val dir = Files.createTempDirectory("filesout").toFile()
         val plan = FilesCommands.planFileSend(dir.absolutePath)
-        assertTrue("No es un archivo" in plan.refusal!!, plan.refusal)
+        assertTrue("Not a file" in plan.refusal!!, plan.refusal)
     }
 
     @Test
@@ -97,15 +97,15 @@ class FilesCommandsTest {
     @Test
     fun aTurnWithoutChangesSaysSo() {
         val text = FilesCommands.renderDiff(emptyList(), all = false, maxReplyChars = 3500)
-        assertTrue("no cambió ningún archivo" in text, text)
+        assertTrue("changed no files" in text, text)
     }
 
     @Test
     fun theRenderCountsAndShowsTheHunks() {
         val files = FilesCommands.changedFilesOf(snapshot, all = false)
         val text = FilesCommands.renderDiff(files, all = false, maxReplyChars = 3500)
-        assertTrue("Archivos cambiados" in text, text)
-        assertTrue("(nuevo)" in text, text) // /b/new.txt was born this turn
+        assertTrue("Changed files" in text, text)
+        assertTrue("(new)" in text, text) // /b/new.txt was born this turn
         assertTrue("+1/−1" in text, text) // old.txt: DOS replaced dos
         // the line-number law (the owner, 3/11): the changed line says WHERE
         assertTrue(Regex("""\+ 2│ DOS""").containsMatchIn(text), text)

@@ -63,7 +63,7 @@ class TranscriptFeedTest {
         val block = msgs[0]
         assertEquals(2, block.block, "the message marks WHICH block it opens")
         assertTrue("📖 <b>CoT 2</b>" in block.text)
-        assertTrue("tocar para leer" in block.text)
+        assertTrue("tap to read" in block.text)
         assertTrue("dos" !in block.text, "the block's text never rides the collapsed message")
     }
 
@@ -75,8 +75,8 @@ class TranscriptFeedTest {
         assertTrue("📖 <b>CoT 3</b>" in expanded)
         assertTrue("<blockquote>línea uno\nlínea dos</blockquote>" in expanded)
         // the unsealed tail's honest label, both shapes
-        assertTrue("sin sellar" in TranscriptFeed.collapsedHeader(null, 1200))
-        assertTrue("sin sellar" in TranscriptFeed.expandedBlock(null, 1200, "x"))
+        assertTrue("unsealed" in TranscriptFeed.collapsedHeader(null, 1200))
+        assertTrue("unsealed" in TranscriptFeed.expandedBlock(null, 1200, "x"))
     }
 
     @Test
@@ -138,8 +138,8 @@ class TranscriptFeedTest {
         assertEquals(1, msgs.size)
         val pages = msgs[0].pages!!
         assertEquals("   1│ uno\n   2│ dos", pages.pages.single())
-        assertTrue("2 líneas" in msgs[0].text)
-        assertTrue("tocar para ver" in msgs[0].text)
+        assertTrue("2 lines" in msgs[0].text)
+        assertTrue("tap to see" in msgs[0].text)
         assertTrue("BOX" !in msgs[0].text, "the box never rides: the output is behind the button")
         // THE TWO 📸 DOORS (the owner, 25/11): the OUTPUT and the INPUT —
         // the command already rides the header's fence, but it earns its own
@@ -227,7 +227,7 @@ class TranscriptFeedTest {
         val curr = turn(tools = listOf(closed("t1", name = "Read", outputLines = 12)))
         val msgs = TranscriptFeed.messages(prev, curr, FeedVerbosity.NORMAL, { "" }, verbs)
         assertEquals(1, msgs.size)
-        assertTrue("<b>Read</b>: 12 líneas de salida ✅" in msgs[0].text)
+        assertTrue("<b>Read</b>: 12 output lines ✅" in msgs[0].text)
     }
 
     @Test
@@ -274,7 +274,7 @@ class TranscriptFeedTest {
             verbs,
         )
         assertEquals(1, msgs.size, "one collapsed message — the text lives behind the tap, not in the chat")
-        assertTrue("generado 8k" in msgs[0].text, "the sealed block's verdict speaks the number law: ${msgs[0].text}")
+        assertTrue("generated 8k" in msgs[0].text, "the sealed block's verdict speaks the number law: ${msgs[0].text}")
     }
 
     @Test
@@ -283,7 +283,7 @@ class TranscriptFeedTest {
         val msgs = TranscriptFeed.pendingFlush(turn(pending = "cola final"))
         assertEquals(1, msgs.size)
         assertEquals(0, msgs[0].block, "the tail is block 0 — the registry knows its own label")
-        assertTrue("sin sellar" in msgs[0].text && "tocar para leer" in msgs[0].text)
+        assertTrue("unsealed" in msgs[0].text && "tap to read" in msgs[0].text)
         assertTrue("cola final" !in msgs[0].text, "the tail's text never rides the collapsed message")
     }
 }

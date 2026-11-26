@@ -44,8 +44,8 @@ sealed interface VoiceBlock {
 }
 
 /**
- * THE TURN'S ORGANIZED DIGEST (the owner, 16/11: «si esto estuviera
- * organizado y con contexto valdría bastante, pero no lo está»): the seal
+ * THE TURN'S ORGANIZED DIGEST (the owner, 16/11: «if this were
+ * organized and with context it would be worth a lot, but it is not» [translated]): the seal
  * stops shipping the turn's raw concatenated prose and speaks STEPS instead
  * — each one labeled with the tool it followed, the conclusion marked ✅.
  *
@@ -224,9 +224,9 @@ object TurnDigest {
      */
     private fun labelOf(index: Int, total: Int, afterTool: String?): String? = when {
         total == 1 -> null
-        index == total - 1 -> "✅ Respuesta"
-        afterTool != null -> "Paso ${index + 1} · tras 🔧 $afterTool"
-        else -> "Paso ${index + 1}"
+        index == total - 1 -> "✅ Answer"
+        afterTool != null -> "Step ${index + 1} · after 🔧 $afterTool"
+        else -> "Step ${index + 1}"
     }
 
     /** One chunk of [RichVoice.BLOCK_CP], prose preferring its last line boundary under the cap. */

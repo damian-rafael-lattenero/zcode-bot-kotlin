@@ -89,7 +89,7 @@ class PlanMenuTest {
         assertTrue("Z.ai (individual)" in line)
         assertTrue("GLM 5.3 Flash" in line)
         assertTrue("Effort: <b>high</b>" in line)
-        assertTrue("Default de la app" in line)
+        assertTrue("App default" in line)
         // the default's effort rides along when the answer carries it
         assertTrue(" · max" in line)
     }
@@ -114,33 +114,33 @@ class PlanMenuTest {
                 PlanQuota.Window("📅", 78),
             ),
         ),
-        "account:zai-individual-coding-plan" to PlanQuota.Mark.Missing("el canal no respondió"),
+        "account:zai-individual-coding-plan" to PlanQuota.Mark.Missing("the channel did not answer"),
     )
 
     @Test
     fun thePlanCardSpeaksQuotaLinesAndButtonsWithQuotaBesideTheName() {
         val v = PlanMenu.parse(goldenJson)!!
-        val card = PlanMenu.planCard(v, "arreglá el login", quotaSeen, nowMs = 1_000L)
+        val card = PlanMenu.planCard(v, "fix the login", quotaSeen, nowMs = 1_000L)
         // the text: one line per plan, missing read included
-        assertTrue("Quota por plan" in card.text)
-        assertTrue("<b>Start Plan</b> — ⏱ 32% libre · resets" in card.text, card.text)
-        assertTrue("<b>Z.AI Individual Coding Plan</b> — ❔ sin datos (el canal no respondió)" in card.text, card.text)
-        assertTrue("Modelo: /model · Effort: /effort" in card.text)
+        assertTrue("Quota per plan" in card.text)
+        assertTrue("<b>Start Plan</b> — ⏱ 32% free · resets" in card.text, card.text)
+        assertTrue("<b>Z.AI Individual Coding Plan</b> — ❔ no data (the channel did not answer)" in card.text, card.text)
+        assertTrue("Model: /model · Effort: /effort" in card.text)
         // the buttons: the quota BESIDE the plan name (the owner's literal order)
         val markup = card.markup.toString()
-        assertTrue("🎯 Start Plan — ⏱ 32% · 📅 78% libre" in markup, markup)
+        assertTrue("🎯 Start Plan — ⏱ 32% · 📅 78% free" in markup, markup)
         assertTrue("🟢 Z.AI Individual Coding Plan — ❔" in markup, markup)
         assertTrue("pl:account:zai-start-plan" in markup)
-        assertTrue("⭐ Default — el primer plan con tokens" in markup)
+        assertTrue("⭐ Default — the first plan with tokens" in markup)
         assertTrue("pdef:" in markup)
-        assertTrue("📌 dejar como default de la app" in markup)
+        assertTrue("📌 set as the app default" in markup)
     }
 
     @Test
     fun theModelCardListsThePlanInForceModels() {
         val v = PlanMenu.parse(goldenJson)!!
-        val card = PlanMenu.modelCard(v, "arreglá el login")!!
-        assertTrue("Modelos de <b>Start Plan</b>" in card.text)
+        val card = PlanMenu.modelCard(v, "fix the login")!!
+        assertTrue("Models of <b>Start Plan</b>" in card.text)
         assertTrue("Plan: /plan · Effort: /effort" in card.text)
         val markup = card.markup.toString()
         assertTrue("🎯 GLM-5.3-Flash" in markup)
@@ -152,9 +152,9 @@ class PlanMenuTest {
     @Test
     fun theEffortCardListsTheShownModelTiers() {
         val v = PlanMenu.parse(goldenJson)!!
-        val card = PlanMenu.effortCard(v, "arreglá el login")!!
-        assertTrue("Effort de <b>GLM-5.3-Flash</b>" in card.text)
-        assertTrue("Plan: /plan · Modelo: /model" in card.text)
+        val card = PlanMenu.effortCard(v, "fix the login")!!
+        assertTrue("Effort levels of <b>GLM-5.3-Flash</b>" in card.text)
+        assertTrue("Plan: /plan · Model: /model" in card.text)
         val markup = card.markup.toString()
         assertTrue("🎯 effort max" in markup)
         assertTrue("▪️ effort low" in markup)
@@ -197,6 +197,6 @@ class PlanMenuTest {
                           "models":[{"id":"glm-5.3-flash","label":"GLM 5.3 Flash"}]}]}""",
         )!!
         val card = PlanMenu.modelCard(byDefault, null)!!
-        assertTrue("Modelos de <b>Z.ai</b>" in card.text)
+        assertTrue("Models of <b>Z.ai</b>" in card.text)
     }
 }

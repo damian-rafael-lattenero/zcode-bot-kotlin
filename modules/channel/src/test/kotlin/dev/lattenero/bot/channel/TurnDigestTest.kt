@@ -114,11 +114,11 @@ class TurnDigestTest {
         )
         val texts = TurnDigest.pages(voice).flatten().map { it.text }
         assertTrue(
-            texts[0].startsWith("🧾 Digest:\n\nPaso 1") && "hablo primero" in texts[0],
+            texts[0].startsWith("🧾 Digest:\n\nStep 1") && "hablo primero" in texts[0],
             "the digest opens with its header, then the numbered step: ${texts[0].take(60)}",
         )
-        assertTrue(texts.any { it.startsWith("Paso 2 · tras 🔧 Bash") && "hablo tras la tool" in it })
-        assertTrue(texts.last().startsWith("✅ Respuesta") && texts.last().endsWith("el final"))
+        assertTrue(texts.any { it.startsWith("Step 2 · after 🔧 Bash") && "hablo tras la tool" in it })
+        assertTrue(texts.last().startsWith("✅ Answer") && texts.last().endsWith("el final"))
     }
 
     @Test

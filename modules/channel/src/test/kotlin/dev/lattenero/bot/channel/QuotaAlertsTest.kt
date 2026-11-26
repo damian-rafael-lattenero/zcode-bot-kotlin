@@ -48,7 +48,7 @@ class QuotaAlertsTest {
     fun exhaustedInForceIsAnnouncedOnceAndOnlyForThatPlan() {
         val inForce = snapshot(mapOf("p1" to seen(0), "p2" to seen(50)))
         val (first, state) = QuotaAlerts.decide(inForce, null, QuotaAlertState(), thresholdPct = 10)
-        assertTrue(first.any { "sin tokens" in it }, first.toString())
+        assertTrue(first.any { "ran out of tokens" in it }, first.toString())
         assertEquals(2, first.size, "the tight window AND the exhausted plan speak: $first")
         val (second, _) = QuotaAlerts.decide(inForce, null, state, thresholdPct = 10)
         assertTrue(second.isEmpty(), second.toString())
@@ -58,7 +58,7 @@ class QuotaAlertsTest {
         val elsewhere = snapshot(mapOf("p2" to seen(0)), plan = "p1")
         val (quiet, _) = QuotaAlerts.decide(elsewhere, null, QuotaAlertState(), thresholdPct = 10)
         assertEquals(1, quiet.size, "one tight notice: $quiet")
-        assertTrue(quiet.none { "sin tokens" in it }, "no in-force page for a plan nobody uses: $quiet")
+        assertTrue(quiet.none { "ran out of tokens" in it }, "no in-force page for a plan nobody uses: $quiet")
     }
 
     @Test

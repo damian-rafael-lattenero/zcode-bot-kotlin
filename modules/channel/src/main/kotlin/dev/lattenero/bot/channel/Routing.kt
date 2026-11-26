@@ -199,7 +199,7 @@ internal object RouteTexts {
      * still runs and the botsService REFUSES the switch (taskRunning).
      */
     const val BUSY_REBIND =
-        "🔄 task corriendo, no puedo re-apuntar — /stop primero o esperá"
+        "🔄 task running, I cannot re-aim — /stop first or wait"
 
     /** The bind did not land (race or vanished conversation). */
     const val BIND_FAILED =

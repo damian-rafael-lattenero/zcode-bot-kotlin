@@ -143,7 +143,7 @@ object DiffPng {
         }
         if (plan.truncated) {
             g.color = GUTTER
-            g.drawString("… (más cambios en el texto)", PAD, y)
+            g.drawString("… (more changes in the text)", PAD, y)
         }
     }
 

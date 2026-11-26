@@ -8,7 +8,7 @@ import kotlin.test.assertTrue
  * /learn — the week's learning card (plan v2 T3): memories + evals + today's
  * cost, fixture-pinned against agent-brain's real /eval/latest (StoredRun[])
  * and /costs/today ({turns, usd, unpriced}) shapes. The honesty ladder per
- * leg: all three down = caído; one leg down degrades THAT leg, the rest of
+ * leg: all three down = down; one leg down degrades THAT leg, the rest of
  * the card still speaks.
  */
 class BrainLearnTest {
@@ -23,7 +23,7 @@ class BrainLearnTest {
     private val url = "http://127.0.0.1:8765"
 
     private val recentJson = """
-        [{"id":50,"kind":"decision","content":"El cutover de LoRA espera el gate, no la intuición",
+        [{"id":50,"kind":"decision","content":"The LoRA cutover waits for the gate, not intuition",
           "sessionId":"ses_9","turnId":"9","salience":0.9,
           "createdAt":"2026-11-19T01:00:00.000Z","score":null},
          {"id":51,"kind":"fact","content":"El judge shadow corre cada noche a las 04:00",
@@ -77,17 +77,17 @@ class BrainLearnTest {
             costs = BrainReply.Response(200, costsTodayJson)
         }
         val text = BrainCommands(fake.gateway()) { pinnedNow }.learn("")
-        assertTrue("aprendizaje de 7 días" in text)
+        assertTrue("learning of the last 7 days" in text)
         // The 2020 pair is OUTSIDE the window; the two fresh ones count.
-        assertTrue("📝 hechos 1" in text)
-        assertTrue("🎯 decisiones 1" in text)
+        assertTrue("📝 facts 1" in text)
+        assertTrue("🎯 decisions 1" in text)
         // Only decisions make their own block with content.
-        assertTrue("El cutover de LoRA espera el gate" in text)
+        assertTrue("The LoRA cutover waits for the gate" in text)
         // The eval rows speak suite + score + verdict.
         assertTrue("shadow 8/8 ✅" in text)
         assertTrue("recall-core 33/33 ✅" in text)
         // The cost line is today's real rollup.
-        assertTrue("12 turnos · \$0.42" in text)
+        assertTrue("12 turns · \$0.42" in text)
         // The doors the card needed: recent(60), evals unfiltered, costs.
         assertTrue("recent:60" in fake.calls.joinToString())
         assertTrue("evals:null:12" in fake.calls.joinToString())
@@ -102,9 +102,9 @@ class BrainLearnTest {
             costs = BrainReply.Response(200, costsTodayJson)
         }
         val text = BrainCommands(fake.gateway()) { pinnedNow }.learn("")
-        assertTrue("📭 sin recuerdos nuevos esta semana" in text)
-        assertTrue("📊 evals: 📭 sin corridas" in text)
-        assertTrue("12 turnos" in text)
+        assertTrue("📭 no new memories this week" in text)
+        assertTrue("📊 evals: 📭 no runs" in text)
+        assertTrue("12 turns" in text)
     }
 
     @Test
@@ -115,7 +115,7 @@ class BrainLearnTest {
             costs = BrainReply.Down(null)
         }
         val text = BrainCommands(fake.gateway()) { pinnedNow }.learn("")
-        assertTrue("caído" in text)
+        assertTrue("down" in text)
     }
 
     @Test
@@ -127,9 +127,9 @@ class BrainLearnTest {
         }
         val text = BrainCommands(fake.gateway()) { pinnedNow }.learn("")
         // The memories leg still speaks; the evals leg degrades alone.
-        assertTrue("El cutover de LoRA espera el gate" in text)
-        assertTrue("evals: 📭 sin corridas" in text)
-        assertTrue("12 turnos · \$0.42" in text)
+        assertTrue("The LoRA cutover waits for the gate" in text)
+        assertTrue("evals: 📭 no runs" in text)
+        assertTrue("12 turns · \$0.42" in text)
     }
 
     @Test

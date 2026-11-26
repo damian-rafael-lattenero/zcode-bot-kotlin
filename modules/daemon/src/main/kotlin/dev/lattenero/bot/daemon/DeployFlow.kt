@@ -33,15 +33,15 @@ private val logger = KotlinLogging.logger {}
  * (missing script, unwritable log) — a throw means THIS daemon stays up
  * and the phone hears it LOUD.
  *
- * 2026-11-04 — THE ONE-TAP LAW (the owner: «elegir que deployar y esa
- * eleccion ya empieza el deploy… una única vez… no se puede volver a
- * apretar esa botonera»): the bare /deploy offers 🤖 bot / 🍴 fork /
- * 📱 whatsapp / 🚀 todos and REMEMBERS the card's born message id; the tap
+ * 2026-11-04 — THE ONE-TAP LAW (the owner: «choose what to deploy and that
+ * choice already starts the deploy… a single time… that button row cannot
+ * be pressed again» [translated]): the bare /deploy offers 🤖 bot / 🍴 fork /
+ * 📱 whatsapp / 🚀 all and REMEMBERS the card's born message id; the tap
  * (or the typed word) IS the confirmation — the owner gate passes and the
  * door fires immediately, and the card's BUTTON ROW DIES (the edit strips
- * the keyboard, marking the chosen row «▶️ en vuelo»). The confirm cards,
+ * the keyboard, marking the chosen row «▶️ in flight»). The confirm cards,
  * the go/no row, the expiry and the arm are all retired. After a launch
- * that lands, THAT target is refused («ya hay un deploy en vuelo») until
+ * that lands, THAT target is refused («a deploy is already in flight») until
  * the rearm window — per-target and time-bounded (the owner's 10/11 fix:
  * the old global process-lifetime flag let ONE WhatsApp deploy lock every
  * target for 30+ minutes) — and the spawn edge's busy-guard is the durable
@@ -125,7 +125,7 @@ class DeployFlow(
     @Suppress("TooGenericExceptionCaught") // the spawn edge: any failure speaks LOUD, never crashes the poller
     private suspend fun launch(target: Target) {
         // THE BUTTON ROW DIES: the card is edited in place — keyboard
-        // stripped, the chosen row marked «▶️ en vuelo». Best-effort: a
+        // stripped, the chosen row marked «▶️ in flight». Best-effort: a
         // failed edit leaves the row as decoration and the in-flight
         // refusal answers its taps (the spawn edge's busy-guard is the
         // durable backstop).
@@ -211,7 +211,7 @@ class DeployFlow(
         const val TARGET_WORD_BRAIN = "brain"
         const val TARGET_WORD_ALL = "all"
 
-        /** The pre-rename word («Ambos» era) — stale cards on the phone still carry it. */
+        /** The pre-rename word (the «Both» era) — stale cards on the phone still carry it. */
         const val TARGET_WORD_BOTH_ALIAS = "both"
 
         fun targetOf(action: String): Target? = when (action) {
@@ -232,16 +232,16 @@ class DeployFlow(
          * old confirm cards' content collapsed (the real cost of each).
          */
         const val TARGETS_CARD = (
-            "🚀 <b>Deploy</b>\n¿Qué deployo? Tocar ES lanzar — una única vez por target, " +
-                "la botonera muere al toque:\n" +
-                "🤖 <b>Bot Kotlin</b> — build (tests incluidos) → install → el LaunchAgent reinicia el daemon\n" +
-                "🍴 <b>ZCode Fork</b> — build AHORA (~15 min, avisos por fases, la app sigue viva) → " +
-                "cierra ZCode solo → swap → reabre (unos segundos de canal 📡 al final)\n" +
-                "📱 <b>WhatsApp (whatsdigest)</b> — build con tests → install → el LaunchAgent del bot " +
-                "de los grupos se reinicia y se verifica solo (nunca toca ESTE daemon)\n" +
-                "🧠 <b>Brain (agent-brain)</b> — build (installDist + detekt) → install → el LaunchAgent " +
-                "del brain se reinicia (outage breve de /brain y memoria; el plugin reconecta solo)\n" +
-                "🚀 <b>Todos</b> — fork PRIMERO, después brain, el daemon y el bot de WhatsApp (jobs hermanos de launchd)"
+            "🚀 <b>Deploy</b>\nWhat do I deploy? Tapping IS launching — a single time per target, " +
+                "the row dies on the tap:\n" +
+                "🤖 <b>Bot Kotlin</b> — build (tests included) → install → the LaunchAgent restarts the daemon\n" +
+                "🍴 <b>ZCode Fork</b> — build NOW (~15 min, phase notices, the app stays alive) → " +
+                "closes ZCode on its own → swap → reopens (a few seconds of 📡 channel at the end)\n" +
+                "📱 <b>WhatsApp (whatsdigest)</b> — build with tests → install → the groups bot's " +
+                "LaunchAgent restarts and verifies itself (never touches THIS daemon)\n" +
+                "🧠 <b>Brain (agent-brain)</b> — build (installDist + detekt) → install → the brain's " +
+                "LaunchAgent restarts (brief /brain and memory outage; the plugin reconnects on its own)\n" +
+                "🚀 <b>All</b> — fork FIRST, then brain, the daemon and the WhatsApp bot (sibling launchd jobs)"
             )
 
         /**
@@ -249,116 +249,116 @@ class DeployFlow(
          * runs. The plain [TARGETS_CARD] stays the fallback byte for byte.
          */
         val TARGETS_CARD_RICH: String = (
-            "🚀 <b>Deploy</b>\n¿Qué deployo? Tocar ES lanzar — una única vez por target, " +
-                "la botonera muere al toque:\n\n" +
+            "🚀 <b>Deploy</b>\nWhat do I deploy? Tapping IS launching — a single time per target, " +
+                "the row dies on the tap:\n\n" +
                 Tables.html(
-                    header = listOf("Target", "Qué hace"),
+                    header = listOf("Target", "What it does"),
                     rows = listOf(
                         listOf(
                             "🤖 Bot Kotlin",
-                            "build (tests incluidos) → install → el LaunchAgent reinicia el daemon",
+                            "build (tests included) → install → the LaunchAgent restarts the daemon",
                         ),
                         listOf(
                             "🍴 ZCode Fork",
-                            "build AHORA (~15 min, avisos por fases, la app sigue viva) → cierra ZCode solo → " +
-                                "swap → reabre (unos segundos de canal 📡 al final)",
+                            "build NOW (~15 min, phase notices, the app stays alive) → closes ZCode on its own → " +
+                                "swap → reopens (a few seconds of 📡 channel at the end)",
                         ),
                         listOf(
                             "📱 WhatsApp (whatsdigest)",
-                            "build con tests → install → el LaunchAgent del bot de los grupos se reinicia y " +
-                                "se verifica solo (nunca toca ESTE daemon)",
+                            "build with tests → install → the groups bot's LaunchAgent restarts and " +
+                                "verifies itself (never touches THIS daemon)",
                         ),
                         listOf(
                             "🧠 Brain (agent-brain)",
-                            "build (installDist + detekt) → install → el LaunchAgent del brain se reinicia " +
-                                "(outage breve de /brain y memoria; el plugin reconecta solo)",
+                            "build (installDist + detekt) → install → the brain's LaunchAgent restarts " +
+                                "(brief /brain and memory outage; the plugin reconnects on its own)",
                         ),
                         listOf(
-                            "🚀 Todos",
-                            "fork PRIMERO, después brain, el daemon y el bot de WhatsApp " +
-                                "(jobs hermanos de launchd)",
+                            "🚀 All",
+                            "fork FIRST, then brain, the daemon and the WhatsApp bot " +
+                                "(sibling launchd jobs)",
                         ),
                     ),
                 )
             )
 
         /** The card's flown rows — the edit's text: keyboard stripped, the choice marked. */
-        const val FLOWN_BOT = "🤖 Bot Kotlin — ▶️ en vuelo"
-        const val FLOWN_FORK = "🍴 ZCode Fork — ▶️ en vuelo"
-        const val FLOWN_WHATSAPP = "📱 WhatsApp (whatsdigest) — ▶️ en vuelo"
-        const val FLOWN_BRAIN = "🧠 Brain (agent-brain) — ▶️ en vuelo"
-        const val FLOWN_ALL = "🚀 Todos — ▶️ en vuelo (fork primero)"
+        const val FLOWN_BOT = "🤖 Bot Kotlin — ▶️ in flight"
+        const val FLOWN_FORK = "🍴 ZCode Fork — ▶️ in flight"
+        const val FLOWN_WHATSAPP = "📱 WhatsApp (whatsdigest) — ▶️ in flight"
+        const val FLOWN_BRAIN = "🧠 Brain (agent-brain) — ▶️ in flight"
+        const val FLOWN_ALL = "🚀 All — ▶️ in flight (fork first)"
 
         /** The in-flight refusal — THIS target flew; its own slot rearms itself. */
         const val IN_FLIGHT = (
-            "🚀 Ya hay un deploy de ESE target en vuelo — no lanzo otro del mismo. " +
-                "Si el job sigue corriendo, el script mismo se niega; esperá a que termine " +
-                "(los ~20 min rearmar el slot)."
+            "🚀 A deploy of THAT target is already in flight — I will not launch another of the same. " +
+                "If the job is still running, the script itself refuses; wait for it to end " +
+                "(the ~20 min rearm the slot)."
             )
 
         /** The door's exact sentences — the phone hears them BEFORE any script can kill anything. */
-        const val THE_ANNOUNCE = "🚀 Deployando el daemon — vuelvo en un momento"
+        const val THE_ANNOUNCE = "🚀 Deploying the daemon — back in a moment"
 
         const val THE_ANNOUNCE_WHATSAPP = (
-            "📱 Deployando el bot de WhatsApp (whatsdigest) — build con tests, " +
-                "install y verificación propia; ESTE daemon no se toca, sigo vivo"
+            "📱 Deploying the WhatsApp bot (whatsdigest) — build with tests, " +
+                "install and its own verification; THIS daemon is not touched, I stay alive"
             )
 
         const val SPAWNED_WHATSAPP = (
-            "🛠 Script de whatsdigest lanzado detached — build con tests, install " +
-                "y el LaunchAgent del bot de los grupos se re-verifica solo. " +
-                "Log: <code>~/.zcode/bot-kotlin/logs/deploy-whatsapp.log</code> — /file lo trae."
+            "🛠 whatsdigest script launched detached — build with tests, install " +
+                "and the groups bot's LaunchAgent re-verifies itself. " +
+                "Log: <code>~/.zcode/bot-kotlin/logs/deploy-whatsapp.log</code> — /file brings it."
             )
 
         const val THE_ANNOUNCE_FORK = (
-            "🍴 Deploy del fork armado — construyo el fork (~15 min, te aviso por fases, " +
-                "la app sigue viva); al final CIERRA ZCode solo, hace el swap y la reabre"
+            "🍴 Fork deploy armed — I build the fork (~15 min, I notify you by phases, " +
+                "the app stays alive); at the end it CLOSES ZCode on its own, swaps and reopens it"
             )
 
         const val THE_ANNOUNCE_BRAIN = (
-            "🧠 Deployando el brain (agent-brain) — build con detekt, install y el LaunchAgent " +
-                "se reinicia con verificación /ready; ESTE daemon no se toca, sigo vivo " +
-                "(outage breve de /brain y memoria)"
+            "🧠 Deploying the brain (agent-brain) — build with detekt, install and the LaunchAgent " +
+                "restarts with /ready verification; THIS daemon is not touched, I stay alive " +
+                "(brief /brain and memory outage)"
             )
 
         const val SPAWNED_BRAIN = (
-            "🛠 Script del brain lanzado detached — installDist + detekt, el LaunchAgent de " +
-                "agent-brain se reinicia y verifica /ready solo (el plugin brain-mcp reconecta solo). " +
-                "Log: <code>~/.zcode/bot-kotlin/logs/deploy-brain.log</code> — /file lo trae."
+            "🛠 Brain script launched detached — installDist + detekt, agent-brain's LaunchAgent " +
+                "restarts and verifies /ready on its own (the brain-mcp plugin reconnects on its own). " +
+                "Log: <code>~/.zcode/bot-kotlin/logs/deploy-brain.log</code> — /file brings it."
             )
 
         const val THE_ANNOUNCE_ALL = (
-            "🚀 Deployando TODOS — primero el fork, después brain, el daemon y el bot de WhatsApp; vuelvo en un momento"
+            "🚀 Deploying ALL — first the fork, then brain, the daemon and the WhatsApp bot; back in a moment"
             )
 
         const val SPAWNED = (
-            "🛠 Script lanzado detached — el build tarda minutos y el daemon " +
-                "NUEVO saluda al boot (el script verifica heartbeat + armed + log tail). " +
-                "Log: <code>~/.zcode/bot-kotlin/logs/deploy-daemon.log</code> — /file lo trae."
+            "🛠 Script launched detached — the build takes minutes and the " +
+                "NEW daemon greets at boot (the script verifies heartbeat + armed + log tail). " +
+                "Log: <code>~/.zcode/bot-kotlin/logs/deploy-daemon.log</code> — /file brings it."
             )
 
         const val SPAWNED_FORK = (
-            "🛠 Script del fork lanzado detached (el MISMO de <code>zcode-deploy</code>) — " +
-                "el build tarda ~15 min y te habla por fases con la app viva; al final " +
-                "CIERRA ZCode solo, hace el swap y la reabre (avisos por Telegram). " +
-                "Log: <code>~/.zcode/bot-kotlin/logs/deploy-fork.log</code> — /file lo trae."
+            "🛠 Fork script launched detached (the SAME one as <code>zcode-deploy</code>) — " +
+                "the build takes ~15 min and talks to you by phases with the app alive; at the end " +
+                "it CLOSES ZCode on its own, swaps and reopens it (Telegram notices). " +
+                "Log: <code>~/.zcode/bot-kotlin/logs/deploy-fork.log</code> — /file brings it."
             )
 
         const val SPAWNED_ALL = (
-            "🛠 Los cuatro scripts lanzados detached — fork, brain, daemon y WhatsApp compilan " +
-                "en paralelo y cada verificación saluda al volver. " +
+            "🛠 The four scripts launched detached — fork, brain, daemon and WhatsApp build " +
+                "in parallel and each verification greets on return. " +
                 "Logs: <code>~/.zcode/bot-kotlin/logs/deploy-fork.log</code>, " +
-                "<code>deploy-brain.log</code>, <code>deploy-daemon.log</code> y " +
-                "<code>deploy-whatsapp.log</code> — /file los trae."
+                "<code>deploy-brain.log</code>, <code>deploy-daemon.log</code> and " +
+                "<code>deploy-whatsapp.log</code> — /file brings them."
             )
 
         const val ANNOUNCE_FAILED = (
-            "⚠️ No pude anunciar el deploy (el mensaje no salió) — NO deployo a ciegas: " +
-                "el daemon moriría y el teléfono quedaría en silencio. Probá de nuevo cuando el send vuelva."
+            "⚠️ I could not announce the deploy (the message did not go out) — I do NOT deploy blind: " +
+                "the daemon would die and the phone would go silent. Try again when the send returns."
             )
 
-        const val SPAWN_FAILED = "❌ deploy: no pude lanzar el script — el daemon NO se reinició: "
+        const val SPAWN_FAILED = "❌ deploy: could not launch the script — the daemon did NOT restart: "
 
-        const val NOT_OWNER = "🚫 Solo el dueño lanza el deploy."
+        const val NOT_OWNER = "🚫 Only the owner launches the deploy."
     }
 }

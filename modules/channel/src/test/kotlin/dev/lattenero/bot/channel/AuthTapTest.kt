@@ -80,7 +80,7 @@ class AuthTapTest {
         val o = FakeOps()
         val dismisses = mutableListOf<String>()
         val reply = commands(o, dismisses).onCallback("auth:36747", 1L, OWNER)!!
-        assertEquals("✅ Anotado — silencio para ese diálogo.", reply.text)
+        assertEquals("✅ Noted — silence for that dialog.", reply.text)
         assertEquals(listOf("36747"), dismisses, "the marker carries the pid, nothing else")
         assertTrue(o.queries.isEmpty(), "no channel query behind a marker")
         assertTrue(o.inbounds.isEmpty(), "nothing rides to the agent — the fallback never sees auth:")
@@ -91,7 +91,7 @@ class AuthTapTest {
         val o = FakeOps()
         val dismisses = mutableListOf<String>()
         val reply = commands(o, dismisses).onCallback("auth:not-a-pid", 2L, OWNER)!!
-        assertEquals("🔐 Marca fuera de lugar — no escribí nada.", reply.text)
+        assertEquals("🔐 Marker out of place — nothing was written.", reply.text)
         assertTrue(dismisses.isEmpty(), "a malformed id never becomes a marker")
     }
 
@@ -100,7 +100,7 @@ class AuthTapTest {
         val o = FakeOps()
         val dismisses = mutableListOf<String>()
         val reply = commands(o, dismisses).onCallback("auth:0", 3L, OWNER)!!
-        assertEquals("✅ Prueba recibida — el canal anda.", reply.text)
+        assertEquals("✅ Probe received — the channel works.", reply.text)
         assertTrue(dismisses.isEmpty(), "the sentinel's own probe leaves no marker")
     }
 
@@ -109,7 +109,7 @@ class AuthTapTest {
         val o = FakeOps()
         val dismisses = mutableListOf<String>()
         val reply = commands(o, dismisses).onCallback("auth:36747", 4L, STRANGER)!!
-        assertEquals("✅ Anotado — silencio para ese diálogo.", reply.text)
+        assertEquals("✅ Noted — silence for that dialog.", reply.text)
         assertEquals(listOf("36747"), dismisses, "a marker owns nothing — same law as the natural-wait reply")
     }
 }

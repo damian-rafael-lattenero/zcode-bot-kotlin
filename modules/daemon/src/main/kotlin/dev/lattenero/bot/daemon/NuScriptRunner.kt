@@ -99,14 +99,14 @@ internal object NuScriptRunner {
         val head = if (exit == 0) {
             "$emoji <b>$label</b> ($mode) · ${tookMs / 1000}s\n"
         } else {
-            "⚠️ $label ($mode) salió con código $exit — el log dice el resto:\n"
+            "⚠️ $label ($mode) exited with code $exit — the log says the rest:\n"
         }
         val body = PyText.esc(out.trimEnd())
         if (PyText.cpLength(body) <= BODY_CAP) return head + "<pre>" + body + "</pre>"
         val headPart = PyText.take(body, BODY_CAP * HEAD_SHARE / 100)
         val tailPart = takeTail(body, BODY_CAP * (100 - HEAD_SHARE) / 100)
         return head + "<pre>" + headPart + "\n…✂️…\n" + tailPart + "</pre>" +
-            "\n✂️ no entró entero — log completo: <code>" + PyText.esc(logPath) + "</code> (/file lo trae)"
+            "\n✂️ it did not fit whole — full log: <code>" + PyText.esc(logPath) + "</code> (/file brings it)"
     }
 
     /** The LAST [n] code points — the tail half of the capped render. */

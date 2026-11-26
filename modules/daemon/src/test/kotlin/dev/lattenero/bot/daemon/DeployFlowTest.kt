@@ -74,7 +74,7 @@ class DeployFlowTest {
         assertEquals(1, rig.spoken.size)
         val (text, loud, markup) = rig.spoken.single()
         assertTrue(text.startsWith("🚀 <b>Deploy</b>"), text)
-        assertTrue(text.contains("Tocar ES lanzar"), "the one-tap law is ON the card")
+        assertTrue(text.contains("Tapping IS launching"), "the one-tap law is ON the card")
         assertEquals(false, loud)
         val row = markup!!.jsonObject["inline_keyboard"]!!.jsonArray[0].jsonArray
         assertEquals(5, row.size)
@@ -98,11 +98,11 @@ class DeployFlowTest {
         // the 📱 target's honesty: THIS daemon is never at stake, and the
         // card + the announce say so (the sibling ecosystem deploys alone)
         assertTrue(
-            DeployFlow.TARGETS_CARD.contains("nunca toca ESTE daemon"),
-            "the card says the whatsdigest deploy never touches this daemon",
+            DeployFlow.TARGETS_CARD.contains("never touches THIS daemon"),
+            "the card says the whatsdigest deploy is not touched, I stay alive",
         )
         assertTrue(
-            DeployFlow.THE_ANNOUNCE_WHATSAPP.contains("ESTE daemon no se toca"),
+            DeployFlow.THE_ANNOUNCE_WHATSAPP.contains("THIS daemon is not touched"),
             "the announce says this daemon stays alive",
         )
         assertEquals(listOf(Target.WHATSAPP), rig.spawnedTargets)
@@ -122,7 +122,7 @@ class DeployFlowTest {
         // the 🧠 target's honesty: THIS daemon is never at stake — the brief
         // memory/RAG outage degrades honestly and brain-mcp reconnects alone
         assertTrue(
-            DeployFlow.THE_ANNOUNCE_BRAIN.contains("ESTE daemon no se toca"),
+            DeployFlow.THE_ANNOUNCE_BRAIN.contains("THIS daemon is not touched"),
             "the announce says this daemon stays alive",
         )
         assertEquals(listOf(Target.BRAIN), rig.spawnedTargets)
@@ -141,8 +141,8 @@ class DeployFlowTest {
         f.onTap("fork", OWNER) // the tap IS the confirmation — no second step exists
         // THE MIRROR'S HONEST ARC survives the one-tap law: the card's fork
         // row says build → the script closes ZCode ITSELF → swap → reopen
-        assertTrue(DeployFlow.TARGETS_CARD.contains("cierra ZCode solo"), "the fork's honest arc is on the card")
-        assertTrue(DeployFlow.THE_ANNOUNCE_FORK.contains("CIERRA ZCode"), "the announce says the close is automatic")
+        assertTrue(DeployFlow.TARGETS_CARD.contains("closes ZCode on its own"), "the fork's honest arc is on the card")
+        assertTrue(DeployFlow.THE_ANNOUNCE_FORK.contains("CLOSES ZCode"), "the announce says the close is automatic")
         assertEquals(listOf(Target.FORK), rig.spawnedTargets)
         assertEquals(2, rig.spoken.size) // announce, spawned-note — no confirm card anywhere
         assertEquals(DeployFlow.THE_ANNOUNCE_FORK, rig.spoken[0].first)
@@ -234,7 +234,7 @@ class DeployFlowTest {
         f.onTap("bot", OWNER)
         assertEquals(0, rig.spawnedTargets.size) // NO blind restarts
         val last = rig.spoken.last()
-        assertTrue(last.first.startsWith("⚠️ No pude anunciar el deploy"), last.first)
+        assertTrue(last.first.startsWith("⚠️ I could not announce the deploy"), last.first)
         assertEquals(true, last.second) // the refusal is LOUD — the owner must learn why nothing happened
     }
 
@@ -266,7 +266,7 @@ class DeployFlowTest {
         f.onTap("bot", OWNER) // the SAME target again — impatience
         assertEquals(1, rig.spawnedTargets.size, "STILL one — the spent target never fires twice")
         assertEquals(DeployFlow.IN_FLIGHT, rig.spoken.last().first)
-        assertTrue(rig.spoken.last().first.contains("en vuelo"), "the honest refusal")
+        assertTrue(rig.spoken.last().first.contains("in flight"), "the honest refusal")
         // a DIFFERENT target flies freely — the WhatsApp deploy never blocks the fork
         f.onTap("fork", OWNER)
         assertEquals(listOf(Target.BOT, Target.FORK), rig.spawnedTargets)

@@ -119,7 +119,7 @@ class PngRenderTest {
         val tall = (1..(PngRender.MAX_LINES + 100)).joinToString("\n") { "line $it" }
         val fitted = PngRender.fit(tall).split('\n')
         assertEquals(PngRender.MAX_LINES + 1, fitted.size, "the budget plus the honest remainder note")
-        assertTrue(fitted.last().contains("100 líneas más"), "the note counts what stayed behind: ${fitted.last()}")
+        assertTrue(fitted.last().contains("100 more lines"), "the note counts what stayed behind: ${fitted.last()}")
         assertEquals("a\nb", PngRender.fit("a\nb"), "a short body passes untouched")
     }
 

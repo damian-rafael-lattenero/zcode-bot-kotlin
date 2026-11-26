@@ -40,7 +40,7 @@ data class QuestionAnswers(val byIndex: Map<QuestionIndex, List<AnswerValue>>) {
 /**
  * THE QUESTION, end to end (the owner's phone answers everything — 30/10):
  * the stream carries `permission_request` / `elicitation_request` events;
- * the card renders «🔐/❓ esperando» and the turn hangs forever. This file
+ * the card renders «🔐/❓ waiting» and the turn hangs forever. This file
  * closes the loop:
  *
  * 1. [parseQuestionEvent] reads the REAL event (the permission options ride
@@ -58,7 +58,7 @@ data class QuestionAnswers(val byIndex: Map<QuestionIndex, List<AnswerValue>>) {
  *    question fails with the fork's own error — never a silent tap). A
  *    MULTI-question form (the fork's `questions[]`, `questionCount > 1`)
  *    advances IN PLACE: the answer is recorded, the SAME Telegram message is
- *    edited with the next question («pregunta 2 de N»), and only after the
+ *    edited with the next question («question 2 of N»), and only after the
  *    LAST answer does ONE `respond` frame fly carrying every answer in the
  *    fork's exact shape ([elicitationContentAll]).
  *
@@ -204,7 +204,7 @@ internal fun parseQuestionEvent(event: JsonObject): PendingQuestion? {
                 header = "🔐 Permiso solicitado",
                 title = event.str("description")?.takeIf { it.isNotBlank() }
                     ?: event.str("title")?.takeIf { it.isNotBlank() }
-                    ?: "El agente pide permiso",
+                    ?: "The agent asks for permission",
                 options = opts,
                 originLabel = origin,
             )
@@ -217,18 +217,18 @@ internal fun parseQuestionEvent(event: JsonObject): PendingQuestion? {
                     taskId = taskId,
                     requestId = requestId,
                     kind = "plan",
-                    header = "📋 Plan por aprobar",
-                    title = event.str("message")?.takeIf { it.isNotBlank() } ?: "¿Apruebo este plan?",
+                    header = "📋 Plan to approve",
+                    title = event.str("message")?.takeIf { it.isNotBlank() } ?: "Approve this plan?",
                     options = listOf(
-                        QuestionOption("approve", "✅ Aprobar el plan"),
-                        QuestionOption("decline", "❌ Rechazar"),
+                        QuestionOption("approve", "✅ Approve the plan"),
+                        QuestionOption("decline", "❌ Reject"),
                     ),
                     plan = schema.str("plan"),
                     originLabel = origin,
                 )
             } else {
                 val questions = event["questions"] as? JsonArray
-                val eventHeader = event.str("header")?.takeIf { it.isNotBlank() } ?: "❓ Pregunta"
+                val eventHeader = event.str("header")?.takeIf { it.isNotBlank() } ?: "❓ Question"
                 val eventOptions = event["options"] as? JsonArray
                 // The FULL questionnaire, index-aligned with the fork's wire
                 // (`answer_N` answers question N — never drop an item, a
@@ -306,8 +306,8 @@ private fun elicitationOptions(raw: JsonArray?): List<QuestionOption> = raw.orEm
  * The question message's TEXT — the dedicated message (never the card):
  * the head, WHICH conversation (the task title) and WHICH subagent (the
  * origin tag) asked, the body, the plan's verbatim clip. User-facing
- * Spanish. A multi-question form says WHICH question is on screen
- * («pregunta N de M»).
+ * English. A multi-question form says WHICH question is on screen
+ * («question N of M»).
  */
 internal fun questionText(q: PendingQuestion): String = buildString {
     append("<b>").append(PyText.esc(q.header)).append("</b>")
@@ -315,13 +315,13 @@ internal fun questionText(q: PendingQuestion): String = buildString {
         append("\n<i>📋 ").append(PyText.esc(PyText.take(title, QuestionBoard.QUESTION_TASK_CP))).append("</i>")
     }
     q.originLabel?.takeIf { it.isNotBlank() }?.let { label ->
-        append("\n<i>🤖 subagente: ")
+        append("\n<i>🤖 subagent: ")
             .append(PyText.esc(PyText.take(label, QuestionBoard.QUESTION_ORIGIN_CP)))
             .append("</i>")
     }
     append("\n").append(PyText.esc(q.title))
     if (q.questionCount > 1) {
-        append("\n<i>pregunta ").append(q.questionIndex + 1).append(" de ").append(q.questionCount).append("</i>")
+        append("\n<i>question ").append(q.questionIndex + 1).append(" of ").append(q.questionCount).append("</i>")
     }
     q.plan?.takeIf { it.isNotBlank() }?.let { plan ->
         append("\n\n<blockquote>").append(PyText.esc(PyText.take(plan, QuestionBoard.QUESTION_PLAN_CP)))
@@ -544,7 +544,7 @@ class QuestionBoard(
         }
         persist() // the insert + the evictions are committed BEFORE the send flies
         // THE EVICTION'S HONESTY (measured 4/11): a retired card keeps armed
-        // buttons whose taps now answer «ya no está pendiente» — a dead
+        // buttons whose taps now answer «no longer pending» — a dead
         // button pretending to be live. The seal edit flies OUTSIDE the lock
         // (the AnswerStep law: decisions under the monitor, effects after).
         registered.evicted.forEach { q ->
@@ -696,9 +696,9 @@ class QuestionBoard(
         /** The short ids' shape (`q1`, `q2`, …) — the tap wire's key AND the reload's counter seed. */
         const val SHORT_ID_PREFIX = "q"
 
-        /** The evicted card's honest seal (4/11: an armed dead button's tap answers «ya no está pendiente»). */
+        /** The evicted card's honest seal (4/11: an armed dead button's tap answers «no longer pending»). */
         const val EVICTION_TEXT =
-            "🗑 Pregunta retirada — llegaron $REGISTRY_CAP pendientes; mandá la respuesta por texto si sigue vigente"
+            "🗑 Question withdrawn — $REGISTRY_CAP pending ones arrived; send the answer as text if it is still valid"
 
         /** The buttons' cap per question (Telegram's keyboard sanity; ✍️ always remains). */
         const val QUESTION_OPTIONS_CAP = 8

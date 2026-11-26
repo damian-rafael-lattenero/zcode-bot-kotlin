@@ -10,7 +10,7 @@ import kotlin.test.assertTrue
  * /brain and /memory: the pure JSON parsers and renderers pinned against
  * agent-brain's REAL shapes (`http/Server.kt`, `rag/RagService.kt`,
  * `memory/MemoryWorker.kt`), plus every rung of the honesty ladder —
- * caído, timeout, HTTP error, unreadable, empty.
+ * down, timeout, HTTP error, unreadable, empty.
  */
 class BrainCommandsTest {
 
@@ -19,36 +19,36 @@ class BrainCommandsTest {
     private val ragQueryJson = """
         {"query":"bridge y memoria","embedModel":"bge-m3",
          "hits":[
-           {"chunkId":11,"docId":3,"uri":"repo://zcode-bot-kotlin/docs/plan-brujula.md",
-            "title":"plan brujula","heading":"U1b — Encender bus y memoria","ordinal":5,
+           {"chunkId":11,"docId":3,"uri":"repo://zcode-bot-kotlin/docs/plan-compass.md",
+            "title":"plan compass","heading":"U1b — Turn on bus and memory","ordinal":5,
             "content":"el daemon publica BusEvent","score":0.91,"vectorRank":1,"textRank":2},
            {"chunkId":12,"docId":3,"uri":"repo://zcode-bot-kotlin/README.md",
             "title":"README","heading":"","ordinal":1,
             "content":"the bot","score":0.44,"vectorRank":2,"textRank":null}
          ],
          "citations":[
-           {"uri":"repo://zcode-bot-kotlin/docs/plan-brujula.md","title":"plan brujula",
-            "heading":"U1b — Encender bus y memoria","ordinal":5,"score":0.91}
+           {"uri":"repo://zcode-bot-kotlin/docs/plan-compass.md","title":"plan compass",
+            "heading":"U1b — Turn on bus and memory","ordinal":5,"score":0.91}
          ]}
     """.trimIndent()
 
     private val memorySearchJson = """
-        {"query":"cómo despliego","embedModel":"bge-m3",
+        {"query":"how do I deploy","embedModel":"bge-m3",
          "memories":[
-           {"id":42,"kind":"preference","content":"El dueño prefiere commits chicos y verificables",
+           {"id":42,"kind":"preference","content":"The owner prefers small, verifiable commits",
             "sessionId":"ses_1","turnId":"1761685200123","salience":0.7,
             "createdAt":"2026-11-02T10:00:00.000Z","score":0.83},
-           {"id":41,"kind":"fact","content":"El daemon usa <code>launchd</code> con kickstart",
+           {"id":41,"kind":"fact","content":"The daemon uses <code>launchd</code> with kickstart",
             "sessionId":"ses_1","turnId":"1761685200000","salience":0.5,
             "createdAt":"2026-11-01T09:00:00.000Z","score":0.61}
          ]}
     """.trimIndent()
 
     private val memoryRecentJson = """
-        [{"id":42,"kind":"preference","content":"Commits chicos",
+        [{"id":42,"kind":"preference","content":"Small commits",
           "sessionId":"ses_1","turnId":"1","salience":0.7,
           "createdAt":"2026-11-02T10:00:00.000Z","score":null},
-         {"id":41,"kind":"fact","content":"Kickstart del daemon",
+         {"id":41,"kind":"fact","content":"Daemon kickstart",
           "sessionId":"ses_1","turnId":"2","salience":0.5,
           "createdAt":"2026-11-01T09:00:00.000Z","score":null}]
     """.trimIndent()
@@ -109,9 +109,9 @@ class BrainCommandsTest {
     @Test
     fun brainQueryCitesUriAndHeading() = runBlocking {
         val text = BrainCommands(fake().gateway()).brain("bridge y memoria")
-        assertTrue("2 resultados" in text)
-        assertTrue("U1b — Encender bus y memoria" in text)
-        assertTrue("repo://zcode-bot-kotlin/docs/plan-brujula.md" in text)
+        assertTrue("2 results" in text)
+        assertTrue("U1b — Turn on bus and memory" in text)
+        assertTrue("repo://zcode-bot-kotlin/docs/plan-compass.md" in text)
         assertTrue("0.91" in text)
         // a blank heading falls back to the title, never to an empty citation
         assertTrue("README" in text)
@@ -137,14 +137,14 @@ class BrainCommandsTest {
     fun brainUnreachableIsTheDownLineWithTheUrl() = runBlocking {
         val f = fake().apply { rag = BrainReply.Down("ConnectException") }
         val text = BrainCommands(f.gateway()).brain("x")
-        assertTrue(text.startsWith("📡 brain caído"))
+        assertTrue(text.startsWith("📡 brain down"))
         assertTrue(url in text)
     }
 
     @Test
     fun brainTimeoutIsTheClockLine() = runBlocking {
         val f = fake().apply { rag = BrainReply.Timeout }
-        assertTrue(BrainCommands(f.gateway()).brain("x").startsWith("⏱️ brain no respondió en 5s"))
+        assertTrue(BrainCommands(f.gateway()).brain("x").startsWith("⏱️ brain did not answer in 5s"))
     }
 
     @Test
@@ -157,7 +157,7 @@ class BrainCommandsTest {
         val errored = BrainCommands(
             fake().apply { rag = BrainReply.Response(400, """{"error":"k must be between 1 and 50"}""") }.gateway(),
         ).brain("algo")
-        assertTrue(errored.startsWith("⚠️ brain respondió HTTP 400"))
+        assertTrue(errored.startsWith("⚠️ brain answered HTTP 400"))
         assertTrue("k must be between 1 and 50" in errored)
         assertEquals(BrainTexts.BRAIN_USAGE, text)
     }
@@ -165,7 +165,7 @@ class BrainCommandsTest {
     @Test
     fun brainUnreadableBodyIsNotSilentlyEmpty() = runBlocking {
         val f = fake().apply { rag = BrainReply.Response(200, "<html>proxy error</html>") }
-        assertTrue(BrainCommands(f.gateway()).brain("x").startsWith("⚠️ brain respondió algo ilegible (HTTP 200)"))
+        assertTrue(BrainCommands(f.gateway()).brain("x").startsWith("⚠️ brain answered something unreadable (HTTP 200)"))
     }
 
     @Test
@@ -179,11 +179,11 @@ class BrainCommandsTest {
     fun brainStatusReadsRagStatsAndTheBus() = runBlocking {
         val f = fake()
         val text = BrainCommands(f.gateway()).brain("status")
-        assertTrue(text.contains("12 documentos"))
+        assertTrue(text.contains("12 documents"))
         assertTrue(text.contains("340 chunks"))
         assertTrue(text.contains("repo 200"))
-        assertTrue(text.contains("120 en DB"))
-        assertTrue(text.contains("118 insertadas"))
+        assertTrue(text.contains("120 in DB"))
+        assertTrue(text.contains("118 inserted"))
         assertTrue(text.contains("turn.completed"))
         assertEquals(listOf("ragStats", "busStatus"), f.calls)
     }
@@ -192,7 +192,7 @@ class BrainCommandsTest {
     fun brainStatusDegradesPerLeg() = runBlocking {
         val f = fake().apply { stats = BrainReply.Down("refused") }
         val text = BrainCommands(f.gateway()).brain("status")
-        assertTrue("📚 RAG: 📡 caído" in text)
+        assertTrue("📚 RAG: 📡 down" in text)
         assertTrue("📡 Bus: 41.2 KB" in text, text) // the bus leg still answers
     }
 
@@ -200,10 +200,10 @@ class BrainCommandsTest {
 
     @Test
     fun memoryQueryRendersKindIdAndContentEscaped() = runBlocking {
-        val text = BrainCommands(fake().gateway()).memory("cómo despliego")
-        assertTrue("2 recuerdos" in text, text)
+        val text = BrainCommands(fake().gateway()).memory("how do I deploy")
+        assertTrue("2 memories" in text, text)
         assertTrue("preference #42" in text)
-        assertTrue("commits chicos" in text)
+        assertTrue("small, verifiable commits" in text)
         assertTrue("0.83" in text)
         // the fixture's HTML-ish content is escaped, never interpreted by Telegram
         assertTrue("&lt;code&gt;launchd&lt;/code&gt;" in text, text)
@@ -222,7 +222,7 @@ class BrainCommandsTest {
         val f = fake().apply {
             search = BrainReply.Response(200, """{"query":"x","embedModel":"m","memories":[]}""")
         }
-        assertTrue(BrainCommands(f.gateway()).memory("nada").startsWith("📭 Sin recuerdos"))
+        assertTrue(BrainCommands(f.gateway()).memory("nada").startsWith("📭 No memories"))
     }
 
     @Test
@@ -239,7 +239,7 @@ class BrainCommandsTest {
     @Test
     fun memoryRecentRendersTheArrayAndItsTimestamp() = runBlocking {
         val text = BrainCommands(fake().gateway()).memory("recent")
-        assertTrue("memoria reciente" in text)
+        assertTrue("recent memory" in text)
         assertTrue("preference #42" in text)
         assertTrue("2026-11-02T10:00:00.000Z" in text)
     }
@@ -253,9 +253,9 @@ class BrainCommandsTest {
     @Test
     fun memoryStatusRendersCountsByKindAndBreaker() = runBlocking {
         val text = BrainCommands(fake().gateway()).memory("status")
-        assertTrue("pendientes: 2" in text)
-        assertTrue("procesados: 31" in text)
-        assertTrue("recuerdos: 120" in text)
+        assertTrue("pending: 2" in text)
+        assertTrue("processed: 31" in text)
+        assertTrue("memories: 120" in text)
         assertTrue("preference 40" in text)
         assertTrue("breaker: CLOSED" in text)
         assertTrue("bge-m3" in text)
@@ -268,10 +268,10 @@ class BrainCommandsTest {
         val timeout = BrainCommands(fake().apply { memory = BrainReply.Timeout }.gateway()).memory("status")
         assertTrue(timeout.startsWith("⏱️"))
         val http = BrainCommands(fake().apply { recent = BrainReply.Response(500, "boom") }.gateway()).memory("recent")
-        assertTrue(http.startsWith("⚠️ brain respondió HTTP 500"))
+        assertTrue(http.startsWith("⚠️ brain answered HTTP 500"))
         assertTrue("boom" in http)
         val unreadable = BrainCommands(fake().apply { memory = BrainReply.Response(200, "nope") }.gateway()).memory("status")
-        assertTrue(unreadable.startsWith("⚠️ brain respondió algo ilegible"))
+        assertTrue(unreadable.startsWith("⚠️ brain answered something unreadable"))
     }
 
     @Test
@@ -313,10 +313,10 @@ class BrainCommandsTest {
     @Test
     fun theDispatcherRoutesBrainAndMemory() = runBlocking {
         val bc = commands(BrainCommands(fake().gateway()))
-        assertTrue(bc.handle("/brain bridge", 1L)!!.text.contains("U1b — Encender bus y memoria"))
+        assertTrue(bc.handle("/brain bridge", 1L)!!.text.contains("U1b — Turn on bus and memory"))
         assertTrue(bc.handle("/memory despliego", 2L)!!.text.contains("preference #42"))
         assertTrue(bc.handle("/brain status", 3L)!!.text.contains("340 chunks"))
-        assertTrue(bc.handle("/memory status", 4L)!!.text.contains("recuerdos: 120"))
+        assertTrue(bc.handle("/memory status", 4L)!!.text.contains("memories: 120"))
     }
 
     @Test

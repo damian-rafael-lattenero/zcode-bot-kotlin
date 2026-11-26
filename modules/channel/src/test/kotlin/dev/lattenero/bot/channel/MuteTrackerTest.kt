@@ -28,9 +28,9 @@ class MuteTrackerTest {
         assertEquals(1_010_000L, window.fromMs)
         assertEquals(1_315_000L, window.toMs)
         val text = window.render()
-        assertEquals(true, text.startsWith("🔌 estuve desconectado "))
+        assertEquals(true, text.startsWith("🔌 I was disconnected "))
         assertEquals(true, "(5 min" in text)
-        assertEquals(true, "Telegram lo guardó" in text) // honesty: nothing was lost
+        assertEquals(true, "Telegram saved it" in text) // honesty: nothing was lost
     }
 
     @Test

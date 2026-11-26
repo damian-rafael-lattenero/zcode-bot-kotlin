@@ -13,7 +13,7 @@ import java.io.File
  * transport's multipart leg; the diff's render is pure JSON-in). Honest by
  * construction: every refusal names its reason, nothing is ever invented —
  * a path that isn't absolute says so, a missing file says so, an oversized
- * file says the cap, a turn without file changes says «no cambió nada».
+ * file says the cap, a turn without file changes says «nothing changed».
  */
 internal object FilesCommands {
 
@@ -24,24 +24,24 @@ internal object FilesCommands {
     internal fun planFileSend(rest: String): FilePlan {
         val path = rest.trim()
         if (path.isEmpty()) {
-            return FilePlan(null, "📎 /file <ruta-absoluta> — te mando el archivo como documento de Telegram.")
+            return FilePlan(null, "📎 /file <absolute-path> — I send you the file as a Telegram document.")
         }
         if (!path.startsWith("/")) {
             return FilePlan(
                 null,
-                "⚠️ Solo rutas ABSOLUTAS («/…») — «$path» no sirve: el bot vive en la Mac del dueño.",
+                "⚠️ ABSOLUTE paths only («/…») — «$path» will not work: the bot lives on the owner's Mac.",
             )
         }
         val f = File(path)
-        if (!f.exists()) return FilePlan(null, "⚠️ No existe: «$path» — revisá la ruta (el /file no lista ni adivina).")
+        if (!f.exists()) return FilePlan(null, "⚠️ Does not exist: «$path» — check the path (/file neither lists nor guesses).")
         if (!f.isFile) {
-            return FilePlan(null, "⚠️ No es un archivo: «$path» (¿un directorio?) — mando archivos, no carpetas.")
+            return FilePlan(null, "⚠️ Not a file: «$path» (a directory?) — I send files, not folders.")
         }
         if (f.length() > MAX_FILE_BYTES) {
             return FilePlan(
                 null,
-                "⚠️ «${f.name}» pesa ${f.length() / MB} MB — el techo de Telegram es ${MAX_FILE_BYTES / MB} MB " +
-                    "por documento. Partilo o pasalo de otro modo.",
+                "⚠️ «${f.name}» is ${f.length() / MB} MB — Telegram's ceiling is ${MAX_FILE_BYTES / MB} MB " +
+                    "per document. Split it or pass it another way.",
             )
         }
         return FilePlan(f, null)
@@ -53,7 +53,7 @@ internal object FilesCommands {
      * The snapshot's fileChanges (the fileChangeTracker's own serialized
      * form: rows of {turnIndex, snapshots: [{path, beforeContent,
      * afterContent, writeCount}]}) parsed into per-file rows of the LAST
-     * turn — «el turno actual». `all` walks every turn (the session's whole
+     * turn — «the current turn». `all` walks every turn (the session's whole
      * file story, first-write-merged by the tracker itself).
      */
     internal data class ChangedFile(val path: String, val before: String?, val after: String, val writeCount: Int)
@@ -88,20 +88,20 @@ internal object FilesCommands {
      * hunks INLINE when small (per-file cap, then a whole-reply cap — the
      * pipe's law). A file over the inline cap says so honestly and points
      * at /file for the full body. Zero invented content: a file whose
-     * before was null renders «(nuevo)».
+     * before was null renders «(new)».
      */
     internal fun renderDiff(files: List<ChangedFile>, all: Boolean, maxReplyChars: Int): String {
-        if (files.isEmpty()) return "📭 El turno no cambió ningún archivo (o el fork aún no lo registra)."
-        val scope = if (all) "la sesión entera" else "el último turno"
-        val out = StringBuilder("📄 <b>Archivos cambiados</b> ($scope) — ${files.size}:\n")
+        if (files.isEmpty()) return "📭 The turn changed no files (or the fork does not record it yet)."
+        val scope = if (all) "the whole session" else "the last turn"
+        val out = StringBuilder("📄 <b>Changed files</b> ($scope) — ${files.size}:\n")
         for (f in files) {
             val (added, removed) = MiniDiff.stats(f.before, f.after)
-            val origin = if (f.before == null) " (nuevo)" else ""
+            val origin = if (f.before == null) " (new)" else ""
             val head = "• <code>${esc(f.path)}</code>$origin +$added/−$removed"
             val hunks = MiniDiff.render(f.before, f.after, PER_FILE_DIFF_LINES, path = f.path)
             val body = buildString {
                 if (hunks.size >= PER_FILE_DIFF_LINES) {
-                    append("\n   ✂️ el diff completo no entra — /file ${f.path}")
+                    append("\n   ✂️ the full diff does not fit — /file ${f.path}")
                 } else {
                     // A `pre` keeps the alignment AND the escaping: a diff line
                     // is file content, never markup (measured 24/11: a hunk with
@@ -113,8 +113,8 @@ internal object FilesCommands {
             }
             val candidate = out.length + head.length + body.length + 2
             if (candidate > maxReplyChars) {
-                out.append("\n• ✂️ …y ").append(files.size - files.indexOf(f))
-                    .append(" archivo(s) más — el reply tiene techo; /file <path> para cualquiera.")
+                out.append("\n• ✂️ …and ").append(files.size - files.indexOf(f))
+                    .append(" more file(s) — the reply has a roof; /file <path> for any of them.")
                 break
             }
             out.append(head).append(body).append("\n")
@@ -154,7 +154,7 @@ internal object MiniDiff {
         val beforeLines = before?.lines()
         val afterLines = after.lines()
         if ((beforeLines?.size ?: 0) > LINE_CAP || afterLines.size > LINE_CAP) {
-            return listOf("✂️ archivo demasiado grande para diff inline — /file $path")
+            return listOf("✂️ file too large for an inline diff — /file $path")
         }
         val ops = ops(beforeLines ?: emptyList(), afterLines)
         val out = mutableListOf<String>()
@@ -183,7 +183,7 @@ internal object MiniDiff {
             }
             if (out.size >= maxLines) return out.take(maxLines) + listOf("✂️ …")
         }
-        if (out.isEmpty()) out.add("(sin cambios de texto)")
+        if (out.isEmpty()) out.add("(no text changes)")
         return out
     }
 

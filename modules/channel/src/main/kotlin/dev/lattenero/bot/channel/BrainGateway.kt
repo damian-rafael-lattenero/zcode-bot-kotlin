@@ -31,7 +31,7 @@ sealed interface BrainReply {
  * the brain never generates; /brain shows a reading list.
  */
 class BrainGateway(
-    /** The base URL, for the honest «caído» line. */
+    /** The base URL, for the honest «down» line. */
     val url: String,
     val ragQuery: suspend (query: String, k: Int) -> BrainReply,
     val ragStats: suspend () -> BrainReply,
@@ -273,77 +273,77 @@ internal object BrainTexts {
     private const val BYTES_PER_MB = BYTES_PER_KB * BYTES_PER_KB
 
     const val BRAIN_USAGE =
-        "🧠 /brain «pregunta» — busca en el RAG de agent-brain y cita uri+heading.\n" +
-            "/brain status — documentos/chunks del RAG + el pulso del bus."
+        "🧠 /brain «question» — searches agent-brain's RAG and cites uri+heading.\n" +
+            "/brain status — the RAG's documents/chunks + the bus pulse."
 
     const val MEMORY_USAGE =
-        "🧠 /memory «texto» — busca recuerdos (semántico).\n" +
-            "/memory recent [k] — los últimos k (default $RECENT_DEFAULT).\n" +
-            "/memory status — turnos, recuerdos y breaker."
+        "🧠 /memory «text» — searches memories (semantic).\n" +
+            "/memory recent [k] — the last k (default $RECENT_DEFAULT).\n" +
+            "/memory status — turns, memories and breaker."
 
     const val LEARN_USAGE =
-        "🧠 /learn — la tarjeta de aprendizaje de los últimos 7 días (memorias, evals y costos). Sin argumentos."
+        "🧠 /learn — the last 7 days' learning card (memories, evals and costs). No arguments."
 
     const val UNWIRED =
-        "⚠️ /brain y /memory no están cableados en este daemon (sin cliente HTTP de agent-brain)."
+        "⚠️ /brain and /memory are not wired in this daemon (no agent-brain HTTP client)."
 
-    fun down(url: String): String = "📡 brain caído — no responde en <code>${PyText.esc(url)}</code> (¿está corriendo?)"
+    fun down(url: String): String = "📡 brain down — it does not answer at <code>${PyText.esc(url)}</code> (is it running?)"
 
-    fun timeout(seconds: Int): String = "⏱️ brain no respondió en ${seconds}s — probá de nuevo."
+    fun timeout(seconds: Int): String = "⏱️ brain did not answer in ${seconds}s — try again."
 
     fun httpError(status: Int, detail: String?): String =
-        "⚠️ brain respondió HTTP $status" + (detail?.takeIf { it.isNotBlank() }?.let { ": ${PyText.esc(it)}" } ?: "")
+        "⚠️ brain answered HTTP $status" + (detail?.takeIf { it.isNotBlank() }?.let { ": ${PyText.esc(it)}" } ?: "")
 
     fun unreadable(status: Int): String =
-        "⚠️ brain respondió algo ilegible (HTTP $status) — mirá el servicio."
+        "⚠️ brain answered something unreadable (HTTP $status) — check the service."
 
-    fun ragEmpty(query: String): String = "📭 Sin resultados en el RAG para «${PyText.esc(query)}»."
+    fun ragEmpty(query: String): String = "📭 No RAG results for «${PyText.esc(query)}»."
 
-    fun memoryEmpty(query: String): String = "📭 Sin recuerdos para «${PyText.esc(query)}»."
+    fun memoryEmpty(query: String): String = "📭 No memories for «${PyText.esc(query)}»."
 
     const val MEMORY_RECENT_EMPTY =
-        "📭 La memoria está vacía — todavía no hay turnos procesados."
+        "📭 Memory is empty — no turns processed yet."
 
     fun ragAnswer(query: String, hits: List<BrainHit>): String {
         val shown = hits.take(HITS_SHOWN)
         return buildString {
             append("🧠 <b>brain</b> — «${PyText.esc(query)}» (")
-            append("${hits.size} ${if (hits.size == 1) "resultado" else "resultados"})")
+            append("${hits.size} ${if (hits.size == 1) "result" else "results"})")
             append("\n")
             shown.forEachIndexed { i, hit ->
                 append("${i + 1}. ${citation(hit)} (${score(hit.score)})")
                 if (i < shown.lastIndex) append("\n")
             }
-            if (hits.size > shown.size) append("\n… y ${hits.size - shown.size} más")
+            if (hits.size > shown.size) append("\n… and ${hits.size - shown.size} more")
         }
     }
 
     fun memoryAnswer(query: String, memories: List<BrainMemory>): String {
         val shown = memories.take(HITS_SHOWN)
         return buildString {
-            append("🧠 <b>memoria</b> — «${PyText.esc(query)}» (")
-            append("${memories.size} ${if (memories.size == 1) "recuerdo" else "recuerdos"})")
+            append("🧠 <b>memory</b> — «${PyText.esc(query)}» (")
+            append("${memories.size} ${if (memories.size == 1) "memory" else "memories"})")
             append("\n")
             shown.forEachIndexed { i, memory ->
                 append("${i + 1}. ${memoryLine(memory)}")
                 memory.score?.let { append(" (${score(it)})") }
                 if (i < shown.lastIndex) append("\n")
             }
-            if (memories.size > shown.size) append("\n… y ${memories.size - shown.size} más")
+            if (memories.size > shown.size) append("\n… and ${memories.size - shown.size} more")
         }
     }
 
     fun memoryRecent(memories: List<BrainMemory>): String {
         val shown = memories.take(HITS_SHOWN)
         return buildString {
-            append("🧠 <b>memoria reciente</b> (${memories.size})")
+            append("🧠 <b>recent memory</b> (${memories.size})")
             append("\n")
             shown.forEachIndexed { i, memory ->
                 append("${i + 1}. ${memoryLine(memory)}")
                 memory.createdAt?.takeIf { it.isNotBlank() }?.let { append(" · <code>${PyText.esc(it)}</code>") }
                 if (i < shown.lastIndex) append("\n")
             }
-            if (memories.size > shown.size) append("\n… y ${memories.size - shown.size} más")
+            if (memories.size > shown.size) append("\n… and ${memories.size - shown.size} more")
         }
     }
 
@@ -356,55 +356,55 @@ internal object BrainTexts {
     }
 
     fun memoryStatus(status: BrainMemoryStatus): String = buildString {
-        append("🧠 <b>memoria</b> (agent-brain)")
-        append("\n⏳ pendientes: ${status.pendingTurns} · ✅ procesados: ${status.processedTurns}")
-        append("\n📝 recuerdos: ${status.memories}")
+        append("🧠 <b>memory</b> (agent-brain)")
+        append("\n⏳ pending: ${status.pendingTurns} · ✅ processed: ${status.processedTurns}")
+        append("\n📝 memories: ${status.memories}")
         if (status.byKind.isNotEmpty()) {
             append("\n   " + status.byKind.entries.joinToString(" · ") { (kind, n) -> "${PyText.esc(kind)} $n" })
         }
-        append("\n🔒 cuarentena: ${status.quarantined} · breaker: ${PyText.esc(status.breaker)}")
+        append("\n🔒 quarantine: ${status.quarantined} · breaker: ${PyText.esc(status.breaker)}")
         append("\n🤖 chat: ${PyText.esc(status.chatModel)} · embed: ${PyText.esc(status.embedModel)}")
     }
 
     private fun ragLeg(reply: BrainReply): String = when (reply) {
-        is BrainReply.Down -> "📚 RAG: 📡 caído"
-        is BrainReply.Timeout -> "📚 RAG: ⏱️ sin respuesta"
+        is BrainReply.Down -> "📚 RAG: 📡 down"
+        is BrainReply.Timeout -> "📚 RAG: ⏱️ no answer"
         is BrainReply.Response -> when {
             reply.status !in HTTP_SUCCESS -> "📚 RAG: ⚠️ HTTP ${reply.status}"
             else -> BrainJson.ragStats(reply.body)?.let { stats ->
                 buildString {
-                    append("📚 RAG: ${stats.documents} documentos · ${stats.chunks} chunks")
+                    append("📚 RAG: ${stats.documents} documents · ${stats.chunks} chunks")
                     if (stats.bySource.isNotEmpty()) {
-                        append("\n   por fuente: ")
+                        append("\n   by source: ")
                         append(stats.bySource.entries.joinToString(" · ") { "${PyText.esc(it.key)} ${it.value}" })
                     }
                 }
-            } ?: "📚 RAG: ⚠️ respuesta ilegible"
+            } ?: "📚 RAG: ⚠️ unreadable answer"
         }
     }
 
     private fun busLeg(reply: BrainReply): String = when (reply) {
-        is BrainReply.Down -> "📡 Bus: caído"
-        is BrainReply.Timeout -> "📡 Bus: ⏱️ sin respuesta"
+        is BrainReply.Down -> "📡 Bus: down"
+        is BrainReply.Timeout -> "📡 Bus: ⏱️ no answer"
         is BrainReply.Response -> when {
             reply.status !in HTTP_SUCCESS -> "📡 Bus: ⚠️ HTTP ${reply.status}"
             else -> BrainJson.busStatus(reply.body)?.let { bus ->
                 buildString {
                     if (!bus.fileExists) {
-                        append("📡 Bus: sin archivo todavía — <code>${PyText.esc(bus.file)}</code>")
+                        append("📡 Bus: no file yet — <code>${PyText.esc(bus.file)}</code>")
                     } else {
                         append("📡 Bus: ${bytes(bus.fileBytes)} · offset ${bytes(bus.offset)}")
                         append(" · lag ${bytes(bus.lagBytes)}")
-                        append("\n   eventos: ${bus.dbEvents} en DB · ${bus.inserted} insertadas")
-                        append(" · ${bus.duplicates} duplicadas")
+                        append("\n   events: ${bus.dbEvents} in DB · ${bus.inserted} inserted")
+                        append(" · ${bus.duplicates} duplicates")
                         append(" · ${bus.malformed} malformed · ${bus.shrinks} shrinks")
                         if (bus.lastKind != null) {
-                            append("\n   último: ${PyText.esc(bus.lastKind)}")
+                            append("\n   last: ${PyText.esc(bus.lastKind)}")
                             bus.lastTs?.let { append(" · <code>${PyText.esc(it)}</code>") }
                         }
                     }
                 }
-            } ?: "📡 Bus: ⚠️ respuesta ilegible"
+            } ?: "📡 Bus: ⚠️ unreadable answer"
         }
     }
 
@@ -448,8 +448,8 @@ internal object BrainTexts {
         }
         val byKind = week.groupBy { it.kind }
         val memoryBlock = buildString {
-            append("\n📝 hechos ${byKind["fact"]?.size ?: 0} · 🎯 decisiones ${byKind["decision"]?.size ?: 0}")
-            append(" · ⭐ preferencias ${byKind["preference"]?.size ?: 0}")
+            append("\n📝 facts ${byKind["fact"]?.size ?: 0} · 🎯 decisions ${byKind["decision"]?.size ?: 0}")
+            append(" · ⭐ preferences ${byKind["preference"]?.size ?: 0}")
             for (kind in listOf("decision", "fact", "preference")) {
                 val items = byKind[kind].orEmpty().take(LEARN_PER_KIND)
                 if (items.isEmpty()) continue
@@ -458,13 +458,13 @@ internal object BrainTexts {
                     append("\n• ${PyText.esc(PyText.take(memory.content.trim(), LEARN_ITEM_CHARS))}")
                 }
             }
-            if (week.isEmpty()) append("\n\n📭 sin recuerdos nuevos esta semana")
+            if (week.isEmpty()) append("\n\n📭 no new memories this week")
         }
         val evalBlock = evalLeg(evals)
-        val costLine = costs?.let { "hoy: ${it.turns} turnos · $${String.format(Locale.ROOT, "%.2f", it.usd)}" }
-            ?: "hoy: 📡 caído"
+        val costLine = costs?.let { "today: ${it.turns} turns · $${String.format(Locale.ROOT, "%.2f", it.usd)}" }
+            ?: "today: 📡 down"
         return buildString {
-            append("🧠 <b>aprendizaje de $LEARN_WINDOW_DAYS días</b>")
+            append("🧠 <b>learning of the last $LEARN_WINDOW_DAYS days</b>")
             append(memoryBlock)
             append(evalBlock)
             append("\n\n💰 ")
@@ -474,10 +474,10 @@ internal object BrainTexts {
 
     /** The eval leg: the newest run per suite, one honest row each. */
     private fun evalLeg(evals: List<BrainEvalRow>): String = if (evals.isEmpty()) {
-        "\n\n📊 evals: 📭 sin corridas"
+        "\n\n📊 evals: 📭 no runs"
     } else {
         buildString {
-            append("\n\n📊 <b>evals</b> (última corrida)")
+            append("\n\n📊 <b>evals</b> (last run)")
             evals.forEach { row ->
                 val mark = if (row.ok) "✅" else "❌"
                 append("\n• ${PyText.esc(row.suite)} ${row.passed}/${row.total} $mark (gate ${row.gate})")
@@ -503,7 +503,7 @@ class BrainCommands(
     private val now: () -> java.time.Instant = java.time.Instant::now,
 ) {
 
-    /** `/brain [pregunta | status]`. */
+    /** `/brain [question | status]`. */
     suspend fun brain(rest: String): String {
         val arg = rest.trim()
         return when {
@@ -525,7 +525,7 @@ class BrainCommands(
         }
     }
 
-    /** `/memory <texto | recent [k] | status>`. */
+    /** `/memory <text | recent [k] | status>`. */
     suspend fun memory(rest: String): String {
         val arg = rest.trim()
         return when {
@@ -546,7 +546,7 @@ class BrainCommands(
         val evals = brain.evalLatest(null, 12)
         val costs = brain.costsToday()
         // Each leg degrades alone; the card assembles whatever answered. All
-        // three down = the one honest «caído».
+        // three down = the one honest «down».
         val allDown = listOf(recent, evals, costs).all { it is BrainReply.Down }
         val memoryList: List<BrainMemory> = when (recent) {
             is BrainReply.Response ->

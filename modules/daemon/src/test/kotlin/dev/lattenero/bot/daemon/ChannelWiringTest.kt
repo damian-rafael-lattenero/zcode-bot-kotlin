@@ -155,7 +155,7 @@ class ChannelWiringTest {
         assertNull(snapshotVoiceOf("not json"))
     }
 
-    // ── THE DEFAULT-MODE ENFORCEMENT (4/11: «por defecto siempre Full access») ──
+    // ── THE DEFAULT-MODE ENFORCEMENT (4/11: «default siempre Full access») ──
 
     /** The fake query leg: canned snapshot answers, the SetMode recorder. */
     private class FakeQuery {

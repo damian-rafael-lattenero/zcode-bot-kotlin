@@ -160,8 +160,8 @@ def main [--dry-run, --force, --status]: nothing -> nothing {
     log_line $log $"HEAL ok=($ok) action=($plan.action) hb_age=($hb_age)s detail=($detail)"
 
     if $ok {
-        notify $"🔧 Healer: el daemon estaba mudo hace ($hb_age / 60 | math floor) min — lo levanté con ($plan.action)."
+        notify $"🔧 Healer: the daemon was mute for ($hb_age / 60 | math floor) min — I raised it with ($plan.action)."
     } else {
-        notify $"☠️ Healer: el daemon estaba mudo hace ($hb_age / 60 | math floor) min y NO pude levantarlo con ($plan.action): ($detail). Necesita manos."
+        notify $"☠️ Healer: the daemon was mute for ($hb_age / 60 | math floor) min and I could NOT raise it with ($plan.action): ($detail). It needs hands."
     }
 }

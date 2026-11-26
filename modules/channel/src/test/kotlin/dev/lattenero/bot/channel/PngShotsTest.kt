@@ -35,7 +35,7 @@ class PngShotsTest {
     fun `an unknown id is the honest miss, never a blank image`() {
         val shots = PngShots()
         assertNull(shots.get(404))
-        assertTrue("registro" in PngShots.MISS, "the miss names the registry: ${PngShots.MISS}")
+        assertTrue("registry" in PngShots.MISS, "the miss names the registry: ${PngShots.MISS}")
     }
 
     @Test

@@ -120,7 +120,7 @@ object Keyboards {
         }
     }
 
-    /** Python's stamp vocabulary on the green row — «quiero los dos emojis» when they co-occur. */
+    /** Python's stamp vocabulary on the green row — «I want the two emojis» [translated] when they co-occur. */
     internal fun taskButtonLabel(t: TaskRow, n: Int, running: Boolean, active: Boolean): String {
         val marks = buildString {
             append(TASK_MARK)
@@ -140,9 +140,9 @@ object Keyboards {
     internal fun dbRunningFresh(r: RunningSubagent, nowMs: Long): Boolean =
         r.lastMs <= 0 || (nowMs - r.lastMs) / MINUTE_MS < SUB_STALE_MIN
 
-    /** The same law as the mark: ▶️ fresh, ⏸️ hace Xm the ghost. */
+    /** The same law as the mark: ▶️ fresh, ⏸️ Xm ago the ghost. */
     internal fun dbRunningMark(r: RunningSubagent, nowMs: Long): String =
-        if (dbRunningFresh(r, nowMs)) "▶️" else "⏸️ hace ${(nowMs - r.lastMs) / MINUTE_MS}m"
+        if (dbRunningFresh(r, nowMs)) "▶️" else "⏸️ ${(nowMs - r.lastMs) / MINUTE_MS}m ago"
 
     /** The blue lane: ▶️ while open, ⏹️ once closed (the owner's exact marks). */
     internal fun subagentLabel(lane: ToolLive): String {
@@ -164,7 +164,7 @@ object Keyboards {
 
     /**
      * The FULL name — the detail card's whole point (the 2/11 complaint:
-     * the spawn descriptions are longísimos and the row label caps at
+     * the spawn descriptions are very long and the row label caps at
      * TITLE_CAP). The same fallback ladder as subagentName, uncapped.
      */
     internal fun subagentFullName(lane: ToolLive): String =
@@ -180,17 +180,17 @@ object Keyboards {
      */
     internal fun subagentDetailText(lane: ToolLive, nowMs: Long): String =
         "$SUBAGENT_MARK «${subagentFullName(lane)}»\n" + if (lane.status == null) {
-            "⏳ vivo hace ${(nowMs - lane.openedAtMs) / MINUTE_MS}m"
+            "⏳ alive for ${(nowMs - lane.openedAtMs) / MINUTE_MS}m"
         } else {
-            "💀 terminó"
+            "💀 ended"
         }
 
     /** The store row's detail body — the full title + the frozen-ghost honesty. */
     internal fun dbRowDetailText(r: RunningSubagent, nowMs: Long): String =
         "$SUBAGENT_MARK «${r.title.ifBlank { r.sid.takeLast(LANE_TAIL) }}»\n" + if (dbRunningFresh(r, nowMs)) {
-            "▶️ corriendo"
+            "▶️ running"
         } else {
-            "⏸️ hace ${(nowMs - r.lastMs) / MINUTE_MS}m — probablemente terminó"
+            "⏸️ ${(nowMs - r.lastMs) / MINUTE_MS}m ago — probably ended"
         }
 
     /**
@@ -208,7 +208,7 @@ object Keyboards {
                     add(
                         buildJsonArray {
                             add(button("👁 attach", "sa:$tail"))
-                            add(button("✍️ orden", "so:$tail"))
+                            add(button("✍️ order", "so:$tail"))
                             add(button(STOP_BUTTON, "sst:$tail"))
                         },
                     )
@@ -220,12 +220,12 @@ object Keyboards {
      * /subagents' ACTIVE view keyboard: one row per open dispatch lane —
      * the name tap (`sn:`) opens the DETAIL CARD (the full uncapped name
      * + the attach/order/stop row, rendered fresh at tap time; the row
-     * label caps at TITLE_CAP and the spawn descriptions are longísimos),
+     * label caps at TITLE_CAP and the spawn descriptions are very long),
      * the ✍️ `so:` tap ARMS the next free text as an ORDER direct to it,
      * the 🌙 `bgc:` tap demotes THAT agent to the background (it keeps
      * running; the result still arrives at seal), and the ⏹️ `sst:` tap
      * stops the child's generation live — then the view-switch row. The
-     * «inactivos» view stays text-only: ended sessions have no stream to
+     * «inactive» view stays text-only: ended sessions have no stream to
      * attach to, no ear to hear an order, nothing left to stop.
      */
     fun subagentsKeyboard(
@@ -235,17 +235,17 @@ object Keyboards {
         nowMs: Long = 0,
     ): JsonObject = buildJsonObject {
         // THE ACTIVE VIEW SPEAKS ONLY WHAT RUNS NOW (owner, 2/11 22:38:
-        // «hay muchísimos botones de más… agentes que no están corriendo
-        // ahora mismo»). The store never closes a KILLED agent's row, so a
+        // «there are way too many buttons… agents that are not running
+        // right now» [translated]). The store never closes a KILLED agent's row, so a
         // 432-minute-old row rendered as a ⏸️ button that could do nothing;
-        // it belongs to «inactivos», not here.
+        // it belongs to «inactive», not here.
         val fresh = dbRunning.filter { dbRunningFresh(it, nowMs) }
         val storedSids = fresh.map { it.sid }.toSet()
         // ONE ROW PER AGENT: a lane whose child already has a store row is
         // the SAME agent twice (the owner's two drill rows). The store row
         // wins — its sid is what ✍️/⏹️ can actually address; an open lane
         // with no agentId has no address at all (its ✍️ was the dead
-        // «fork viejo» button). With the store silent, the lanes are the
+        // «old fork» button). With the store silent, the lanes are the
         // ONLY witness and all of them speak (the bus-can-die law).
         val laneOnly = if (fresh.isEmpty()) {
             lanes
@@ -298,23 +298,23 @@ object Keyboards {
             }
             add(
                 buildJsonArray {
-                    if (inactiveView) add(button("▶️ activos", "saa:")) else add(button("⏹️ inactivos", "sao:"))
+                    if (inactiveView) add(button("▶️ active", "saa:")) else add(button("⏹️ inactive", "sao:"))
                 },
             )
         }
     }
 
     /**
-     * The ⚡/⏳ question's row (the owner's law, 2/11 23:12: «quiero que me
-     * pregunte empujar o encolar»): a busy child is never cut or queued by
+     * The ⚡/⏳ question's row (the owner's law, 2/11 23:12: «I want it to
+     * ask me push or queue» [translated]): a busy child is never cut or queued by
      * our own judgment — ONE tap decides, and the pending text flies then.
      */
     fun pushOrQueue(): JsonObject = buildJsonObject {
         putJsonArray("inline_keyboard") {
             add(
                 buildJsonArray {
-                    add(button("⚡ Empujar", "odp:1"))
-                    add(button("⏳ Encolar", "odq:1"))
+                    add(button("⚡ Push", "odp:1"))
+                    add(button("⏳ Queue", "odq:1"))
                 },
             )
         }
@@ -327,7 +327,7 @@ object Keyboards {
      * The wiring intercepts `dep:` taps BEFORE the callback fallback — the
      * sst: law: a stray data must never ride to the agent as the owner's
      * own words. The owner's rename, 10/11: with three targets the last
-     * row is «Todos», not «Ambos» (dep:all; dep:both still answers —
+     * row is «All», not «Both» (dep:all; dep:both still answers —
      * stale cards). 15/11: 🧠 brain joins (the RAG/memory server's own
      * deploy, the zcode-deploy-all wave's 2/4 leg).
      */
@@ -339,7 +339,7 @@ object Keyboards {
                     add(button("🍴 ZCode Fork", "dep:fork"))
                     add(button("📱 WhatsApp", "dep:whatsapp"))
                     add(button("🧠 Brain", "dep:brain"))
-                    add(button("🚀 Todos", "dep:all"))
+                    add(button("🚀 All", "dep:all"))
                 },
             )
         }
@@ -369,8 +369,8 @@ object Keyboards {
     }
 
     /**
-     * The F17 question (the owner's words, 30/10: «que me pregunte
-     * interrumpir o encolar») — the parked text is ALREADY in the queue:
+     * The F17 question (the owner's words, 30/10: «it must ask me
+     * interrupt or queue» [translated]) — the parked text is ALREADY in the queue:
      * ⚡ stops the turn (the drain then fires the text by itself), ⏳ IS
      * ZCode's enqueue (the owner's 18/11 law): a soft steer — the text
      * rides the steer frame INTO the running turn and is injected at the
@@ -384,8 +384,8 @@ object Keyboards {
         putJsonArray("inline_keyboard") {
             add(
                 buildJsonArray {
-                    add(button("⚡ Empujar e interrumpir", "intr:$sid"))
-                    add(button("⏳ Encolar (steer suave)", "qgo:$sid:$updateId"))
+                    add(button("⚡ Push and interrupt", "intr:$sid"))
+                    add(button("⏳ Queue (soft steer)", "qgo:$sid:$updateId"))
                 },
             )
         }
@@ -443,12 +443,12 @@ object Keyboards {
         }
     }
 
-    /** The picker's one label: the level's Spanish word + its meaning, the current one marked. */
+    /** The picker's one label: the level's word + its meaning, the current one marked. */
     fun verbosityLabel(level: FeedVerbosity, current: Boolean): String {
         val word = when (level) {
-            FeedVerbosity.SUMMARY -> "🔈 summary — solo el cartel y la respuesta"
-            FeedVerbosity.NORMAL -> "🔉 normal — bloques CoT + cierres de tools"
-            FeedVerbosity.VERBOSE -> "🔊 verbose — todo, en vivo"
+            FeedVerbosity.SUMMARY -> "🔈 summary — only the sign and the answer"
+            FeedVerbosity.NORMAL -> "🔉 normal — CoT blocks + tool closes"
+            FeedVerbosity.VERBOSE -> "🔊 verbose — everything, live"
         }
         return if (current) "✅ $word" else word
     }
@@ -465,9 +465,9 @@ object Keyboards {
                 buildJsonArray {
                     add(
                         if (expanded) {
-                            button("🙈 plegar", "cb:$registryId")
+                            button("🙈 fold", "cb:$registryId")
                         } else {
-                            button("📖 leer", "cb:$registryId")
+                            button("📖 read", "cb:$registryId")
                         },
                     )
                 },
@@ -486,9 +486,9 @@ object Keyboards {
             add(
                 buildJsonArray {
                     if (inactiveView) {
-                        add(button("▶️ activos", "saa:"))
+                        add(button("▶️ active", "saa:"))
                     } else {
-                        add(button("⏹️ inactivos", "sao:"))
+                        add(button("⏹️ inactive", "sao:"))
                     }
                 },
             )
@@ -496,13 +496,13 @@ object Keyboards {
     }
 
     /**
-     * A COLLAPSED tool output's one door (the owner, 3/11: «los outputs de
-     * bash comprimidos en un único botón»): the registry id rides the data
+     * A COLLAPSED tool output's one door (the owner, 3/11: «bash outputs
+     * compressed into a single button» [translated]): the registry id rides the data
      * (`bp:<id>:0`), a few bytes — the 64-byte law never breathes.
      */
     fun boxOpen(registryId: Int): JsonObject = buildJsonObject {
         putJsonArray("inline_keyboard") {
-            add(buildJsonArray { add(button("📜 Ver salida", "bp:$registryId:0")) })
+            add(buildJsonArray { add(button("📜 View output", "bp:$registryId:0")) })
         }
     }
 
@@ -525,7 +525,7 @@ object Keyboards {
                     },
                 )
             }
-            add(buildJsonArray { add(button("🔙 Cerrar", "bf:$registryId")) })
+            add(buildJsonArray { add(button("🔙 Close", "bf:$registryId")) })
         }
     }
 
@@ -566,10 +566,10 @@ object Keyboards {
     private const val PNG_LABEL = "📸 PNG"
 
     /** The BOX's OUTPUT door (the owner, 25/11): the image is what the run printed. */
-    const val PNG_OUTPUT_LABEL: String = "📸 salida PNG"
+    const val PNG_OUTPUT_LABEL: String = "📸 PNG output"
 
     /** The BOX's INPUT door: the image is the command itself. */
-    const val PNG_COMMAND_LABEL: String = "📸 comando PNG"
+    const val PNG_COMMAND_LABEL: String = "📸 PNG command"
 
     /**
      * THE FILE VIEWER's doors (the owner, 5/11): a WRITE/EDIT close's one
@@ -580,7 +580,7 @@ object Keyboards {
      */
     fun fileOpen(registryId: Int): JsonObject = buildJsonObject {
         putJsonArray("inline_keyboard") {
-            add(buildJsonArray { add(button("📄 archivo completo", "fvm:$registryId")) })
+            add(buildJsonArray { add(button("📄 full file", "fvm:$registryId")) })
         }
     }
 
@@ -597,7 +597,7 @@ object Keyboards {
                     },
                 )
             }
-            if (count > 1) add(buildJsonArray { add(button("📄 inicio", "fvp:$registryId:0")) })
+            if (count > 1) add(buildJsonArray { add(button("📄 start", "fvp:$registryId:0")) })
         }
     }
 

@@ -206,9 +206,9 @@ class PngTaps(
         const val DIFF_LANGUAGE = "diff"
 
         const val RENDER_FAILED =
-            "🖼️ No pude dibujar ese bloque (silicon falló) — el texto de arriba sigue siendo la verdad."
+            "🖼️ Could not draw that block (silicon failed) — the text above is still the truth."
         const val TOO_BIG =
-            "🖼️ Ese bloque no entra como foto (muy alto o muy ancho para Telegram) — el texto de arriba es la verdad."
-        const val UPLOAD_FAILED = "📡 El PNG no voló: %s — probá de nuevo en un momento."
+            "🖼️ That block does not fit as a photo (too tall or too wide for Telegram) — the text above is the truth."
+        const val UPLOAD_FAILED = "📡 The PNG did not fly: %s — try again in a moment."
     }
 }

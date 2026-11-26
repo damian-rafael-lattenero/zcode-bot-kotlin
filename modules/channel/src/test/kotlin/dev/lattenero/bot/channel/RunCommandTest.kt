@@ -120,7 +120,7 @@ class RunCommandTest {
     private val app = "/Users/damian/Projects/app"
 
     private val rows = listOf(
-        TaskRow(sid = "task-77", title = "unificador", ws = app),
+        TaskRow(sid = "task-77", title = "unifier", ws = app),
         TaskRow(sid = "task-02", title = "otra", ws = app),
     )
 
@@ -294,15 +294,15 @@ class RunCommandTest {
     fun runNeverSpendsTheArmedOrderTheTypedLineStillFlies() = runBlocking {
         val (bc, o, dir) = commands(FakeOps(boundStatus))
         val arm = bc.onCallback("so:task-77", 8L, OWNER)!!
-        assertTrue("Armado" in arm.text, "got: $arm")
+        assertTrue("Armed" in arm.text, "got: $arm")
         val refused = bc.reply("/run preparate el desayuno", 9L)!!
         assertTrue("✍️" in refused, "got: $refused")
-        assertTrue("unificador" in refused, "the armed order's own title: $refused")
+        assertTrue("unifier" in refused, "the armed order's own title: $refused")
         assertTrue(o.orders.isEmpty(), "/run never fired the order")
         assertTrue(o.inbound.isEmpty() && o.awaited.isEmpty(), "and it fired nothing else either")
         // the arm SURVIVES: the next typed line is still the owner's ✍️ shot
         val orderAck = bc.reply("la orden directa", 10L)!!
-        assertTrue("Orden entregada" in orderAck, "got: $orderAck")
+        assertTrue("Order delivered" in orderAck, "got: $orderAck")
         assertEquals(listOf("la orden directa" to "task-77"), o.orders)
         cleanup(dir)
     }

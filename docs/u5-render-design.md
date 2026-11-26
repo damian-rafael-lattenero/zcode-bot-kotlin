@@ -1,7 +1,7 @@
 # U5 — Render core (B4): design before the ~4.9k lines
 
 > Status: design (2026-11-03). The plan calls U5 the roadmap's biggest
-> risk (`docs/plan-brujula.md` — «render core (~4.9k LOC: cajitas, línea
+> risk (`docs/plan-compass.md` — «render core (~4.9k LOC: boxes, blinking
 > parpadeante, agent live) sobre KapStream»). This document exists so the
 > risk is spent on design, not on a big-bang. English per the plan
 > convention; the owner's visual laws are quoted verbatim where they bind.

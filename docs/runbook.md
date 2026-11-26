@@ -486,7 +486,7 @@ The chat is a diagnostic surface, and it never lies about a degrade:
 | Command | What a degrade looks like |
 |---|---|
 | `/status` | `📡 The channel to the app is down — the fork's host is not running?` |
-| `/plan_model_effort` | `📡 No pude leer la selección — ¿el fork está deployado con los frames de /plan?` |
+| `/plan_model_effort` | `📡 Could not read the selection — is the fork deployed with the /plan frames?` |
 | `/tasks` | `📡 The channel is down (…unavailable) — the fork's host is not running?` |
 | `/queue` | the parked texts, with 🚀/🗑 per row |
 | `/ctx`, `/usage` | `⚠️ No pude leer…` when the host answers a shape the bot cannot parse |
@@ -875,7 +875,7 @@ you want.
 **Evidence.** One `zsh -c 'sleep 8 && open -a ZCode && sleep 5 && open -a ZCode'`
 at every login, no KeepAlive, no interval. It exists because the app's
 own "open at login" was not enough after a reboot (the 30/10 incident's
-"cerraba y no abría").
+"closed and did not open").
 
 **Proposed step.** Keep it while the Mac's login behavior is what it is;
 if the app's own login item is ever made reliable, retiring this is a
@@ -943,7 +943,7 @@ means by each one and whether the meaning was **carried** unchanged,
 **drifted** (reused for a related-but-different law), or **retired**.
 
 Read a tag with its repository — the same label can mean something else
-in a sibling repo (`docs/plan-brujula.md` calls agent-brain's anti-while
+in a sibling repo (`docs/plan-compass.md` calls agent-brain's anti-while
 gate "F1", while Python's F1 was "one single source per concept").
 
 | Tag | What THIS repo means by it | Owner file | Status |
@@ -1095,8 +1095,8 @@ echo "active=$([ "$m" -gt "$now" ] && echo yes || echo no)"
 
 ### 8.4 The fork is deployed with an old build
 
-Symptom: `📡 No pude leer la selección — ¿el fork está deployado con los
-frames de /plan?`, or a command naming a "fix" the app does not have.
+Symptom: `📡 Could not read the selection — is the fork deployed with the
+/plan frames?`, or a command naming a "fix" the app does not have.
 
 ```bash
 # [read-only] what the RUNNING host says it is

@@ -310,8 +310,8 @@ private fun reduceThought(state: RenderState, event: RenderEvent.Thought): Rende
             cotPending = pending,
             cotTail = LiveTurn.takeLastCodePoints(state.cotTail + fresh, LiveTurn.COT_TAIL_CP),
             // THE CoT'S FRESHNESS ANCHOR (v2 §2): only the main agent's real
-            // deltas mark the thinking fresh — the «generando CoT vs
-            // procesando…» split reads it, subagent lanes never touch it
+            // deltas mark the thinking fresh — the «generating CoT vs
+            // processing…» split reads it, subagent lanes never touch it
             lastThoughtAtMs = event.atMs.takeIf { it > 0 } ?: event.nowMs,
             phase = TurnPhase.Thinking(chars = chars, sinceMs = phaseSince(state.phase, state, event.nowMs)),
             // REAL progress clears the retry pill (the fork's own recovery rule)
@@ -368,9 +368,9 @@ private tailrec fun sealLoop(
 }
 
 /**
- * THE SENTENCE-AWARE SEAL (the owner, 22/11: «máximo 1k pero que no corten
- * en cualquier lado… completos, con punto final, y que el siguiente cot
- * empiece en otra frase») — PURE: the pending's own text answers, nothing
+ * THE SENTENCE-AWARE SEAL (the owner, 22/11: «1k max but they must not cut
+ * anywhere… complete, with a final period, and the next cot must start on
+ * another sentence» [translated]) — PURE: the pending's own text answers, nothing
  * else. Returns the CODE POINT length of the next sealed block, or null
  * when the pending must keep waiting.
  *

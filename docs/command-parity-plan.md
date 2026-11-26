@@ -3,7 +3,7 @@
 The per-command, per-unit work plan agreed with the owner after the full
 reconnaissance of the retired Python bot (`~/Projects/bot`, byte-exact
 behavioral spec), the live Kotlin daemon, and the fork's channel surface.
-Companion of `plan-brujula.md` (the U0–U11 roadmap — this batch is the
+Companion of `plan-compass.md` (the U0–U11 roadmap — this batch is the
 post-U2.5 hot-fix queue, NOT a re-order of the compass) and
 `parity-and-engineering.md` (the verdict matrix this plan executes).
 
@@ -97,7 +97,7 @@ post-U2.5 hot-fix queue, NOT a re-order of the compass) and
   conversation); an old host gets the fork-deploy line. The read asks for
   ONE message (`messageLimit=1` — meta only).
 - **/tasks's ghost rows** (the owner's 3/11: «dos botones azules… MISSION:…
-  y no sé qué son»): they were two subagent sessions of yesterday's batch
+  y no sé qué son» [translated: «two blue buttons… MISSION:… and I don't know what they are»]): they were two subagent sessions of yesterday's batch
   killed before the CLI wrote `last_outcome` — the store lists them as
   running forever (ghosts). /subagents already hid stale rows; /tasks's
   keyboard still rendered them (⏸️ hace 991m). Now `tasksKeyboard` applies
@@ -146,7 +146,7 @@ post-U2.5 hot-fix queue, NOT a re-order of the compass) and
   `v2/provider_config.json` (the hook snapshot stays as fallback); the GET
   moved to `QuotaFetch.kt` with the same redaction law. Same commit: the
   context meter climbs to M — the owner's «en vez de 1000k me gustaría que
-  diga 1M» (1M, 1.2M; below the rung it stays K).
+  diga 1M» [translated: "instead of 1000k I would like it to say 1M"] (1M, 1.2M; below the rung it stays K).
 - **The prize line, the output pager and the line-number law** (the
   owner's 3/11 four-item order; the fork merge is its item 1): the
   WORKING card carries a small «🎁 Premios» line while a turn runs —
@@ -158,7 +158,8 @@ post-U2.5 hot-fix queue, NOT a re-order of the compass) and
   the tap opens the numbered output IN PLACE, page buttons flip it, the
   fold returns the header — no wall of text in the chat. And every file
   the bot shows carries its REAL line numbers (the owner: «no sé bien lo
-  que estoy leyendo a qué línea corresponde»): bash/read pages number
+  que estoy leyendo a qué línea corresponde» [translated: "I can't tell what
+  I am reading, which line it corresponds to"]): bash/read pages number
   from 1 / from the read's offset, write lines already did, the Edit
   diffs now emit their `@@` hunks into `colorizeDiff` (Python's bare
   circles were the parity ceiling) and `/diff` numbers every `+`/`−` line

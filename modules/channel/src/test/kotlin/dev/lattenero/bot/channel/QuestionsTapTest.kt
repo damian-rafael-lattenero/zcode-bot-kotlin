@@ -152,7 +152,7 @@ class QuestionsTapTest {
     fun staleTapSaysSo() = runBlocking {
         val cmds = commands(FakeOps(), Seams().board())
         val reply = cmds.onCallback("qa:zz:0", 1, OWNER)
-        assertEquals("⏳ Esa pregunta ya no está pendiente.", reply?.text)
+        assertEquals("⏳ That question is no longer pending.", reply?.text)
     }
 
     @Test
@@ -165,7 +165,7 @@ class QuestionsTapTest {
         ops.answer = RespondAnswer.Failed("already_resolved", "interaction ya resuelta")
 
         assertNull(cmds.onCallback("qa:q1:0", 5, OWNER))
-        assertEquals(7L to "⚠️ El tap no entró (already_resolved): interaction ya resuelta", seams.edits.single())
+        assertEquals(7L to "⚠️ The tap did not go in (already_resolved): interaction ya resuelta", seams.edits.single())
         assertNull(board.byShortId("q1"))
     }
 
@@ -179,7 +179,7 @@ class QuestionsTapTest {
         ops.answer = RespondAnswer.Unavailable
 
         val reply = cmds.onCallback("qa:q1:0", 5, OWNER)
-        assertTrue(reply?.text?.contains("canal") == true)
+        assertTrue(reply?.text?.contains("channel") == true)
         assertNotNull(board.byShortId("q1")) // armed: the owner retries
     }
 
@@ -245,7 +245,7 @@ class QuestionsTapTest {
 
         cmds.handle("otra cosa", 12) // the arm is gone: the text rides the normal route (the router's own tests cover that path)
         assertEquals(
-            "⏳ Esa pregunta ya no está pendiente.",
+            "⏳ That question is no longer pending.",
             cmds.onCallback("qf:q1", 13, OWNER)?.text, // the board sealed: no re-arm, no second answer
         )
     }
@@ -260,7 +260,7 @@ class QuestionsTapTest {
 
         cmds.onCallback("qf:q1", 10, OWNER)
         val reply = cmds.handle("la main", 11)
-        assertTrue(reply?.text?.contains("armada") == true) // the honest retry copy (CHANNEL_DOWN is English)
+        assertTrue(reply?.text?.contains("still armed") == true) // the honest retry copy (CHANNEL_DOWN is English)
         assertNotNull(board.byShortId("q1")) // still armed
 
         ops.answer = RespondAnswer.Resolved
@@ -282,7 +282,7 @@ class QuestionsTapTest {
         assertNull(cmds.onCallback("qa:q1:0", 20, OWNER)) // q1: main — the edit IS the feedback
         assertEquals(0, ops.responds.size) // no frame yet — the questionnaire is half done
         assertEquals(1, seams.edits.size)
-        assertTrue("pregunta 2 de 2" in seams.edits[0].second)
+        assertTrue("question 2 of 2" in seams.edits[0].second)
         assertTrue("¿qué runtime?" in seams.edits[0].second)
         assertEquals("¿qué runtime?", board.byShortId("q1")?.title)
 
@@ -300,11 +300,11 @@ class QuestionsTapTest {
             frame.content,
         )
         assertNull(frame.content?.get("answer"))
-        assertEquals("✅ Respondidas las 2 preguntas", seams.edits[1].second) // the honest seal
+        assertEquals("✅ Answered all 2 questions", seams.edits[1].second) // the honest seal
         assertNull(board.byShortId("q1"))
 
         assertEquals(
-            "⏳ Esa pregunta ya no está pendiente.",
+            "⏳ That question is no longer pending.",
             cmds.onCallback("qa:q1:0", 22, OWNER)?.text, // the double tap: honest failure, no second frame
         )
         assertEquals(1, ops.responds.size)
@@ -354,7 +354,7 @@ class QuestionsTapTest {
         assertNull(board.byShortId("q1"))
 
         assertEquals(
-            "⏳ Esa pregunta ya no está pendiente.",
+            "⏳ That question is no longer pending.",
             cmds.onCallback("qa:q1:0", 41, OWNER)?.text, // the stale tap: honest miss
         )
         assertEquals(0, ops.responds.size) // NO orphan respond
@@ -375,7 +375,7 @@ class QuestionsTapTest {
         assertEquals(listOf("main"), board.byShortId("q1")?.answers?.get(0))
         assertEquals(0, ops.responds.size) // the submit owns the advance — no frame yet
         assertEquals(1, seams.edits.size) // the same card redrawn with the mark
-        assertTrue("pregunta 2 de 2" !in seams.edits[0].second) // still question 1
+        assertTrue("question 2 of 2" !in seams.edits[0].second) // still question 1
 
         cmds.onCallback("qa:q1:2", 51, OWNER) // qa → toggled ON
         cmds.onCallback("qa:q1:0", 52, OWNER) // main → toggled OFF
@@ -383,7 +383,7 @@ class QuestionsTapTest {
 
         assertNull(cmds.onCallback("qs:q1", 53, OWNER)) // the 📨 submit → question 2 on screen
         assertEquals(0, ops.responds.size)
-        assertTrue("pregunta 2 de 2" in seams.edits.last().second)
+        assertTrue("question 2 of 2" in seams.edits.last().second)
 
         assertNull(cmds.onCallback("qa:q1:0", 54, OWNER)) // q2: node — the LAST answer
         assertEquals(1, ops.responds.size) // exactly ONE frame for the whole form
@@ -395,10 +395,10 @@ class QuestionsTapTest {
             ).jsonObject,
             frame.content,
         )
-        assertEquals("✅ Respondidas las 2 preguntas", seams.edits.last().second)
+        assertEquals("✅ Answered all 2 questions", seams.edits.last().second)
         assertNull(board.byShortId("q1"))
         assertEquals(
-            "⏳ Esa pregunta ya no está pendiente.",
+            "⏳ That question is no longer pending.",
             cmds.onCallback("qs:q1", 55, OWNER)?.text, // a late submit: honest miss, no second frame
         )
         assertEquals(1, ops.responds.size)
@@ -421,7 +421,7 @@ class QuestionsTapTest {
             Json.parseToJsonElement("""{"answers":{"¿bases?":""},"answer_0":[],"answer":[]}""").jsonObject,
             ops.responds[0].content,
         )
-        assertEquals("✅ Respondido (sin opciones marcadas)", seams.edits.single().second)
+        assertEquals("✅ Answered (no options marked)", seams.edits.single().second)
         assertNull(board.byShortId("q1"))
     }
 

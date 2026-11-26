@@ -161,14 +161,14 @@ class PlanQuotaTest {
         val gate = PlanQuota.Mark.Seen(
             listOf(PlanQuota.Window("⏱", 98), PlanQuota.Window("📅", 0)),
         )
-        assertEquals("la ventana 📅 está agotada", PlanQuota.blockedNote(gate))
+        assertEquals("the 📅 window is exhausted", PlanQuota.blockedNote(gate))
         val both = PlanQuota.Mark.Seen(listOf(PlanQuota.Window("⏱", 0), PlanQuota.Window("📅", 0)))
-        assertEquals("las ventanas ⏱ 📅 están agotadas", PlanQuota.blockedNote(both))
+        assertEquals("the ⏱ 📅 windows are exhausted", PlanQuota.blockedNote(both))
         val lanes = PlanQuota.Mark.Seen(
             listOf(PlanQuota.Window("⏱", 0), PlanQuota.Window("📅", 0)),
             PlanQuota.Rule.LANES,
         )
-        assertEquals("todas las ventanas agotadas", PlanQuota.blockedNote(lanes))
+        assertEquals("every window exhausted", PlanQuota.blockedNote(lanes))
     }
 
     @Test
@@ -191,7 +191,7 @@ class PlanQuotaTest {
         val seen = PlanQuota.Mark.Seen(
             listOf(PlanQuota.Window("⏱", 32), PlanQuota.Window("📅", 78)),
         )
-        assertEquals(" — ⏱ 32% · 📅 78% libre", PlanQuota.compact(seen))
+        assertEquals(" — ⏱ 32% · 📅 78% free", PlanQuota.compact(seen))
         assertEquals(" — ❔", PlanQuota.compact(PlanQuota.Mark.Missing("timeout")))
         assertEquals(" — ❔", PlanQuota.compact(null))
     }
@@ -211,10 +211,10 @@ class PlanQuotaTest {
         val seen = PlanQuota.Mark.Seen(listOf(PlanQuota.Window("⏱", 32, resetMs = 1_760_000_000_000L)))
         val line = PlanQuota.line("Start Plan", seen, nowMs = 1_000L)
         assertTrue("<b>Start Plan</b>" in line, line)
-        assertTrue("⏱ 32% libre" in line, line)
+        assertTrue("⏱ 32% free" in line, line)
         assertTrue("resets" in line, line)
-        val missing = PlanQuota.line("Start Plan", PlanQuota.Mark.Missing("el canal no respondió"), 1_000L)
-        assertTrue("❔ sin datos (el canal no respondió)" in missing, missing)
-        assertTrue("reintentá /plan más tarde" in missing, missing)
+        val missing = PlanQuota.line("Start Plan", PlanQuota.Mark.Missing("the channel did not answer"), 1_000L)
+        assertTrue("❔ no data (the channel did not answer)" in missing, missing)
+        assertTrue("retry /plan later" in missing, missing)
     }
 }

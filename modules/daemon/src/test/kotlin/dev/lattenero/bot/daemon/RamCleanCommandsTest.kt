@@ -47,7 +47,7 @@ class RamCleanCommandsTest {
     fun cleanRefusesStrangersAndFailCloses() {
         val gated = RamCleanCommands.gate(RamCleanCommands.Plan.Clean, fromId = 42L, owner = 7L)
         assertTrue(gated is RamCleanCommands.Plan.Refused, gated.toString())
-        assertTrue("Solo el dueño" in gated.reason, gated.reason)
+        assertTrue("Only the owner" in gated.reason, gated.reason)
         // fail-closed: a null sender or an unwired owner never passes
         assertTrue(RamCleanCommands.gate(RamCleanCommands.Plan.Clean, null, 7L) is RamCleanCommands.Plan.Refused)
         assertTrue(RamCleanCommands.gate(RamCleanCommands.Plan.Clean, 7L, null) is RamCleanCommands.Plan.Refused)

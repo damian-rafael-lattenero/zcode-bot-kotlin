@@ -10,9 +10,9 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 /**
- * THE /plan ROWS' QUOTA (the owner's 11/11 order: «al lado del nombre del
- * plan te dice cuánta quota tenés… fundamental para saber si ese plan tiene
- * tokens o no y no elegirlo en vano»).
+ * THE /plan ROWS' QUOTA (the owner's 11/11 order: «beside the plan's name it tells
+ * you how much quota you have… fundamental to know whether that plan has
+ * tokens or not and not to pick it in vain» [translated]).
  *
  * One [Mark] per plan row, normalized across the three sources:
  *  - the fork's quota frame WITH the per-plan `providerId` override
@@ -24,7 +24,7 @@ import java.time.format.DateTimeFormatter
  *    invented number.
  *
  * A window's number is the REMAINING share — the owner decides with it
- * («tiene tokens o no»), so every source's used-percent is inverted ONCE,
+ * («does it have tokens or not» [translated]), so every source's used-percent is inverted ONCE,
  * here, and clamped to 0..100. Pure: parse + render only; the reads ride
  * the callers (the commands and the mirror render the same bytes).
  */
@@ -35,7 +35,7 @@ object PlanQuota {
     data class Window(val glyph: String, val remainingPct: Int?, val resetMs: Long? = null)
 
     /**
-     * How a plan's windows decide «tiene tokens» (measured 17/11 against a
+     * How a plan's windows decide «it has tokens» (measured 17/11 against a
      * coding plan the bot kept choosing with its weekly window at zero):
      *  - [GATES]: every window must be open — ONE window at zero blocks
      *    EVERY call (the provider answers 1310/429 while that gate is dry,
@@ -85,18 +85,18 @@ object PlanQuota {
         is Mark.Seen -> {
             val closed = mark.windows.filter { (it.remainingPct ?: 1) <= 0 }
             when {
-                mark.rule == Rule.LANES || closed.isEmpty() -> "todas las ventanas agotadas"
-                closed.size == 1 -> "la ventana ${closed.single().glyph} está agotada"
-                else -> "las ventanas ${closed.joinToString(" ") { it.glyph }} están agotadas"
+                mark.rule == Rule.LANES || closed.isEmpty() -> "every window exhausted"
+                closed.size == 1 -> "the ${closed.single().glyph} window is exhausted"
+                else -> "the ${closed.joinToString(" ") { it.glyph }} windows are exhausted"
             }
         }
 
-        else -> "todas las ventanas agotadas"
+        else -> "every window exhausted"
     }
 
     /**
-     * The BUTTON's compact suffix: ` — ⏱ 68% · 📅 91% libre` — the owner's
-     * literal ask («al lado del nombre»). ⛔ prefixes a PROVEN-empty plan,
+     * The BUTTON's compact suffix: ` — ⏱ 68% · 📅 91% free` — the owner's
+     * literal ask («beside the name» [translated]). ⛔ prefixes a PROVEN-empty plan,
      * ⚠️ the tightest window under 25%; a missing read shows just ❔ (the
      * reason lives in the card's line, buttons stay short).
      */
@@ -115,14 +115,14 @@ object PlanQuota {
             (windows.minOfOrNull { it.remainingPct ?: 100 } ?: 100) < ALERT_REMAINING_PCT -> "⚠️ "
             else -> ""
         }
-        return " — $flag$parts libre"
+        return " — $flag$parts free"
     }
 
     /**
-     * The card's line for ONE plan: `<b>label</b> — ⏱ 68% libre · resets
+     * The card's line for ONE plan: `<b>label</b> — ⏱ 68% free · resets
      * 17:00` — the compact suffix's numbers plus each window's reset. A
-     * missing read is the tiny error the owner ordered («qué pasó y
-     * reintentar más tarde»), never silence and never a fake number.
+     * missing read is the tiny error the owner ordered («what happened and
+     * retry later» [translated]), never silence and never a fake number.
      */
     fun line(
         label: String,
@@ -130,19 +130,19 @@ object PlanQuota {
         nowMs: Long,
         zone: ZoneId = ZoneId.systemDefault(),
     ): String = when (mark) {
-        null -> missingLine(label, "quota no leída")
+        null -> missingLine(label, "quota not read")
         is Mark.Missing -> missingLine(label, mark.reason)
         is Mark.Seen -> seenLine(label, mark, nowMs, zone)
     }
 
     private fun missingLine(label: String, reason: String): String =
-        "<b>${PyText.esc(label)}</b> — ❔ sin datos ($reason) — reintentá /plan más tarde"
+        "<b>${PyText.esc(label)}</b> — ❔ no data ($reason) — retry /plan later"
 
     private fun seenLine(label: String, mark: Mark.Seen, nowMs: Long, zone: ZoneId): String {
         val windows = mark.windows
-        if (windows.isEmpty()) return missingLine(label, "el plan no publica ventanas")
+        if (windows.isEmpty()) return missingLine(label, "the plan publishes no windows")
         val body = windows.joinToString(" · ") { w ->
-            "${w.glyph} ${w.remainingPct?.toString() ?: "?"}% libre" +
+            "${w.glyph} ${w.remainingPct?.toString() ?: "?"}% free" +
                 (w.resetMs?.takeIf { it != 0L }?.let { " · resets ${fmtReset(it, nowMs, zone)}" } ?: "")
         }
         val flag = when {

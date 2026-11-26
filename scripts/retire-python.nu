@@ -1,6 +1,6 @@
 #!/Users/lattenero/.local/bin/nu-nightly
 # retire-python.nu — B3b's LAST step: the abrupt Python retirement (owner's
-# directive 30/10, plan-brujula U2.5). PREPARED, NOT EXECUTED BY THE AGENT —
+# directive 30/10, plan-compass U2.5). PREPARED, NOT EXECUTED BY THE AGENT —
 # the main runs it only AFTER Damian restarts the app with the fork's
 # daemon-local channel deployed (⌘Q + build-install.nu + verify-deploy.nu),
 # because retiring Python's poller before the channel exists leaves the

@@ -80,12 +80,12 @@ class MenuMirrorTest {
 
     @Test
     fun theSameTextIsNeverReEdited() {
-        assertFalse(MenuMirror.shouldEdit("🎯 «x»\n🎛 Modo: <b>yolo</b>", "🎯 «x»\n🎛 Modo: <b>yolo</b>"))
+        assertFalse(MenuMirror.shouldEdit("🎯 «x»\n🎛 Mode: <b>yolo</b>", "🎯 «x»\n🎛 Mode: <b>yolo</b>"))
     }
 
     @Test
     fun aChangedTextEdits() {
-        assertTrue(MenuMirror.shouldEdit("🎛 Modo: <b>yolo</b>", "🎛 Modo: <b>plan</b>"))
+        assertTrue(MenuMirror.shouldEdit("🎛 Mode: <b>yolo</b>", "🎛 Mode: <b>plan</b>"))
         assertTrue(MenuMirror.shouldEdit(null, "anything")) // no baseline yet — the first render edits
     }
 

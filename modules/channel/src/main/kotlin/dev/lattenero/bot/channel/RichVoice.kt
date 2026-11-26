@@ -12,8 +12,8 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
 /**
- * THE VOICE OF THE LLM (the owner, 5/11: «yo se que el texto que está en
- * ese fondo pertenece a ese canal y es el llm hablando»): every segment of
+ * THE VOICE OF THE LLM (the owner, 5/11: «I know that the text on that
+ * background belongs to that channel and it is the llm talking» [translated]): every segment of
  * the model's prose — the mid-turn talk, the final summary, the thinking —
  * travels as a Bot API 10.x RICH MESSAGE, its quote styling the violet
  * channel's look. Pure: text in → wire JSON out; the send leg lives in

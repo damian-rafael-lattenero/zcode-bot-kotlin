@@ -11,7 +11,7 @@ import kotlinx.serialization.json.JsonPrimitive
  *    real, no un cartel de adorno» — every live state derives from REAL
  *    channel events with a staleness watchdog: generic Thinking is only
  *    valid WHILE thought chunks keep arriving; 20s of silence degrades
- *    honestly («(30s sin eventos)»); a socket drop renders the RECONNECT
+ *    honestly («(30s without events)»); a socket drop renders the RECONNECT
  *    state, never a fake ongoing turn; a typed error frame resolves the
  *    turn with its error visible (quota exhaustion is a pill, not a
  *    hanging spinner). Silence is data.
@@ -112,7 +112,7 @@ internal val SHELL_TOOLS = setOf("Bash", "Shell")
  */
 internal val WRITE_EDIT_TOOLS = setOf("Edit", "MultiEdit", "Replace", "Write", "Create", "New")
 
-/** A write/edit lane's file path — the [📄 archivo completo] door's key (the owner, 5/11). */
+/** A write/edit lane's file path — the [📄 full file] door's key (the owner, 5/11). */
 internal fun ToolLive.editFilePath(): String? =
     takeIf { name in WRITE_EDIT_TOOLS && input != null }?.let { lane ->
         listOf("file_path", "path").firstNotNullOfOrNull { k -> lane.input?.str(k)?.takeIf { it.isNotEmpty() } }
@@ -243,8 +243,8 @@ data class TurnLive(
      * full accumulation lives here; a block's text is never
      * summarized, never invented. Each block travels as its own COLLAPSED
      * Telegram message (header + button — the owner decides whether to
-     * read it, 2/11: «yo decido si los leo o no una vez que se llenó el
-     * botón de los 3k»); the card carries the COUNT only.
+     * read it, 2/11: «I decide whether I read them or not once the 3k
+     * button filled up» [translated]); the card carries the COUNT only.
      */
     val cotBlocks: List<String> = emptyList(),
     /** The block currently filling: seals into [cotBlocks] at the cap. */
@@ -279,8 +279,8 @@ data class TurnLive(
     val failedTools: Int = 0,
     val interaction: InteractionPending? = null,
     /**
-     * The last MAIN-AGENT thought's real moment (v2 §2): the «generando CoT
-     * vs procesando…» split's anchor. Subagent lanes never touch it (their
+     * The last MAIN-AGENT thought's real moment (v2 §2): the «generating CoT
+     * vs processing…» split's anchor. Subagent lanes never touch it (their
      * narration is the 🤖 row, not the card's thinking state); a replayed
      * chunk never refreshes it (the replay guard returns state whole).
      */
@@ -561,7 +561,7 @@ object LiveTurn {
     /**
      * The ANSWER tail's cap — Python's `_live_box_body` rendered
      * `text[-3200:]` inside the live box while the turn wrote. The owner
-     * (3/11): «no está llegando… lo que vos decís» — the card counted
+     * (3/11): «it is not arriving… what you say» [translated] — the card counted
      * characters but never showed the words. Restored at the same 3200
      * code points, inside the same `<pre>` the Python used.
      */
@@ -612,13 +612,13 @@ object LiveTurn {
      */
     const val CHILD_FRESH_MS = 90_000L
 
-    /** Thinking degrades honestly after this silence — «(30s sin eventos)». */
+    /** Thinking degrades honestly after this silence — «(30s without events)». */
     const val STALE_SOFT_MS = 20_000L
 
     /**
      * The CoT's freshness window (v2 §2): a main-agent thought younger than
-     * this means the CoT is ACTUALLY flowing — «generando CoT»; past it the
-     * honest word is «procesando…» (the model may be computing pure).
+     * this means the CoT is ACTUALLY flowing — «generating CoT»; past it the
+     * honest word is «processing…» (the model may be computing pure).
      */
     const val COT_QUIET_MS = 5_000L
 
@@ -648,8 +648,8 @@ object LiveTurn {
     // ---- render ------------------------------------------------------------
 
     /**
-     * The status message's TEXT — THE PROCESS (the owner's ley raíz,
-     * 2/11: «separar bien el dato del proceso»). The card's shape is the
+     * The status message's TEXT — THE PROCESS (the owner's root law,
+     * 2/11: «separate the data from the process properly» [translated]). The card's shape is the
      * desktop pill's mirror: the WORKING header (how long the turn has
      * run), the NOW line (what is executing RIGHT NOW — the verb, the
      * target, that tool's own elapsed; between tools the thinking line,
@@ -666,18 +666,18 @@ object LiveTurn {
         verbs: ToolVerbifier = ToolVerbs.MINIMAL,
         /**
          * The daemon's cached PRIZE line (GiftsMenu.workingLine) — the
-         * owner's «pequeña sección premios»: it rides the process card
+         * owner's «little prizes section» [translated]: it rides the process card
          * while the turn runs, one line, never the detail (/quota owns
          * that). Null = nothing claimable, or the read is not fresh.
          */
         giftsLine: String? = null,
     ): String {
-        // THE OWNER'S RULE («los segundos no deben correr»), 5/11 edition: the
+        // THE OWNER'S RULE («the seconds must not run» [translated]), 5/11 edition: the
         // clock RUNS while the channel is alive and the turn holds no error
-        // (a silent model may be legitimately grinding — his «Procesando...
+        // (a silent model may be legitimately grinding — his «Processing...
         // xS» ticks on); it FREEZES only on a dead channel, a typed error or
         // an api-retry pill — the outage lies he rejected three times. The
-        // footer still reports the silence honestly («último evento hace…»).
+        // footer still reports the silence honestly («last event Xm ago»).
         val silence = silenceMs(state, nowMs)
         val frozen = !channelAlive ||
             state.typedError != null ||
@@ -688,30 +688,30 @@ object LiveTurn {
         when (val phase = state.phase) {
             is TurnPhase.Idle -> lines.add(
                 if (state.attachAwaited) {
-                    "👁 <b>«${PyText.esc(state.title)}»</b> attachado — ningún turno corriendo ahora; " +
-                        "la carta entra cuando arranque el próximo."
+                    "👁 <b>«${PyText.esc(state.title)}»</b> attached — no turn running now; " +
+                        "the card goes in when the next one starts."
                 } else {
-                    "💻 <b>«${PyText.esc(state.title)}»</b> — suscripto, nada corriendo"
+                    "💻 <b>«${PyText.esc(state.title)}»</b> — subscribed, nothing running"
                 },
             )
 
             is TurnPhase.Done -> lines.add(
                 "${if (state.failedTools > 0) "⚠️" else "✅"} <b>«${PyText.esc(state.title)}»</b>" +
-                    " — listo: ${PyText.esc(phase.stopReason)}",
+                    " — done: ${PyText.esc(phase.stopReason)}",
             )
 
             is TurnPhase.Thinking -> {
                 lines.add(workingHead(state.title, elapsed))
                 // v2 §2: the pure-computing state vs the CoT actually
                 // flowing. The freshness reads the REAL clock — a frozen
-                // card (silence, dead channel, error) is never «generando»;
-                // its honest word is «procesando…» plus the staleness line.
+                // card (silence, dead channel, error) is never «generating»;
+                // its honest word is «processing…» plus the staleness line.
                 val fresh = state.lastThoughtAtMs != null && nowMs - state.lastThoughtAtMs < COT_QUIET_MS
                 lines.add(
                     if (fresh) {
-                        "🧠 <b>generando CoT</b> · ${phase.chars} caracteres · ${fmtDur(clockNow - phase.sinceMs)}"
+                        "🧠 <b>generating CoT</b> · ${phase.chars} chars · ${fmtDur(clockNow - phase.sinceMs)}"
                     } else {
-                        "🧠 <b>procesando…</b>${stalenessWord(silence, channelAlive)}"
+                        "🧠 <b>processing…</b>${stalenessWord(silence, channelAlive)}"
                     },
                 )
             }
@@ -737,7 +737,7 @@ object LiveTurn {
                         )
                     }
                     lines.add(
-                        "✍️ <b>escribiendo la respuesta</b> · ${phase.rawChars} caracteres · " +
+                        "✍️ <b>writing the answer</b> · ${phase.rawChars} chars · " +
                             fmtDur(clockNow - phase.sinceMs),
                     )
                 } else {
@@ -750,11 +750,11 @@ object LiveTurn {
         // the socket drop is a STATE, not a background detail: the phase line
         // must never pretend a turn is alive while the channel reconnects
         if (!channelAlive && state.phase !is TurnPhase.Done) {
-            lines.add("📡 canal caído — reconectando… (última señal hace ${fmtDur(silence)})")
+            lines.add("📡 channel down — reconnecting… (last signal ${fmtDur(silence)} ago)")
         }
-        state.interaction?.let { lines.add("${it.emoji} esperando: ${PyText.esc(it.title ?: it.kind)}") }
+        state.interaction?.let { lines.add("${it.emoji} waiting: ${PyText.esc(it.title ?: it.kind)}") }
         state.typedError?.let { pill ->
-            val quota = if (pill.isQuota) " · 💳 CUOTA" else ""
+            val quota = if (pill.isQuota) " · 💳 QUOTA" else ""
             lines.add("💀 <b>error:</b> ${pill.line()}$quota")
         }
         // THE OWNER'S PRIZE SECTION (3/11): while the turn runs, the card
@@ -785,7 +785,7 @@ object LiveTurn {
             lines.add(
                 "🤖 <b>${PyText.esc(childName(lane, laneId))}</b> · 🧠 ${fmtKDecimal(child.cotChars.toLong())} · " +
                     "✍️ ${fmtKDecimal(child.answerChars.toLong())} · " +
-                    fmtDur(clockNow - child.lastDeltaAtMs) + " desde su última palabra",
+                    fmtDur(clockNow - child.lastDeltaAtMs) + " since its last word",
             )
         }
         // THE NEWEST CHILD'S WORDS (12/11): the live tail of the child that
@@ -821,15 +821,15 @@ object LiveTurn {
         val live = channelAlive && state.typedError == null && state.apiRetry == null &&
             silence < STALE_HARD_MS
         lines.add(
-            if (live) "en vivo · último evento hace ${fmtDur(silence)} · ${state.doneTools} listos"
-            else "frozen · ${fmtDur(silence)} sin eventos · ${state.doneTools} listos",
+            if (live) "live · last event ${fmtDur(silence)} ago · ${state.doneTools} done"
+            else "frozen · ${fmtDur(silence)} without events · ${state.doneTools} done",
         )
         return lines.joinToString("\n")
     }
 
-    /** THE WORKING HEADER — the owner's 5/11 words: «⏳ Procesando... 3m 51s — «título»». */
+    /** THE WORKING HEADER — the owner's 5/11 words: «⏳ Processing... 3m 51s — «title»» [translated]. */
     private fun workingHead(title: String, elapsed: String): String =
-        "⏳ <b>Procesando... $elapsed</b> — «${PyText.esc(title)}»"
+        "⏳ <b>Processing... $elapsed</b> — «${PyText.esc(title)}»"
 
     /**
      * A child row's name — the same ladder as Keyboards.subagentName (the
@@ -862,7 +862,7 @@ object LiveTurn {
         val frozenLane = lane.subagentAgentId == null && nowMs - lane.touchedAtMs >= LANE_FROZEN_MS
         return if (frozenLane) {
             "❄️ <i>${verb.head()}$detail${laneCounts(lane)} · ${fmtDur(lane.touchedAtMs - lane.openedAtMs)} · " +
-                "frozen · ${fmtDur(nowMs - lane.touchedAtMs)} sin eventos</i>"
+                "frozen · ${fmtDur(nowMs - lane.touchedAtMs)} without events</i>"
         } else {
             "${verb.head()}$detail${laneCounts(lane)} · ${fmtDur(clockNow - lane.openedAtMs)}"
         }
@@ -870,14 +870,14 @@ object LiveTurn {
 
     /**
      * The lane's counts: the live +N/−M for edits, the streamed lines
-     * otherwise. «0 líneas» is an INVENTED number (the fork streams no
+     * otherwise. «0 lines» is an INVENTED number (the fork streams no
      * tool output while a tool runs) — when nothing streams the box says
      * honestly where the output will appear: at close.
      */
     private fun laneCounts(lane: ToolLive): String = when {
         lane.added != null || lane.removed != null -> " · 🟢 +${lane.added ?: 0} · 🔴 −${lane.removed ?: 0}"
-        lane.lines > 0 -> " · ${lane.lines} líneas"
-        else -> " · salida al cerrar"
+        lane.lines > 0 -> " · ${lane.lines} lines"
+        else -> " · output at close"
     }
 
     /** One closed lane's verdict line: the runtime (REAL, both anchors are
@@ -892,8 +892,8 @@ object LiveTurn {
         val runtime = lane.lastUpdateAtMs?.let { " · ${fmtDur(it - lane.openedAtMs)}" } ?: ""
         val verdict = when {
             lane.added != null || lane.removed != null -> "🟢 +${lane.added ?: 0} · 🔴 −${lane.removed ?: 0}"
-            lane.outputLines != null -> "${lane.outputLines} líneas de salida"
-            else -> PyText.esc(lane.status ?: "listo")
+            lane.outputLines != null -> "${lane.outputLines} output lines"
+            else -> PyText.esc(lane.status ?: "done")
         }
         val who = toolLabel(lane.name)
         return "${verbs.of(lane.name, lane.input, lane.isMcp).emoji} ${PyText.esc(who)}$runtime · $verdict$mark"
@@ -939,9 +939,9 @@ object LiveTurn {
                     lane != null && (lane.added != null || lane.removed != null) ->
                         " · 🟢 +${lane.added ?: 0} · 🔴 −${lane.removed ?: 0}"
 
-                    phase.lines > 0 -> " · ${phase.lines} líneas"
+                    phase.lines > 0 -> " · ${phase.lines} lines"
 
-                    lane != null -> laneCounts(lane) // «salida al cerrar» — the fork streams no live output
+                    lane != null -> laneCounts(lane) // «output at close» — the fork streams no live output
                     else -> ""
                 }
                 listOf("${verb.head()}$detail$counts · $timer$stale")
@@ -951,7 +951,7 @@ object LiveTurn {
 
     /**
      * The shell's command block (v2 §5): Telegram's bash highlighting is
-     * the closest to «fondo negro, letras verdes» — a message cannot force
+     * the closest to «black background, green letters» [translated] — a message cannot force
      * colors, that is the honest ceiling. ≤ [COMMAND_CARD_CP] code points
      * ride complete; longer shows the head and promises the feed (which
      * speaks the command ONCE, complete).
@@ -965,7 +965,7 @@ object LiveTurn {
         else -> listOf(
             "<pre><code class=\"language-${CodeLang.SHELL}\">" +
                 "${PyText.esc(CommandShape.shape(PyText.take(cmd, COMMAND_CARD_CP)))}</code></pre>",
-            "✂️ … el comando completo va en el feed",
+            "✂️ … the full command goes in the feed",
         )
     }
 
@@ -977,7 +977,7 @@ object LiveTurn {
         val target = if (path.isEmpty()) "" else " — <code>${PyText.esc(PathName.detail(path))}</code>"
         val counts = when {
             lane.added != null || lane.removed != null -> " · 🟢 +${lane.added ?: 0} · 🔴 −${lane.removed ?: 0}"
-            lane.lines > 0 -> " · ${lane.lines} líneas"
+            lane.lines > 0 -> " · ${lane.lines} lines"
             else -> ""
         }
         return "${verb.emoji} <b>${PyText.esc(toolLabel(lane.name))}</b> · $timer$target$counts$stale"
@@ -990,8 +990,8 @@ object LiveTurn {
     internal fun stalenessWord(silenceMs: Long, channelAlive: Boolean): String = when {
         !channelAlive -> "" // the reconnect line already speaks
         silenceMs >= STALE_HARD_MS ->
-            " (${fmtDur(silenceMs)} sin eventos — stream cortado?)"
-        silenceMs >= STALE_SOFT_MS -> " (${fmtDur(silenceMs)} sin eventos)"
+            " (${fmtDur(silenceMs)} without events — stream cut?)"
+        silenceMs >= STALE_SOFT_MS -> " (${fmtDur(silenceMs)} without events)"
         else -> ""
     }
 
@@ -1000,8 +1000,8 @@ object LiveTurn {
 
     /**
      * The CoT ROW — the card's one-liner for the thinking (the owner,
-     * 2/11: «yo decido si los leo o no una vez que se llenó el botón de
-     * los 3k»): the sealed blocks' count and the pending fill, CHARS
+     * 2/11: «I decide whether I read them or not once the 3k button
+     * filled up» [translated]): the sealed blocks' count and the pending fill, CHARS
      * ONLY. The text itself lives in the collapsed block messages below
      * the card (the tap opens each one in place) — the tail never spills.
      */
@@ -1010,10 +1010,10 @@ object LiveTurn {
         val pending = PyText.cpLength(state.cotPending)
         val blocksWord = when {
             blocks == 0 -> null
-            blocks == 1 -> "1 bloque plegado"
-            else -> "$blocks bloques plegados"
+            blocks == 1 -> "1 folded block"
+            else -> "$blocks folded blocks"
         }
-        val pendingWord = if (pending == 0) null else "${fmtKDecimal(pending.toLong())} en camino"
+        val pendingWord = if (pending == 0) null else "${fmtKDecimal(pending.toLong())} on the way"
         return when {
             blocksWord == null && pendingWord == null -> null
             else -> "📖 CoT: " + listOfNotNull(blocksWord, pendingWord).joinToString(" · ")
@@ -1034,7 +1034,7 @@ object LiveTurn {
      * v2's number law: K/M rungs with DECIMAL COMMA, trailing zeros
      * trimmed, FLOORED — never rounds into the next rung («1000k» cannot
      * exist), and the M rung starts exactly at 1_000_000 (1M, never
-     * «1000k»). Spoken by the pings, the CoT row's «en camino» and the
+     * «1000k»). Spoken by the pings, the CoT row's «on the way» and the
      * sealed blocks' «generado Xk»; the card's phase lines keep raw counts.
      */
     internal fun fmtKDecimal(n: Long): String = when {
@@ -1066,12 +1066,12 @@ object LiveTurn {
     fun sealText(state: TurnLive, nowMs: Long): String {
         val phase = state.phase as? TurnPhase.Done ?: return render(state, nowMs, true)
         val total = state.startedAtMs?.let { fmtDur(nowMs - it) } ?: "?"
-        val error = state.typedError?.let { "\n💀 ${it.line()}" + if (it.isQuota) " · 💳 CUOTA" else "" } ?: ""
+        val error = state.typedError?.let { "\n💀 ${it.line()}" + if (it.isQuota) " · 💳 QUOTA" else "" } ?: ""
         val blocks = when {
             state.cotBlocks.isEmpty() -> ""
             else -> {
                 val n = state.cotBlocks.size
-                " · $n bloque${if (n == 1) "" else "s"} CoT"
+                " · $n CoT block${if (n == 1) "" else "s"}"
             }
         }
         return "✅ <b>«${PyText.esc(state.title)}»</b> — ${PyText.esc(phase.stopReason)} in $total · " +
@@ -1118,7 +1118,7 @@ object LiveTurn {
      * A plain lane with no event for this long renders FROZEN — its clock
      * stops (the doctrine) and the line dims. 10 minutes: a pending
      * elicitation or a slow legit run stays live well under it; the
-     * owner's corpse («Bash · 0 líneas · 43m23s») is far past it.
+     * owner's corpse («Bash · 0 lines · 43m23s») is far past it.
      */
     const val LANE_FROZEN_MS = 600_000L
 

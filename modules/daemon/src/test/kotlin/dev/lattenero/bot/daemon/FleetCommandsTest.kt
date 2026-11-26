@@ -159,7 +159,7 @@ class FleetCommandsTest {
         val text = FleetCommands.listText(FleetCommands.parse(json))
         assertTrue("/fleet_brain" in text, text)
         assertTrue("/fleet_deploy_bot" in text, text)
-        assertTrue(text.contains("<b>2 comandos nu</b>"), text)
+        assertTrue(text.contains("<b>2 nu commands</b>"), text)
     }
 
     // THE POISON-BODY LAW (measured 24/11): the arguments carry `<string>`,
@@ -173,7 +173,7 @@ class FleetCommandsTest {
         assertTrue("&lt;path&gt;" !in text, "no path argument in this fixture")
         // the only raw angle brackets left are the two of <b>…</b>
         assertEquals(4, text.count { it == '<' } + text.count { it == '>' }, text)
-        assertTrue(text.startsWith("🧰 <b>2 comandos nu</b>"), text)
+        assertTrue(text.startsWith("🧰 <b>2 nu commands</b>"), text)
     }
 
     @Test

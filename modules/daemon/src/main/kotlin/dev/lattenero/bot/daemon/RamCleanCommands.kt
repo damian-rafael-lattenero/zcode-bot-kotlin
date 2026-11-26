@@ -65,16 +65,16 @@ internal object RamCleanCommands {
     internal const val LOG_FILE_NAME = "ram-clean.log"
 
     internal const val USAGE =
-        "🧹 /ram_clean — limpia la Mac AHORA: mata islas idle, purga caches, receipts en la respuesta.\n" +
-            "🧹 /ram_clean report — solo lectura: leak suspects, swap, top citizens."
+        "🧹 /ram_clean — cleans the Mac NOW: kills idle islands, purges caches, receipts in the answer.\n" +
+            "🧹 /ram_clean report — read only: leak suspects, swap, top citizens."
 
-    internal const val NOT_OWNER = "🚫 Solo el dueño corre la limpieza."
+    internal const val NOT_OWNER = "🚫 Only the owner runs the cleanup."
 
     /** The drill's timeout words — the shared edge names the budget. */
     internal fun timeout(budgetSeconds: Long): String =
-        "⏱ ram-clean no terminó en $budgetSeconds s — lo maté; " +
-            "algo lo trabó (¿purge lento?): probá de nuevo en un momento."
+        "⏱ ram-clean did not finish in $budgetSeconds s — I killed it; " +
+            "something wedged it (slow purge?): try again in a moment."
 
     /** The drill's spawn-failure words. */
-    internal const val ERRORED = "⚠️ ram-clean no pudo correr — el daemon sigue vivo: "
+    internal const val ERRORED = "⚠️ ram-clean could not run — the daemon is still alive: "
 }

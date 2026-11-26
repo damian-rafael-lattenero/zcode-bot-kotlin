@@ -156,7 +156,7 @@ class GiftsCommandTest {
         assertEquals("ZCODE GLOBAL BUILD", offer.displayName)
         assertEquals(300_000_000.0, offer.tokens)
         assertEquals("GLM-5.3-Flash", offer.entitlement)
-        assertEquals("único", offer.period)
+        assertEquals("one-time", offer.period)
     }
 
     @Test
@@ -171,7 +171,7 @@ class GiftsCommandTest {
         // never a title invented from the id (the 3/11 live shape: the
         // GLOBAL BUILD banner carries no text in the API answer)
         assertTrue(
-            "🔴 <b>Oferta reclamable (flash-promo)</b>" in GiftsMenu.render(gifts, 1L).single(),
+            "🔴 <b>Claimable offer (flash-promo)</b>" in GiftsMenu.render(gifts, 1L).single(),
             GiftsMenu.render(gifts, 1L).single(),
         )
     }
@@ -181,9 +181,9 @@ class GiftsCommandTest {
         val gifts = GiftsMenu.parse(giftsJson, nowMs = 1_000L)
         val lines = GiftsMenu.render(gifts, nowMs = 1_000L)
         assertTrue("🎁 <b>2 resets</b> (5h)" in lines[0], lines[0])
-        assertTrue("expira en 16m" in lines[0], "1000000-1000 ms → 16m: ${lines[0]}")
-        assertTrue("🎁 <b>1 reset</b> (semanal)" in lines[1], lines[1])
-        assertTrue("🔴 <b>Reclamable: ZCODE GLOBAL BUILD</b> — 300M tokens · GLM-5.3-Flash (único)" in lines[2], lines[2])
+        assertTrue("expires in 16m" in lines[0], "1000000-1000 ms → 16m: ${lines[0]}")
+        assertTrue("🎁 <b>1 reset</b> (weekly)" in lines[1], lines[1])
+        assertTrue("🔴 <b>Claimable: ZCODE GLOBAL BUILD</b> — 300M tokens · GLM-5.3-Flash (one-time)" in lines[2], lines[2])
     }
 
     @Test
@@ -202,10 +202,10 @@ class GiftsCommandTest {
         val reply = commands(o).handle("/quota", 1L)!!
         assertTrue("41% remaining" in reply.text, reply.text)
         assertTrue("🎁 <b>2 resets</b>" in reply.text, reply.text)
-        assertTrue("Reclamable: ZCODE GLOBAL BUILD" in reply.text, reply.text)
+        assertTrue("Claimable: ZCODE GLOBAL BUILD" in reply.text, reply.text)
         val r = rows(reply)
         assertEquals(
-            listOf("🎁 Reclamar" to "cl:global-build", "🎁 Usar reset 5h" to "gf:FIVE_HOUR", "🎁 Usar reset semanal" to "gf:WEEK"),
+            listOf("🎁 Claim" to "cl:global-build", "🎁 Use 5h reset" to "gf:FIVE_HOUR", "🎁 Use weekly reset" to "gf:WEEK"),
             r,
         )
         assertTrue(o.queries.any { it is ChannelQuery.CodingPlanGifts })
@@ -236,11 +236,11 @@ class GiftsCommandTest {
         val bc = commands(ops())
         bc.handle("/quota", 1L)
         val confirm = bc.onCallback("cl:global-build", 2L, OWNER)!!
-        assertTrue("¿Reclamar «ZCODE GLOBAL BUILD»?" in confirm.text, confirm.text)
-        assertTrue("300M tokens · GLM-5.3-Flash (único)" in confirm.text, confirm.text)
-        assertTrue("cambio de plan" in confirm.text)
+        assertTrue("Claim «ZCODE GLOBAL BUILD»?" in confirm.text, confirm.text)
+        assertTrue("300M tokens · GLM-5.3-Flash (one-time)" in confirm.text, confirm.text)
+        assertTrue("plan change" in confirm.text)
         assertEquals(
-            listOf("✅ Confirmar" to "cly:", "❌ Cancelar" to "gxn:"),
+            listOf("✅ Confirm" to "cly:", "❌ Cancel" to "gxn:"),
             rows(confirm),
         )
     }
@@ -253,9 +253,9 @@ class GiftsCommandTest {
         bc.onCallback("cl:global-build", 2L, OWNER)
         val done = bc.onCallback("cly:", 3L, OWNER)!!
         assertEquals("global-build", o.claimPlanId)
-        assertTrue("✅ <b>Reclamado: ZCODE GLOBAL BUILD</b>" in done.text, done.text)
-        assertTrue("estado active" in done.text, done.text)
-        assertTrue("/plan para usar el plan nuevo" in done.text)
+        assertTrue("✅ <b>Claimed: ZCODE GLOBAL BUILD</b>" in done.text, done.text)
+        assertTrue("status active" in done.text, done.text)
+        assertTrue("/plan to use the new plan" in done.text)
     }
 
     @Test
@@ -267,7 +267,7 @@ class GiftsCommandTest {
         bc.handle("/quota", 1L)
         bc.onCallback("cl:global-build", 2L, OWNER)
         val done = bc.onCallback("cly:", 3L, OWNER)!!
-        assertTrue("El server rechazó el reclamo (1003): campaign ended" in done.text, done.text)
+        assertTrue("The server refused the claim (1003): campaign ended" in done.text, done.text)
     }
 
     @Test
@@ -290,7 +290,7 @@ class GiftsCommandTest {
         val done = bc.onCallback("cly:", 3L, OWNER)!!
         assertEquals(BotCommands.GIFT_CAPTCHA, done.text)
         val row = done.markup!!.jsonObject["inline_keyboard"]!!.jsonArray[0].jsonArray[0].jsonObject
-        assertEquals("🌐 Abrir la web (planes)", row["text"]!!.jsonPrimitive.content)
+        assertEquals("🌐 Open the web (plans)", row["text"]!!.jsonPrimitive.content)
         assertEquals(BotCommands.GIFT_CLAIM_URL, row["url"]!!.jsonPrimitive.content)
         assertEquals(
             "https://zcode.z.ai/en/rewards?embedded=app&theme=zai-dark",
@@ -312,7 +312,7 @@ class GiftsCommandTest {
         val bc = commands(o)
         bc.handle("/quota", 1L)
         bc.onCallback("cl:global-build", 2L, OWNER)
-        assertEquals("📬 Cancelado — no se tocó nada.", bc.onCallback("gxn:", 3L, OWNER)!!.text)
+        assertEquals("📬 Cancelled — nothing was touched.", bc.onCallback("gxn:", 3L, OWNER)!!.text)
         assertNull(o.claimPlanId)
     }
 
@@ -320,7 +320,7 @@ class GiftsCommandTest {
     fun anOfferThatVanishedBeforeTheTapIsNamedAsSuch() = runBlocking {
         val o = ops()
         val bc = commands(o)
-        assertEquals("🤷 Esa oferta ya no está — corré /quota de nuevo.", bc.onCallback("cl:gone", 1L, OWNER)!!.text)
+        assertEquals("🤷 That offer is gone — run /quota again.", bc.onCallback("cl:gone", 1L, OWNER)!!.text)
         assertNull(o.claimPlanId)
     }
 
@@ -332,10 +332,10 @@ class GiftsCommandTest {
         val bc = commands(o)
         bc.handle("/quota", 1L)
         val confirm = bc.onCallback("gf:FIVE_HOUR", 2L, OWNER)!!
-        assertTrue("¿Usar un reset de 5 horas?" in confirm.text, confirm.text)
-        assertTrue("Te quedan <b>2</b>" in confirm.text, confirm.text)
+        assertTrue("Use a 5-hour reset?" in confirm.text, confirm.text)
+        assertTrue("You have <b>2</b> left" in confirm.text, confirm.text)
         val done = bc.onCallback("gfy:", 3L, OWNER)!!
-        assertTrue("✅ Reset usado (5h)" in done.text, done.text)
+        assertTrue("✅ Reset used (5h)" in done.text, done.text)
         assertEquals("FIVE_HOUR", o.resetQuery!!.resetType)
         assertEquals("task-77", o.resetQuery!!.taskId)
         assertEquals(36, o.resetQuery!!.idempotencyKey.length, "a UUID rides as the server's idempotency key")
@@ -356,7 +356,7 @@ class GiftsCommandTest {
     fun aResetThatVanishedIsNamedAsSuch() = runBlocking {
         val o = ops(gifts = """{"reset":{"week":[{"expireAt":500}]}}""")
         val bc = commands(o)
-        assertEquals("🤷 Ese reset ya no está — corré /quota de nuevo.", bc.onCallback("gf:WEEK", 1L, OWNER)!!.text)
+        assertEquals("🤷 That reset is gone — run /quota again.", bc.onCallback("gf:WEEK", 1L, OWNER)!!.text)
         assertNull(o.resetQuery)
     }
 
@@ -389,8 +389,8 @@ class GiftsCommandTest {
         )
         val line = GiftsMenu.workingLine(gifts, 1_000L)!!
         assertTrue("2 resets 5h" in line)
-        assertTrue("1 reset semanal" in line)
-        assertTrue("expira en" in line) // a REAL expireAt, never invented
+        assertTrue("1 weekly reset" in line)
+        assertTrue("expires in" in line) // a REAL expireAt, never invented
         assertTrue("/quota" in line) // the detail's door
     }
 
@@ -399,7 +399,7 @@ class GiftsCommandTest {
         val line = GiftsMenu.workingLine(GiftsMenu.parse(giftsJson, 1_000L), 1_000L)!!
         assertTrue("ZCODE GLOBAL BUILD" in line)
         assertTrue("300M tokens" in line)
-        assertTrue("reclamable" in line)
+        assertTrue("claimable" in line)
     }
 
     @Test
@@ -409,7 +409,7 @@ class GiftsCommandTest {
             1_000L,
         )
         val line = GiftsMenu.workingLine(gifts, 1_000L)!!
-        assertTrue("oferta" in line)
+        assertTrue("offer" in line)
         assertFalse("zcode-v3-start-plan-1103" in line)
     }
 }

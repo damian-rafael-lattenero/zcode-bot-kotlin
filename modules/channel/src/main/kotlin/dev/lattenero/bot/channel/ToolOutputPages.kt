@@ -7,7 +7,7 @@ import dev.lattenero.bot.contracts.PyText
  * the chat — it travels COMPRESSED behind one button and opens in pages of
  * NUMBERED lines. The numbering is the owner's other law: every line the
  * bot shows carries its real position, so a snippet is never anonymous
- * («no sé bien lo que estoy leyendo a qué línea corresponde»).
+ * («I can't tell what I am reading, which line it corresponds to» [translated]).
  *
  * Pure: text in → header + pages out. The state that owns message ids and
  * pages is the fold's ([RenderState.boxes], U5b); this object never touches
@@ -73,7 +73,7 @@ object ToolOutputPages {
         }
         if (current.isNotEmpty()) pages += current.toString()
         if (pages.size > MAX_PAGES) {
-            val rest = "✂️ el resto del output no entra en Telegram — corré el comando en la Mac"
+            val rest = "✂️ the rest of the output does not fit in Telegram — run the command on the Mac"
             return pages.take(MAX_PAGES) + listOf(rest)
         }
         return pages.ifEmpty { listOf("") }
@@ -98,7 +98,7 @@ object ToolOutputPages {
         fence: String? = null,
         language: String? = null,
     ): String {
-        val noun = if (lines == 1) "1 línea" else "$lines líneas"
+        val noun = if (lines == 1) "1 line" else "$lines lines"
         if (fence != null) {
             // THE SHAPED COMMAND (25/11): the client wraps every code block,
             // so the pipes own the line breaks here — never an arbitrary cut
@@ -110,13 +110,13 @@ object ToolOutputPages {
                 else ->
                     "<pre><code class=\"language-$language\">" +
                         PyText.esc(PyText.take(shown, COMMAND_CLOSE_CP)) +
-                        "</code></pre>\n✂️ … el comando completo va en el feed"
+                        "</code></pre>\n✂️ … the full command goes in the feed"
             }
-            return "$kind · $noun\n<i>📸 tocar para ver la imagen</i>\n$block"
+            return "$kind · $noun\n<i>📸 tap to see the image</i>\n$block"
         }
         val shown = PathName.shaped(detail, HEADER_DETAIL_CP)
         val suffix = if (shown.isNotEmpty()) " — <code>${PyText.esc(shown)}</code>" else ""
-        return "$kind$suffix · $noun\n<i>📸 tocar para ver la imagen</i>"
+        return "$kind$suffix · $noun\n<i>📸 tap to see the image</i>"
     }
 
     /**

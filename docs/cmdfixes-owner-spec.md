@@ -38,7 +38,9 @@ command that throws.
 
 Current: tap target → arm + confirm card → `dep:go` fires. The owner's law:
 «command deploy, elegir que deployar y esa eleccion ya empieza el deploy… una
-única vez… no se puede volver a apretar esa botonera».
+única vez… no se puede volver a apretar esa botonera» [translated: "command deploy,
+choose what to deploy and that choice already starts the deploy… a single time… that
+button row cannot be pressed again"].
 
 - `DeployCommand` simplifies: no arm window, no confirm half — the machine
   keeps ONLY the owner gate (`authorize(fromId, ownerUserId)`) and the
@@ -91,13 +93,13 @@ Current: tap target → arm + confirm card → `dep:go` fires. The owner's law:
 
 New command, plan leaves /mode:
 
-- Card: «🧭 Plan mode de «título»» + the state line ON/OFF (current =
+- Card: «🧭 Plan mode of «title»» + the state line ON/OFF (current =
   snapshot `meta.mode == "plan"` — READ, never remembered).
 - Keyboard: TWO buttons — `✅ ON` / `⬜ OFF` (`pm:on` / `pm:off`), the CURRENT
   one carrying 🎯 (the same marking law as /mode's rows).
 - ON → `SetMode(taskId, "plan")`; OFF → `SetMode(taskId, "yolo")` (the
   default law — back to Full access; another mode is one /mode tap away).
-  Applied copy mirrors /mode's («aplica al próximo turno»).
+  Applied copy mirrors /mode's («applies to the next turn»).
 - Typed: `/plan_mode` (card), `/plan_mode on|off` (direct toggle), unknown
   word → the card. Register in the command table (+ /help) and the
   DESTRUCTIVE vocabulary stays untouched (a mode switch is not destructive).

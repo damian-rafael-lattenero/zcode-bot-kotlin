@@ -114,7 +114,7 @@ class BotCommandsTest {
     private val defaultWs = "/Users/damian/.zcode/workspace/default"
 
     private val rows = listOf(
-        TaskRow(sid = "task-77", title = "arreglá el login", ws = app),
+        TaskRow(sid = "task-77", title = "fix the login", ws = app),
         TaskRow(sid = "task-02", title = "second", ws = botWs),
         TaskRow(sid = "task-03", title = "", ws = defaultWs),
         TaskRow(sid = "sub-ghost-1", title = "", ws = "$app/Projects"),
@@ -134,12 +134,12 @@ class BotCommandsTest {
         botStatusJson = status
         answers["botStatus"] = status ?: "null"
         answers["listTasks"] = """[
-            {"taskId":"task-77","title":"arreglá el login","updatedAt":900},
+            {"taskId":"task-77","title":"fix the login","updatedAt":900},
             {"taskId":"task-02","title":"second","updatedAt":300}
         ]"""
-        answers["taskList"] = """{"items":[{"taskId":"task-77","title":"arreglá el login","updatedAt":900}],"total":1,"hasMore":false}"""
+        answers["taskList"] = """{"items":[{"taskId":"task-77","title":"fix the login","updatedAt":900}],"total":1,"hasMore":false}"""
         answers["activeTaskIds"] = """[]"""
-        answers["taskMeta"] = """{"taskId":"task-77","title":"arreglá el login"}"""
+        answers["taskMeta"] = """{"taskId":"task-77","title":"fix the login"}"""
         answers["quota"] = """
             {"generatedAt":1,"authenticated":true,"provider":{"id":"glm","name":"GLM"},
              "remaining":{"count":72,"isShow":true,"percentage":41,"nextResetTime":4700000}}
@@ -186,7 +186,7 @@ class BotCommandsTest {
             """
             💬 <b>Conversations by project</b> — tap a row to watch it live
             🔄 1. second · 📁bot
-            🎯 2. arreglá el login
+            🎯 2. fix the login
 
             Free text you send goes to the active conversation (🎯).
             """.trimIndent(),
@@ -212,12 +212,12 @@ class BotCommandsTest {
         val history = FakeHistory(
             listOf(
                 TaskRow(sid = "task-fresh-idle", title = "recien tocada", ws = app, whenMs = 5_000L),
-                TaskRow(sid = "task-old-running", title = "corriendo hace rato", ws = app, whenMs = 100L),
+                TaskRow(sid = "task-old-running", title = "running for a while", ws = app, whenMs = 100L),
             ),
         )
         val (bc, _) = commands(o, history)
         val reply = bc.reply("/tasks", 1L)!!
-        assertTrue("🔄 1. corriendo hace rato" in reply, "the running row is FIRST")
+        assertTrue("🔄 1. running for a while" in reply, "the running row is FIRST")
         assertTrue("· 2. recien tocada" in reply, "the idle row keeps its execution-time slot beneath")
     }
 
@@ -235,7 +235,7 @@ class BotCommandsTest {
         val (bc, _) = commands(o)
         val reply = bc.reply("/tasks", 1L)!!
         assertTrue("🔄 1. second · 📁bot" in reply, "a running row in ANOTHER workspace wears the stamp")
-        assertTrue("🎯 2. arreglá el login" in reply)
+        assertTrue("🎯 2. fix the login" in reply)
     }
 
     @Test
@@ -249,10 +249,10 @@ class BotCommandsTest {
         }
         val many = (1..15).map { n ->
             TaskRow(sid = "idle-$n", title = "idle $n", ws = app, whenMs = 10_000L - n)
-        } + TaskRow(sid = "task-old-run", title = "vieja pero corriendo", ws = app, whenMs = 1L)
+        } + TaskRow(sid = "task-old-run", title = "old but running", ws = app, whenMs = 1L)
         val (bc, _) = commands(o, FakeHistory(many))
         val reply = bc.reply("/tasks", 1L)!!
-        assertTrue("🔄 1. vieja pero corriendo" in reply, "the running row floats in from outside the display cap")
+        assertTrue("🔄 1. old but running" in reply, "the running row floats in from outside the display cap")
         assertTrue("idle 15" !in reply, "the display cap still holds — the oldest idles drop")
     }
 
@@ -261,7 +261,7 @@ class BotCommandsTest {
         val (bc, _) = commands(ops(status = """{"bot":{"id":"daemon-local","enabled":true},"context":null}"""))
         val reply = bc.reply("/tasks", 1L)!! // Python: /task is HOW you get an active one
         assertTrue("Conversations by project" in reply)
-        assertTrue("· 1. arreglá el login · 📁app" in reply) // no context: every row tagged
+        assertTrue("· 1. fix the login · 📁app" in reply) // no context: every row tagged
     }
 
     @Test
@@ -281,7 +281,7 @@ class BotCommandsTest {
         val reply = bc.handle("/tasks 2", 7L)!!
         assertTrue("Conversations by project" in reply.text, "any rest is ignored — the list answers")
         assertTrue(reply.markup != null, "the list is never buttonless")
-        assertTrue("Sin números" !in reply.text, "the retirement hint died with the parameter era")
+        assertTrue("No numbers" !in reply.text, "the retirement hint died with the parameter era")
         assertTrue(o.inbound.isEmpty() && o.awaited.isEmpty(), "no bind ever fires from a rest")
     }
 
@@ -291,7 +291,7 @@ class BotCommandsTest {
         val reply = bc.handle("/all_tasks 5", 1L)!!
         assertTrue("All conversations" in reply.text)
         assertTrue(reply.markup != null, "the all-list is tappable")
-        assertTrue("Sin números" !in reply.text)
+        assertTrue("No numbers" !in reply.text)
     }
 
     @Test
@@ -309,9 +309,9 @@ class BotCommandsTest {
     @Test
     fun freeTextGoesToTheBoundConversationAndSubscribes() = runBlocking {
         val (bc, o) = commands(ops())
-        val reply = bc.reply("arreglá el login del bot", 4242L)
+        val reply = bc.reply("fix the login del bot", 4242L)
         assertNull(reply) // no ack: the live view and the final render speak
-        assertEquals(listOf("arreglá el login del bot" to "tg-4242"), o.inbound)
+        assertEquals(listOf("fix the login del bot" to "tg-4242"), o.inbound)
         assertEquals(listOf("task-77" to app), o.subscribed)
     }
 
@@ -396,14 +396,14 @@ class BotCommandsTest {
         }
         val (bc, _) = commands(o)
         bc.onCallback("t:task-02", 20L, OWNER)!! // the tap: CONFIRMED, intent armed
-        bc.reply("hola elegida", 21L)
+        bc.reply("hello selected", 21L)
         assertEquals(
-            listOf("task-02" to "hola elegida"), // (bindTaskId, text) — the wire's order
+            listOf("task-02" to "hello selected"), // (bindTaskId, text) — the wire's order
             o.atomicBinds,
             "the text flies AT the tapped task, whatever the index's freshest row says",
         )
         // the status speaks the standing choice
-        assertTrue("🎯 elegida: «second»" in bc.reply("/status", 22L)!!)
+        assertTrue("🎯 selected: «second»" in bc.reply("/status", 22L)!!)
     }
 
     @Test
@@ -500,11 +500,11 @@ class BotCommandsTest {
             answers["activeTaskIds"] = """["task-02"]"""
         }
         val (bc, _) = commands(o) // freshest = task-77 (open) ≠ bound task-02 (running)
-        val reply = bc.reply("re-apuntá", 6L)!!
-        assertTrue(reply.startsWith("🔄 task corriendo, no puedo re-apuntar"))
+        val reply = bc.reply("re-aim", 6L)!!
+        assertTrue(reply.startsWith("🔄 task running, I cannot re-aim"))
         assertTrue("stayed in the queue (1 waiting)" in reply)
         assertTrue(o.awaited.isEmpty()) // the pre-check refuses BEFORE any bind is fired
-        assertEquals(listOf(Triple("re-apuntá", "tg-6", 1_000_000L)), o.queued)
+        assertEquals(listOf(Triple("re-aim", "tg-6", 1_000_000L)), o.queued)
     }
 
     @Test
@@ -542,7 +542,7 @@ class BotCommandsTest {
         val (bc, _) = commands(o)
         val full = bc.handle("y ahora esto", 5L)!!
         val reply = full.text
-        assertTrue("⏳ The Mac is busy with «arreglá el login»" in reply)
+        assertTrue("⏳ The Mac is busy with «fix the login»" in reply)
         assertTrue("stayed in the queue (1 waiting)" in reply)
         assertTrue("soft steer" in reply, "the card speaks the enqueue's new meaning: ZCode's soft steer")
         // 30/10: the park ASKS — push-or-enqueue (the owner's «que me
@@ -605,8 +605,8 @@ class BotCommandsTest {
         val reply = bc.onCallback("t:task-02", 99L, OWNER)!!
         // the owner's 5/11 law: the tap's next message is a 100%-sure
         // confirmation, read back from the fork's own state
-        assertTrue("✅ CONFIRMADO: «second» es la conversación activa" in reply.text)
-        assertTrue("(verificado leyendo el fork" in reply.text)
+        assertTrue("✅ CONFIRMED: «second» is the active conversation" in reply.text)
+        assertTrue("(verified by reading the fork" in reply.text)
         assertEquals(listOf("/task task-02" to "tg-99-bind"), o.awaited)
     }
 
@@ -635,24 +635,24 @@ class BotCommandsTest {
         val (bc, _) = commands(o, FakeHistory(rows, ModelSel("GLM-5.3", "high")))
         val reply = bc.reply("/status", 1L)!!
         assertTrue("📊 <b>Status</b>" in reply)
-        assertTrue("🎯 Active: «arreglá el login»" in reply)
+        assertTrue("🎯 Active: «fix the login»" in reply)
         assertTrue("🤖 GLM-5.3 · 🧠 high · 🎛 🔓 Full access" in reply)
         assertTrue("running now: 1" in reply)
         assertTrue("context: app" in reply)
     }
 
-    // THE RICH STATUS (24/11): the same card as a Campo/Valor table — one
+    // THE RICH STATUS (24/11): the same card as a Field/Value table — one
     // pass feeds both lanes, the plain sentences stay the fallback.
     @Test
-    fun statusCarriesTheCampoValorTable() = runBlocking {
+    fun statusCarriesTheFieldValueTable() = runBlocking {
         val o = ops().apply { answers["activeTaskIds"] = """["task-77"]""" }
         val (bc, _) = commands(o, FakeHistory(rows, ModelSel("GLM-5.3", "high")))
         val rich = bc.handle("/status", 2L)!!.rich!!
         assertTrue("<table bordered>" in rich, rich)
-        assertTrue("<th>Campo</th><th>Valor</th>" in rich, rich)
-        assertTrue("<td>Contexto</td>" in rich, rich)
-        assertTrue("<td>Activa</td>" in rich, rich)
-        assertTrue("<td>Modelo</td>" in rich, rich)
+        assertTrue("<th>Field</th><th>Value</th>" in rich, rich)
+        assertTrue("<td>Context</td>" in rich, rich)
+        assertTrue("<td>Active</td>" in rich, rich)
+        assertTrue("<td>Model</td>" in rich, rich)
         assertTrue("<td>Running now</td>" in rich, rich)
         assertTrue("GLM-5.3" in rich, rich)
         assertTrue("<code>" !in rich, "cells are inline-only: no markup invented inside them: $rich")
@@ -682,8 +682,8 @@ class BotCommandsTest {
         """.trimIndent()
         val text = BotCommands.renderQuota(json, nowMs = 0L)
         assertTrue("📊 <b>Coding plan</b>" in text)
-        assertTrue("⏱ 5 hours: 31/120 credits (74% libre)" in text) // 5h first, weekly after
-        assertTrue("📅 Weekly: 88,000/88,000 credits (10% libre)" in text) // the owner's law: separator, unit never moves
+        assertTrue("⏱ 5 hours: 31/120 credits (74% free)" in text) // 5h first, weekly after
+        assertTrue("📅 Weekly: 88,000/88,000 credits (10% free)" in text) // the owner's law: separator, unit never moves
         assertTrue("⚠️" in text) // ≥75% used carries the alert
     }
 
@@ -701,7 +701,7 @@ class BotCommandsTest {
                "percentage":26,"nextResetTime":$resetMs}]}}
             """.trimIndent(),
             nowMs = nowMs,
-        ).substringAfter("credits (74% libre) · ")
+        ).substringAfter("credits (74% free) · ")
 
         val zone = ZoneId.systemDefault() // fmtReset's own (defaulted) zone
 
@@ -743,8 +743,8 @@ class BotCommandsTest {
         """.trimIndent()
         val text = BotCommands.renderQuota(json, nowMs = 0L)
         assertTrue("📊 <b>Start plan</b>" in text)
-        assertTrue("• 5 hours: 340M/500M usado · 32% libre" in text)
-        assertTrue("• weekly: 900M/4,000M usado · 78% libre" in text)
+        assertTrue("• 5 hours: 340M/500M used · 32% free" in text)
+        assertTrue("• weekly: 900M/4,000M used · 78% free" in text)
         assertTrue("⚠️" !in text) // 68% and 22% used are below the 75% alert
     }
 
@@ -759,7 +759,7 @@ class BotCommandsTest {
             }
         """.trimIndent()
         val text = BotCommands.renderQuota(json, nowMs = 0L)
-        assertTrue("• 5 hours: 850K/500M usado · 100% libre" in text, "got: $text")
+        assertTrue("• 5 hours: 850K/500M used · 100% free" in text, "got: $text")
     }
 
     @Test
@@ -775,7 +775,7 @@ class BotCommandsTest {
             }
         """.trimIndent()
         val text = BotCommands.renderQuota(json, nowMs = 0L)
-        assertTrue("• one_time: 166.6M/300M usado · 45% libre" in text, "got: $text")
+        assertTrue("• one_time: 166.6M/300M used · 45% free" in text, "got: $text")
     }
 
     @Test
@@ -787,7 +787,7 @@ class BotCommandsTest {
             }
         """.trimIndent()
         val text = BotCommands.renderQuota(json, nowMs = 0L)
-        assertTrue("340M/400M usado · 15% libre" in text)
+        assertTrue("340M/400M used · 15% free" in text)
         assertTrue("⚠️" in text)
     }
 
@@ -946,7 +946,7 @@ class BotCommandsTest {
     @Test
     fun theTaskListCarriesANativeTable() {
         val rows = listOf(
-            TaskRow("sess_aaaaaaaaaaaa", "arreglá el login", "/w/proj-a", whenMs = 2),
+            TaskRow("sess_aaaaaaaaaaaa", "fix the login", "/w/proj-a", whenMs = 2),
             TaskRow("sess_bbbbbbbbbbbb", "", "/w/proj-b", whenMs = 1),
         )
         val rich = BotCommands.renderTaskListRich(
@@ -957,8 +957,8 @@ class BotCommandsTest {
             all = false,
         )
         assertTrue("<table bordered>" in rich, rich)
-        assertTrue("<th>Conversación</th>" in rich, rich)
-        assertTrue("<td>arreglá el login</td>" in rich, rich)
+        assertTrue("<th>Conversation</th>" in rich, rich)
+        assertTrue("<td>fix the login</td>" in rich, rich)
         assertTrue("<td>proj-b</td>" in rich, rich)
         assertTrue("<td>bbbbbbbb</td>" in rich, "a nameless row wears its sid tail: $rich")
     }
@@ -980,7 +980,7 @@ class BotCommandsTest {
                "currentValue": 30, "usage": 100, "nextResetTime": 1795650000}]}}""",
             1_795_600_000_000L,
         )!!
-        assertTrue("<th>Ventana</th>" in quota, quota)
+        assertTrue("<th>Window</th>" in quota, quota)
         assertTrue("70%" in quota, "the owner reads FREE: $quota")
     }
 
@@ -1057,8 +1057,8 @@ class BotCommandsTest {
         }
         val (bc, _) = commands(o)
         val reply = bc.onCallback("t:task-02", 42L, OWNER)!!
-        assertTrue("✅ CONFIRMADO: «second» es la conversación activa" in reply.text)
-        assertTrue("moví el fork a su proyecto «bot»" in reply.text)
+        assertTrue("✅ CONFIRMED: «second» is the active conversation" in reply.text)
+        assertTrue("moved the fork to its project «bot»" in reply.text)
         assertEquals(
             listOf(
                 "/task task-02" to "tg-42-bind",
@@ -1086,8 +1086,8 @@ class BotCommandsTest {
         }
         val (bc, _) = commands(o)
         val reply = bc.onCallback("t:task-02", 43L, OWNER)!!
-        assertTrue("⏳ Para activar «second» tengo que mudar el fork a su proyecto" in reply.text)
-        assertTrue("/stop primero" in reply.text)
+        assertTrue("⏳ To activate «second» I have to move the fork to its project" in reply.text)
+        assertTrue("/stop first" in reply.text)
         assertEquals(listOf("/task task-02" to "tg-43-bind", "/project $botWs" to "tg-43-ws"), o.awaited)
     }
 
@@ -1101,7 +1101,7 @@ class BotCommandsTest {
         }
         val (bc, _) = commands(o)
         val reply = bc.onCallback("t:task-02", 44L, OWNER)!!
-        assertTrue("⚠️ El bind no pudo confirmarse" in reply.text)
+        assertTrue("⚠️ The bind could not be confirmed" in reply.text)
         assertTrue("task-77" in reply.text, "the contradiction names what actually stayed active")
     }
 
@@ -1114,8 +1114,8 @@ class BotCommandsTest {
         }
         val (bc, _) = commands(o)
         val reply = bc.onCallback("t:task-02", 45L, OWNER)!!
-        assertTrue("🎯 Tu texto va a «second»" in reply.text)
-        assertTrue("no dejó releer el estado" in reply.text)
+        assertTrue("🎯 Your text goes to «second»" in reply.text)
+        assertTrue("did not let the state be re-read" in reply.text)
         assertTrue("✅ CONFIRMADO" !in reply.text)
     }
 }

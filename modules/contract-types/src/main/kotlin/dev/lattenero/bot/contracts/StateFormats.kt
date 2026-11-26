@@ -209,16 +209,16 @@ data class OutboxItem(
     val ts: Long = 0,
     val text: String = "",
     /**
-     * Los pases de flush FALLIDOS de este item (aditivo 2/11, ignorado por
-     * Python si algún día vuelve a leer el archivo). El cap del drain
-     * (Sender.MAX_ITEM_ATTEMPTS) lo descarta — un mensaje que Telegram
-     * rechaza SIEMPRE (el 400 de un tag HTML crudo) no puede ciclar para
-     * siempre: cada reintento cuenta como falla del breaker y lo mantiene
-     * OPEN — el veneno de un comando se come la voz de todo el bot.
+     * This item's FAILED flush passes (additive 2/11, ignored by
+     * Python if it ever reads the file again). The drain's cap
+     * (Sender.MAX_ITEM_ATTEMPTS) discards it — a message Telegram
+     * ALWAYS rejects (the 400 of a raw HTML tag) cannot cycle forever:
+     * every retry counts as a breaker failure and keeps it OPEN — one
+     * command's poison eats the whole bot's voice.
      */
     val attempts: Int = 0,
     /**
-     * THE NOTIFICATION FLAG (aditivo 24/11, ignored by Python): true = the
+     * THE NOTIFICATION FLAG (additive 24/11, ignored by Python): true = the
      * parked message must still BUZZ when the drain speaks it (a key-moment
      * notification). Every item written before the flag existed reads false
      * — the old drain spoke everything silently, which was the bug.

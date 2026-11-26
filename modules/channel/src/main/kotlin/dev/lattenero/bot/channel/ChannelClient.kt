@@ -426,12 +426,12 @@ class ChannelClient(
     }
 
     /**
-     * EL RESPOND del dueño (el loop cerrado, el fork's respond frame —
-     * 6993d7e8): AWAITED — respond_result ok:true SOLO tras el ACK del v4
-     * command; el fallo (interactionId desconocido, interacción ya
-     * resuelta, turno sellado) llega COMO ChannelError con el mensaje del
-     * CLI verbatim — el tap edita el mensaje de la pregunta con esa
-     * verdad. Un fork viejo dice unknown_request: Failed honesta.
+     * THE OWNER'S RESPOND (the closed loop, the fork's respond frame —
+     * 6993d7e8): AWAITED — respond_result ok:true ONLY after the v4
+     * command's ACK; the failure (unknown interactionId, already-resolved
+     * interaction, sealed turn) arrives AS a ChannelError with the
+     * CLI's verbatim message — the tap edits the question's message with
+     * that truth. An old fork says unknown_request: an honest Failed.
      */
     @Suppress("TooGenericExceptionCaught", "SwallowedException") // best-effort for its caller, never for the daemon
     suspend fun respond(frame: ClientFrame.Respond, timeout: Duration = ACK_TIMEOUT): RespondAnswer {
@@ -524,13 +524,13 @@ class ChannelClient(
     }
 
     /**
-     * La ORDEN awaited (la ✍️ armada): el frame Inbound lleva `taskId`
-     * (el destino directo — NO el bindTaskId del bind) y ESPERA el
-     * veredicto del fork. Fire-and-forget aquí es una MENTIRA: el
-     * 2/11 lo probó — el frame sale, el fork rechaza 7ms después
-     * (proto.sessionNotFound) y el dueño ya leyó «Orden entregada».
-     * El ChannelError vuelve tipado ([InboundAnswer.Failed]) con el
-     * verbatim del host.
+     * THE AWAITED ORDER (the ✍️ arm): the Inbound frame carries `taskId`
+     * (the direct destination — NOT the bind's bindTaskId) and WAITS for the
+     * fork's verdict. Fire-and-forget here is a LIE: 2/11 proved it — the
+     * frame leaves, the fork rejects 7ms later
+     * (proto.sessionNotFound) and the owner already read «Order delivered».
+     * The ChannelError returns typed ([InboundAnswer.Failed]) with the
+     * host's verbatim.
      */
     @Suppress("TooGenericExceptionCaught", "SwallowedException") // best-effort mirrors sendInboundAwait
     suspend fun sendOrderAwait(

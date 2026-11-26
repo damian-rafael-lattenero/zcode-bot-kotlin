@@ -277,6 +277,6 @@ class SubagentsCommandTest {
         // surface — this test only owns the subagents entry)
         assertEquals(1, BotCommands.MENU.count { it.name == "subagents" })
         val desc = BotCommands.MENU.first { it.name == "subagents" }.description
-        assertTrue("inactivos" in desc, "the /help entry documents the switch: $desc")
+        assertTrue("inactive" in desc, "the /help entry documents the switch: $desc")
     }
 }

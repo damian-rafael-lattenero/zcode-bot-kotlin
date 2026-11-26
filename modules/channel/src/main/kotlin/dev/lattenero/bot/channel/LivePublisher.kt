@@ -433,9 +433,9 @@ class LiveHub {
 internal const val STALE_SEAL_MS = 900_000L
 
 /**
- * THE CARD IS THE PROCESS, THE FEED IS THE DATA (the owner's ley raíz,
- * 2/11: «separar bien el dato del proceso — el proceso debe estar siempre
- * visible, el dato debe mostrarse de forma ordenada»). THE CARD: one
+ * THE CARD IS THE PROCESS, THE FEED IS THE DATA (the owner's root law,
+ * 2/11: «separate the data from the process properly — the process must always
+ * be visible, the data must be shown in an orderly way» [translated]). THE CARD: one
  * Telegram message born at the turn's start carrying the WORKING header
  * (the elapsed since the real start) and the NOW line (verb + target +
  * that tool's own elapsed) — and it is RE-DRAWN AS THE CHAT'S LAST
@@ -447,8 +447,8 @@ internal const val STALE_SEAL_MS = 900_000L
  * the one-line record and the turn's ORGANIZED DIGEST (the steps with
  * their tools, the conclusion marked ✅ — [TurnDigest]).
  *
- * THE TRANSCRIPT FEED (the owner's 30/10 order: «quiero VER los archivos,
- * leer los commands de bash…»): every tick drains [TranscriptFeed]'s
+ * THE TRANSCRIPT FEED (the owner's 30/10 order: «I want to SEE the files,
+ * read the bash commands…» [translated]): every tick drains [TranscriptFeed]'s
  * diff — each tool CLOSE becomes its own message with its real content,
  * and each sealed CoT block becomes a COLLAPSED message (header + button,
  * never the text) — the card SWAPS (delete → feed → re-birth last) in the
@@ -529,7 +529,7 @@ class LivePublisher(
     /**
      * THE PRIZE SOURCE (the owner, 3/11): a CACHED read of the coding
      * plan's gifts (the daemon injects the channel query). Refreshed every
-     * [GIFTS_REFRESH_MS]; the card shows «Premios» while a turn runs and
+     * [GIFTS_REFRESH_MS]; the card shows «Prizes» while a turn runs and
      * the snapshot is younger than [GIFTS_STALE_MS]. Null/empty = silence.
      */
     private val gifts: suspend () -> GiftsMenu.Gifts? = { null },
@@ -614,8 +614,8 @@ class LivePublisher(
         if (telegram.editPlain(
                 cfg,
                 orphan.messageId,
-                "⛓️ turno perdido — el bot se reinició (nuclear/crash) y este cartel quedó huérfano. " +
-                    "El estado real está en la app; un texto nuevo abre la vista en vivo de nuevo.",
+                "⛓️ lost turn — the bot restarted (nuclear/crash) and this card was left orphaned. " +
+                    "The real state is in the app; a new text opens the live view again.",
             )
         ) {
             logger.info { "live view ORPHAN sealed: message_id=${orphan.messageId} taskId=${orphan.taskId}" }
@@ -675,7 +675,7 @@ class LivePublisher(
         var state: TurnLive = peeked
         refreshGifts(now)
         // THE ATTACH'S AWAIT (5/11): an explicitly-attached IDLE session
-        // births its honest card («ningún turno corriendo ahora») — the old
+        // births its honest card («no turn running now») — the old
         // law left the owner staring at NOTHING after every sa: attach to a
         // stored child whose turn was over
         // the fold's own staleness (the Tick event reduced it) — the same
@@ -762,7 +762,7 @@ class LivePublisher(
         telegram.editPlain(
             cfg,
             mid,
-            "⛓️ turno reemplazado — esta vista era de otra tarea; la nueva tiene su propio cartel.",
+            "⛓️ turn replaced — this view belonged to another task; the new one has its own card.",
         )
         logger.info { "live view REPLACED: old taskId=$statusTaskId message_id=$mid" }
         statusMessageId = null
@@ -787,8 +787,8 @@ class LivePublisher(
         telegram.editPlain(
             cfg,
             mid,
-            "🧊 turno en silencio hace $minutes min — sellado por inactividad. " +
-                "Si sigue corriendo en la app, /task lo re-ataca y la carta vuelve a nacer.",
+            "🧊 turn silent for $minutes min — sealed for inactivity. " +
+                "If it is still running in the app, /task re-attacks it and the card is born again.",
         )
         logger.info {
             "live view STALE-SEALED: taskId=${state.taskId} message_id=$mid — " +
@@ -834,8 +834,8 @@ class LivePublisher(
      * The TRANSCRIPT FEED's drain: [TranscriptFeed]'s diff between the
      * seen pointer and this tick's state, spoken through the render lane.
      * The feed speaks FIRST and the card follows it down (the owner's
-     * rule: «el thinking box siempre se tiene que redibujar como último
-     * mensaje de todo») — but the reclaim rides [redrawCard]'s bounded
+     * rule: «the thinking box must always be redrawn as the last
+     * message of everything» [translated]) — but the reclaim rides [redrawCard]'s bounded
      * window (the 5/11 law): when the spacing window is open the card
      * swaps last as before; when it is not, the feed speaks below the
      * card and the next window's tick reclaims the bottom — the card is
@@ -969,7 +969,7 @@ class LivePublisher(
      * an honest miss.
      *
      * PNG DOORS ONLY (the owner, 26/11): the box wears the 📸 rows and nothing
-     * else — no «Ver salida», no pager. Its words stay registered for the image.
+     * else — no «View output», no pager. Its words stay registered for the image.
      */
     private suspend fun speakBox(
         state: TurnLive,
@@ -1009,7 +1009,7 @@ class LivePublisher(
     override suspend fun toggle(registryId: Int): String? = tickMutex.withLock {
         val cfg = config()
         if (!cfg.configured) {
-            "📡 Sin Telegram configurado — no hay mensaje que abrir."
+            "📡 No Telegram configured — there is no message to open."
         } else {
             cotBlocks.toggle(registryId)
         }
@@ -1017,7 +1017,7 @@ class LivePublisher(
 
     /**
      * THE RETIRED DOOR (the owner, 26/11: the outputs are images and nothing
-     * that is not an image is shown): a tap on an old «Ver salida» button
+     * that is not an image is shown): a tap on an old «View output» button
      * answers the honest words and edits NOTHING — the text pages are no
      * longer a door. An in-flight dispatch keeps the fold's own law.
      */
@@ -1030,7 +1030,7 @@ class LivePublisher(
     override suspend fun fold(registryId: Int): String? = tickMutex.withLock {
         val cfg = config()
         if (!cfg.configured) {
-            "📡 Sin Telegram configurado — no hay mensaje que abrir."
+            "📡 No Telegram configured — there is no message to open."
         } else {
             val box = hub.box(registryId) ?: return@withLock BoxTaps.MISS
             val ok = telegram.editPlain(cfg, box.messageId, box.header, null)
@@ -1311,7 +1311,7 @@ class LivePublisher(
                 if (editKey == pingLastEditKey) return // the counts did not change
                 pingCounter += 1
                 pingLastEditKey = editKey
-                val text = "✏️ Editando archivo $basename +${totals.first} −${totals.second}"
+                val text = "✏️ Editing file $basename +${totals.first} −${totals.second}"
                 speak(text, null)
                 logger.info { "progress ping #$pingCounter: $text (taskId=${state.taskId.takeLast(TASK_ID_TAIL)})" }
             }
@@ -1344,7 +1344,7 @@ class LivePublisher(
 
         /** What an old text door answers now: the outputs are images (26/11). */
         const val RETIRED_DOOR =
-            "📭 Ese botón ya no existe: la salida va en la imagen — tocá el 📸 de la caja."
+            "📭 That button no longer exists: the output goes in the image — tap the box's 📸."
 
         /** The progress pings' cadence (v2 §4) — one ping per 5s per turn, max. */
         val PING_CADENCE = 5.seconds
