@@ -70,8 +70,8 @@ as the manual script below.
 | `DOWN: zcode Mac` | `@HealthchecksBot` | No heartbeat for ~2 min: internet cut, Mac asleep, beacon/launchd dead, or Mac dead — from outside they are indistinguishable, and all mean the bot is down. |
 | `UP: zcode Mac` | `@HealthchecksBot` | Heartbeats returned. |
 | `DOWN: zcode Mac` (the event log records a `/fail` signal) | `@HealthchecksBot` | The Mac is alive but the bot cannot hear the phone: the poller has not completed a successful `getUpdates` cycle for **3 minutes** (dead daemon, hung one, 409 from a second poller, 401, or a real network cut — one number covers them all). A single failed poll never rings: the cursor file's mtime is the receipt, and the next cycle is 3 s away. The beacon pings `/fail`; healthchecks.io alerts through **its** bot, a path independent of the Mac's Telegram connection. |
-| `💀 watchdog: la Mac no late hace X min` | `scripts/watchdog-check.nu` (manual) | Diagnostic path: reads the gist and sends through the second bot token. |
-| `[TEST] 💀 watchdog: simulación…` | `scripts/watchdog-check.nu --simulate-stale-minutes` | Circuit test; proves the gist read and the Telegram send path. |
+| `💀 watchdog: the Mac has not beaten for X min` | `scripts/watchdog-check.nu` (manual) | Diagnostic path: reads the gist and sends through the second bot token. |
+| `[TEST] 💀 watchdog: simulation…` | `scripts/watchdog-check.nu --simulate-stale-minutes` | Circuit test; proves the gist read and the Telegram send path. |
 
 ## Setup (one time)
 

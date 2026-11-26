@@ -26,7 +26,7 @@ instead.
 | ▶️ | alive: open lane mark · «activos» view switch · resumed run |
 | ⏹️ | stop: the `sst:` button · closed lane mark · «inactivos» view switch |
 | ⏸️ | paused: the ghost mark — a store row gone stale («⏸️ hace Xm») |
-| 💀 | ended / hard stop: `stop:go`, «ya terminó», the kill ladder |
+| 💀 | ended / hard stop: `stop:go`, «it already ended», the kill ladder |
 | ☢️ | nuclear: the confirmation row and its go |
 | 🗑 | discard ONE queued text (`qd:`) |
 | ✍️ | ARM the next free text as an order/answer (`so:`, `qf:`) — never a send |
@@ -90,9 +90,9 @@ instead.
 1. Header bold, body plain, quoted data in a blockquote (the plan clip in the
    question card). Every interpolated name/title goes through `PyText.esc`.
 2. Honest status lines, derived from REAL timestamps, never decorated:
-   «⏳ vivo hace Xm» · «💀 terminó» · «▶️ corriendo» · «⏸️ hace Xm —
-   probablemente terminó».
-3. A refusal says what did NOT happen: «la orden NO voló», «NADA voló», «text
+   «⏳ alive for Xm» · «💀 ended» · «▶️ running» · «⏸️ Xm ago —
+   probably ended».
+3. A refusal says what did NOT happen: «the order did NOT fly», «NOTHING flew», «text
    did NOT reach a conversation», «nothing was touched». A refusal that only
    explains policy is half a refusal — name the thing that did not happen.
 4. Failures carry the host's verbatim: «⚠️ X failed (code): message».

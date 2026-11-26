@@ -37,7 +37,7 @@ def main []: nothing -> nothing {
     print $build.stdout
     if $build.exit_code != 0 {
         print -e $build.stderr
-        announce-loud "❌ <b>DEPLOY BOT KOTLIN (ZCODE) FALLÓ</b> — el build (Gradle/detekt/tests) se cayó; el daemon sigue con lo anterior"
+        announce-loud "❌ <b>KOTLIN BOT DEPLOY (ZCODE) FAILED</b> — the build (Gradle/detekt/tests) fell; the daemon keeps the previous one"
         die $"the build failed: exit ($build.exit_code)"
     }
 
@@ -62,7 +62,7 @@ def main []: nothing -> nothing {
     bootstrap-agent $repo $LABEL
 
     step "verification: first heartbeat + armed state (deadline 45s)"
-    announce "🚀 deploy Bot Kotlin espejo ZCode 4/4 — verification (heartbeat + estado armado, deadline 45 s)"
+    announce "🚀 deploy Bot Kotlin espejo ZCode 4/4 — verification (heartbeat + armed state, deadline 45 s)"
     let hb: path = ($data | path join "state/hb-zconn-shadow")
     let zconn: path = ($data | path join "state/zconn.json")
     let ok: bool = (wait-armed $hb $zconn $started 45sec)
@@ -74,7 +74,7 @@ def main []: nothing -> nothing {
         for line in (tail-lines $err 5) {
             print -e $line
         }
-        announce-loud "❌ <b>DEPLOY BOT KOTLIN (ZCODE) FALLÓ</b> — el daemon NO armó en 45 s (heartbeat ausente); mirá el deploy log"
+        announce-loud "❌ <b>KOTLIN BOT DEPLOY (ZCODE) FAILED</b> — the daemon did NOT arm in 45 s (missing heartbeat); check the deploy log"
         exit 1
     }
     log $"heartbeat: (^stat -f '%Sm' $hb | str trim)"

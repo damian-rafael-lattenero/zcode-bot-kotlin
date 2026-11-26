@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- El autómata del cutover como job ONE-SHOT de launchd (lección medida: un
-     nohup desde adentro del app muere con el árbol del app cuando launchd lo
-     tumba; hijo de launchd, el autómata sobrevive a TODO).
-     30/10: RunAtLoad era true — en CADA boot el cutover corria solo (--real:
-     cierra el app, buildea, swap, reabre). El dueño lo vivio: reinicio la PC,
-     abrio ZCode y el script arranco solo. DEPLOY = DECISION DEL DUEÑO, nunca
-     un bootstrap. Carga manual cuando el la pide:
+<!-- The cutover automaton as a launchd ONE-SHOT job (measured lesson: a
+     nohup from inside the app dies with the app tree when launchd
+     takes it down; a launchd child, the automaton survives EVERYTHING).
+     10/30: RunAtLoad was true — on EVERY boot the cutover ran on its own (--real:
+     closes the app, builds, swaps, reopens). The owner lived it: he restarted the PC,
+     opened ZCode and the script started on its own. DEPLOY = THE OWNER DECISION, never
+     a bootstrap. Loaded by hand when he asks:
        launchctl kickstart gui/$(id -u)/com.zcode.deploy-fork
-     Loguea a /tmp/deploy-fork.log, y al salir queda idle (inofensivo). -->
+     Logs to /tmp/deploy-fork.log, and goes idle on exit (harmless). -->
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
@@ -16,8 +16,8 @@
   <array>
     <!-- 2/11: launchd NO puede spawnear el binario nu-nightly directo
          (OS_REASON_CODESIGNING — ad-hoc linker-signed + xattr provenance;
-         desde shell anda, desde launchd no). El wrapper zsh (firmado por
-         Apple) lo exec como hijo y pasa el gate. -->
+         from a shell it works, from launchd it does not). The zsh wrapper (signed by
+         Apple) execs it as a child and passes the gate. -->
     <string>/bin/zsh</string>
     <string>-c</string>
     <string>exec /Users/lattenero/.local/bin/nu-nightly /Users/lattenero/Projects/zcode-bot-kotlin/scripts/deploy-fork-and-retire.nu --real</string>

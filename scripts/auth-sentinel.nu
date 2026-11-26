@@ -124,34 +124,34 @@ def suspects []: nothing -> string {
     let parsed: table = ($rows | each {|l|
         $l | parse -r '^\s*(?<pid>\d+)\s+(?<etime>\S+)\s+(?<comm>\S+)' | first
     } | compact)
-    if ($parsed | is-empty) { return "No identifiqué al peticionario." }
+    if ($parsed | is-empty) { return "I could not identify the asker." }
     let named: table = ($parsed | where {|r| ($r.comm | path basename) in $ASKERS })
     let young: table = ($parsed | where {|r|
         ($r.comm | path basename) not-in $ASKERS and (etime_to_s $r.etime) < 120
     } | sort-by {|r| etime_to_s $r.etime } | first 3)
     let all: table = ($named | append $young)
-    if ($all | is-empty) { return "No identifiqué al peticionario." }
+    if ($all | is-empty) { return "I could not identify the asker." }
     $all | each {|r|
-        $"• ($r.comm | path basename) — pid ($r.pid), hace (etime_to_s $r.etime)s"
+        $"• ($r.comm | path basename) — pid ($r.pid), (etime_to_s $r.etime)s ago"
     } | str join "\n"
 }
 
 def alert_text [episode: record, who: string]: nothing -> string {
-    $"🔐 La Mac pidió contraseña/autorización.
+    $"🔐 The Mac asked for a password/authorization.
 
-Proceso: ($episode.name) — pid ($episode.pid) — desde las ($episode.started_clock).
-Probable peticionario:
+Process: ($episode.name) — pid ($episode.pid) — since ($episode.started_clock).
+Probable asker:
 ($who)
 
-Queda esperando en la pantalla de la Mac. La contraseña no viaja por Telegram — si se repite, lo matamos de raíz."
+It waits on the Mac screen. The password never travels over Telegram — if it repeats, we kill it at the root."
 }
 
 def reping_text [episode: record]: nothing -> string {
-    $"⏳ La Mac SIGUE esperando la contraseña: ($episode.name) — pid ($episode.pid) — desde las ($episode.started_clock)."
+    $"⏳ The Mac is STILL waiting for the password: ($episode.name) — pid ($episode.pid) — since ($episode.started_clock)."
 }
 
 def resolve_text [episode: record]: nothing -> string {
-    $"🔓 Se cerró el diálogo de contraseña de la Mac — pid ($episode.pid), había nacido a las ($episode.started_clock)."
+    $"🔓 The Mac password dialog closed — pid ($episode.pid), born at ($episode.started_clock)."
 }
 
 # Stateless sendMessage (the healer's siren): button_pid >= 0 attaches the
@@ -165,7 +165,7 @@ def notify [text: string, button_pid: int]: nothing -> nothing {
     if ($token | is-empty) or ($chat | is-empty) { return }
     let base: record = {chat_id: ($chat | into string), text: $text}
     let body: record = (if $button_pid >= 0 {
-        $base | insert reply_markup {inline_keyboard: [[{text: "✅ Ya la atendí", callback_data: $"auth:($button_pid)"}]]}
+        $base | insert reply_markup {inline_keyboard: [[{text: "✅ Already attended", callback_data: $"auth:($button_pid)"}]]}
     } else {
         $base
     })
@@ -208,7 +208,7 @@ def main [--status, --dry-run, --selftest, --test-alert]: nothing -> nothing {
     if $selftest { selftest; return }
     let log: string = (cfg_path "AUTH_SENTINEL_LOG" "~/.zcode/bot-kotlin/logs/auth-sentinel.log")
     if $test_alert {
-        notify "🔐 Prueba del sentinel — si leés esto y el botón contesta, el canal anda." 0
+        notify "🔐 Sentinel probe — if you read this and the button answers, the channel works." 0
         log_line $log "test alert sent (callback auth:0)"
         return
     }

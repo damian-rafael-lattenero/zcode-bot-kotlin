@@ -2,7 +2,7 @@
 
 > Reference for Python-parity work. Produced 2026-10-29 by a read-only survey agent, verified against code (evidence cited inline).
 > Branches: ZCode fork `damian` @ `9b814dcb` (B3a deployed) · Kotlin daemon `zcode-bot-kotlin` · Python reference `~/Projects/bot`.
-> Companion docs: `~/Projects/ZCode/docs/fork/DAEMON-CHANNEL.md` (channel spec), `docs/plan-brujula.md` (roadmap).
+> Companion docs: `~/Projects/ZCode/docs/fork/DAEMON-CHANNEL.md` (channel spec), `docs/plan-compass.md` (roadmap).
 
 ## 1. The fork's surfaces (everything a client can touch)
 
@@ -82,7 +82,7 @@ Kotlin: `modules/channel/.../BotCommands.kt` (dispatch), wired in `daemon/Channe
 | Capability | Python | Lives in | Reaches daemon via | Missing |
 | --- | --- | --- | --- | --- |
 | Free text → chosen conversation | active sid (only_active_task) | `BotState.activeTaskId` | inbound + `/task <id>` bind + botStatus poll | race-free targeting; bind refused while old task runs; no queue when busy |
-| Push-or-enqueue on busy turn | «¿empujar o encolar?» buttons | — | `taskRunning` reply + `stop` query + stream `task_complete` | the whole flow (buttons + pending queue) |
+| Push-or-enqueue on busy turn | «push or queue?» buttons | — | `taskRunning` reply + `stop` query + stream `task_complete` | the whole flow (buttons + pending queue) |
 | /tasks buttons | inline keyboard | — | — (send path has no markup yet) | inline keyboard EVERYWHERE (structural piece) |
 | /status model line | model_selection_payload | cli db | nothing | direct read |
 | /nuclear confirm | ☢️/🙅 buttons | — | nothing | confirmation flow |

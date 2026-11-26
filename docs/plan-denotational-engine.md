@@ -17,7 +17,7 @@ with seven ingredients, and only Nushell has them. In parallel, the replay of th
 showed that drift is semantic — no structural rule sees it — so correcting the agent while it works
 needs a judge, not more lint.
 
-The plan has one vehicle: a study book (v5) written as short fichas, where every piece of the engine
+The plan has one vehicle: a study book (v5) written as short cards, where every piece of the engine
 is also something the owner learns by building.
 
 ## 2. Vocabulary (the pieces — form first)
@@ -31,7 +31,7 @@ is also something the owner learns by building.
 | `Gate` | A pure predicate from an action to a verdict: `Allow · Guide(text) · Ask(card) · Deny(reason)` | `~/Scripts/scripts/hooks/*.nu` |
 | `Oracle` | The compiler or test runner of a language — the only ground truth for "it works" | PostToolUse hooks (new) |
 | `Drill` | One exercise with an automated check | `canonical-drills` repo |
-| `Ficha` | One book unit: concept + mappings + paper sheet + drill + retrieval questions + checkpoint | `agent-brain/docs/book/` |
+| `Card` | One book unit: concept + mappings + paper sheet + drill + retrieval questions + checkpoint | `agent-brain/docs/book/` |
 | `Correction` | What the agent did, what the owner did instead, and the concept or law it breaks | brain `corrections` table (new) |
 | `Proposal` | A correction turned into a candidate hook, law note, skill or drill — owner approves | Corpus Doctor |
 | `Eval` | One number over time, in the ledger | `agent-brain/evals/suites/*.json` |
@@ -102,13 +102,13 @@ completion verifier — it never inspects an action before it happens.
    (Haskell concepts, sourced from the manuals) + the Maps (one per language) + the official docs
    mirror per language.
 2. **Application** — gates at write time + the oracle after the write.
-3. **Rumbo** — the typed witness of the request + a semantic judge fired by the measured triggers.
+3. **Course** — the typed witness of the request + a semantic judge fired by the measured triggers.
 4. **Learning** — corrections captured as data, proposed as rules, promoted through the owner's ladder.
 5. **Measurement** — three new numbers in the ledger, shown by `/learn`.
 
 ## 5. Phases
 
-Each phase is one or more sessions; each session is one logical unit: commit, push, and the ficha it
+Each phase is one or more sessions; each session is one logical unit: commit, push, and the card it
 teaches. Hooks follow the census law (every `.nu` has its test, `~/Scripts/tests/`).
 
 ### P0 — Baseline and scaffolding (1 session) — DONE 26/11
@@ -119,7 +119,7 @@ teaches. Hooks follow the census law (every `.nu` has its test, `~/Scripts/tests
 - [x] Baseline `scripts/brain-baseline.nu` + `lib/brain-baseline.nu` (pure core), tests, gate green;
       first real run exit 0 in 65 s. Oracle definition measured: a failing run is `status=completed`
       with the failure inside `state.output` (no exit codes are stored; `status=error` is the harness).
-- [x] Book folder and the hoja de ruta (`agent-brain` `cb632ca`).
+- [x] Book folder and the route sheet (`agent-brain` `cb632ca`).
 - [x] Found and fixed on the way: the typing hook's type-alias warn crashed on two prose parens
       inside the interpolated message — exactly on the files the law targets (`6f58ad8`).
 
@@ -152,8 +152,9 @@ teaches. Hooks follow the census law (every `.nu` has its test, `~/Scripts/tests
       Fifteen live questions (`agent-brain query`, k = 10; the Spanish one again through MCP). Nine
       English concept questions: the Canon note is in the top 3 for 8 (first for 4) — rank 2 for
       "difference between applicative and monad", rank 5 for the bare word "monad", rank 9 for "what
-      does Monad denote in Haskell and which laws must it keep". Spanish, the way the owner asks: "qué
-      es una mónada y para qué sirve" returns `concepts/monad.md` tenth of ten through MCP (absent
+      does Monad denote in Haskell and which laws must it keep". Spanish, the way the owner asks: «qué
+      es una mónada y para qué sirve» [translated: "what is a monad and what is it for"] returns
+      `concepts/monad.md` tenth of ten through MCP (absent
       from the ten through the CLI), with a similarity of 0.70 — the fourth highest of the ten. Two
       causes, both read on that answer: (1) five of the nine slots above it are SPANISH documents
       already in the store, at 0.556–0.578, the noise floor — `fp-kb/notes/README.md`,
@@ -167,11 +168,11 @@ teaches. Hooks follow the census law (every `.nu` has its test, `~/Scripts/tests
       and a map that ranks tenth teaches nothing. The fix is the owner's call (brain code and corpus):
       the Spanish documents translated or out of the index, curated notes ranked first, and a retrieval
       suite of concept questions in the ledger with the before and after.
-- [ ] `~/Projects/ECOSISTEMA.md` lists no KB today — decide whether it should.
+- [ ] `~/Projects/ECOSYSTEM.md` lists no KB today — decide whether it should.
 - [x] DONE 26/11 — the Theory (owner's order, 2026-11-26: "launch one more subagent for category theory… the
       categories that then come down to Haskell and then pass to other languages… always the latest on
       the web, in papers, in books"). New repo `theory-kb`: `official/` (text sources whose license
-      allows a mirror) + `notes/category-theory/<id>.md`, 20 concepts in learning order, fichas H01–H20:
+      allows a mirror) + `notes/category-theory/<id>.md`, 20 concepts in learning order, cards H01–H20:
       category · functor · natural transformation · limit and colimit · adjunction · monoidal functor ·
       monoid object · Kleisli category · F-algebra · free and forgetful · exponential and CCC · Yoneda ·
       Kan extension · contravariant functor · profunctor · comonad · monoidal category · sheaf ·
@@ -210,15 +211,15 @@ teaches. Hooks follow the census law (every `.nu` has its test, `~/Scripts/tests
       `kap-rules.yml`; `.ts` → `tsc --noEmit --incremental` when a tsconfig exists; `.hs` → `ghc -fno-code`
       (the owner's `haskell-flows-mcp` already wraps ghcide — reuse, do not rebuild).
 
-### P4 — Rumbo: the judge (3 sessions)
+### P4 — Course: the course judge (3 sessions)
 
-- [ ] `El Pedido`: a typed witness `{ goal, constraints, nonGoals, acceptance }` written at turn start
-      to `~/.zcode/hooks/state/pedidos/<session>.json`.
+- [ ] `The Request`: a typed witness `{ goal, constraints, nonGoals, acceptance }` written at turn start
+      to `~/.zcode/hooks/state/requests/<session>.json`.
 - [ ] Triggers, from the replay: two tool errors in the first 10 steps · a subagent in the first 10 ·
       no edit in the first 8 · a request of 60 characters or fewer past step 50 · the first edit.
-- [ ] The judge: one stateless call over the pack (Pedido + the action ledger: files, tests, errors)
-      returning `alineado · desvío menor · desvío` with cited evidence; it may only ask, once per turn.
-- [ ] Seal: delivered versus Pedido, reusing the fork's completion-verifier prompt shape
+- [ ] The judge: one stateless call over the pack (The Request + the action ledger: files, tests, errors)
+      returning `aligned · minor drift · drift` with cited evidence; it may only ask, once per turn.
+- [ ] Seal: delivered versus The Request, reusing the fork's completion-verifier prompt shape
       (`ZCode/apps/zcode-cli/packages/contracts/src/tools/target.ts`).
 - [ ] It lives in the fork's hook layer, so desktop and phone share one mechanism.
 
@@ -235,11 +236,11 @@ teaches. Hooks follow the census law (every `.nu` has its test, `~/Scripts/tests
 
 - [ ] `first-pass` — per language: law denials per 1,000 writes and oracle failure ratio, weekly.
 - [ ] `canon` — a weekly sample of 20 edits judged against the Canon: adherence and the most violated
-      concepts, which also says which ficha to read next.
+      concepts, which also says which card to read next.
 - [ ] `rumbo` — cancels per 100 turns and the wasted-step share (baselines 12.4% and 74.3%).
 - [ ] New `EvalKind`s and JSON suites in `agent-brain/evals/suites/`; `/learn` shows the three numbers.
 
-### P7 — The book v5 (starts at P0; every phase writes its fichas)
+### P7 — The book v5 (starts at P0; every phase writes its cards)
 
 **From the v4 audit (measured):** v4 has 149 dictionary entries in one part, zero exercises with
 answers, 21 exam questions with no answer key, zero recap boxes, and eleven ideas used before they are
@@ -247,31 +248,31 @@ defined (LoRA, MRR, RRF, HNSW, harness, bus, ledger and gate among them). Its st
 149 entries to a single day and is not ordered by prerequisite. The v5 rules that follow: one home per
 idea (the fixture-blindness and LoRA stories are each retold four or more times in v4); no paragraph
 over 100 words; order by prerequisite, never by date; the exam gets an answer key and a
-question-to-ficha map.
+question-to-card map.
 
 **Shape.** `agent-brain/docs/book/`, Spanish, code and terms in English (the same deliberate exception
-as v4). `00-hoja-de-ruta.md` is one page with a checkbox per ficha, ordered by prerequisite. v4 stays as
-the historical record; the Desktop copy (still the old v2) is replaced by the hoja de ruta.
+as v4). `00-route-sheet.md` is one page with a checkbox per card, ordered by prerequisite. v4 stays as
+the historical record; the Desktop copy (still the old v2) is replaced by the route sheet.
 
-**A ficha** is at most 150 lines and sized for the owner's measured reading time: 10–20 minutes on new
+**A card** is at most 150 lines and sized for the owner's measured reading time: 10–20 minutes on new
 material, chained so a hyperfocus session can continue. Fixed order:
 
-1. **El ajá** (five lines or fewer) — the Haskell idea in one sentence and its equivalent in his
+1. **The aha** (five lines or fewer) — the Haskell idea in one sentence and its equivalent in his
    languages, or a real bug from his repos that the idea explains. The reward comes first.
-2. **Qué denota · en Haskell · por qué existe** — the one-sentence denotation, the type and its laws.
-3. **En tus lenguajes** — the table: Kotlin, Nushell, TypeScript, with the gap and the trap.
-4. **📍 En tu sistema** — the real file where it lives (`kap/LAWS.md`, a `nushell-fp` module, a bot file).
-5. **✍️ Hoja de papel** — copy the signature; complete the law (`fmap id == ___`); draw the diagram.
+2. **What it denotes · in Haskell · why it exists** — the one-sentence denotation, the type and its laws.
+3. **In your languages** — the table: Kotlin, Nushell, TypeScript, with the gap and the trap.
+4. **📍 In your system** — the real file where it lives (`kap/LAWS.md`, a `nushell-fp` module, a bot file).
+5. **✍️ Paper sheet** — copy the signature; complete the law (`fmap id == ___`); draw the diagram.
 6. **Drill** — the test to make pass in the drills repo.
-7. **Preguntas de recuperación** — three, answered from memory; answers live in the answers part.
-8. **Cierre** — a three-line recap, then the checkpoint: if you can explain X in your own words, go
-   to ficha N.
+7. **Retrieval questions** — three, answered from memory; answers live in the answers part.
+8. **Close-out** — a three-line recap, then the checkpoint: if you can explain X in your own words, go
+   to card N.
 
-**Parts.** A El mapa (the five pillars, the history in two pages) · B Los conceptos (the Canon, one
-ficha each) · C Tu sistema por dentro (RAG, memoria, evals, MCP, harness — v4's architecture parts
-rewritten as fichas) · D El harness como capa de leyes (new: hooks, skills, the ladder, gates, the judge,
-promotion) · E Los números (recall, MRR, gates, and the three new ones) · F El método y las trampas ·
-G Respuestas · H La teoría (the 20 categorical concepts above the Canon, fichas H01–H20, written after
+**Parts.** A The map and the base words (the five pillars, the history in two pages) · B The concepts (the Canon, one
+card each) · C Your system inside (RAG, memory, evals, MCP, harness — v4's architecture parts
+rewritten as cards) · D The harness as a layer of laws (new: hooks, skills, the ladder, gates, the judge,
+promotion) · E The numbers (recall, MRR, gates, and the three new ones) · F The method ·
+G Answers · H The theory (the 20 categorical concepts above the Canon, cards H01–H20, written after
 B so that each one can point at its Canon note).
 
 **Drills repo** `~/Projects/canonical-drills`: one module per language, types-first (the test and the
@@ -328,4 +329,4 @@ fired, the judge spoke, or the eval row landed in the ledger.
 P0 → P1 → P2 → P3 → P4 → P5, with P6's baseline inside P0 and P7 running through all of them. Parts A,
 C, D and F of the book document what already exists and can be written right after P0, so the v5 is
 readable early. Open decisions deferred to their phase: the TypeScript FP library (P2), and whether the
-`Pedido` is parsed deterministically or by a small model call (P4).
+`The Request` is parsed deterministically or by a small model call (P4).
