@@ -126,8 +126,8 @@ class LiveHub {
         // THE WATCH'S HOLD (5/11): an explicit attach is the owner's choice —
         // a previous task's still-subscribed running traffic never steals the
         // card back (the live flip-flop 15:13-16:10: born/REPLACED every few
-        // seconds, «funciona horrible, no se desuscribe», «⛓️» en bucle). The
-        // hold is HUB state — it SURVIVES the watched turn's seal (a seal
+        // seconds, «it works horribly, it does not unsubscribe» [translated],
+        // «⛓️» in a loop). The hold is HUB state — it SURVIVES the watched turn's seal (a seal
         // nulls the fold; a fold-borne hold died with it and the loop
         // returned at the next traffic). The implicit pre-attach world holds
         // nothing and keeps the traffic-following law.
@@ -453,7 +453,7 @@ internal const val STALE_SEAL_MS = 900_000L
  * and each sealed CoT block becomes a COLLAPSED message (header + button,
  * never the text) — the card SWAPS (delete → feed → re-birth last) in the
  * same tick. The tap on a collapsed message EXPANDS THE BLOCK IN PLACE
- * ([toggle], 2/11: «el lugar para que aparezca el texto ES EN EL BOTÓN»),
+ * ([toggle], 2/11: «the place for the text to appear IS IN THE BUTTON» [translated]),
  * another tap re-collapses. The level ([FeedVerbosity], read PER TICK
  * from the injected setting — policy §7: the publisher never reads files)
  * gates: SUMMARY speaks nothing (the card STILL renders — the process is
@@ -805,10 +805,10 @@ class LivePublisher(
 
     /**
      * THE CARD EDITS IN PLACE, THE RECLAIM IS BOUNDED (the owner's 5/11
-     * verdict: «no estoy viendo el cartel»): a changed render now EDITS the
+     * verdict: «I am not seeing the card» [translated]): a changed render now EDITS the
      * message (Telegram's editMessageText — the seconds tick without a
      * single new message), and the delete+re-birth that keeps the card
-     * «debajo de todo» fires at most ONCE per [BIRTH_SPACING_MS] window —
+     * «below everything» [translated] fires at most ONCE per [BIRTH_SPACING_MS] window —
      * the 4/11 flicker died right here (the old redraw deleted first and
      * the spacing law then blocked the re-birth: the card went MISSING for
      * up to 30s at a stretch — six births in 2.5 minutes). Under a 429
@@ -999,8 +999,8 @@ class LivePublisher(
     }
 
     /**
-     * THE TAP (the owner's 2/11 refinement, verbatim): «el lugar para que
-     * aparezca el texto ES EN EL BOTÓN del CoT» — the collapsed block's
+     * THE TAP (the owner's 2/11 refinement, verbatim): «the place for the
+     * text to appear IS IN THE CoT BUTTON» [translated] — the collapsed block's
      * message expands IN PLACE with the block WHOLE; another tap folds it
      * back to the one-line header. MUTEXED with the tick (the registry is
      * the publisher's mutable state). The configured check rides here:

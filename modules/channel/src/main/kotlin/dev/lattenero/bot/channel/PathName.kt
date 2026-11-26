@@ -3,8 +3,8 @@ package dev.lattenero.bot.channel
 import dev.lattenero.bot.contracts.PyText
 
 /**
- * THE NAME-FIRST LAW (v2 §7 — the owner, 12/11: «las rutas son las largas,
- * nunca llego a ver el nombre del archivo»): a path's detail LEADS with the
+ * THE NAME-FIRST LAW (v2 §7 — the owner, 12/11: «the paths are the long
+ * ones, I never get to see the file's name» [translated]): a path's detail LEADS with the
  * basename — «LiveTurn.kt · …/channel» — the file's name first, ONE
  * directory of context behind, never the long middle. The basename itself
  * is never cut (the filename law, v2 §6, still owns that); the context

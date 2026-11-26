@@ -7,8 +7,8 @@ import kotlinx.serialization.json.JsonPrimitive
 /**
  * B3b's LIVE VIEW — HONEST, PURE. The owner's two hard rules (29/10):
  *
- * A. «el cartel de thinking que hay ahora es falso … yo quiero que sea
- *    real, no un cartel de adorno» — every live state derives from REAL
+ * A. «the thinking card shown now is fake … I want it to be real,
+ *    not a decorative card» [translated] — every live state derives from REAL
  *    channel events with a staleness watchdog: generic Thinking is only
  *    valid WHILE thought chunks keep arriving; 20s of silence degrades
  *    honestly («(30s without events)»); a socket drop renders the RECONNECT
@@ -16,9 +16,9 @@ import kotlinx.serialization.json.JsonPrimitive
  *    turn with its error visible (quota exhaustion is a pill, not a
  *    hanging spinner). Silence is data.
  *
- * B. «cada thinking debe ser distinto: el thinking general, el thinking
- *    por read, por write, y por cada accion que tenga zcode, mcps, shell
- *    etc» — the phase is keyed by what is ACTUALLY happening, each with
+ * B. «each thinking must be distinct: the general thinking, the thinking
+ *    per read, per write, and for every action zcode has — mcps, shell
+ *    etc.» [translated] — the phase is keyed by what is ACTUALLY happening, each with
  *    its own verb (🧠 general thought, 📖 reading, ✏️ writing/editing,
  *    ⚡ shell, 🔌 mcp …) via the injected [ToolVerbifier] — the wiring
  *    passes the SPECTATOR's classification map, never a duplicate.
@@ -300,7 +300,7 @@ data class TurnLive(
      */
     val staleMs: Long? = null,
     /**
-     * THE ATTACH'S AWAIT (measured 5/11: «silencio de radio total»): a
+     * THE ATTACH'S AWAIT (measured 5/11: «total radio silence» [translated]): a
      * SwitchTask attach to an IDLE session (a stored child whose turn is
      * over) never receives a frame — without this flag the publisher
      * refused to birth an Idle card and the owner stared at NOTHING. The
@@ -814,8 +814,8 @@ object LiveTurn {
         }
         cotRow(state)?.let(lines::add)
         // THE HEART IS DEAD (the owner's 30/10 verdict on the 💓): liveness
-        // is the per-box counters themselves plus this sober line — «en
-        // vivo» with the honest silence while the stream moves or waits;
+        // is the per-box counters themselves plus this sober line — «live»
+        // with the honest silence while the stream moves or waits;
         // «frozen» when the channel is down, the turn errored, the retry
         // pill holds or the stream is cut (the clocks above already froze).
         val live = channelAlive && state.typedError == null && state.apiRetry == null &&
@@ -1035,7 +1035,7 @@ object LiveTurn {
      * trimmed, FLOORED — never rounds into the next rung («1000k» cannot
      * exist), and the M rung starts exactly at 1_000_000 (1M, never
      * «1000k»). Spoken by the pings, the CoT row's «on the way» and the
-     * sealed blocks' «generado Xk»; the card's phase lines keep raw counts.
+     * sealed blocks' «generated Xk»; the card's phase lines keep raw counts.
      */
     internal fun fmtKDecimal(n: Long): String = when {
         n < K_FROM -> n.toString()

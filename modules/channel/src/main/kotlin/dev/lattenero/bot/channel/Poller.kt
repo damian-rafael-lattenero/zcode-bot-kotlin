@@ -196,7 +196,7 @@ class Poller(
             // must not RE-DELIVER the update: every in-process single-flight
             // gate (nuclearGate, the deploy's consumed arm) dies with the
             // process and cannot protect across it (measured: nuclear fired
-            // twice, deploys chained «muchas veces»). Everything else keeps
+            // twice, deploys chained «many times» [translated]). Everything else keeps
             // the at-least-once post-commit law untouched.
             if (isSuicidal(message)) saveCursor(message.updateId + 1)
             try {
@@ -313,8 +313,8 @@ class Poller(
      * single-object media shapes (voice, audio, video, video_note, sticker,
      * animation) or a document — the fork's own vocabulary speaks all four
      * kinds («image» | «audio» | «video» | «file»), and a dropped voice note
-     * was pure silence (the owner, 13/11: «no se pueden enviar archivos y
-     * audios e imagenes»). Stickers and animations have no vocabulary slot
+     * was pure silence (the owner, 13/11: «files, audio and images cannot
+     * be sent» [translated]). Stickers and animations have no vocabulary slot
      * of their own: a sticker rides as «image» or «video» by its real mime
      * (the [stickerKind] selector), an animation as «video» — the shape's
      * own name (`sticker-…`, `animation-…`) and mime keep the truth. A

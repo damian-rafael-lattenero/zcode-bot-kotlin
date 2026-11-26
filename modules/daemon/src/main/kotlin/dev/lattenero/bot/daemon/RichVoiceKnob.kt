@@ -12,8 +12,9 @@ data class RichVoiceKnobReading(val on: Boolean, val warning: String? = null)
  * THE VIOLET CHANNEL's knob: `rich_voice` in the same `<home>/daemon.json`
  * the notifications/poll/event_bus knobs live in — read ONCE at boot.
  *
- * THE DEFAULT IS ON — the owner's 5/11 order («quisiera que vayan por un
- * canal especial… fondo violeta… es el llm hablando») makes ON the safe
+ * THE DEFAULT IS ON — the owner's 5/11 order («I would like them to ride a
+ * special channel… violet background… it is the LLM speaking»
+ * [translated]) makes ON the safe
  * default: a missing file, an absent key or garbage all STAY ON (the
  * warning lands in daemon.jsonl); only an explicit false silences. OFF
  * means the publisher speaks the LLM's voice the old way (plain texts,

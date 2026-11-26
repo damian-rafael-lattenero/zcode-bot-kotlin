@@ -31,8 +31,8 @@ import java.util.Properties
  * xerial connections, mode=ro, zero writes. The SQL itself now lives typed
  * in `Cli.sq`/`Tasks.sq` (typing-only schema: both files belong to ZCode).
  *
- * THE NEWBORN LAW (the owner, 14/11: «las tasks nuevas del /run no
- * aparecen»): the app writes a /run-born conversation's tasks-index row
+ * THE NEWBORN LAW (the owner, 14/11: «the new /run tasks do not
+ * appear» [translated]): the app writes a /run-born conversation's tasks-index row
  * only at its FIRST TURN'S END (created_at backdated — measured live:
  * the row was absent 3 min after birth), while the CLI db's own session
  * row exists from birth. Every interactive parent session younger than
@@ -111,7 +111,7 @@ internal class TasksHistoryIo(
     }
 
     /**
-     * /subagents «inactivos» — today's ENDED subagent rows of the cli db's
+     * /subagents «inactivos» (the live command token, kept as is) — today's ENDED subagent rows of the cli db's
      * own `session` table (parent_id IS NOT NULL): last_outcome != ''
      * (empty = STILL RUNNING — measured live 30/10: the two running
      * subagents carried '', the ended ones 'completed'/'interrupted'),
@@ -284,7 +284,7 @@ internal class TasksHistoryIo(
 
     /**
      * One index row or null — the dedupe guard lives here. THE FRESH-TASK
-     * LAW (the owner, 12/11: «/tasks no muestra las tasks nuevas del /run»):
+     * LAW (the owner, 12/11: «/tasks does not show the new /run tasks» [translated]):
      * a row without CLI usage still RIDES — its first model_usage line has
      * not been written yet, and that absence never hides a conversation the
      * index itself holds (the router's freshestTask already sees it). It

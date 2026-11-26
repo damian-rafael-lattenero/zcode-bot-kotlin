@@ -2,7 +2,7 @@ package dev.lattenero.bot.channel
 
 /**
  * The TRANSCRIPT FEED's level (the owner's 30/10 order: verbose BY
- * DEFAULT — «yo quiero VER los archivos, leerlos»). The publisher gates
+ * DEFAULT — «I want to SEE the files, to read them» [translated]). The publisher gates
  * its mid-turn sends per level; the status card exists and ticks at every
  * level, and the seal's answer + summary speak at every level.
  */
@@ -22,7 +22,8 @@ enum class FeedVerbosity {
 
         /**
          * `/verbosity <arg>`'s parse: the three tokens plus the Spanish
-         * aliases (user-facing words are Spanish). Null = unknown arg —
+         * aliases — kept on purpose: they are live command input the owner
+         * already types (compatibility, not prose). Null = unknown arg —
          * the command answers with the picker instead of guessing.
          */
         fun of(arg: String): FeedVerbosity? = when (arg.trim().lowercase()) {

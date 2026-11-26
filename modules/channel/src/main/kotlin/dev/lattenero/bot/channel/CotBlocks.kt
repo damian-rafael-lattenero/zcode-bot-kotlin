@@ -63,7 +63,7 @@ class CotBlocks(
 
     /**
      * THE TAP: expand ↔ fold IN PLACE (the owner's refinement, verbatim:
-     * «el lugar para que aparezca el texto ES EN EL BOTÓN del CoT»).
+     * «the place for the text to appear IS IN THE CoT BUTTON» [translated]).
      * Null = the edit is the feedback (no new message — the chat's order
      * untouched). A throttled tap flips NOTHING: the message keeps its
      * button and the owner retries.
