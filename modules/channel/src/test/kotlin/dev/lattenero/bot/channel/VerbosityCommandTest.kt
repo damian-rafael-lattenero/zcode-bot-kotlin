@@ -72,11 +72,11 @@ class VerbosityCommandTest {
     fun anArgSetsItThroughTheSeamWithTheSpanishAliases() = runBlocking {
         val setting = VolatileVerbosity()
         val cmds = commands(setting)
-        assertTrue("✅ Aplicado" in cmds.handle("/verbosity resumen", 1L)!!.text)
+        assertTrue("✅ Applied" in cmds.handle("/verbosity resumen", 1L)!!.text)
         assertEquals(FeedVerbosity.SUMMARY, setting.current())
-        assertTrue("✅ Aplicado" in cmds.handle("/verbosity vv", 2L)!!.text)
+        assertTrue("✅ Applied" in cmds.handle("/verbosity vv", 2L)!!.text)
         assertEquals(FeedVerbosity.VERBOSE, setting.current())
-        assertTrue("✅ Aplicado" in cmds.handle("/verbosity vn", 3L)!!.text)
+        assertTrue("✅ Applied" in cmds.handle("/verbosity vn", 3L)!!.text)
         assertEquals(FeedVerbosity.NORMAL, setting.current())
     }
 
@@ -84,7 +84,7 @@ class VerbosityCommandTest {
     fun anUnknownArgAnswersThePickerWithTheHonestNote() = runBlocking {
         val setting = VolatileVerbosity()
         val reply = commands(setting).handle("/verbosity ruidoso", 1L)!!
-        assertTrue("no es un nivel" in reply.text, "the honest note, never a guess")
+        assertTrue("is not a level" in reply.text, "the honest note, never a guess")
         assertEquals(3, reply.markup!!["inline_keyboard"]!!.jsonArray.size)
         assertEquals(FeedVerbosity.DEFAULT, setting.current(), "the unknown arg changed nothing")
     }
@@ -94,9 +94,9 @@ class VerbosityCommandTest {
         val setting = VolatileVerbosity()
         val reply = commands(setting).onCallback("vb:summary", 1L, OWNER)!!
         assertEquals(FeedVerbosity.SUMMARY, setting.current())
-        assertTrue("Aplicado" in reply.text)
+        assertTrue("Applied" in reply.text)
         val refusal = commands(setting).onCallback("vb:gratis", 2L, OWNER)!!
-        assertTrue("no existe" in refusal.text, "the honest refusal")
+        assertTrue("does not exist" in refusal.text, "the honest refusal")
         assertEquals(FeedVerbosity.SUMMARY, setting.current(), "an unknown tap data set nothing")
     }
 

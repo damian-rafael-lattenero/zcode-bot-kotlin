@@ -81,7 +81,7 @@ class WatchCommandTest {
         val reply = commands(ops, FakeHistory(listOf(cardRow)), hub).handle("/watch", 1)
         assertEquals(listOf("task-A" to "/ws/a"), ops.subscribed)
         assertTrue(reply!!.text.contains("the card's turn"), reply.text)
-        assertTrue(reply.text.contains("re-enganchado"), reply.text)
+        assertTrue(reply.text.contains("re-attached"), reply.text)
     }
 
     @Test
@@ -92,7 +92,7 @@ class WatchCommandTest {
         val reply = commands(ops, FakeHistory(listOf(active)), hub).handle("/watch", 2)
         assertEquals(listOf("task-B" to "/ws/a"), ops.subscribed)
         assertTrue(reply!!.text.contains("the open one"), reply.text)
-        assertTrue(reply.text.contains("su próximo turno abre la carta"), reply.text)
+        assertTrue(reply.text.contains("its next turn opens the card"), reply.text)
     }
 
     @Test
@@ -103,7 +103,7 @@ class WatchCommandTest {
         val reply = commands(ops, FakeHistory(listOf(cardRow)), hub).handle("/watch", 3)
         assertEquals(emptyList(), ops.subscribed, "the child topic never moves the parent's focus")
         assertEquals(listOf("sess_subagent_abc" to "/ws/a"), ops.childSubscribed)
-        assertTrue(reply!!.text.contains("Subagente"), reply.text)
+        assertTrue(reply!!.text.contains("Subagent"), reply.text)
         assertNull(hub.peekPin()?.takeIf { it != "sess_subagent_abc" }, "the pin stays: the same child")
     }
 

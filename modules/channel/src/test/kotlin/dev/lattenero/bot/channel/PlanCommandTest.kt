@@ -85,7 +85,7 @@ class PlanCommandTest {
     }
 
     private val app = "/Users/damian/Projects/app"
-    private val rows = listOf(TaskRow(sid = "task-77", title = "arreglá el login", ws = app))
+    private val rows = listOf(TaskRow(sid = "task-77", title = "fix the login", ws = app))
 
     /** The owner's REAL catalog (the three plans, the fork's own ids + labels); `default` = the app default's plan. */
     private fun catalogJson(
@@ -163,7 +163,7 @@ class PlanCommandTest {
     fun planRendersEveryPlanWithItsQuotaBesideTheName() = runBlocking {
         val o = quotaOps()
         val reply = commands(o).handle("/plan", 1L)!!
-        assertTrue(""fix the login"" in reply.text, "the title comes from the history")
+        assertTrue("«fix the login»" in reply.text, "the title comes from the history")
         assertTrue("Quota per plan" in reply.text)
         // the Start Plan row: 32% remaining of the 5h bucket
         assertTrue("<b>Start Plan</b> — ⏱ 32% free · resets" in reply.text, reply.text)
@@ -314,7 +314,7 @@ class PlanCommandTest {
         assertEquals("kimi-k2", set.model)
         assertNull(set.plan, "model only — the fork places it under its owner plan")
         assertTrue("✅ Model applied" in reply.text, reply.text)
-        assertTrue("Modelos de" in reply.text, "the model menu re-renders")
+        assertTrue("Models of" in reply.text, "the model menu re-renders")
         assertEquals(MenuMirror.Kind.MODEL, reply.mirror?.kind)
     }
 
@@ -328,7 +328,7 @@ class PlanCommandTest {
         assertNull(set.plan, "effort only")
         assertNull(set.model, "effort only")
         assertTrue("✅ Effort applied" in reply.text, reply.text)
-        assertTrue("Effort de" in reply.text, "the effort menu re-renders")
+        assertTrue("Effort levels of" in reply.text, "the effort menu re-renders")
         assertEquals(MenuMirror.Kind.EFFORT, reply.mirror?.kind)
     }
 
@@ -512,7 +512,7 @@ class PlanCommandTest {
             quotaAnswers["account:zai-individual-coding-plan"] = creditLimitJson(pct5h = 2, pctWeek = 100)
         }
         val reply = commands(o).handle("/plan", 1L)!!
-        assertTrue("El default de la app (<b>Z.ai</b>) has no tokens" in reply.text, reply.text)
+        assertTrue("The app default (<b>Z.ai</b>) has no tokens" in reply.text, reply.text)
         assertTrue("tap ⭐" in reply.text, reply.text)
     }
 

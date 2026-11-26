@@ -115,7 +115,7 @@ class CallbackOwnerGateTest {
     fun theOwnersDestructiveTapRunsAsAlways() = runBlocking {
         val o = FakeOps()
         val reply = commands(o).onCallback("intr:task-77", 1L, OWNER)!!
-        assertEquals("⚡ Interrumpido — tu mensaje entra ya.", reply.text)
+        assertEquals("⚡ Interrupted — your message goes in now.", reply.text)
         assertEquals(listOf<ChannelQuery>(ChannelQuery.Stop("task-77")), o.queries)
     }
 
@@ -190,7 +190,7 @@ class CallbackOwnerGateTest {
     fun aNonDestructiveTapFromAStrangerIsUntouched() = runBlocking {
         val o = FakeOps()
         val reply = commands(o).onCallback("qgo:task-77:10", 10L, STRANGER)!!
-        assertEquals("🤷 Ya no está — el drenaje del turno se la llevó (o se descartó antes).", reply.text)
+        assertEquals("🤷 Gone — the turn's drain took it (or it was discarded earlier).", reply.text)
         assertTrue(o.queries.isEmpty(), "the steer never gates — the tap answers its own promise")
     }
 }

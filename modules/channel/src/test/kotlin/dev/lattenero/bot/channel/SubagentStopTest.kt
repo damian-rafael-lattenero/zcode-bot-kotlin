@@ -205,7 +205,7 @@ class SubagentStopTest {
 
     @Test
     fun aGhostStoreRowIsGone() {
-        // the ⏸️ hace 20m row IS the dead agent it renders as — its stop
+        // the ⏸️ 20m ago row IS the dead agent it renders as — its stop
         // would be decoration (the honest-indicators law)
         val sid = "sess_subagent_killed"
         val target = SubagentStop.resolve(
@@ -293,7 +293,7 @@ class SubagentStopTest {
             o.queries,
             "the stop addresses the child's FULL session id",
         )
-        assertTrue("generación detenida" in reply.text, reply.text)
+        assertTrue("generation stopped" in reply.text, reply.text)
         assertTrue("Agent" in reply.text, reply.text)
     }
 
@@ -309,7 +309,7 @@ class SubagentStopTest {
                 .onCallback("sst:$tail", 1L, OWNER)!!
         }
         assertEquals(listOf<ChannelQuery>(ChannelQuery.Stop(sid)), o.queries)
-        assertTrue("generación detenida" in reply.text, reply.text)
+        assertTrue("generation stopped" in reply.text, reply.text)
         assertTrue("hunter" in reply.text, reply.text)
     }
 
@@ -320,7 +320,7 @@ class SubagentStopTest {
             "subagentAgentId" to "agent-9")
         val o = FakeOps().apply { stopAnswer = QueryAnswer.Failed("bad_request", "no such session") }
         val reply = runBlocking { bc(o, hub).onCallback("sst:dispatch-1", 1L, OWNER)!! }
-        assertTrue("⚠️ No pude detener" in reply.text, reply.text)
+        assertTrue("⚠️ Could not stop" in reply.text, reply.text)
         assertTrue("bad_request" in reply.text, reply.text)
         assertTrue("no such session" in reply.text, reply.text)
     }
@@ -341,7 +341,7 @@ class SubagentStopTest {
         feed(hub, 1, "type" to "tool_call", "toolId" to "dispatch-1", "toolName" to "Agent")
         val o = FakeOps()
         val reply = runBlocking { bc(o, hub).onCallback("sst:dispatch-1", 1L, OWNER)!! }
-        assertTrue("todavía no sé su sesión" in reply.text, reply.text)
+        assertTrue("I don't know its session yet" in reply.text, reply.text)
         assertTrue(o.queries.isEmpty(), "no session, no stop — never a guessed one")
     }
 
@@ -354,7 +354,7 @@ class SubagentStopTest {
         val hub = LiveHub()
         val o = FakeOps()
         val reply = runBlocking { bc(o, hub).onCallback("sst:zzzzzzzzzzzzzzzz", 1L, OWNER)!! }
-        assertTrue("ya no está vivo" in reply.text, reply.text)
+        assertTrue("is no longer alive" in reply.text, reply.text)
         assertTrue(o.queries.none { it is ChannelQuery.Stop }, "no session, no stop query")
         assertTrue(o.inbounds.isEmpty(), "the tail NEVER rides to the agent as the owner's words")
     }

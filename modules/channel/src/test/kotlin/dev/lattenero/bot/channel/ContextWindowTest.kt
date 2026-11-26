@@ -88,8 +88,8 @@ class ContextWindowTest {
             """{"model":"GLM-5.3-Flash","usedTokens":45300,"windowTokens":200000}"""
         val text = commands(o).handle("/context_window", 1L)!!.text
         assertEquals(
-            "🪟 <b>Ventana de contexto «task-77»</b>\n" +
-                "Modelo <b>GLM-5.3-Flash</b>: 45.3K de 200K (23%)\n" +
+            "🪟 <b>Context window «task-77»</b>\n" +
+                "Model <b>GLM-5.3-Flash</b>: 45.3K of 200K (23%)\n" +
                 "▰▰▱▱▱▱▱▱▱▱",
             text,
         )
@@ -101,7 +101,7 @@ class ContextWindowTest {
             """{"model":"m","usedTokens":123456,"windowTokens":1000000}""",
             "t",
         )
-        assertTrue("123K de 1M (12%)" in text)
+        assertTrue("123K of 1M (12%)" in text)
     }
 
     @Test
@@ -111,9 +111,9 @@ class ContextWindowTest {
             """{"model":"m","usedTokens":$used,"windowTokens":$window}""",
             "t",
         )
-        assertTrue("347K de 1M (35%)" in meter(347_000, 1_000_000), "the owner's own reading")
-        assertTrue("1.2M de 2M (60%)" in meter(1_200_000, 2_000_000), "one decimal M, trimmed when whole")
-        assertTrue("999K de 1M (100%)" in meter(999_000, 1_000_000), "below the M rung it stays K")
+        assertTrue("347K of 1M (35%)" in meter(347_000, 1_000_000), "the owner's own reading")
+        assertTrue("1.2M of 2M (60%)" in meter(1_200_000, 2_000_000), "one decimal M, trimmed when whole")
+        assertTrue("999K of 1M (100%)" in meter(999_000, 1_000_000), "below the M rung it stays K")
     }
 
     @Test
@@ -125,7 +125,7 @@ class ContextWindowTest {
             """{"model":"m","usedTokens":200000,"windowTokens":1000000,"windowSource":"owner_default"}""",
             "t",
         )
-        assertTrue("200K de 1M (~) (20%)" in approx)
+        assertTrue("200K of 1M (~) (20%)" in approx)
         // a REAL window (model registry / runtime) never carries the marker
         val real = BotCommands.renderContextWindow(
             """{"model":"m","usedTokens":200000,"windowTokens":1000000,"windowSource":"model"}""",
@@ -151,7 +151,7 @@ class ContextWindowTest {
         o.answers["contextWindow"] =
             """{"model":"GLM-5.3-Flash","usedTokens":45300,"windowTokens":null}"""
         val text = commands(o).handle("/context_window", 1L)!!.text
-        assertTrue("ventana desconocida" in text)
+        assertTrue("window unknown" in text)
         assertTrue("45.3K" in text)
         assertFalse("%" in text)
         assertFalse("▰" in text)
@@ -199,7 +199,7 @@ class ContextWindowTest {
         o.failCode = BotCommands.UNKNOWN_QUERY_CODE // the fork's by-name refusal
         val text = commands(o).handle("/context_window", 1L)!!.text
         assertTrue(text.startsWith("⚠️"))
-        assertTrue("deployar el fork" in text)
+        assertTrue("needs a deploy" in text)
         assertTrue("9cfb39a9" in text)
     }
 

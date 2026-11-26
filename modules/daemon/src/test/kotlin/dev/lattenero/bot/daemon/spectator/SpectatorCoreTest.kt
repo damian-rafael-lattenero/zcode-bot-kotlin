@@ -87,7 +87,7 @@ class SpectatorCoreTest {
         )
         assertTrue(st.noticed)
         // finishReason stop: the FINAL answer is F32's, zero duplication
-        val fin = record(finish = "stop", text = "respuesta final")
+        val fin = record(finish = "stop", text = "final answer")
         assertEquals(emptyList(), SpectatorCore.processRecord(fin, st, cfg).second)
     }
 

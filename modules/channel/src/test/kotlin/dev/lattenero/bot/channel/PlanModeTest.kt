@@ -63,7 +63,7 @@ class PlanModeTest {
 
     private class FakeHistory : TasksHistory {
         override suspend fun ctxTasks(limit: Int): List<TaskRow> =
-            listOf(TaskRow(sid = "task-77", title = "arreglá el login", ws = "/ws"))
+            listOf(TaskRow(sid = "task-77", title = "fix the login", ws = "/ws"))
 
         override suspend fun modelSelection(sid: String): ModelSel? = null
         override suspend fun freshestTask(workspacePath: String): TaskRow? = null
@@ -101,8 +101,8 @@ class PlanModeTest {
     @Test
     fun bareCardShowsOnWhenTheSnapshotSaysPlan() = runBlocking {
         val reply = commands(ops(current = "plan")).handle("/plan_mode", 1L)!!
-        assertTrue("🧭 Plan mode de «arreglá el login»" in reply.text, reply.text)
-        assertTrue("Estado: <b>✅ ON</b>" in reply.text, reply.text)
+        assertTrue("🧭 Plan mode of «fix the login»" in reply.text, reply.text)
+        assertTrue("State: <b>✅ ON</b>" in reply.text, reply.text)
         val r = rows(reply)
         assertEquals(listOf("pmd:on", "pmd:off"), r.map { it.second })
         assertTrue(r[0].first.startsWith("🎯"), "the CURRENT state carries 🎯: ${r[0].first}")
@@ -112,7 +112,7 @@ class PlanModeTest {
     @Test
     fun bareCardShowsOffForAnyOtherMode() = runBlocking {
         val reply = commands(ops(current = "yolo")).handle("/plan_mode", 1L)!!
-        assertTrue("Estado: <b>⬜ OFF</b>" in reply.text, reply.text)
+        assertTrue("State: <b>⬜ OFF</b>" in reply.text, reply.text)
         assertTrue("Full access" in reply.text, "the default law is ON the card")
         val r = rows(reply)
         assertTrue(r[1].first.startsWith("🎯"), "OFF is the current state: ${r[1].first}")
@@ -123,7 +123,7 @@ class PlanModeTest {
     fun aSnapshotWithoutModeReadsAsOff() = runBlocking {
         // meta.mode absent → the default (Full access) is in force → OFF
         val reply = commands(ops(current = null)).handle("/plan_mode", 1L)!!
-        assertTrue("Estado: <b>⬜ OFF</b>" in reply.text, reply.text)
+        assertTrue("State: <b>⬜ OFF</b>" in reply.text, reply.text)
         assertTrue(rows(reply)[1].first.startsWith("🎯"))
     }
 
@@ -134,8 +134,8 @@ class PlanModeTest {
         val o = ops()
         val reply = commands(o).handle("/plan_mode on", 2L)!!
         assertEquals("task-77" to "plan", o.setModes.single())
-        assertTrue("🧭 Plan mode de «arreglá el login»: <b>✅ ON</b> ✅" in reply.text, reply.text)
-        assertTrue("aplica al próximo turno" in reply.text, "/mode's promise, the toggle's voice")
+        assertTrue("🧭 Plan mode of «fix the login»: <b>✅ ON</b> ✅" in reply.text, reply.text)
+        assertTrue("applies to the next turn" in reply.text, "/mode's promise, the toggle's voice")
         assertTrue(rows(reply)[0].first.startsWith("🎯"), "the keyboard answers ON-marked")
     }
 
@@ -144,7 +144,7 @@ class PlanModeTest {
         val o = ops(current = "plan")
         val reply = commands(o).handle("/plan_mode off", 3L)!!
         assertEquals("task-77" to "yolo", o.setModes.single(), "OFF is the DEFAULT law: back to Full access")
-        assertTrue("⬜ OFF</b> ✅ — volvemos a 🔓 Full access" in reply.text, reply.text)
+        assertTrue("⬜ OFF</b> ✅ — back to 🔓 Full access" in reply.text, reply.text)
         assertTrue(rows(reply)[1].first.startsWith("🎯"))
     }
 
@@ -165,7 +165,7 @@ class PlanModeTest {
         val o = ops()
         val reply = commands(o).handle("/plan_mode bananas", 6L)!!
         assertEquals(0, o.setModes.size, "a typo never writes a mode")
-        assertTrue("🧭 Plan mode de «arreglá el login»" in reply.text, "the card again")
+        assertTrue("🧭 Plan mode of «fix the login»" in reply.text, "the card again")
         assertTrue(reply.markup != null, "the card still offers the toggle")
     }
 

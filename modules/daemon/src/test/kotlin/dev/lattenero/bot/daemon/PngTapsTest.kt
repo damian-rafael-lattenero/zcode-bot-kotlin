@@ -204,7 +204,7 @@ class PngTapsTest {
         val answer = runBlocking {
             taps(shots, uploaded = uploaded, png = pngOf(200, 5000)).shoot(id)
         }
-        assertTrue(answer!!.contains("no entra como foto"), "the reason names the ceiling: $answer")
+        assertTrue(answer!!.contains("does not fit as a photo"), "the reason names the ceiling: $answer")
         assertTrue(uploaded.isEmpty(), "a doomed upload never flies")
         assertTrue(dir.listFiles().orEmpty().isEmpty(), "the temp files die")
     }

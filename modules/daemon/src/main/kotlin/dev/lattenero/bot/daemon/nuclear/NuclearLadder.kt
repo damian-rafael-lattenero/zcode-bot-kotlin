@@ -167,7 +167,7 @@ class NuclearLadder(
 
     /** The whole ladder — every step logged, both announces awaited BEFORE the self-kill. */
     suspend fun run(): NuclearReport {
-        announce("💥 nuclear: reiniciando todo…")
+        announce("💥 nuclear: restarting everything…")
         val outcomes = mutableListOf<StepOutcome>()
 
         val stopped = stopAllStep(outcomes)

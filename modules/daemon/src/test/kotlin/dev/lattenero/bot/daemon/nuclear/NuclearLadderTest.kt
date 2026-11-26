@@ -113,8 +113,8 @@ class NuclearLadderTest {
         val report = ladder.run()
 
         // the announces: the owner's start word, then the summary — BEFORE the self-kill
-        assertEquals("💥 nuclear: reiniciando todo…", announced.first())
-        assertTrue(announced.last().startsWith("💥 nuclear listo"))
+        assertEquals("💥 nuclear: restarting everything…", announced.first())
+        assertTrue(announced.last().startsWith("💥 nuclear done"))
         assertEquals(2, announced.size)
 
         // stopAll → TERM both CLIs → bootout the label → open → hello → kickstart self LAST
@@ -167,7 +167,7 @@ class NuclearLadderTest {
         )
         val report = ladder.run()
         assertFalse(report.helloOk)
-        assertTrue(announcedOf(report).contains("SIN hello_ok"))
+        assertTrue(announcedOf(report).contains("WITHOUT hello_ok"))
     }
 
     private fun announcedOf(report: NuclearReport): String = report.summary()

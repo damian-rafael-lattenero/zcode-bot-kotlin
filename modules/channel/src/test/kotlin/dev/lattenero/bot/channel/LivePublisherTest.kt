@@ -128,18 +128,18 @@ class LivePublisherTest {
         var calls = 0
         val publisher = publisher(wire, hub) { _ ->
             calls += 1
-            "arreglá el login"
+            "fix the login"
         }
         publisher.tick()
         assertEquals(1, calls) // exactly one history read
         val birth = cardBodies(wire).first().first
-        assertTrue("«arreglá el login»" in birth, "the birth wears the REAL title, not the sid tail")
+        assertTrue("«fix the login»" in birth, "the birth wears the REAL title, not the sid tail")
         assertTrue("«644150daf013»" !in birth) // the tail is not the head
         hub.apply(frame(taskId, "agent_thought_chunk", at = 1_200, "content" to JsonPrimitive("más")), nowMs = 1_200)
         publisher.tick() // a new event → the card re-draws; the resolution is ONE-SHOT per turn
         assertEquals(1, calls)
         val redraw = cardBodies(wire).last().first
-        assertTrue("arreglá el login" in redraw, "the re-drawn card carries the honest name too")
+        assertTrue("fix the login" in redraw, "the re-drawn card carries the honest name too")
     }
 
     @Test
@@ -171,8 +171,8 @@ class LivePublisherTest {
         hub.watchTaskId(child, now)
         publisher.tick()
         val birth = cardBodies(wire).first().first
-        assertTrue("👁 <b>«_agent_quiet»</b> attachado" in birth, "the honest idle card BORN: $birth")
-        assertTrue("ningún turno corriendo" in birth)
+        assertTrue("👁 <b>«_agent_quiet»</b> attached" in birth, "the honest idle card BORN: $birth")
+        assertTrue("no turn running now" in birth)
         // the watchdog stays silent: an awaited idle session has no dead bus
         now += 120_000L
         publisher.tick()
@@ -184,8 +184,8 @@ class LivePublisherTest {
         publisher.tick()
         // the card's update may ride the EDIT leg (the 5/11 reclaim window)
         val live = wire.bodies.last { it.second in setOf("sendMessage", "editMessageText") }.first
-        assertTrue("Procesando" in live, "the real turn took the card over: $live")
-        assertTrue("ningún turno corriendo" !in live)
+        assertTrue("Processing" in live, "the real turn took the card over: $live")
+        assertTrue("no turn running now" !in live)
     }
 
     @Test
@@ -208,7 +208,7 @@ class LivePublisherTest {
         now += STALE_SEAL_MS + 10_000L
         publisher.tick() // the stale horizon trips
         val edit = wire.bodies.last { it.second == "editMessageText" }.first
-        assertTrue("🧊" in edit && "sellado por inactividad" in edit, "the honest stale seal: $edit")
+        assertTrue("🧊" in edit && "sealed for inactivity" in edit, "the honest stale seal: $edit")
         publisher.tick() // later ticks: the corpse does NOT rebirth
         publisher.tick()
         assertEquals(1, cardBirths(), "no rebirth while the corpse stays silent")
@@ -227,7 +227,7 @@ class LivePublisherTest {
         var calls = 0
         val publisher = publisher(wire, hub) { _ ->
             calls += 1
-            "arreglá el login"
+            "fix the login"
         }
         publisher.tick()
         assertEquals(0, calls) // nothing born, nothing burned
@@ -237,7 +237,7 @@ class LivePublisherTest {
         publisher.tick()
         assertEquals(1, calls)
         val birth = cardBodies(wire).first().first
-        assertTrue("«arreglá el login»" in birth)
+        assertTrue("«fix the login»" in birth)
     }
 
     @Test
@@ -246,8 +246,8 @@ class LivePublisherTest {
         hub.apply(frame("task-9", "agent_thought_chunk", at = 1_000, "content" to JsonPrimitive("x")), nowMs = 1_000)
         hub.retitle("another-task", "otra") // a foreign task's retitle is ignored
         assertEquals("task-9".takeLast(12), hub.peek()?.title)
-        hub.retitle("task-9", "arreglá el login")
-        assertEquals("arreglá el login", hub.peek()?.title)
+        hub.retitle("task-9", "fix the login")
+        assertEquals("fix the login", hub.peek()?.title)
     }
 
     // ---- the transcript feed -------------------------------------------------
@@ -284,8 +284,8 @@ class LivePublisherTest {
         assertEquals("deleteMessage", methods[1], "then the stale card dies")
         assertEquals("sendMessage", methods[2], "the card is reborn LAST (classic: scroll)")
         val reborn = cardBodies(wire).last().first
-        assertTrue("⏳ <b>Procesando..." in reborn, "the re-born card IS the process card")
-        assertTrue("📖 CoT: 1 bloque plegado" in reborn, "the card carries the CoT row (count only)")
+        assertTrue("⏳ <b>Processing..." in reborn, "the re-born card IS the process card")
+        assertTrue("📖 CoT: 1 folded block" in reborn, "the card carries the CoT row (count only)")
     }
 
     @Test
@@ -315,14 +315,14 @@ class LivePublisherTest {
         val expanded = wire.bodies.last { it.second == "editMessageText" }.first
         assertTrue("el pensamiento sellado completo" in expanded, "the block WHOLE, in place")
         assertTrue("<blockquote>" in expanded)
-        assertTrue("🙈 plegar" in expanded, "the button offers the fold back")
+        assertTrue("🙈 fold" in expanded, "the button offers the fold back")
         // THE SECOND TAP folds it back to the one-line header
         assertEquals(null, publisher.toggle(1))
         val folded = wire.bodies.last { it.second == "editMessageText" }.first
-        assertTrue("tocar para leer" in folded)
+        assertTrue("tap to read" in folded)
         assertTrue("el pensamiento sellado completo" !in folded, "the text goes back behind the tap")
         // an unknown id answers the honest miss
-        assertEquals("🤷 Ese CoT ya no está en el registro — el botón quedó de otro turno.", publisher.toggle(99))
+        assertEquals("🤷 That CoT is no longer in the registry — the button belongs to another turn.", publisher.toggle(99))
     }
 
     @Test
@@ -374,7 +374,7 @@ class LivePublisherTest {
         val inWindow = wire.bodies.drop(afterBirth).map { it.second }
         assertEquals(listOf("editMessageText"), inWindow, "the seconds tick by EDITING the same message")
         val edited = wire.bodies.last { it.second == "editMessageText" }.first
-        assertTrue("⏳ <b>Procesando..." in edited, "the card speaks the owner's wording: $edited")
+        assertTrue("⏳ <b>Processing..." in edited, "the card speaks the owner's wording: $edited")
         // the window lifts: the next change RECLAIMS the bottom — delete +
         // re-birth, once per window at most
         now += 31_000L
@@ -491,7 +491,7 @@ class LivePublisherTest {
         now += 31_000L // the close's card swap is a SECOND birth: the spacing applies
         publisher.tick()
         assertTrue(
-            spoken.any { "⚡ <b>Nushell</b>" in it && "tocar para ver" in it },
+            spoken.any { "⚡ <b>Nushell</b>" in it && "tap to see" in it },
             "NORMAL: the close collapses behind its button (the owner's 3/11)",
         )
     }
@@ -618,13 +618,13 @@ class LivePublisherTest {
         // AT the tool's arrival by the thinking's boundary law, traveling
         // COLLAPSED), then the record, then the answer LAST
         assertTrue(
-            spoken.any { "⚡ <b>Nushell</b>" in it && "tocar para ver" in it },
+            spoken.any { "⚡ <b>Nushell</b>" in it && "tap to see" in it },
             "the unseen close speaks (collapsed) at the seal",
         )
         val tail = spoken.firstOrNull { "CoT 1" in it }
         assertTrue(tail != null, "the tail sealed at the tool's arrival — it travels collapsed")
-        assertTrue("generado" in tail!!, "a boundary-sealed tail earns the SEALED verdict")
-        assertTrue("tocar para leer" in tail)
+        assertTrue("generated" in tail!!, "a boundary-sealed tail earns the SEALED verdict")
+        assertTrue("tap to read" in tail)
         assertTrue("pensando" !in tail, "the tail's text hides behind the tap too")
         assertTrue("end_turn" in spoken[spoken.size - 2], "the record is second-to-last")
         assertEquals("🧾 Digest:\n\nLA RESPUESTA", spoken.last(), "the answer is the last word, behind the header")
@@ -784,15 +784,15 @@ class LivePublisherTest {
             "the second door is the OUTPUT the run printed",
         )
         // the box speaks through the CLASSIC throat (the scroll law's lane)
-        val box = plain.firstOrNull { "tocar para ver" in it.first }
+        val box = plain.firstOrNull { "tap to see" in it.first }
         assertNotNull(box, "the box spoke: $plain")
         val markup = box.second?.toString().orEmpty()
         assertTrue("png:1" in markup && "png:2" in markup, "both doors carry their id: $markup")
-        assertTrue("comando PNG" in markup, "the input door names what it shows: $markup")
-        assertTrue("salida PNG" in markup, "the output door names what it shows: $markup")
+        assertTrue("PNG command" in markup, "the input door names what it shows: $markup")
+        assertTrue("PNG output" in markup, "the output door names what it shows: $markup")
         // 26/11, the owner: the outputs are IMAGES and nothing else — the
         // text pager's door no longer rides the box
-        assertTrue("Ver salida" !in markup, "no non-PNG door: $markup")
+        assertTrue("View output" !in markup, "no non-PNG door: $markup")
     }
 
     private companion object {
@@ -1008,7 +1008,7 @@ class LivePublisherTest {
         )
         now = 16_200L
         publisher.pingTick()
-        assertTrue("✏️ Editando archivo report.txt +3 −2" in spoken, "the new action's pings count from 1: $spoken")
+        assertTrue("✏️ Editing file report.txt +3 −2" in spoken, "the new action's pings count from 1: $spoken")
         // the counts did not change: skip
         now = 21_300L
         publisher.pingTick()
@@ -1028,7 +1028,7 @@ class LivePublisherTest {
         )
         now = 26_500L
         publisher.pingTick()
-        assertTrue("✏️ Editando archivo report.txt +5 −4" in spoken, "$spoken")
+        assertTrue("✏️ Editing file report.txt +5 −4" in spoken, "$spoken")
     }
 
     @Test
@@ -1113,14 +1113,14 @@ class LivePublisherTest {
         // first edit: +3 −2 — the ladder's first rung
         hub.apply(editFrame("te1", "a\nb\nc", "a\nX\nc\nd"), nowMs = now + 100)
         publisher.pingTick()
-        assertTrue("✏️ Editando archivo report.txt +3 −2" in spoken, "$spoken")
+        assertTrue("✏️ Editing file report.txt +3 −2" in spoken, "$spoken")
         // it seals; a SECOND edit on the same file opens with +2 −1: the
         // running total is the FILE's (+3−2 + +2−1 = +5 −3), not the rung's
         hub.apply(editFrame("te1", "a\nb\nc", "a\nX\nc\nd", status = "completed"), nowMs = now + 100)
         hub.apply(editFrame("te2", "x\ny", "x\nz\nw"), nowMs = now + 100)
         now += 5_100L
         publisher.pingTick()
-        assertTrue("✏️ Editando archivo report.txt +5 −3" in spoken, "the ladder accumulates the file: $spoken")
+        assertTrue("✏️ Editing file report.txt +5 −3" in spoken, "the ladder accumulates the file: $spoken")
     }
 
     @Test
@@ -1170,11 +1170,11 @@ class LivePublisherTest {
         publisher.tick()
         // the seal: the fold's digest speaks the spent steps ONCE, organized —
         // the words arrive at the end, labeled, never as mid-turn bubbles
-        val digest = spoken.lastOrNull { "✅ Respuesta" in it }
+        val digest = spoken.lastOrNull { "✅ Answer" in it }
         assertNotNull(digest, "the seal's digest spoke: $spoken")
         assertTrue("El meter es real" in digest, "the spent step rides the digest, organized")
         assertTrue(
-            blockBodies(wire).none { "✅ Respuesta" in it.first },
+            blockBodies(wire).none { "✅ Answer" in it.first },
             "the digest rides the classic HTML lane, never the rich blocks",
         )
     }
@@ -1191,15 +1191,15 @@ class LivePublisherTest {
         hub.apply(frame(taskId, "agent_thought_chunk", at = 1_050, "content" to JsonPrimitive("p")), nowMs = 1_050)
         val wire = Wire()
         val spoken = mutableListOf<String>()
-        val publisher = publisher(wire, hub, spoken, finalTurn = { voiceOf("La respuesta final con `codigo`.") })
+        val publisher = publisher(wire, hub, spoken, finalTurn = { voiceOf("La final answer con `codigo`.") })
         publisher.tick()
         hub.apply(frame(taskId, "task_complete", at = 1_200, "stopReason" to JsonPrimitive("end_turn")), nowMs = 1_200)
         publisher.tick()
-        val answer = spoken.lastOrNull { "respuesta final" in it }
+        val answer = spoken.lastOrNull { "final answer" in it }
         assertNotNull(answer, "the final answer spoke: $spoken")
         assertTrue("<code>codigo</code>" in answer, "the inline code renders as a run: $answer")
         assertTrue(
-            blockBodies(wire).none { "respuesta final" in it.first },
+            blockBodies(wire).none { "final answer" in it.first },
             "never the rich lane: ${wire.bodies.map { it.second }}",
         )
     }
@@ -1233,19 +1233,19 @@ class LivePublisherTest {
         publisher.tick()
         hub.apply(frame(taskId, "task_complete", at = 1_200, "stopReason" to JsonPrimitive("end_turn")), nowMs = 1_200)
         publisher.tick()
-        val digest = spoken.lastOrNull { "✅ Respuesta" in it }
+        val digest = spoken.lastOrNull { "✅ Answer" in it }
         assertNotNull(digest, "the digest spoke: $spoken")
-        assertTrue("Paso 1" in digest, "the opening step carries its number")
-        assertTrue("tras 🔧 Bash" in digest, "the step names the tool it followed")
+        assertTrue("Step 1" in digest, "the opening step carries its number")
+        assertTrue("after 🔧 Bash" in digest, "the step names the tool it followed")
         assertTrue(
             digest.trimEnd().endsWith("El fix consistió en X.</blockquote>"),
             "the conclusion closes the digest — quoted, the voice's own highlight: $digest",
         )
         assertTrue(
-            "<blockquote>🧾 Digest:\n\nPaso 1\n\nReviso el handler primero.</blockquote>" in digest,
+            "<blockquote>🧾 Digest:\n\nStep 1\n\nReviso el handler primero.</blockquote>" in digest,
             "the header leads, then the label and the words keep their REAL blank line: $digest",
         )
-        assertTrue(blockBodies(wire).none { "✅ Respuesta" in it.first }, "the digest left the rich lane")
+        assertTrue(blockBodies(wire).none { "✅ Answer" in it.first }, "the digest left the rich lane")
     }
 
     @Test
@@ -1301,11 +1301,11 @@ class LivePublisherTest {
         val publisher = publisher(wire, hub, spoken, finalTurn = { null })
         publisher.tick()
         publisher.tick()
-        val digest = spoken.lastOrNull { "✅ Respuesta" in it }
+        val digest = spoken.lastOrNull { "✅ Answer" in it }
         assertNotNull(digest, "the fold's digest spoke: $spoken")
-        assertTrue("Paso 1" in digest, "the spent step rides numbered: ${digest.take(300)}")
+        assertTrue("Step 1" in digest, "the spent step rides numbered: ${digest.take(300)}")
         assertTrue("La conclusión del fold." in digest)
-        assertEquals(1, spoken.count { "✅ Respuesta" in it }, "one digest, one message")
+        assertEquals(1, spoken.count { "✅ Answer" in it }, "one digest, one message")
     }
 
     @Test
@@ -1430,7 +1430,7 @@ class LivePublisherTest {
         publisher.tick() // the close collapses behind its image door
         val box = hub.peek()?.boxes?.single()
         assertEquals("nu", box?.language, "the fold carries the fence language for a shell's box")
-        // 26/11, the owner: the text pager is retired — an old «Ver salida»
+        // 26/11, the owner: the text pager is retired — an old «View output»
         // tap answers the honest words and the fold never leaves the header
         val edits = wire.bodies.count { it.second == "editMessageText" }
         assertTrue(publisher.open(box!!.boxId, 0)!!.contains("📸"), "the retired door speaks")

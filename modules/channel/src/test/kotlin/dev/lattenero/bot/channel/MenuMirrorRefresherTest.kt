@@ -37,7 +37,7 @@ class MenuMirrorRefresherTest {
         var planRender: MenuRender? = null,
         var modelRender: MenuRender? = null,
         var effortRender: MenuRender? = null,
-        var title: String? = "arreglá el login",
+        var title: String? = "fix the login",
         val edit: EditSpy = EditSpy(),
         clock: () -> Long,
     ) {
@@ -76,19 +76,19 @@ class MenuMirrorRefresherTest {
 
     @Test
     fun theOpenMenuEditsItselfWithTheFreshState() = runBlocking {
-        val h = registered(MenuMirror.Kind.MODE, "🎯 «arreglá el login»\n🎛 Modo: <b>yolo</b>")
+        val h = registered(MenuMirror.Kind.MODE, "🎯 «fix the login»\n🎛 Mode: <b>yolo</b>")
         h.modeNow = "plan"
         h.refresher.onConfigUpdate("task-77", options)
         assertEquals(1, h.edit.calls.size)
         val (mid, text) = h.edit.calls.single()
         assertEquals(42L, mid)
-        assertTrue("🎛 Modo: <b>🗺 Plan mode</b>" in text, "the fresh mode (the app's label), not the payload: $text")
-        assertTrue("🎯 «arreglá el login»" in text, "the title, the commands' own source: $text")
+        assertTrue("🎛 Mode: <b>🗺 Plan mode</b>" in text, "the fresh mode (the app's label), not the payload: $text")
+        assertTrue("🎯 «fix the login»" in text, "the title, the commands' own source: $text")
     }
 
     @Test
     fun aSecondUnchangedEventNeverReEdits() = runBlocking {
-        val h = registered(MenuMirror.Kind.MODE, "🎯 «arreglá el login»\n🎛 Modo: <b>yolo</b>")
+        val h = registered(MenuMirror.Kind.MODE, "🎯 «fix the login»\n🎛 Mode: <b>yolo</b>")
         h.modeNow = "plan" // the fork already wrote it; the FIRST edit renders it
         h.refresher.onConfigUpdate("task-77", options)
         // the fork re-announces the SAME state (a duplicate write, a second option row…)
@@ -98,7 +98,7 @@ class MenuMirrorRefresherTest {
 
     @Test
     fun aFailedEditKeepsTheOldBaselineAndTheNextEventRetriesOnce() = runBlocking {
-        val h = registered(MenuMirror.Kind.MODE, "🎯 «arreglá el login»\n🎛 Modo: <b>yolo</b>")
+        val h = registered(MenuMirror.Kind.MODE, "🎯 «fix the login»\n🎛 Mode: <b>yolo</b>")
         h.modeNow = "plan"
         h.edit.land = false // throttled (the cooldown's own skip) or a Telegram refusal
         h.refresher.onConfigUpdate("task-77", options)
@@ -115,7 +115,7 @@ class MenuMirrorRefresherTest {
 
     @Test
     fun theTtlKillsTheMirrorQuietly() = runBlocking {
-        val h = registered(MenuMirror.Kind.MODE, "🎯 «arreglá el login»\n🎛 Modo: <b>yolo</b>")
+        val h = registered(MenuMirror.Kind.MODE, "🎯 «fix the login»\n🎛 Mode: <b>yolo</b>")
         h.modeNow = "plan"
         now += MenuMirror.TTL_MS + 1
         h.refresher.onConfigUpdate("task-77", options)
@@ -124,7 +124,7 @@ class MenuMirrorRefresherTest {
 
     @Test
     fun theTurnSealKillsTheMirror() = runBlocking {
-        val h = registered(MenuMirror.Kind.MODE, "🎯 «arreglá el login»\n🎛 Modo: <b>yolo</b>")
+        val h = registered(MenuMirror.Kind.MODE, "🎯 «fix the login»\n🎛 Mode: <b>yolo</b>")
         h.modeNow = "plan"
         h.refresher.seal("task-77")
         h.refresher.onConfigUpdate("task-77", options)
@@ -133,7 +133,7 @@ class MenuMirrorRefresherTest {
 
     @Test
     fun anotherTasksEventTouchesNothing() = runBlocking {
-        val h = registered(MenuMirror.Kind.MODE, "🎯 «arreglá el login»\n🎛 Modo: <b>yolo</b>")
+        val h = registered(MenuMirror.Kind.MODE, "🎯 «fix the login»\n🎛 Mode: <b>yolo</b>")
         h.modeNow = "plan"
         h.refresher.onConfigUpdate("task-88", options)
         assertEquals(0, h.edit.calls.size, "the mirror is keyed by task — another task's write is not ours")
@@ -143,7 +143,7 @@ class MenuMirrorRefresherTest {
 
     @Test
     fun anUnreadableLiveStateEditsNothing() = runBlocking {
-        val h = registered(MenuMirror.Kind.MODE, "🎯 «arreglá el login»\n🎛 Modo: <b>yolo</b>")
+        val h = registered(MenuMirror.Kind.MODE, "🎯 «fix the login»\n🎛 Mode: <b>yolo</b>")
         h.modeNow = null // channel down / old fork / foreign snapshot — the read says nothing
         h.refresher.onConfigUpdate("task-77", options)
         assertEquals(0, h.edit.calls.size, "no data → no edit: the message keeps what it shows")
@@ -168,9 +168,9 @@ class MenuMirrorRefresherTest {
 
     @Test
     fun thePlanMenuRefreshesThroughTheBoundRenderer() = runBlocking {
-        val h = registered(MenuMirror.Kind.PLAN, "🎯 «arreglá el login»\nPlan: <b>Start Plan</b>")
+        val h = registered(MenuMirror.Kind.PLAN, "🎯 «fix the login»\nPlan: <b>Start Plan</b>")
         h.planRender = MenuRender(
-            "🎯 «arreglá el login»\nPlan: <b>OpenCode Go</b> · Modelo: <b>kimi-k2</b> · Effort: <b>high</b>",
+            "🎯 «fix the login»\nPlan: <b>OpenCode Go</b> · Model: <b>kimi-k2</b> · Effort: <b>high</b>",
             null,
         )
         h.refresher.onConfigUpdate(
@@ -184,25 +184,25 @@ class MenuMirrorRefresherTest {
 
     @Test
     fun theModelMenuRefreshesThroughItsOwnRenderer() = runBlocking {
-        val h = registered(MenuMirror.Kind.MODEL, "🎯 «arreglá el login»\nModelos de <b>Start Plan</b>")
-        h.modelRender = MenuRender("🎯 «arreglá el login»\nModelos de <b>OpenCode Go</b>", null)
+        val h = registered(MenuMirror.Kind.MODEL, "🎯 «fix the login»\nModels of <b>Start Plan</b>")
+        h.modelRender = MenuRender("🎯 «fix the login»\nModels of <b>OpenCode Go</b>", null)
         h.refresher.onConfigUpdate("task-77", listOf(ConfigOptionsUpdate.Option("model", "opencode-go-chat/kimi-k2")))
         assertEquals(1, h.edit.calls.size)
-        assertTrue("Modelos de <b>OpenCode Go</b>" in h.edit.calls.single().second)
+        assertTrue("Models of <b>OpenCode Go</b>" in h.edit.calls.single().second)
     }
 
     @Test
     fun theEffortMenuRefreshesThroughItsOwnRenderer() = runBlocking {
-        val h = registered(MenuMirror.Kind.EFFORT, "🎯 «arreglá el login»\nEffort de <b>GLM-5.3-Flash</b>")
-        h.effortRender = MenuRender("🎯 «arreglá el login»\nEffort de <b>kimi-k2</b>", null)
+        val h = registered(MenuMirror.Kind.EFFORT, "🎯 «fix the login»\nEffort levels of <b>GLM-5.3-Flash</b>")
+        h.effortRender = MenuRender("🎯 «fix the login»\nEffort levels of <b>kimi-k2</b>", null)
         h.refresher.onConfigUpdate("task-77", listOf(ConfigOptionsUpdate.Option("model", "opencode-go-chat/kimi-k2")))
         assertEquals(1, h.edit.calls.size)
-        assertTrue("Effort de <b>kimi-k2</b>" in h.edit.calls.single().second)
+        assertTrue("Effort levels of <b>kimi-k2</b>" in h.edit.calls.single().second)
     }
 
     @Test
     fun anUnboundRendererKeepsTheMenuText() = runBlocking {
-        val h = registered(MenuMirror.Kind.PLAN, "🎯 «arreglá el login»\nPlan: <b>Start Plan</b>")
+        val h = registered(MenuMirror.Kind.PLAN, "🎯 «fix the login»\nPlan: <b>Start Plan</b>")
         // no bindRenderers call — the wiring's boot order speaks: keep the text, never a ghost edit
         h.refresher.onConfigUpdate("task-77", options)
         assertEquals(0, h.edit.calls.size)
@@ -238,7 +238,7 @@ class MenuMirrorRefresherTest {
 
     private class FakeHistory : TasksHistory {
         override suspend fun ctxTasks(limit: Int): List<TaskRow> =
-            listOf(TaskRow(sid = "task-77", title = "arreglá el login", ws = "/ws"))
+            listOf(TaskRow(sid = "task-77", title = "fix the login", ws = "/ws"))
 
         override suspend fun modelSelection(sid: String): ModelSel? = null
         override suspend fun freshestTask(workspacePath: String): TaskRow? = null

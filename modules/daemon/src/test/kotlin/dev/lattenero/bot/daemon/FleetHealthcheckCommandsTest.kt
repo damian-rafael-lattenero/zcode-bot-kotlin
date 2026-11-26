@@ -46,7 +46,7 @@ class FleetHealthcheckCommandsTest {
     fun fixRefusesStrangersAndFailCloses() {
         val gated = FleetHealthcheckCommands.gate(FleetHealthcheckCommands.Plan.Fix, fromId = 42L, owner = 7L)
         assertTrue(gated is FleetHealthcheckCommands.Plan.Refused, gated.toString())
-        assertTrue("Solo el dueño" in gated.reason, gated.reason)
+        assertTrue("Only the owner" in gated.reason, gated.reason)
         // fail-closed: a null sender or an unwired owner never passes
         assertTrue(FleetHealthcheckCommands.gate(FleetHealthcheckCommands.Plan.Fix, null, 7L) is FleetHealthcheckCommands.Plan.Refused)
         assertTrue(FleetHealthcheckCommands.gate(FleetHealthcheckCommands.Plan.Fix, 7L, null) is FleetHealthcheckCommands.Plan.Refused)

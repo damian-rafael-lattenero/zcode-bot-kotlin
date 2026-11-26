@@ -62,7 +62,7 @@ class ToolBoxTodoTest {
         val box = boxOf(*many.toTypedArray())
         val lines = box.split("\n")
         assertEquals(ToolBox.TODO_LINES_MAX + 2, lines.size, "head + the cap + the counter")
-        assertTrue(lines.last().contains("+10 más"), "the tail speaks what it hid")
+        assertTrue(lines.last().contains("+10 more"), "the tail speaks what it hid")
     }
 
     @Test

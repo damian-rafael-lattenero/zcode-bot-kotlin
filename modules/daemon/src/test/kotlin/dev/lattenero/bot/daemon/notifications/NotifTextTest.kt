@@ -6,17 +6,17 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * The format law («mensajes bien fuertes»): emoji + BOLD first line,
+ * The format law («messages good and loud» [translated]): emoji + BOLD first line,
  * plain lines after; honest truncation; the empty turn's silence.
  */
 class NotifTextTest {
 
     @Test
     fun theSubagentLineCarriesEmojiBoldHeadTitleAndOutcome() {
-        val text = NotifText.subagentDone(SubagentDone("sess_subagent_1", "misión limpia", "completed", 1, 2))
+        val text = NotifText.subagentDone(SubagentDone("sess_subagent_1", "clean mission", "completed", 1, 2))
         assertTrue(text.startsWith("🔔 "), "the moment's emoji first")
-        assertTrue(text.contains("<b>Subagente terminó</b>"), "the BOLD first line")
-        assertTrue(text.contains("«misión limpia»"))
+        assertTrue(text.contains("<b>Subagent finished</b>"), "the BOLD first line")
+        assertTrue(text.contains("«clean mission»"))
         assertTrue(text.contains("completed"))
         assertEquals(3, text.lines().size, "emoji head + title + outcome")
     }
@@ -38,10 +38,10 @@ class NotifTextTest {
 
     @Test
     fun htmlInTheStoreSpeaksEscaped() {
-        val text = NotifText.subagentDone(SubagentDone("s", "<b>inyección</b>", "<i>done</i>", 1, 2))
-        assertTrue(text.contains("&lt;b&gt;inyección&lt;/b&gt;"))
+        val text = NotifText.subagentDone(SubagentDone("s", "<b>injection</b>", "<i>done</i>", 1, 2))
+        assertTrue(text.contains("&lt;b&gt;injection&lt;/b&gt;"))
         assertTrue(text.contains("&lt;i&gt;done&lt;/i&gt;"))
-        assertTrue("<b>inyección" !in text)
+        assertTrue("<b>injection" !in text)
     }
 
     @Test
@@ -54,18 +54,18 @@ class NotifTextTest {
     fun theSealLineCarriesEmojiBoldHeadDurationAndTools() {
         val facts = SealFacts(
             taskId = "task-9",
-            title = "arreglá el login",
+            title = "fix the login",
             stopReason = "end_turn",
             startedAtMs = 0,
             sealedAtMs = 192_000L,
             doneTools = 7,
             failedTools = 0,
-            answer = "listo, el login valida de nuevo",
+            answer = "done, the login validates again",
         )
         val text = NotifText.turnSealed(facts)!!
         assertTrue(text.startsWith("🏁 "), "the moment's emoji first")
-        assertTrue(text.contains("<b>«arreglá el login» — terminó (3m12s, 7 herramientas)</b>"))
-        assertTrue(text.contains("listo, el login valida de nuevo"))
+        assertTrue(text.contains("<b>«fix the login» — finished (3m12s, 7 tools)</b>"))
+        assertTrue(text.contains("done, the login validates again"))
         assertEquals(2, text.lines().size, "the bold head + the answer's plain line")
     }
 
@@ -73,29 +73,29 @@ class NotifTextTest {
     fun aSpokenAnswerIsNeverRepeatedByTheBell() {
         val facts = SealFacts(
             taskId = "task-9",
-            title = "arreglá el login",
+            title = "fix the login",
             stopReason = "end_turn",
             startedAtMs = 0,
             sealedAtMs = 192_000L,
             doneTools = 7,
             failedTools = 0,
-            answer = "listo, el login valida de nuevo",
+            answer = "done, the login validates again",
             answerSpoken = true, // the live card just spoke the full answer
         )
         val text = NotifText.turnSealed(facts)!!
-        assertTrue(text.contains("terminó (3m12s, 7 herramientas)"), "the moment still speaks")
-        assertTrue("listo, el login" !in text, "the single-source law: the 🔔 never repeats the card's answer")
+        assertTrue(text.contains("finished (3m12s, 7 tools)"), "the moment still speaks")
+        assertTrue("done, the login" !in text, "the single-source law: the 🔔 never repeats the card's answer")
     }
 
     @Test
     fun oneToolIsSingular() {
-        val facts = SealFacts("t", "título", "end_turn", 0, 5_000L, doneTools = 1, failedTools = 0, answer = null)
-        assertTrue(NotifText.turnSealed(facts)!!.contains("1 herramienta)"))
+        val facts = SealFacts("t", "title", "end_turn", 0, 5_000L, doneTools = 1, failedTools = 0, answer = null)
+        assertTrue(NotifText.turnSealed(facts)!!.contains("1 tool)"))
     }
 
     @Test
     fun anAnswerLongerThanTheBudgetIsTruncatedHonestly() {
-        val facts = SealFacts("t", "título", "end_turn", 0, 1_000L, doneTools = 2, failedTools = 0, answer = "y".repeat(400))
+        val facts = SealFacts("t", "title", "end_turn", 0, 1_000L, doneTools = 2, failedTools = 0, answer = "y".repeat(400))
         val line = NotifText.turnSealed(facts)!!.lines().last()
         assertEquals(NotifText.ANSWER_PREVIEW_CP + 1, line.length, "150 chars + the ellipsis")
         assertTrue(line.endsWith("…"))
@@ -104,27 +104,27 @@ class NotifTextTest {
     @Test
     fun aTurnThatProducedNothingIsSilence() {
         // the owner's law: silence is data, no decoration
-        assertEquals(null, NotifText.turnSealed(SealFacts("t", "título", "end_turn", 0, 1_000L, 0, 0, null)))
-        assertEquals(null, NotifText.turnSealed(SealFacts("t", "título", "end_turn", 0, 1_000L, 0, 0, "  ")))
+        assertEquals(null, NotifText.turnSealed(SealFacts("t", "title", "end_turn", 0, 1_000L, 0, 0, null)))
+        assertEquals(null, NotifText.turnSealed(SealFacts("t", "title", "end_turn", 0, 1_000L, 0, 0, "  ")))
         // but zero tools WITH an answer still speaks
-        val withAnswer = NotifText.turnSealed(SealFacts("t", "título", "end_turn", 0, 1_000L, 0, 0, "respondí sin herramientas"))
-        assertTrue(withAnswer!!.contains("respondí sin herramientas"))
+        val withAnswer = NotifText.turnSealed(SealFacts("t", "title", "end_turn", 0, 1_000L, 0, 0, "answered without tools"))
+        assertTrue(withAnswer!!.contains("answered without tools"))
         // and tools with no answer speak too
-        val withTools = NotifText.turnSealed(SealFacts("t", "título", "end_turn", 0, 1_000L, 3, 0, null))
-        assertTrue(withTools!!.contains("3 herramientas"))
+        val withTools = NotifText.turnSealed(SealFacts("t", "title", "end_turn", 0, 1_000L, 3, 0, null))
+        assertTrue(withTools!!.contains("3 tools"))
     }
 
     @Test
     fun anUnknownStartDoesNotInventADuration() {
-        val facts = SealFacts("t", "título", "end_turn", null, 1_000L, 2, 0, null)
-        assertTrue(NotifText.turnSealed(facts)!!.contains("(?, 2 herramientas)"))
+        val facts = SealFacts("t", "title", "end_turn", null, 1_000L, 2, 0, null)
+        assertTrue(NotifText.turnSealed(facts)!!.contains("(?, 2 tools)"))
     }
 
     @Test
     fun aFailedTurnRingsFailedWithTheForkErrorLine() {
         val facts = SealFacts(
             "t",
-            "título",
+            "title",
             "provider 429: over capacity",
             0,
             5_000L,
@@ -135,13 +135,13 @@ class NotifTextTest {
         )
         val text = NotifText.turnSealed(facts)!!
         assertTrue(text.startsWith("❌ "), "an error is never a clean finish")
-        assertTrue(text.contains("— falló (5s, 3 herramientas)"))
+        assertTrue(text.contains("— failed (5s, 3 tools)"))
         assertTrue(text.contains("provider 429: over capacity"))
     }
 
     @Test
     fun aFailedTurnThatProducedNothingStillRings() {
-        val facts = SealFacts("t", "título", "timeout", 0, 1_000L, 0, 0, null, failed = true)
+        val facts = SealFacts("t", "title", "timeout", 0, 1_000L, 0, 0, null, failed = true)
         val text = NotifText.turnSealed(facts)!!
         assertTrue(text.startsWith("❌ "))
         assertTrue(text.contains("timeout"), "the error is the only honest content left")

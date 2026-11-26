@@ -37,7 +37,7 @@ class NuScriptRunnerTest {
         val ok = render("out")
         assertTrue("(clean) · 0s" in ok, ok)
         val failed = render("boom", exit = 3)
-        assertTrue("código 3" in failed, failed)
+        assertTrue("exited with code 3" in failed, failed)
     }
 
     @Test
@@ -50,7 +50,7 @@ class NuScriptRunnerTest {
         assertTrue("free 71%" in reply, reply) // the tail (verdicts + receipts) survives
         assertTrue("…✂️…" in reply, reply)
         assertTrue("/logs/ram-clean.log" in reply, reply)
-        assertTrue("/file lo trae" in reply, reply)
+        assertTrue("/file brings it" in reply, reply)
         // the middle is what got cut — a filler line is provably gone
         assertFalse("line 300 of the middle tables" in reply, reply)
     }

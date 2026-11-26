@@ -64,7 +64,7 @@ class ModeCommandTest {
 
     private class FakeHistory : TasksHistory {
         override suspend fun ctxTasks(limit: Int): List<TaskRow> =
-            listOf(TaskRow(sid = "task-77", title = "arreglá el login", ws = "/ws"))
+            listOf(TaskRow(sid = "task-77", title = "fix the login", ws = "/ws"))
 
         override suspend fun modelSelection(sid: String): ModelSel? = null
         override suspend fun freshestTask(workspacePath: String): TaskRow? = null
@@ -156,8 +156,8 @@ class ModeCommandTest {
     fun bareModeShowsTheModeInForceAndTheFourTaps() = runBlocking {
         val o = ops(current = "yolo")
         val reply = commands(o).handle("/mode", 1L)!!
-        assertTrue("🎛 Modo: <b>🔓 Full access</b>" in reply.text, reply.text)
-        assertTrue("«arreglá el login»" in reply.text)
+        assertTrue("🎛 Mode: <b>🔓 Full access</b>" in reply.text, reply.text)
+        assertTrue("«fix the login»" in reply.text)
         val r = rows(reply)
         assertEquals(
             listOf("mo:yolo", "mo:build", "mo:edit", "mo:guarded"),
@@ -181,12 +181,12 @@ class ModeCommandTest {
 
     @Test
     fun aSnapshotWithoutModeRendersTheDefaultFullAccess() = runBlocking {
-        // THE DEFAULT LAW (4/11: «por defecto siempre Full access»): the
+        // THE DEFAULT LAW (4/11: «Full access always by default»): the
         // card says it — the label as default, never «—», 🎯 on the yolo
         // row — and carries the honest first-turn caveat
         val reply = commands(ops(current = null)).handle("/mode", 1L)!!
-        assertTrue("🎛 Modo: <b>🔓 Full access</b> (por defecto)" in reply.text, reply.text)
-        assertTrue("La primera vuelta de una charla nueva corre el default del app" in reply.text, reply.text)
+        assertTrue("🎛 Mode: <b>🔓 Full access</b> (default)" in reply.text, reply.text)
+        assertTrue("The first turn of a new chat runs the app's default" in reply.text, reply.text)
         assertFalse(reply.text.contains("—"), "never a blank: the default is SAID")
         val r = rows(reply)
         assertTrue(r.first { it.second == "mo:yolo" }.first.startsWith("🎯"), "the default row is the marked one")
@@ -208,8 +208,8 @@ class ModeCommandTest {
         val o = ops()
         val reply = commands(o).handle("/mode edit", 2L)!!
         assertEquals("task-77" to "edit", o.setModes.single())
-        assertTrue("🎛 Modo de «arreglá el login»: <b>📝 Edit automatically</b> ✅" in reply.text, reply.text)
-        assertTrue("aplica al próximo turno" in reply.text)
+        assertTrue("🎛 Mode of «fix the login»: <b>📝 Edit automatically</b> ✅" in reply.text, reply.text)
+        assertTrue("applies to the next turn" in reply.text)
         assertTrue(
             rows(reply).first { it.second == "mo:edit" }.first.startsWith("🎯"),
             "the applied mode becomes the marked one",
@@ -223,7 +223,7 @@ class ModeCommandTest {
         val o = ops()
         val reply = commands(o).handle("/mode plan", 2L)!!
         assertEquals("task-77" to "plan", o.setModes.single())
-        assertTrue("🎛 Modo de «arreglá el login»: <b>🗺 Plan mode</b> ✅" in reply.text, reply.text)
+        assertTrue("🎛 Mode of «fix the login»: <b>🗺 Plan mode</b> ✅" in reply.text, reply.text)
         // and the keyboard that comes back offers the four, plan unmarked-none
         assertEquals(listOf("mo:yolo", "mo:build", "mo:edit", "mo:guarded"), rows(reply).map { it.second })
     }
@@ -240,8 +240,8 @@ class ModeCommandTest {
     fun anUnknownWordIsRefusedWithTheRealVocabularyAndNothingIsSent() = runBlocking {
         val o = ops()
         val reply = commands(o).handle("/mode bananas", 4L)!!
-        assertTrue("⚠️ Modos: plan · yolo · build · edit · guarded" in reply.text, reply.text)
-        assertTrue("/mode &lt;modo&gt;" in reply.text, "the usage's bracket is ESCAPED (the 2/11 poison law)")
+        assertTrue("⚠️ Modes: plan · yolo · build · edit · guarded" in reply.text, reply.text)
+        assertTrue("/mode &lt;mode&gt;" in reply.text, "the usage's bracket is ESCAPED (the 2/11 poison law)")
         assertEquals(0, o.setModes.size, "a typo never degrades the conversation")
         assertTrue(reply.markup != null, "the refusal still offers the honest rows")
     }

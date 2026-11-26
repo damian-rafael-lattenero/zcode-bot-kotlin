@@ -43,7 +43,7 @@ class FileMenuTest {
         val rec = RecordingMenu(disk = "una línea")
         val first = rec.menu.buttonFor("/w/Main.kt")
         val second = rec.menu.buttonFor("/w/Main.kt")
-        assertTrue("\"📄 archivo completo\"" in first.toString())
+        assertTrue("\"📄 full file\"" in first.toString())
         assertTrue("fvm:1" in first.toString(), "the id rides the callback: $first")
         assertEquals(first, second, "the same path is the same door — one viewer, not many")
     }
@@ -56,7 +56,7 @@ class FileMenuTest {
         assertEquals(null, rec.menu.open(id), "the send IS the feedback")
         val (text, pager) = rec.sent.single()
         assertTrue("📄 <b>/w/Main.kt</b>" in text, "the path rides the header: $text")
-        assertTrue("fresco al toque" in text, "the freshness law speaks in the header")
+        assertTrue("fresh at tap time" in text, "the freshness law speaks in the header")
         assertTrue("a\nb\nc" in text, "PURE CODE: the file verbatim, no gutter: $text")
         assertTrue("│" !in text, "no line-number gutter — the code scrolls: $text")
         assertTrue("class=\"language-kotlin\"" in text, "the viewer colors by the file's own language: $text")
@@ -71,20 +71,20 @@ class FileMenuTest {
         val id = "fvm:(\\d+)".toRegex().find(markup.toString())!!.groupValues[1].toInt()
         rec.menu.open(id)
         // the file CHANGED after the viewer opened — the page tap sees the NEW disk
-        rec.disk = "cambió en la Mac"
+        rec.disk = "changed on the Mac"
         assertEquals(null, rec.menu.page(id, 0))
         val (mid, text, _) = rec.edits.single()
         assertEquals(50L, mid, "the edit lands on the SAME viewer message")
-        assertTrue("cambió en la Mac" in text, "fresh at tap time — his choice: $text")
+        assertTrue("changed on the Mac" in text, "fresh at tap time — his choice: $text")
         assertTrue("original" !in text)
     }
 
     @Test
     fun theUnknownIdAndTheVanishedFileAnswerHonestly() = runTest {
         val rec = RecordingMenu(disk = null)
-        assertTrue("otro turno" in (rec.menu.open(99) ?: ""))
+        assertTrue("another turn" in (rec.menu.open(99) ?: ""))
         rec.menu.buttonFor("/w/gone.kt")
-        assertTrue("No pude leer" in (rec.menu.open(1) ?: ""), "a vanished file is not a lie about it")
+        assertTrue("Could not read" in (rec.menu.open(1) ?: ""), "a vanished file is not a lie about it")
     }
 
     @Test

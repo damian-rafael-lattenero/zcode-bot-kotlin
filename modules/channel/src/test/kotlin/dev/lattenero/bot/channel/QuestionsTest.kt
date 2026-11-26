@@ -113,9 +113,9 @@ class QuestionsTest {
                      {"question":"uno"},{"question":"dos"}]}""",
             ),
         )!!
-        assertTrue("pregunta 1 de 2" in questionText(q))
+        assertTrue("question 1 of 2" in questionText(q))
         val advanced = q.copy(questionIndex = 1, header = q.questions[1].header, title = q.questions[1].text)
-        assertTrue("pregunta 2 de 2" in questionText(advanced))
+        assertTrue("question 2 of 2" in questionText(advanced))
     }
 
     @Test
@@ -305,7 +305,7 @@ class QuestionsTest {
             board.onStreamEvent(questionFrame("r$i"))
         }
         assertNull(board.byShortId("q1")) // the eldest evicted...
-        // ...and its card DIED on screen (4/11: the armed dead button answered «ya no está pendiente»)
+        // ...and its card DIED on screen (4/11: the armed dead button answered «no longer pending»)
         assertEquals(listOf(5L to QuestionBoard.EVICTION_TEXT), seams.edits)
     }
 
@@ -391,7 +391,7 @@ class QuestionsTest {
         assertTrue(b.answer("q1", "main") is QuestionFlow.Advanced)
         val (mid, text, _) = seamsB.edits.single()
         assertEquals(9L, mid) // the OLD card's message — the restart changed nothing
-        assertTrue("pregunta 2 de 2" in text)
+        assertTrue("question 2 of 2" in text)
     }
 
     // ---- the multi-question flow: advance IN PLACE, ONE respond at the end ----
@@ -441,7 +441,7 @@ class QuestionsTest {
         assertEquals(1, seams.sent.size) // the rate law: never a second message
         val (mid, text, markup) = seams.edits.single()
         assertEquals(9L, mid)
-        assertTrue("pregunta 2 de 2" in text)
+        assertTrue("question 2 of 2" in text)
         assertTrue("¿qué runtime?" in text)
         assertTrue("qa:q1:0" in markup.toString()) // q2's OWN option now on screen
         assertEquals("¿qué runtime?", board.byShortId("q1")?.title)
@@ -556,7 +556,7 @@ class QuestionsTest {
         )!!
         assertEquals("general-purpose · audit the migrations", q.originLabel)
         val text = questionText(q)
-        assertTrue("🤖 subagente: general-purpose · audit the migrations" in text)
+        assertTrue("🤖 subagent: general-purpose · audit the migrations" in text)
     }
 
     @Test

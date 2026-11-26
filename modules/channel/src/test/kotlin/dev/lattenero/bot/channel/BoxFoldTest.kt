@@ -147,7 +147,7 @@ class BoxFoldTest {
     @Test
     fun theOutputsAreImagesOnlyNoTextDoorIsBornOrAnswered() = runTest {
         // THE OWNER, 26/11: the outputs are images and nothing that is not an
-        // image is shown. A box is born with NO keyboard, an old «Ver salida»
+        // image is shown. A box is born with NO keyboard, an old «View output»
         // tap answers the honest words and edits nothing, and the way back
         // folds to the header — still doorless.
         val hub = LiveHub()
@@ -167,7 +167,7 @@ class BoxFoldTest {
         assertEquals(1, spoke.size)
         val (spokeText, spokeMarkup) = spoke.single()
         assertEquals(
-            "⚡ <b>Nushell</b> · 27 líneas\n<i>📸 tocar para ver la imagen</i>\n" +
+            "⚡ <b>Nushell</b> · 27 lines\n<i>📸 tap to see the image</i>\n" +
                 "<pre><code class=\"language-nu\">ls</code></pre>",
             spokeText,
             "the collapsed header, byte-exact — its hint names the image",
@@ -183,7 +183,7 @@ class BoxFoldTest {
         assertEquals(null, publisher.fold(box.boxId))
         val folded = lastEdit(wire)
         assertEquals(
-            "⚡ <b>Nushell</b> · 27 líneas\n<i>📸 tocar para ver la imagen</i>\n" +
+            "⚡ <b>Nushell</b> · 27 lines\n<i>📸 tap to see the image</i>\n" +
                 "<pre><code class=\"language-nu\">ls</code></pre>",
             folded.text,
             "the fold-back is the exact header, byte-exact",

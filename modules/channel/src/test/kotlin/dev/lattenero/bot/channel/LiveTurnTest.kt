@@ -875,7 +875,7 @@ class LiveTurnTest {
         )
         assertTrue("❄️" in text)
         assertTrue("npm install" in text)
-        assertTrue("frozen · 10m05s sin eventos" in text) // now − touchedAt
+        assertTrue("frozen · 10m05s without events" in text) // now − touchedAt
         assertTrue("· 0s · frozen" in text, "the frozen clock stops at the last real event")
         // an ACKed dispatch lane NEVER freezes — the child runs as its OWN
         // session (the sa: card is the live view there); a frozen claim the
@@ -893,7 +893,7 @@ class LiveTurnTest {
         // detail, unlike the NOW lane's) must stay warm — the child runs as
         // its own session and the parent stream cannot verify a freeze
         val dispatchLine = later.lineSequence()
-            .first { "<b>shell</b>" in it && "salida al cerrar" in it && "<code>" !in it }
+            .first { "<b>shell</b>" in it && "output at close" in it && "<code>" !in it }
         assertTrue("❄️" !in dispatchLine)
     }
 
@@ -974,7 +974,7 @@ class LiveTurnTest {
         )
         s = reduce(s, thought("pensando"))
         val text = LiveTurn.render(s!!, nowMs = s.lastEventAtMs!! + 1_000, channelAlive = true)
-        assertTrue("⏳ <b>Procesando... 1m40s</b>" in text, "the header counts from zcode's start: $text")
+        assertTrue("⏳ <b>Processing... 1m40s</b>" in text, "the header counts from zcode's start: $text")
     }
 
     @Test
@@ -1019,24 +1019,24 @@ class LiveTurnTest {
         val fresh = LiveTurn.render(s, nowMs = last + 2_000, channelAlive = true)
         assertTrue("🧠 <b>generating CoT</b> · 20 chars · 2s" in fresh, fresh)
         // 6s since the last delta: under the staleness window, past the CoT
-        // one — the honest «procesando…» (the model may be computing pure)
+        // one — the honest «processing…» (the model may be computing pure)
         val quiet = LiveTurn.render(s, nowMs = last + 6_000, channelAlive = true)
-        assertTrue("🧠 <b>procesando…</b>" in quiet, quiet)
-        assertTrue("sin eventos" !in quiet, "the staleness degrade has not fired under 20s")
-        // THE FROZEN CLOCK IS NEVER «GENERANDO»: the freshness reads the
-        // real clock, so 42s of silence says «procesando…» + the honest age
+        assertTrue("🧠 <b>processing…</b>" in quiet, quiet)
+        assertTrue("without events" !in quiet, "the staleness degrade has not fired under 20s")
+        // THE FROZEN CLOCK IS NEVER «GENERATING»: the freshness reads the
+        // real clock, so 42s of silence says «processing…» + the honest age
         val frozen = LiveTurn.render(s, nowMs = last + 42_000, channelAlive = true)
-        assertTrue("🧠 <b>procesando…</b> (42s sin eventos)" in frozen, frozen)
+        assertTrue("🧠 <b>processing…</b> (42s without events)" in frozen, frozen)
         // a subagent's narration does not keep the CoT fresh
         var sub = reduce(null, thought("main", parent = null))
         sub = reduce(sub, thought("sub narration", parent = "lane-A"))
         val subFresh = LiveTurn.render(sub!!, nowMs = sub.lastEventAtMs!! + 6_000, channelAlive = true)
-        assertTrue("🧠 <b>procesando…</b>" in subFresh, "subagent lanes never refresh the card's CoT: $subFresh")
+        assertTrue("🧠 <b>processing…</b>" in subFresh, "subagent lanes never refresh the card's CoT: $subFresh")
     }
 
     @Test
     fun afterAToolClosesTheThinkingStartsProcesandoUntilNewDeltas() {
-        // v2 §2: lastThoughtAtMs is old right after a close — «procesando…»
+        // v2 §2: lastThoughtAtMs is old right after a close — «processing…»
         // immediately; the first new delta flips it to «generating CoT»
         var s: TurnLive? = null
         s = reduce(s, thought("antes de la acción"))
@@ -1057,7 +1057,7 @@ class LiveTurnTest {
             ),
         )
         val afterClose = LiveTurn.render(closed, nowMs = closed.lastEventAtMs!! + 1_000, channelAlive = true)
-        assertTrue("🧠 <b>procesando…</b>" in afterClose, afterClose)
+        assertTrue("🧠 <b>processing…</b>" in afterClose, afterClose)
         val again = reduce(closed, thought("el CoT sigue"))
         val freshAgain = LiveTurn.render(again, nowMs = again.lastEventAtMs!! + 1_000, channelAlive = true)
         assertTrue("🧠 <b>generating CoT</b>" in freshAgain, freshAgain)
