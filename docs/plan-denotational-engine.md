@@ -82,7 +82,10 @@ fork/config-level question to resolve in P3).
 2. `prompt-laws.nu` is Nushell-only: no "consult kotlin-kb and kap first" law rides a Kotlin prompt.
 3. No PostToolUse hook exists, so nothing ever compiles a file the agent just wrote.
 4. The corpus indexes no `.kt`, `.ts` or `.hs` source and no TypeScript documentation.
-5. No hook writes a denial record; the curve above had to be reconstructed.
+5. No hook wrote a denial record — FIXED 26/11: `denials.tsv` is live (P0).
+
+Baseline oracle-failure ratios from the first run (W45 → W48): nu 20.8% → 4.8% (a real learning
+signal), kt ≈ 16–26% (flat — no mechanical layer), ts 13.1% → 0% (small numbers), hs dormant since W41.
 
 ### 3.4 Correcting the agent while it works
 
