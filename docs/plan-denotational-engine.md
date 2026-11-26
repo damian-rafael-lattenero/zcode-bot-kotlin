@@ -58,17 +58,23 @@ Proof points: hooks are registered in `~/.zcode/cli/config.json` (`hooks.events`
 `~/Scripts/scripts/hooks/`; the live corpus list is `~/.zcode/agent-brain/corpus.txt`; `kap-detekt-rules:5.5.0`
 is wired in `zcode-bot-kotlin`, `agent-brain` and `whatsdigest-kt` build files with three rules.
 
-### 3.2 The Nushell learning curve (law denials per 1,000 `.nu` writes)
+### 3.2 The Nushell learning curve (law denials; first pass revised 26/11)
 
-| Week | `.nu` writes | denials |
-|---|---|---|
-| Nov 2–8 | 520 | 11 |
-| Nov 9–15 | 1,139 | 22 |
-| Nov 16–22 | 1,008 | 31 |
-| Nov 23–26 | 385 | 1 |
+| Week | `.nu` writes | denials | per 1,000 |
+|---|---|---|---|
+| Nov 2–8 | 520 | 18 | 34.5 |
+| Nov 9–15 | 1,139 | 40 | 35.0 |
+| Nov 16–22 | 1,008 | 30 | 30.1 |
+| Nov 23–26 | 516 | 19 | 36.8 |
 
-Approximate — reconstructed by substring from the session store, because **no hook logs its denials**.
-It is still the only learning curve the fleet has, and the model for what "learned" means.
+The first reconstruction (11/22/31/1) undercounted: it missed Bash-tool denials and the newer
+`PreToolUse:… hook error: [command hidden]` wrapper. The real rate is FLAT at ~30–37 per 1,000
+writes — the hooks catch real mistakes continuously; there was no collapse. `denials.tsv` is
+authoritative from 26/11 (the live-fire drill logged its first line the same day). 60 stored denials
+of the retired `nu -c` wrapper rule are counted apart; weeks before W44 show zero because no denying
+hook existed yet. 25,341 of the window's 80,278 tool steps came from subagent sessions and carry
+**zero** hook denials — the mechanical layer does not fire in subagent sessions at all (a
+fork/config-level question to resolve in P3).
 
 ### 3.3 Concrete defects found
 
@@ -100,15 +106,17 @@ completion verifier — it never inspects an action before it happens.
 Each phase is one or more sessions; each session is one logical unit: commit, push, and the ficha it
 teaches. Hooks follow the census law (every `.nu` has its test, `~/Scripts/tests/`).
 
-### P0 — Baseline and scaffolding (1 session)
+### P0 — Baseline and scaffolding (1 session) — DONE 26/11
 
-- [ ] Save the owner's cognitive profile to permanent memory (done: `owner-cognitive-profile-denotational-engine`).
-- [ ] One pointer line in `AGENTS.md`'s "Adaptación a mi forma de trabajar" section.
-- [ ] Denial ledger: the denying hooks append `ts, session, hook, rule, language, path` to
-      `~/.zcode/hooks/state/denials.tsv` (the `write-guard.tsv` precedent) — turns §3.2 into a clean number.
-- [ ] Baseline script `~/Scripts/scripts/brain-baseline.nu` (+ test): per language per week — writes,
-      oracle runs, oracle failures, law denials. The replay of today moves into the repo as its rumbo leg.
-- [ ] Book folder and the hoja de ruta skeleton.
+- [x] The owner's cognitive profile in permanent memory + one line in `AGENTS.md`.
+- [x] Denial ledger: the three denying hooks append `ts, session, hook, rule, language, target` to
+      `~/.zcode/hooks/state/denials.tsv` — merged `0fe94d2`, the live-fire drill logged its first line.
+- [x] Baseline `scripts/brain-baseline.nu` + `lib/brain-baseline.nu` (pure core), tests, gate green;
+      first real run exit 0 in 65 s. Oracle definition measured: a failing run is `status=completed`
+      with the failure inside `state.output` (no exit codes are stored; `status=error` is the harness).
+- [x] Book folder and the hoja de ruta (`agent-brain` `cb632ca`).
+- [x] Found and fixed on the way: the typing hook's type-alias warn crashed on two prose parens
+      inside the interpolated message — exactly on the files the law targets (`6f58ad8`).
 
 ### P1 — The Canon: Haskell as the source (3 sessions)
 
@@ -229,7 +237,7 @@ top-k — hence one note per concept and top 4 in the guard.
 
 | Number | Today | Target |
 |---|---|---|
-| Law denials per 1,000 writes — Nushell | ≈ 3 | hold |
+| Law denials per 1,000 writes — Nushell | ≈ 30–37, flat | hold; kt/ts to Nushell's order within 6 weeks of P3 |
 | Law denials per 1,000 writes — Kotlin, TypeScript | unknown | Nushell's order within 6 weeks of P3 |
 | Oracle failure ratio, per language | unknown (baseline at P0) | falling week over week |
 | Canon adherence of written code | not measured | baseline, then rising |
