@@ -204,7 +204,7 @@ internal fun parseQuestionEvent(event: JsonObject): PendingQuestion? {
                 header = "🔐 Permiso solicitado",
                 title = event.str("description")?.takeIf { it.isNotBlank() }
                     ?: event.str("title")?.takeIf { it.isNotBlank() }
-                    ?: "El agente pide permiso",
+                    ?: "The agent asks for permission",
                 options = opts,
                 originLabel = origin,
             )
@@ -217,18 +217,18 @@ internal fun parseQuestionEvent(event: JsonObject): PendingQuestion? {
                     taskId = taskId,
                     requestId = requestId,
                     kind = "plan",
-                    header = "📋 Plan por aprobar",
-                    title = event.str("message")?.takeIf { it.isNotBlank() } ?: "¿Apruebo este plan?",
+                    header = "📋 Plan to approve",
+                    title = event.str("message")?.takeIf { it.isNotBlank() } ?: "Approve this plan?",
                     options = listOf(
-                        QuestionOption("approve", "✅ Aprobar el plan"),
-                        QuestionOption("decline", "❌ Rechazar"),
+                        QuestionOption("approve", "✅ Approve the plan"),
+                        QuestionOption("decline", "❌ Reject"),
                     ),
                     plan = schema.str("plan"),
                     originLabel = origin,
                 )
             } else {
                 val questions = event["questions"] as? JsonArray
-                val eventHeader = event.str("header")?.takeIf { it.isNotBlank() } ?: "❓ Pregunta"
+                val eventHeader = event.str("header")?.takeIf { it.isNotBlank() } ?: "❓ Question"
                 val eventOptions = event["options"] as? JsonArray
                 // The FULL questionnaire, index-aligned with the fork's wire
                 // (`answer_N` answers question N — never drop an item, a
@@ -544,7 +544,7 @@ class QuestionBoard(
         }
         persist() // the insert + the evictions are committed BEFORE the send flies
         // THE EVICTION'S HONESTY (measured 4/11): a retired card keeps armed
-        // buttons whose taps now answer «ya no está pendiente» — a dead
+        // buttons whose taps now answer «no longer pending» — a dead
         // button pretending to be live. The seal edit flies OUTSIDE the lock
         // (the AnswerStep law: decisions under the monitor, effects after).
         registered.evicted.forEach { q ->
@@ -696,9 +696,9 @@ class QuestionBoard(
         /** The short ids' shape (`q1`, `q2`, …) — the tap wire's key AND the reload's counter seed. */
         const val SHORT_ID_PREFIX = "q"
 
-        /** The evicted card's honest seal (4/11: an armed dead button's tap answers «ya no está pendiente»). */
+        /** The evicted card's honest seal (4/11: an armed dead button's tap answers «no longer pending»). */
         const val EVICTION_TEXT =
-            "🗑 Pregunta retirada — llegaron $REGISTRY_CAP pendientes; mandá la respuesta por texto si sigue vigente"
+            "🗑 Question withdrawn — $REGISTRY_CAP pending ones arrived; send the answer as text if it is still valid"
 
         /** The buttons' cap per question (Telegram's keyboard sanity; ✍️ always remains). */
         const val QUESTION_OPTIONS_CAP = 8

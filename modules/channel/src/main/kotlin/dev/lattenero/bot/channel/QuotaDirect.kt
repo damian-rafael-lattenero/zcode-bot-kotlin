@@ -176,7 +176,7 @@ object QuotaDirect {
         else -> group(BigDecimal(n.toString()).stripTrailingZeros().toPlainString())
     }
 
-    /** Miles con coma (el dueño 2/11: «300,000.4» — ínfimo pero ayuda a leer). */
+    /** Thousands with a comma (the owner 2/11: «300,000.4» — tiny, but it helps reading). */
     private fun group(digits: String): String {
         val dot = digits.indexOf('.')
         val head = if (dot >= 0) digits.substring(0, dot) else digits

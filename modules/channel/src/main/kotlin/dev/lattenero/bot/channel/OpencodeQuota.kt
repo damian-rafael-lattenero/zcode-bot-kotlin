@@ -11,9 +11,9 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 /**
- * /quota's OpenCode rung (owner's order, 3/11: «estoy usando la api de
- * open code… me gustaría que me muestre los límites disponibles de
- * opencode go» — the bot was still answering the OLD z.ai coding plan's
+ * /quota's OpenCode rung (owner's order, 3/11: «I am using the open code
+ * api… I would like it to show me the available limits of
+ * opencode go» [translated] — the bot was still answering the OLD z.ai coding plan's
  * pools because the ladder's direct leg was z.ai-hardcoded).
  *
  * The provider's OWN meter, discovered live on 3/11: ONE Bearer GET to

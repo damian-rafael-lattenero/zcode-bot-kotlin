@@ -44,8 +44,8 @@ sealed interface VoiceBlock {
 }
 
 /**
- * THE TURN'S ORGANIZED DIGEST (the owner, 16/11: «si esto estuviera
- * organizado y con contexto valdría bastante, pero no lo está»): the seal
+ * THE TURN'S ORGANIZED DIGEST (the owner, 16/11: «if this were
+ * organized and with context it would be worth a lot, but it is not» [translated]): the seal
  * stops shipping the turn's raw concatenated prose and speaks STEPS instead
  * — each one labeled with the tool it followed, the conclusion marked ✅.
  *

@@ -24,12 +24,12 @@ data class FeedMessage(
     val pages: ToolOutputPages.Pages? = null,
     /**
      * A WRITE/EDIT close's file path (the owner, 5/11): the message earns
-     * the [📄 archivo completo] button — the publisher owns the registry,
+     * the [📄 full file] button — the publisher owns the registry,
      * the feed only marks which message is a file close. Null = no button.
      */
     val editPath: String? = null,
     /**
-     * BORN OPEN (12/11 — «no muestra expandido por defecto el texto»): the
+     * BORN OPEN (12/11 — «it does not show the text expanded by default» [translated]): the
      * message is a collapsed output box whose page 1 SHOWS at birth — the
      * child's report must arrive read, not behind one more tap — with the
      * pager's buttons intact for the flips. Shells keep the folded birth
@@ -58,15 +58,15 @@ data class FeedMessage(
 }
 
 /**
- * The TRANSCRIPT FEED — THE DATA half of the ley raíz (the owner, 2/11:
- * «separar bien el dato del proceso»): each tool CLOSE becomes its own
+ * The TRANSCRIPT FEED — THE DATA half of the root law (the owner, 2/11:
+ * «separate the data from the process properly» [translated]): each tool CLOSE becomes its own
  * Telegram message with its real content (the bash command + output, the
  * edit's diff box), ordered, under the always-last process card. THE CoT
  * STOPS TRAVELING WHOLE: each sealed ~1K block becomes a COLLAPSED message
- * — the header «📖 CoT N · 1K — tocar para leer» and a button; the tap
+ * — the header «📖 CoT N · 1K — tap to read» and a button; the tap
  * expands the block WHOLE in place on that same message (the publisher's
- * edit), another tap re-collapses (the owner, 2/11: «yo decido si los leo
- * o no una vez que se llenó el botón de los 3k»). A block never chunks:
+ * edit), another tap re-collapses (the owner, 2/11: «I decide whether I
+ * read them or not once the 3k button filled up» [translated]). A block never chunks:
  * it seals at sentence ends under [LiveTurn.COT_BLOCK_TARGET_CP] (a
  * crossing sentence may run past it, the valve at [LiveTurn.COT_VALVE_CP]
  * is the ceiling), one message by law.
@@ -126,8 +126,8 @@ object TranscriptFeed {
             out += FeedMessage(collapsedHeader(i + 1, PyText.cpLength(curr.cotBlocks[i])), block = i + 1)
         }
 
-        // THE LANE SCOPE (measured live 4/11: «están llegando cosas de los
-        // subagentes y ahora está frenada»): a subagent's INNER tools are its
+        // THE LANE SCOPE (measured live 4/11: «things from the subagents are
+        // arriving and now it is stuck» [translated]): a subagent's INNER tools are its
         // own narration, never the parent card's transcript — the parent keeps
         // the dispatch tool's line plus the 🤖 lane summary the card renders.
         // A `sa:`-scoped card speaks exactly its lane. Unscoped = only
@@ -156,7 +156,7 @@ object TranscriptFeed {
                 }
                 val box = if (lane.input == null) "" else toolBox(lane)
                 // THE FILE BUTTON (the owner, 5/11): a write/edit close earns
-                // «📄 archivo completo» — the path rides the message, the
+                // «📄 full file» — the path rides the message, the
                 // publisher's registry builds the door
                 val editPath = lane.editFilePath()
                 out += FeedMessage(
@@ -170,7 +170,7 @@ object TranscriptFeed {
         // the tool OPENS — the VERBOSE extra: a one-liner the moment a lane
         // appears, so the transcript shows the action as it STARTS. And the
         // LONG-COMMAND LAW (v2 §3): a shell command too long for the card
-        // travels here ONCE, COMPLETE — the card's «✂️ … va en el feed»
+        // travels here ONCE, COMPLETE — the card's «✂️ … goes in the feed»
         // promised it (NORMAL speaks it too: it is DATA, not noise; SUMMARY
         // stays silent by its own law). Split across messages only when a
         // single one would exceed Telegram's 4096 — never elided mid-command.
@@ -225,23 +225,23 @@ object TranscriptFeed {
 
     /**
      * The collapsed block's header — the whole message until the tap
-     * expands it: number, the «generado Xk» verdict (v2 §4, the number
+     * expands it: number, the «generated Xk» verdict (v2 §4, the number
      * law), the affordance. The text itself never rides here.
      */
     internal fun collapsedHeader(number: Int?, cp: Int): String {
-        // «generado» is a SEALED block's verdict — an unsealed tail never
+        // «generated» is a SEALED block's verdict — an unsealed tail never
         // claims it; its size rides as the plain rung (the number law).
         val verdict = when (number) {
             null -> "· ${LiveTurn.fmtKDecimal(cp.toLong())}"
-            else -> "generado ${LiveTurn.fmtKDecimal(cp.toLong())}"
+            else -> "generated ${LiveTurn.fmtKDecimal(cp.toLong())}"
         }
-        val label = if (number != null) "CoT $number" else "CoT · sin sellar"
-        return "📖 <b>$label</b> $verdict — tocar para leer"
+        val label = if (number != null) "CoT $number" else "CoT · unsealed"
+        return "📖 <b>$label</b> $verdict — tap to read"
     }
 
     /** The tap's EXPANDED render: the header, then the block WHOLE. */
     internal fun expandedBlock(number: Int?, cp: Int, text: String): String {
-        val label = if (number != null) "CoT $number" else "CoT · sin sellar"
+        val label = if (number != null) "CoT $number" else "CoT · unsealed"
         return "📖 <b>$label</b> · ${LiveTurn.fmtKDecimal(cp.toLong())}\n<blockquote>${PyText.esc(text)}</blockquote>"
     }
 
@@ -254,8 +254,8 @@ object TranscriptFeed {
         }
         val verdict = when {
             lane.added != null || lane.removed != null -> "🟢 +${lane.added ?: 0} · 🔴 −${lane.removed ?: 0}"
-            lane.outputLines != null -> "${lane.outputLines} líneas de salida"
-            else -> lane.status ?: "listo"
+            lane.outputLines != null -> "${lane.outputLines} output lines"
+            else -> lane.status ?: "done"
         }
         return "${verbs.of(lane.name, lane.input, lane.isMcp).emoji} " +
             "<b>${PyText.esc(lane.name)}</b>: ${PyText.esc(verdict)}$mark"

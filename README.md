@@ -9,7 +9,7 @@ the parity reference and the rollback door. The migration grew through the
 writes, `flock` with a deadline, mtimes as shared clocks). The roadmap is
 [`docs/kap-first-migration.md`](https://github.com/damian-rafael-lattenero/zcode-bot/blob/master/docs/kap-first-migration.md)
 in the bot repo; this repo is its **B0**. The current unified plan is
-[`docs/plan-brujula.md`](docs/plan-brujula.md).
+[`docs/plan-compass.md`](docs/plan-compass.md).
 
 **Principles (binding):** FP-first development — pure by default, KAP as
 the effect layer and standard library (anything KAP lacks is added to KAP
@@ -59,7 +59,7 @@ scripts/deploy-daemon.nu         # the daemon: ~/.zcode/bot-daemon + LaunchAgent
 The whole script surface is typed Nushell (`scripts/*.nu`), pinned by
 shebang to `~/.local/bin/nu-nightly` (0.116.2-nightly.28). `nu-check
 --debug` is the parse gate; the migration notes live in
-`~/Projects/nu/002-migracion-total-2026-11-02.md`.
+`~/Projects/nu/002-full-migration-2026-11-02.md`.
 
 The recorder is a fresh JVM per pass (LaunchAgent `StartInterval`, 60 s) —
 the same self-healing dumb-ring pattern the bot's outer healer uses. The

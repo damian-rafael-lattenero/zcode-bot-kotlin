@@ -43,8 +43,8 @@ object ModeMenu {
     private val BY_ID = MODES.associateBy { it.id }
 
     /**
-     * THE DEFAULT (the owner's law, 4/11: «por defecto siempre Full
-     * access»): a conversation whose snapshot has NO `meta.mode` IS
+     * THE DEFAULT (the owner's law, 4/11: «Full access always by default»
+     * [translated]): a conversation whose snapshot has NO `meta.mode` IS
      * Full access — the card says it (🎯 on the yolo row, the label said
      * as default, never «—»), and the wiring's `task_run_started`
      * enforcement WRITES it into the fork so the app runs it too.
@@ -81,7 +81,7 @@ object ModeMenu {
 
     /**
      * Python's card: the conversation, the mode in force, the tap promise.
-     * A snapshot with NO mode says «Full access (por defecto)» and carries
+     * A snapshot with NO mode says «Full access (default)» and carries
      * the honest caveat (4/11): the very first turn of a brand-new
      * conversation runs the app's own default — the enforcement lands yolo
      * for the NEXT turn. Never «—»: the default is SAID, never a blank.
@@ -90,12 +90,12 @@ object ModeMenu {
         val eff = effective(current)
         val label = byId(eff)?.label ?: eff
         return if (current == null) {
-            "🎯 «${PyText.esc(title)}»\n🎛 Modo: <b>${PyText.esc(label)}</b> (por defecto)\n" +
-                "La primera vuelta de una charla nueva corre el default del app; " +
-                "Full access entra desde la próxima.\nTocá para cambiar (aplica al próximo turno):"
+            "🎯 «${PyText.esc(title)}»\n🎛 Mode: <b>${PyText.esc(label)}</b> (default)\n" +
+                "The first turn of a new chat runs the app's default; " +
+                "Full access lands from the next one.\nTap to change (applies to the next turn):"
         } else {
-            "🎯 «${PyText.esc(title)}»\n🎛 Modo: <b>${PyText.esc(label)}</b>\n" +
-                "Tocá para cambiar (aplica al próximo turno):"
+            "🎯 «${PyText.esc(title)}»\n🎛 Mode: <b>${PyText.esc(label)}</b>\n" +
+                "Tap to change (applies to the next turn):"
         }
     }
 
@@ -117,9 +117,9 @@ object ModeMenu {
     }
 
     /** Python's unknown-mode refusal, with the real vocabulary (and no silent downgrade). */
-    fun usage(): String = "⚠️ Modos: ${ids()} — /mode &lt;modo&gt;"
+    fun usage(): String = "⚠️ Modes: ${ids()} — /mode &lt;mode&gt;"
 
     /** The applied copy — Python's own promise, in the bot's language. */
     fun applied(title: String, mode: Mode): String =
-        "🎛 Modo de «${PyText.esc(title)}»: <b>${PyText.esc(mode.label)}</b> ✅\n(aplica al próximo turno)"
+        "🎛 Mode of «${PyText.esc(title)}»: <b>${PyText.esc(mode.label)}</b> ✅\n(applies to the next turn)"
 }

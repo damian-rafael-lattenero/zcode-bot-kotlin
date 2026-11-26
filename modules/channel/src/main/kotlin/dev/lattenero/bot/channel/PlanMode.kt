@@ -21,11 +21,11 @@ object PlanMode {
 
     /** The card: the conversation, the state line, the tap promise. */
     fun statusLine(title: String, on: Boolean): String =
-        "🧭 Plan mode de «${PyText.esc(title)}»\n" +
+        "🧭 Plan mode of «${PyText.esc(title)}»\n" +
             if (on) {
-                "Estado: <b>✅ ON</b> (planear antes de editar)\nTocá para cambiar (aplica al próximo turno):"
+                "State: <b>✅ ON</b> (plan before editing)\nTap to change (applies to the next turn):"
             } else {
-                "Estado: <b>⬜ OFF</b> (por defecto: 🔓 Full access)\nTocá para cambiar (aplica al próximo turno):"
+                "State: <b>⬜ OFF</b> (default: 🔓 Full access)\nTap to change (applies to the next turn):"
             }
 
     /**
@@ -47,10 +47,10 @@ object PlanMode {
 
     /** The applied copy — /mode's promise, in the toggle's 🧭 voice. */
     fun applied(title: String, on: Boolean): String =
-        "🧭 Plan mode de «${PyText.esc(title)}»: " +
+        "🧭 Plan mode of «${PyText.esc(title)}»: " +
             if (on) {
-                "<b>✅ ON</b> ✅\n(aplica al próximo turno)"
+                "<b>✅ ON</b> ✅\n(applies to the next turn)"
             } else {
-                "<b>⬜ OFF</b> ✅ — volvemos a 🔓 Full access\n(aplica al próximo turno)"
+                "<b>⬜ OFF</b> ✅ — back to 🔓 Full access\n(applies to the next turn)"
             }
 }

@@ -20,9 +20,9 @@ interface FileTaps {
 }
 
 /**
- * THE FILE VIEWER (the owner, 5/11: «Mensaje final -> terminó de editar,
- * muestro el total y muestro el archivo completo»): every WRITE/EDIT close
- * carries a [📄 archivo completo] button; the tap reads the file FROM DISK
+ * THE FILE VIEWER (the owner, 5/11: «Final message -> it finished editing,
+ * I show the total and I show the complete file» [translated]): every WRITE/EDIT close
+ * carries a [📄 full file] button; the tap reads the file FROM DISK
  * AT TAP TIME (his choice — always fresh, later edits included) and opens
  * it in NUMBERED pages ([ToolOutputPages] — the line-number law). Page
  * taps RE-READ the file (each page is the truth of its moment, labeled
@@ -81,8 +81,8 @@ class FileMenu(
     private fun render(path: String, pages: List<String>, index: Int): String {
         val readClock = Instant.ofEpochMilli(clock()).atZone(ZoneId.systemDefault())
             .toLocalTime().format(DateTimeFormatter.ofPattern("HH:mm"))
-        val header = "📄 <b>${PyText.esc(path)}</b> · ${pages.size} página(s) · " +
-            "leído a las $readClock <i>(fresco al toque — edits posteriores incluidos)</i>"
+        val header = "📄 <b>${PyText.esc(path)}</b> · ${pages.size} page(s) · " +
+            "read at $readClock <i>(fresh at tap time — later edits included)</i>"
         return ToolOutputPages.renderPage(header, pages, index, CodeLang.ofPath(path) ?: CodeLang.SHELL)
     }
 
@@ -97,9 +97,9 @@ class FileMenu(
         /** The registry's ceiling — old paths die first, like the CoT registry. */
         const val REGISTRY_CAP = 60
 
-        const val MISS = "🤷 Ese botón quedó de otro turno — el registro de archivos ya no lo tiene."
+        const val MISS = "🤷 That button belongs to another turn — the file registry no longer has it."
         const val UNREADABLE =
-            "⚠️ No pude leer ese archivo (¿se movió o se borró?) — el diff de arriba sigue siendo la verdad del edit."
-        const val SEND_FAILED = "📡 El envío no voló — probá de nuevo en un momento."
+            "⚠️ Could not read that file (was it moved or deleted?) — the diff above is still the edit's truth."
+        const val SEND_FAILED = "📡 The send did not fly — try again in a moment."
     }
 }

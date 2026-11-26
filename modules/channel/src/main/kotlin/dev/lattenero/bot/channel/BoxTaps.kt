@@ -18,6 +18,6 @@ interface BoxTaps {
 
     companion object {
         /** A tap on an output the fold no longer knows (an old turn, a bot restart). */
-        const val MISS = "🤷 Esa salida ya no está en el registro — el botón quedó de otro turno."
+        const val MISS = "🤷 That output is no longer in the registry — the button belongs to another turn."
     }
 }

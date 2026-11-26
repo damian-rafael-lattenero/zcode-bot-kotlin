@@ -111,7 +111,7 @@ object GiftsMenu {
     /** The lines appended to a USABLE /quota card (never to a degraded one). */
     fun render(gifts: Gifts, nowMs: Long): List<String> {
         val lines = mutableListOf<String>()
-        listOf(FIVE_HOUR to "5h", WEEK to "semanal").forEach { (type, word) ->
+        listOf(FIVE_HOUR to "5h", WEEK to "weekly").forEach { (type, word) ->
             val alive = gifts.resets.filter { it.type == type }
             if (alive.isEmpty()) return@forEach
             val count = alive.size
@@ -127,10 +127,10 @@ object GiftsMenu {
     private fun offerLine(offer: Offer): String {
         // the billing preview supplies the name; a marketing-only offer has
         // NONE (the banner's «ZCODE GLOBAL BUILD» lives in its image, not in
-        // the API answer) — say «Oferta reclamable» + the real plan id
+        // the API answer) — say «Claimable offer» + the real plan id
         // instead of pretending the id is a title
-        val title = offer.name?.let { "Reclamable: ${PyText.esc(it)}" }
-            ?: "Oferta reclamable (${PyText.esc(offer.planId)})"
+        val title = offer.name?.let { "Claimable: ${PyText.esc(it)}" }
+            ?: "Claimable offer (${PyText.esc(offer.planId)})"
         val body = buildString {
             append("🔴 <b>$title</b>")
             offer.tokens?.let { append(" — ${BotCommands.tokenRaw(it)} tokens") }
@@ -141,9 +141,9 @@ object GiftsMenu {
     }
 
     /**
-     * THE WORKING CARD's compact prize line (the owner, 3/11: «una pequeña
-     * seccion que diga premios… mientras se recarga y te muestras los
-     * segundos y los cots»): ONE line riding the always-last process card —
+     * THE WORKING CARD's compact prize line (the owner, 3/11: «a little
+     * section that says prizes… while it reloads and you show me the
+     * seconds and the cots» [translated]): ONE line riding the always-last process card —
      * the detail (and the taps) stay in /quota. Silence when there is
      * nothing: absence is not a prize. Resets carry their REAL earliest
      * expiry; a plan offer has NO expiry field, so the line never invents
@@ -155,32 +155,32 @@ object GiftsMenu {
         val five = gifts.resets.count { it.type == FIVE_HOUR }
         if (five > 0) parts += "🎁 ${if (five == 1) "1 reset 5h" else "$five resets 5h"}"
         val week = gifts.resets.count { it.type == WEEK }
-        if (week > 0) parts += "🎁 ${if (week == 1) "1 reset semanal" else "$week resets semanales"}"
+        if (week > 0) parts += "🎁 ${if (week == 1) "1 weekly reset" else "$week weekly resets"}"
         gifts.offers.firstOrNull()?.let { offer ->
-            val name = offer.name?.let { PyText.esc(it) } ?: "oferta"
+            val name = offer.name?.let { PyText.esc(it) } ?: "offer"
             val tokens = offer.tokens?.let { " · ${BotCommands.tokenRaw(it)} tokens" }.orEmpty()
-            parts += "🔴 $name$tokens reclamable"
+            parts += "🔴 $name$tokens claimable"
         }
         val earliest = gifts.resets.minOfOrNull { it.expireAt }
         val expiry = earliest?.let { " · ${expiringWord(it, nowMs)}" }.orEmpty()
-        return "🎁 <b>Premios</b> · ${parts.joinToString(" · ")}$expiry — /quota"
+        return "🎁 <b>Prizes</b> · ${parts.joinToString(" · ")}$expiry — /quota"
     }
 
     /**
-     * The taps of a usable card: one 🎁 Reclamar per offer (the planId is
+     * The taps of a usable card: one 🎁 Claim per offer (the planId is
      * short by contract; a long one degrades to no button rather than a
-     * broken callback) and one 🎁 Usar reset per window with gifts.
+     * broken callback) and one 🎁 Use reset per window with gifts.
      */
     fun keyboard(gifts: Gifts): JsonObject? {
         val rows = mutableListOf<Pair<String, String>>()
         gifts.offers.forEach { offer ->
             val data = "cl:${offer.planId}"
-            if (Keyboards.callbackDataValid(data)) rows.add("🎁 Reclamar" to data)
+            if (Keyboards.callbackDataValid(data)) rows.add("🎁 Claim" to data)
         }
         val five = gifts.resets.count { it.type == FIVE_HOUR }
-        if (five > 0) rows.add("🎁 Usar reset 5h" to "gf:$FIVE_HOUR")
+        if (five > 0) rows.add("🎁 Use 5h reset" to "gf:$FIVE_HOUR")
         val week = gifts.resets.count { it.type == WEEK }
-        if (week > 0) rows.add("🎁 Usar reset semanal" to "gf:$WEEK")
+        if (week > 0) rows.add("🎁 Use weekly reset" to "gf:$WEEK")
         if (rows.isEmpty()) return null
         return buildJsonObject {
             putJsonArray("inline_keyboard") {
@@ -191,28 +191,28 @@ object GiftsMenu {
 
     /** The claim's confirmation — the plan change is the warning, not a footnote. */
     fun claimConfirmation(offer: Offer): String = buildString {
-        append("🔴 <b>¿Reclamar «${PyText.esc(offer.displayName)}»?</b>\n")
+        append("🔴 <b>Claim «${PyText.esc(offer.displayName)}»?</b>\n")
         offer.tokens?.let { append("${BotCommands.tokenRaw(it)} tokens") }
         offer.entitlement?.let { append(" · ${PyText.esc(it)}") }
         offer.period?.let { append(" ($it)") }
         if (offer.tokens != null || offer.entitlement != null) append("\n")
-        append("Es un cambio de plan en tu cuenta — no se puede deshacer.")
+        append("It is a plan change on your account — it cannot be undone.")
     }
 
     /** The reset's confirmation — how many, and how soon the earliest dies. */
     fun resetConfirmation(type: String, count: Int, earliestMs: Long, nowMs: Long): String {
-        val word = if (type == WEEK) "semanal" else "5 horas"
-        return "🎁 <b>¿Usar un reset de $word?</b>\n" +
-            "Te quedan <b>$count</b> · el más temprano ${expiringWord(earliestMs, nowMs)}\n" +
-            "El reset se consume y no se puede recuperar."
+        val word = if (type == WEEK) "weekly" else "5-hour"
+        return "🎁 <b>Use a $word reset?</b>\n" +
+            "You have <b>$count</b> left · the earliest ${expiringWord(earliestMs, nowMs)}\n" +
+            "The reset is spent and cannot be recovered."
     }
 
     /** The ✅/❌ row every confirmation carries (destructive LAST, per the guide). */
     fun confirmKeyboard(goData: String): JsonObject = buildJsonObject {
         putJsonArray("inline_keyboard") {
             add(buildJsonArray {
-                add(Keyboards.button("✅ Confirmar", goData))
-                add(Keyboards.button("❌ Cancelar", "gxn:"))
+                add(Keyboards.button("✅ Confirm", goData))
+                add(Keyboards.button("❌ Cancel", "gxn:"))
             })
         }
     }
@@ -221,7 +221,7 @@ object GiftsMenu {
      * The browser DOOR (the claim's captcha gate, 3/11): ONE url button —
      * a tap opens the owner's browser at the rewards surface. Telegram
      * cannot make a callback open a URL by itself, so this row is the
-     * closest a bot can get to «confirm → abrí el link».
+     * closest a bot can get to «confirm → open the link» [translated].
      */
     fun webDoorKeyboard(label: String, url: String): JsonObject = buildJsonObject {
         putJsonArray("inline_keyboard") {
@@ -233,15 +233,15 @@ object GiftsMenu {
     @Suppress("ReturnCount") // one guard per verdict tier (unreadable, refused, applied)
     fun claimResult(json: String, name: String, zone: ZoneId = ZoneId.systemDefault()): String {
         val root = runCatching { Json.parseToJsonElement(json) as? JsonObject }.getOrNull()
-            ?: return "⚠️ No pude leer la respuesta del reclamo"
+            ?: return "⚠️ Could not read the claim's answer"
         if (root.bool("success") != true) {
             val code = root.int("code") ?: -1
             val message = root.str("message").orEmpty().takeIf { it.isNotBlank() }
             return when {
-                code == HTTP_UNAUTHORIZED -> "⚠️ La app no tiene sesión de ZCode iniciada — reclamá desde la app."
+                code == HTTP_UNAUTHORIZED -> "⚠️ The app has no ZCode session — claim from the app."
                 code in TERMINAL_CLAIM_CODES ->
-                    "⚠️ El server rechazó el reclamo ($code): ${PyText.esc(message ?: "la oferta ya no está disponible")}"
-                else -> "⚠️ No pude reclamar ($code): ${PyText.esc(message ?: "?")}"
+                    "⚠️ The server refused the claim ($code): ${PyText.esc(message ?: "the offer is no longer available")}"
+                else -> "⚠️ Could not claim ($code): ${PyText.esc(message ?: "?")}"
             }
         }
         val plan = root.obj("plan")
@@ -249,10 +249,10 @@ object GiftsMenu {
         val endsAt = plan?.long("endsAt")?.takeIf { it > 0 }
             ?.let { Instant.ofEpochMilli(it * MS_PER_SECOND).atZone(zone).format(DATE_FMT) }
         return buildString {
-            append("✅ <b>Reclamado: ${PyText.esc(name)}</b>")
-            status?.let { append(" · estado ${PyText.esc(it)}") }
-            endsAt?.let { append(" · hasta $it") }
-            append("\nCorré /quota para ver los tokens — y /plan para usar el plan nuevo.")
+            append("✅ <b>Claimed: ${PyText.esc(name)}</b>")
+            status?.let { append(" · status ${PyText.esc(it)}") }
+            endsAt?.let { append(" · until $it") }
+            append("\nRun /quota to see the tokens — and /plan to use the new plan.")
         }
     }
 
@@ -260,22 +260,22 @@ object GiftsMenu {
 
     /** The provider's period vocabulary, only where a word is unambiguous. */
     private fun periodWord(raw: String?): String? = when (raw?.trim()?.lowercase()) {
-        "one_time", "onetime" -> "único"
-        "daily" -> "diario"
-        "weekly" -> "semanal"
-        "monthly" -> "mensual"
+        "one_time", "onetime" -> "one-time"
+        "daily" -> "daily"
+        "weekly" -> "weekly"
+        "monthly" -> "monthly"
         else -> null
     }
 
-    /** «expira en 3h 20m» / «expira en 2d 4h» — relative to a REAL expireAt. */
+    /** «expires in 3h 20m» / «expires in 2d 4h» — relative to a REAL expireAt. */
     fun expiringWord(expireAtMs: Long, nowMs: Long): String {
         val secs = (expireAtMs - nowMs) / MS_PER_SECOND
         return when {
-            secs <= 0 -> "expira ya"
-            secs < SECS_MIN -> "expira en ${secs}s"
-            secs < SECS_HOUR -> "expira en ${secs / SECS_MIN}m"
-            secs < SECS_DAY -> "expira en ${secs / SECS_HOUR}h ${(secs % SECS_HOUR) / SECS_MIN}m"
-            else -> "expira en ${secs / SECS_DAY}d ${(secs % SECS_DAY) / SECS_HOUR}h"
+            secs <= 0 -> "expires now"
+            secs < SECS_MIN -> "expires in ${secs}s"
+            secs < SECS_HOUR -> "expires in ${secs / SECS_MIN}m"
+            secs < SECS_DAY -> "expires in ${secs / SECS_HOUR}h ${(secs % SECS_HOUR) / SECS_MIN}m"
+            else -> "expires in ${secs / SECS_DAY}d ${(secs % SECS_DAY) / SECS_HOUR}h"
         }
     }
 

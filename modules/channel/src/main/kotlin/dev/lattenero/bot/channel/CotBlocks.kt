@@ -6,8 +6,8 @@ import kotlinx.serialization.json.JsonObject
 private val logger = KotlinLogging.logger {}
 
 /**
- * THE CoT REGISTRY — the collapsed blocks' world (the owner, 2/11: «yo
- * decido si los leo o no una vez que se llenó el botón de los 3k»). Each
+ * THE CoT REGISTRY — the collapsed blocks' world (the owner, 2/11: «I
+ * decide whether I read them or not once the 3k button filled up» [translated]). Each
  * collapsed message the feed speaks registers here (id → message id +
  * block number + the FULL text); the tap toggles it IN PLACE on that
  * same message: expand renders the block whole, fold returns the
@@ -94,6 +94,6 @@ class CotBlocks(
         const val MAX_ENTRIES = 720
 
         /** A tap on a block the registry no longer knows (an old turn, a bot restart). */
-        const val MISS = "🤷 Ese CoT ya no está en el registro — el botón quedó de otro turno."
+        const val MISS = "🤷 That CoT is no longer in the registry — the button belongs to another turn."
     }
 }

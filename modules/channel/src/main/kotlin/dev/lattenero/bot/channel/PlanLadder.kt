@@ -2,9 +2,10 @@ package dev.lattenero.bot.channel
 
 /**
  * THE DEFAULT LADDER (the owner's 11/11 order): one priority list that
- * keeps the bot on a plan WITH tokens — «si la 1 no tiene tokens, va a la
- * 2, y si esa tampoco, va a la 3, y si esa tampoco, error - quota limit
- * reached for all… en ese orden, si la 1 no tiene tokens, va a la 2».
+ * keeps the bot on a plan WITH tokens — «if number 1 has no tokens, go to
+ * 2, and if that one neither, go to 3, and if that one neither, error -
+ * quota limit reached for all… in that order, if number 1 has no tokens,
+ * go to 2» [translated].
  *
  * THE ORDER IS THE OWNER'S, verbatim:
  *   1) Start Plan    — GLM-5.3-Flash    — Max
@@ -66,7 +67,7 @@ object PlanLadder {
             usable != null -> Verdict(usable.first, notes + usable.second)
             unknown != null -> Verdict(
                 unknown.first,
-                notes + unknown.second + "• quota desconocida — elegido por el orden del dueño",
+                notes + unknown.second + "• quota unknown — picked by the owner's order",
             )
 
             else -> Verdict(null, notes)
@@ -90,11 +91,11 @@ object PlanLadder {
 
     private fun evaluate(rung: Rung, catalog: PlanMenu.Views, quota: Map<String, PlanQuota.Mark>): Step {
         val plan = catalog.plans.firstOrNull { it.providerId == rung.providerId }
-            ?: return Step.Missing("• ${rung.providerId} no está en el catálogo de la app")
+            ?: return Step.Missing("• ${rung.providerId} is not in the app's catalog")
         val mark = quota[rung.providerId]
         return when {
             PlanQuota.exhausted(mark) ->
-                Step.Exhausted("• ${plan.label}: ⛔ sin tokens — ${PlanQuota.blockedNote(mark)}")
+                Step.Exhausted("• ${plan.label}: ⛔ no tokens — ${PlanQuota.blockedNote(mark)}")
             mark is PlanQuota.Mark.Seen && PlanQuota.usable(mark) -> Step.Usable(plan, rung)
             else -> Step.Unknown(plan, rung) // the quota could not be read — the LAST resort, never the first
         }
@@ -111,14 +112,14 @@ object PlanLadder {
             ?: return null
         val notes = buildList {
             if (model.id != rung.modelId) {
-                add("• ${plan.label}: «${rung.modelId}» no está en el plan — usé ${model.label}")
+                add("• ${plan.label}: «${rung.modelId}» is not in the plan — used ${model.label}")
             }
             when {
                 rung.effort in model.reasoningLevels -> {}
                 model.reasoningLevels.isNotEmpty() ->
-                    add("• ${model.label}: sin tier «${rung.effort}» — usé ${model.reasoningLevels.last()}")
+                    add("• ${model.label}: no «${rung.effort}» tier — used ${model.reasoningLevels.last()}")
 
-                else -> add("• ${model.label}: sin niveles de effort — va sin effort")
+                else -> add("• ${model.label}: no effort levels — runs without effort")
             }
         }
         val effort = when {

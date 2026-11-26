@@ -162,24 +162,24 @@ object PlanMenu {
         text = buildString {
             append(statusLine(v, title))
             defaultWarning(v, quota)?.let { append("\n").append(it) }
-            append("\n\n<b>Quota por plan</b> — «tiene tokens o no», al lado de cada nombre:")
+            append("\n\n<b>Quota per plan</b> — «whether it has tokens or not» [translated], beside each name:")
             v.plans.forEach { p -> append("\n").append(PlanQuota.line(p.label, quota[p.providerId], nowMs, zone)) }
-            append("\n\nModelo: /model · Effort: /effort")
+            append("\n\nModel: /model · Effort: /effort")
         },
         markup = planKeyboard(v, quota),
     )
 
     /**
-     * The stale app default's honest flag (the owner's 17/11 «que avise que
-     * no tiene»): the default's plan is PROVEN tokenless — the ⭐ tap fixes
+     * The stale app default's honest flag (the owner's 17/11 «it must warn
+     * that it has none» [translated]): the default's plan is PROVEN tokenless — the ⭐ tap fixes
      * it. Null when there is no default or it still holds tokens.
      */
     private fun defaultWarning(v: Views, quota: Map<String, PlanQuota.Mark>): String? {
         val plan = v.defaultPlan
         return if (plan != null && PlanQuota.exhausted(quota[plan])) {
             val label = PyText.esc(v.planLabel(plan) ?: plan)
-            "⚠️ El default de la app (<b>$label</b>) está sin tokens — " +
-                "tocá ⭐ para pasarlo al primero con tokens"
+            "⚠️ The app default (<b>$label</b>) has no tokens — " +
+                "tap ⭐ to move it to the first one with tokens"
         } else {
             null
         }
@@ -197,7 +197,7 @@ object PlanMenu {
         if (plan.models.isEmpty()) return null
         val body = buildString {
             append(statusLine(v, title))
-            append("\n\nModelos de <b>${PyText.esc(v.planLabel(shown) ?: shown)}</b> — el plan vigente es el dueño:")
+            append("\n\nModels of <b>${PyText.esc(v.planLabel(shown) ?: shown)}</b> — the plan in force owns them:")
             append("\n\nPlan: /plan · Effort: /effort")
         }
         return MenuRender(body, modelKeyboard(plan, v.model))
@@ -216,28 +216,28 @@ object PlanMenu {
         if (levels.isEmpty()) return null
         val body = buildString {
             append(statusLine(v, title))
-            append("\n\nEffort de <b>${PyText.esc(v.modelLabel(shownModel) ?: shownModel)}</b>" +
+            append("\n\nEffort levels of <b>${PyText.esc(v.modelLabel(shownModel) ?: shownModel)}</b>" +
                 " (plan ${PyText.esc(v.planLabel(shownPlan) ?: shownPlan)}):")
-            append("\n\nPlan: /plan · Modelo: /model")
+            append("\n\nPlan: /plan · Model: /model")
         }
         return MenuRender(body, effortKeyboard(levels, v.effort))
     }
 
     /** The status line: what IS, and the app default — no draft, nothing staged. */
     fun statusLine(v: Views, title: String?): String = buildString {
-        append("🎯 <b>«${PyText.esc(title ?: "conversación")}»</b>\n")
+        append("🎯 <b>«${PyText.esc(title ?: "conversation")}»</b>\n")
         append(currentLine(v))
         defaultLine(v)?.let { append("\n").append(it) }
     }
 
     private fun currentLine(v: Views): String =
         "Plan: <b>${PyText.esc(v.planLabel(v.plan) ?: v.plan ?: "—")}</b>" +
-            " · Modelo: <b>${PyText.esc(v.modelLabel(v.model) ?: v.model ?: "—")}</b>" +
+            " · Model: <b>${PyText.esc(v.modelLabel(v.model) ?: v.model ?: "—")}</b>" +
             " · Effort: <b>${PyText.esc(v.effort ?: "—")}</b>"
 
     private fun defaultLine(v: Views): String? {
         val plan = v.defaultPlan ?: return null
-        return "Default de la app: ${PyText.esc(v.planLabel(plan) ?: plan)}" +
+        return "App default: ${PyText.esc(v.planLabel(plan) ?: plan)}" +
             (v.defaultModel?.let { " · ${PyText.esc(v.modelLabel(it) ?: it)}" } ?: "") +
             (v.defaultEffort?.let { " · ${PyText.esc(it)}" } ?: "")
     }
@@ -251,7 +251,7 @@ object PlanMenu {
             val label = "$mark ${plan.label}${PlanQuota.compact(quota[plan.providerId])}"
             listOf(KeyboardButton(label, "pl:${plan.providerId}"))
         } + listOf(
-            listOf(KeyboardButton("⭐ Default — el primer plan con tokens", "pdef:")),
+            listOf(KeyboardButton("⭐ Default — the first plan with tokens", "pdef:")),
         ) + defaultRow(v)
         return keyboard(rows)
     }
@@ -275,7 +275,7 @@ object PlanMenu {
         )
 
     private fun defaultRow(v: Views): List<KeyboardRow> =
-        if (v.plan == null) emptyList() else listOf(listOf(KeyboardButton("📌 dejar como default de la app", "pd:")))
+        if (v.plan == null) emptyList() else listOf(listOf(KeyboardButton("📌 set as the app default", "pd:")))
 
     private fun keyboard(rows: List<KeyboardRow>): JsonObject = buildJsonObject {
         putJsonArray("inline_keyboard") {

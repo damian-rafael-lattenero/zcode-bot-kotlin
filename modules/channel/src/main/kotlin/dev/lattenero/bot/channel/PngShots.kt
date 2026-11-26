@@ -59,6 +59,6 @@ class PngShots(private val cap: Int = REGISTRY_CAP) {
         const val REGISTRY_CAP: Int = 60
 
         /** The honest miss a stale tap answers (the FileMenu's own words). */
-        const val MISS: String = "🤷 Ese botón quedó de otro turno — el registro de PNGs ya no lo tiene."
+        const val MISS: String = "🤷 That button belongs to another turn — the PNG registry no longer has it."
     }
 }

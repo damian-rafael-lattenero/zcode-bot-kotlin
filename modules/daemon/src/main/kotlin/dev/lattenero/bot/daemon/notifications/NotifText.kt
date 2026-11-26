@@ -5,8 +5,8 @@ import dev.lattenero.bot.channel.SealFacts
 import dev.lattenero.bot.contracts.PyText
 
 /**
- * The notifications' TEXT — the owner's format law («mensajes bien
- * fuertes»): the moment's emoji + a BOLD first line, plain lines after.
+ * The notifications' TEXT — the owner's format law («messages good and
+ * loud» [translated]): the moment's emoji + a BOLD first line, plain lines after.
  * The composers are PURE and honest: HTML escapes every piece that came
  * from a store or a snapshot, the previews are the house truncation
  * (PyText.preview — whitespace collapsed, the cut named with an ellipsis),
@@ -32,13 +32,13 @@ object NotifText {
      * interrupted, or a longer verdict; the preview is honest either way).
      */
     fun subagentDone(done: SubagentDone): String =
-        "🔔 <b>Subagente terminó</b>\n" +
+        "🔔 <b>Subagent finished</b>\n" +
             "«${PyText.esc(titleOf(done.title, done.sid))}»\n" +
             PyText.esc(PyText.preview(done.outcome, OUTCOME_PREVIEW_CP))
 
     /**
      * 🔔 MOMENT 2 — the owner's bound conversation's turn sealed:
-     * «🏁 <título> — terminó (X, N herramientas)» + the answer's first
+     * «🏁 <title> — finished (X, N tools)» + the answer's first
      * ~150 chars ONLY when the card did not speak the answer itself
      * ([SealFacts.answerSpoken] — measured 3/11: repeating the head after
      * a live card's full answer is exactly the duplication the owner
@@ -54,7 +54,7 @@ object NotifText {
         val head = if (seal.failed) {
             failedHead(seal, elapsed)
         } else {
-            "🏁 <b>«${PyText.esc(titleOf(seal.title, seal.taskId))}» — terminó " +
+            "🏁 <b>«${PyText.esc(titleOf(seal.title, seal.taskId))}» — finished " +
                 "($elapsed, ${toolCount(seal.doneTools)})</b>"
         }
         val answer = raw
@@ -80,21 +80,21 @@ object NotifText {
      * finish and an empty failed turn was silent.
      */
     private fun failedHead(seal: SealFacts, elapsed: String): String {
-        val head = "❌ <b>«${PyText.esc(titleOf(seal.title, seal.taskId))}» — falló " +
+        val head = "❌ <b>«${PyText.esc(titleOf(seal.title, seal.taskId))}» — failed " +
             "($elapsed, ${toolCount(seal.doneTools)})</b>"
         val reason = seal.stopReason.trim()
         return if (reason.isBlank()) head else head + "\n" + PyText.esc(PyText.preview(reason, ANSWER_PREVIEW_CP))
     }
 
     private fun toolCount(tools: Int): String =
-        "$tools ${if (tools == 1) "herramienta" else "herramientas"}"
+        "$tools ${if (tools == 1) "tool" else "tools"}"
 
     /**
      * 🔔 MOMENT 1b — the subagent's START (owner, 16/11): a child began its
      * turn. The title and its own start stamp; nothing invented.
      */
     fun subagentStarted(started: SubagentStarted): String =
-        "🚀 <b>Subagente arrancó</b>\n" +
+        "🚀 <b>Subagent started</b>\n" +
             "«${PyText.esc(titleOf(started.title, started.sid))}»"
 
     /**
@@ -102,12 +102,12 @@ object NotifText {
      * title, the workspace it belongs to, and the fork's own verdict word.
      */
     fun taskFinished(task: TaskSignal): String =
-        "🏁 <b>«${PyText.esc(titleOf(task.title, task.taskId))}» — terminó</b>\n" +
+        "🏁 <b>«${PyText.esc(titleOf(task.title, task.taskId))}» — finished</b>\n" +
             PyText.esc(workspaceLabel(task.workspacePath)) + outcomeLine(task.lastOutcome)
 
     /** ❌ M4 — ANY task's failure, subscribed or not. */
     fun taskFailed(task: TaskSignal): String =
-        "❌ <b>«${PyText.esc(titleOf(task.title, task.taskId))}» — falló</b>\n" +
+        "❌ <b>«${PyText.esc(titleOf(task.title, task.taskId))}» — failed</b>\n" +
             PyText.esc(workspaceLabel(task.workspacePath))
 
     /** The workspace's own name (its last path segment) — the phone's context line. */
