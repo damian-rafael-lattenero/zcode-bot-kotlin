@@ -1,331 +1,233 @@
 # Plan — The Denotational Engine
 
-> Created: 2026-11-26 · Status: v1.2 (in execution since the owner's order of 2026-11-26: P0 done, P1 written, reviewed and indexed; one open item — the Canon must rank first)
-> Sits next to [plan-brujula-v2.md](plan-brujula-v2.md): that plan built the five pillars; this one makes the
-> whole fleet teach and enforce one style of programming — the owner's.
+> Created: 2026-11-26 · Status: **v2.0 — approved by the owner on 2026-11-26 with 24 recorded answers.**
+> Execution starts at U1, one unit per session; the book is written inside the units, never as a separate marathon.
+> Supersedes v1.2 (same day; git history keeps it). The book v5 is written by building the engine: every piece is also a ficha.
 
 ## 1. Context
 
-The owner's stated goal (2026-11-26): his RAG and brain learned Nushell to the point of almost never
-writing a broken `.nu`; he wants the same for Kotlin, TypeScript and any other language he uses. Haskell
-is **the source of the concepts, not a target**: the brain learns each concept from the manuals (the
-`Maybe` monad with `Just`/`Nothing`) and then says, per language, "here is the equivalent, and here is
-the detail that differs".
+The owner's goal, in his words: the brain learned Nushell to the point of almost never writing a broken
+`.nu`; he wants the same for Haskell, Kotlin and anything functional and denotational. The brain must be
+present whenever an LLM writes code — as **hook** (a gate that stops what breaks a law), **guide** (the
+right note injected at the moment of writing), **judge** (the *juez de rumbo*, watching the turn while it
+runs) and **lighthouse** (the curated Canon ranks first, every time) — and every miss becomes a rule.
 
-The measured reason this needs a plan rather than another KB: the Nushell result came from a recipe
-with seven ingredients, and only Nushell has them. In parallel, the replay of the cancelled turns
-showed that drift is semantic — no structural rule sees it — so correcting the agent while it works
-needs a judge, not more lint.
+**One sentence:** when an agent writes Haskell, Kotlin or Nushell, the brain is there at every moment, so
+the code is correct and denotational on the first try — *learned* = **5 % or less first-try oracle
+failure**, measured per language — and every miss becomes a rule.
 
-The plan has one vehicle: a study book (v5) written as short fichas, where every piece of the engine
-is also something the owner learns by building.
+Done since v1.2: P0 (baseline `brain-baseline.nu`, the `denials.tsv` ledger), P1 (the Canon: 25 notes +
+79 QuickCheck laws; the Theory: 20 notes; both indexed), and the English-corpus campaign (22 notes
+translated with a mechanical receipt, the store door + the English-input boundary + the live
+`canon-recall` suite, all on branch `agent/rag-en` — merged and deployed in U1).
 
-## 2. Vocabulary (the pieces — form first)
+Typed input and output apply to four things (owner decision 26/11): the code the agent writes, the
+agent's replies to the owner, the engine's own pieces (Pedido, verdict, correction, cards), and the book.
+
+## 2. Vocabulary — form first
 
 | Piece | Denotes (one sentence) | Lives in |
 |---|---|---|
-| `Concept` | One idea of the Haskell canon: what it denotes, its type, its laws, its sources | `haskell-kb/notes/concepts/` |
-| `Theory` | One categorical concept above the Canon: its shape, where it comes down to Haskell, what other languages make of it, where a cited source finds it in architecture | `theory-kb/notes/category-theory/` |
-| `Mapping` | For one concept and one language: the equivalent construct, an example, the gap, the trap | `*-kb/notes/canon-map.md` |
-| `Law` | A rule the owner stated | `fp-kb/notes`, the KBs, `AGENTS.md` |
-| `Gate` | A pure predicate from an action to a verdict: `Allow · Guide(text) · Ask(card) · Deny(reason)` | `~/Scripts/scripts/hooks/*.nu` |
-| `Oracle` | The compiler or test runner of a language — the only ground truth for "it works" | PostToolUse hooks (new) |
-| `Drill` | One exercise with an automated check | `canonical-drills` repo |
-| `Ficha` | One book unit: concept + mappings + paper sheet + drill + retrieval questions + checkpoint | `agent-brain/docs/book/` |
-| `Correction` | What the agent did, what the owner did instead, and the concept or law it breaks | brain `corrections` table (new) |
-| `Proposal` | A correction turned into a candidate hook, law note, skill or drill — owner approves | Corpus Doctor |
-| `Eval` | One number over time, in the ledger | `agent-brain/evals/suites/*.json` |
+| `Canon` · `Theory` | The idea in Haskell; the categorical shape above it | `haskell-kb`, `theory-kb` (exist) |
+| `Mapping` | For one concept and one language: the equivalent, an example that compiles, the difference, the trap — or "gap" | `kotlin-kb/notes/canon-map.md`, `nushell-kb/notes/canon-map.md` (new) |
+| `Rung` | One concept learned end to end (map row → gate → drill → eval case → ficha) | the ladder loop, §6 |
+| `Gate` | A deterministic predicate from an action to a verdict: `Allow · Guide · Ask · Deny` | `~/Scripts/scripts/hooks/` |
+| `Oracle` | The compiler or test runner of a language — the only ground truth for "it works" | `PostToolUse` hooks (new) |
+| `Pedido` | The typed witness of what was asked: `goal · constraints · nonGoals · acceptance` | fork runtime |
+| `Verdict` | `aligned · minor_drift · drift`, with cited evidence | fork runtime |
+| `Seal` | Delivered versus Pedido, plus the reply's shape | fork runtime |
+| `Reply` | The agent's answer to the owner: `result · evidence · next` | law text + seal |
+| `Correction` → `Proposal` | What the agent did, what the owner did instead, which concept it breaks → a candidate rule the owner approves | bus kind + table in the brain |
+| `Eval` | One number over time, in the ledger, with baseline and target | `agent-brain/evals/suites/` |
+| `Ficha` · `PaperSheet` | One book unit; what the owner writes by hand: `signature · law · drawing · own_words` | `agent-brain/docs/book/` |
+| `LawText` | The denotational law every session carries in its system prompt | `agent-brain/docs/denotational-law.md` (new) |
 
-Laws of the engine:
-- A `Gate` that denies is deterministic. An LLM may only `Ask`, never `Deny`, and at most once per turn.
-- Every `Mapping` is verified by an `Oracle`; a concept with no equivalent says "gap", never a fake one.
-- Nothing is written into a KB or a hook without the owner's approval (the Corpus Doctor rule).
+Engine laws (kept from v1.2): a Gate that denies is deterministic; an LLM may only Ask, at most once per
+turn; nothing enters a KB or a hook without the owner's approval; a quotation without verification does
+not enter.
 
-## 3. Diagnosis (measured 2026-11-26)
+## 3. Diagnosis — what the measurements corrected in v1.2
 
-### 3.1 The recipe, ingredient by ingredient
+| v1.2 said | Measured reality (26/11) |
+|---|---|
+| Hooks never fire in subagents — "a fork/config question to resolve in P3" | The child runtime is built **without hook wiring** (`subagent.ts` omits the deps); every entry returns an empty result. It is an omission, not a design: a small fork fix. 25,341 of 80,278 steps (31 %) ran ungated. |
+| The Canon "answers Monad queries" | Only for the phrasings tried: `canon-recall` (90 cases, 45 concepts × EN/ES) put the note **first for 34/45** English and 23/45 Spanish with the English-input boundary. U1 re-measures on the clean, deployed store. |
+| Kotlin lacks a lint | detekt runs at build/CI, and `kap-detekt-rules:5.5.0` is wired in three consumers — but its 3 rules (ManualWaitLoop, CancellationArmBeforeCatchAll, VolatileReadModifyWrite) are concurrency rules. **No mechanical denotational-style rule exists for Kotlin.** |
+| No PostToolUse hook exists in the fleet | Correct, and the fork supports PostToolUse but it **cannot block** — it only adds context after the tool ran. Right home for oracles; wrong home for gates. |
+| "haskell-flows-mcp" | Lives at `~/Projects/haskell-rules-and-mcp`: 12 tools over one embedded ghcide (`ghc_check`, `ghc_property`, `ghc_gate`, …). Reused in U9, not rebuilt. |
+| Theory: 25 of 60 language rows empty; kotlin-kb 6 notes; prompt-laws Nushell-only | 18 of 60 empty (Kotlin 8, TypeScript 6, Nushell 4). kotlin-kb: 5 notes + README, no official mirror. `prompt-laws.nu` is mostly language-neutral — but it carries no Kotlin, Canon or Theory text, and `rag-guard`'s `is-law` still excludes `kotlin-kb/notes`, `haskell-kb` and `theory-kb`. |
 
-| Ingredient | Nushell | Kotlin | TypeScript | Haskell |
-|---|---|---|---|---|
-| Official docs mirror | `nushell-kb/official` (1,473 pages) | none | none | none |
-| Curated notes | 33 files | 6 files, 391 lines | 1 note | none |
-| Write-time hook that denies | 3 (`nushell-typing`, `anti-pattern-lint`, `nushell-law`) | none (advisory only) | none | none |
-| Lint | `anti-pattern-lint.nu` | detekt at build/CI only | none | none |
-| Compiler oracle after a write | none | none | none | none |
-| Shared library | `nushell-fp` (15 modules) | `kap` | none | none |
-| Test census | `~/Scripts/tests/census.nu` | none | none | none |
+The Nushell result is a recipe, not magic — seven ingredients (mirror · curated notes · denying hook ·
+lint · compiler oracle · shared library · test census); only Nushell has all seven. Baseline (P0):
+oracle failure nu 20.8 % → 4.8 % (the learning signal), kt 16–26 % flat, hs dormant since W41; law
+denials flat at 30–37 per 1,000 writes — the gate teaching at write time is part of the recipe; what
+must fall is the first-try failure.
 
-Proof points: hooks are registered in `~/.zcode/cli/config.json` (`hooks.events`), canonical copies in
-`~/Scripts/scripts/hooks/`; the live corpus list is `~/.zcode/agent-brain/corpus.txt`; `kap-detekt-rules:5.5.0`
-is wired in `zcode-bot-kotlin`, `agent-brain` and `whatsdigest-kt` build files with three rules.
+## 4. The four roles at five moments (the picture the book repeats)
 
-### 3.2 The Nushell learning curve (law denials; first pass revised 26/11)
-
-| Week | `.nu` writes | denials | per 1,000 |
+| Role | When | Mechanism | Receipt |
 |---|---|---|---|
-| Nov 2–8 | 520 | 18 | 34.5 |
-| Nov 9–15 | 1,139 | 40 | 35.0 |
-| Nov 16–22 | 1,008 | 30 | 30.1 |
-| Nov 23–26 | 516 | 19 | 36.8 |
+| Lighthouse | on every query | Canon (curated) ranks above manual fragments; nothing non-English in the store | a concept question, EN and ES, returns the Canon note at rank 1 (`canon-recall`) |
+| Guide | at design time; when a file is born | `LawText` in the system prompt + `design-guard` querying the Canon live | a real turn where the injected hit changed the design |
+| Hook | at the write, and right after | a deterministic gate, then the oracle (compiler/tests) | a `denials.tsv` line; an oracle-failure ledger line — also from subagent sessions (U4) |
+| Judge | along the turn | the Pedido, measured triggers, one verdict with cited evidence | a real turn where the judge spoke and the turn was saved |
+| Memory | after the turn | correction → proposal → owner approval → promotion | a correction that became a rule |
 
-The first reconstruction (11/22/31/1) undercounted: it missed Bash-tool denials and the newer
-`PreToolUse:… hook error: [command hidden]` wrapper. The real rate is FLAT at ~30–37 per 1,000
-writes — the hooks catch real mistakes continuously; there was no collapse. `denials.tsv` is
-authoritative from 26/11 (the live-fire drill logged its first line the same day). 60 stored denials
-of the retired `nu -c` wrapper rule are counted apart; weeks before W44 show zero because no denying
-hook existed yet. 25,341 of the window's 80,278 tool steps came from subagent sessions and carry
-**zero** hook denials — the mechanical layer does not fire in subagent sessions at all (a
-fork/config-level question to resolve in P3).
+## 5. The fleet — one row per piece
 
-### 3.3 Concrete defects found
+| Piece | Today | Target | Change | Unit | Receipt |
+|---|---|---|---|---|---|
+| RAG store | English-only by the door (unmerged); Canon first 34/45 EN · 23/45 ES | Canon rank 1 both languages (≥ 43/45) | merge + deploy; curated-source priority in `RagStore.kt` if the number demands it | U1 | `canon-recall` ledger row; the Spanish mónada question returns `monad.md` first |
+| Memories | 13 Spanish + 42 mixed rows | English-only | `translate-legacy` + review; inventory must show zero | U2 | `rag-language-inventory --short` clean |
+| Evals | recall-core 33 · real-questions 8 (non-deterministic) · `canon-recall` live 90 (branch) | canon-recall in the nightly; `first-pass` / `canon` / `rumbo` suites | suites + nightly step | U1, U22 | ledger rows; `/learn` shows the numbers |
+| Hooks | 14, deny only for `.nu`; nothing compiles after a write; silent in subagents | Kotlin + Haskell gates; PostToolUse oracles; fire everywhere | `is-law` opens to `*-kb/notes`; new gates; oracle hooks; fork wiring | U4, U9, U11+ | `denials.tsv` rows incl. subagent sessions; an oracle catch |
+| Prompt layer | `prompt-laws.nu` static, no Kotlin/Canon; `design-guard` static ladder | the law in the fork's system prompt; live Canon retrieval | `systemPromptAppendFile`; `design-guard` queries the brain | U4, U9 | the law visible in a subagent's context |
+| MCP | 4 read-only tools | unchanged | — | — | — |
+| Bot | `/learn` = memories + evals + costs; steer/stop publish nothing | `/learn` shows the three numbers; corrections published | `correction` bus kind on steer/stop/cancel | U8, U22 | a correction row from a real steer |
+| Skills | `fp-denotational-design`, Spanish body | English law text, the `LawText` | body replaced (authorized) | U4 | the skill loads in a fresh session |
+| KBs | 5 repos; 15 of 25 concepts without an executable law; no canon-map | maps for Kotlin + Nushell; 15 new QuickCheck laws; `kotlin-kb/official` | filled rung by rung | U9–U21 | `cabal test` green per new law; map rows verified |
 
-1. `rag-guard.nu` (`is-law`, l.16–24) excludes `kotlin-kb/notes`: Kotlin notes are indexed but never injected.
-2. `prompt-laws.nu` is Nushell-only: no "consult kotlin-kb and kap first" law rides a Kotlin prompt.
-3. No PostToolUse hook exists, so nothing ever compiles a file the agent just wrote.
-4. The corpus indexes no `.kt`, `.ts` or `.hs` source and no TypeScript documentation.
-5. No hook wrote a denial record — FIXED 26/11: `denials.tsv` is live (P0).
+## 6. The concept ladder — one concept per rung
 
-Baseline oracle-failure ratios from the first run (W45 → W48): nu 20.8% → 4.8% (a real learning
-signal), kt ≈ 16–26% (flat — no mechanical layer), ts 13.1% → 0% (small numbers), hs dormant since W41.
+1. Its row in both maps (Kotlin + kap; Nushell + nushell-fp), with an example that compiles, the
+   difference and the trap — or "gap".
+2. A gate rule when the law is mechanical: denies from day 1 when the pattern is unambiguous (owner
+   decision 26/11); what needs the tree goes to the oracle. Eight-case selftest + census test.
+3. Its drill in `canonical-drills` (new repo: Kotlin, Nushell, Haskell; the type and the test exist, the
+   body is the exercise) and its QuickCheck law if missing (15 of 25 lack one).
+4. Its eval case per language.
+5. Its ficha B.
 
-### 3.4 Correcting the agent while it works
+**Exit criterion:** the rung is learned when its eval case passes first-try, N of N (N = 3), in fresh
+sessions. **Order:** writing follows the measured violation (U10 judges a sample of real edits against
+the Canon and names the five most violated); reading follows the book's prerequisite order.
 
-From the replay of 619 turns (77 cancelled, 12.4%): successful and cancelled turns are structural
-twins (4.00 vs 4.03 re-edits per file, 51.7 vs 59.6 steps); 23 long turns still running hold 74.3% of
-the wasted steps; the best deterministic signals reach lift 2.46 with 14% recall. They are triggers
-for a judge, never verdicts. ZCode's `/goal` is a session-local persistence loop with a post-turn
-completion verifier — it never inspects an action before it happens.
+## 7. The units — U1…U25 (one per session)
 
-## 4. Target architecture — five layers
+| # | Unit | Leaves done | Live receipt | Fichas |
+|---|---|---|---|---|
+| U1 | Lighthouse | merge `agent/rag-en` (deploy authorized 26/11); measure; curated-first in `RagStore.kt` if needed | `canon-recall` row; "qué es una mónada y para qué sirve" → `monad.md` first | C5, C8, E1 |
+| U2 | The English check | memories to English; `rag-english-check` + `translation-check` promoted to `~/Scripts` with tests; nightly runs them; `~/Scripts/tests/` out of the index; ADR "The corpus is English"; AGENTS.md edits (`[verified <version>]`, the KB list) | the check green on the live store, red on a planted Spanish note | D1, C7 |
+| U3 | The book frame | English route sheet (`00-route-sheet.md`): 90 fichas, prerequisite order; `book-check` with tests; first 8 fichas | `book-check` green; A1 readable | A0.1–A0.4, A1–A3, C6 |
+| U4 | The fork carries the law | system-prompt append section reading a file (generic `systemPromptAppendFile`); replaces the skill's Spanish body, retires `prompt-laws.nu`; hooks wired into subagents (all of them, owner decision), with a live survey of what fires | (after the owner's build) a `denials.tsv` deny from a subagent session; the law in a subagent's context | C1, D2, D3, D4, D9 |
+| U5 | The Pedido | before the first step: drafted by model + schema → confirm/correct card → waits for the tap, 2-minute expiry → injected and stored; conversational prompts get no card | a real turn (desktop and phone) where the agent waited | D7 |
+| U6 | Triggers + verdict | the measured triggers off the fork's own event flow; one model call; minor drift = a note to the agent; big or repeated = one question to the owner; fails open, counted | a real turn where the judge spoke to the agent | D5 |
+| U7 | The seal | delivered vs Pedido + the `result · evidence · next` shape; one bounce, then the owner is told | a real turn the seal bounced | D10 |
+| U8 | Corrections | `correction` bus kind; the bot publishes on steer/stop/cancel; `corrections` table + extractor beside `MemoryExtractor`; Corpus Doctor gains `law_gap` (proposes, never writes) | a correction that became a rule | C2, C3, C4, D8 |
+| U9 | Oracles + guide | PostToolUse for `.kt` (compile + detekt with the kap rules) and `.hs` (`ghc_check` reused), advisory, time-capped, with its ledger; `rag-guard` injects every `*-kb/notes`; `design-guard` queries the Canon live and covers `.hs` | a compile failure caught right after a write | D6 |
+| U10 | Kotlin baseline | `kotlin-kb/official`; a sample of real edits judged against the Canon → the 5 most violated; the `var`/`!!` survey by package | the list of 5, with numbers | E3 |
+| U11–U15 | Rungs 1–5 | the most violated, one per unit | per rung: its eval case passes first-try; a Kotlin deny in the ledger | B ×5 |
+| U16–U19 | Rungs 6–25 | five per unit | idem | B ×20 |
+| U20–U21 | Part N | one ficha per nushell-fp module (15) | — | N ×15 |
+| U22 | The numbers | `first-pass`, `canon`, `rumbo` as evals with suites; `/learn` shows them | the three rows in the ledger and `/learn` | E2 |
+| U23–U24 | Part H | the 20 short theory fichas, Kotlin and Nushell rows verified | — | H ×20 |
+| U25 | The method | laws with receipts, traps of the month, exam with answer key and question→ficha map; answers close | — | F1, F2 |
 
-1. **Knowledge** — the Theory (the categorical shapes, sourced from books and papers) above the Canon
-   (Haskell concepts, sourced from the manuals) + the Maps (one per language) + the official docs
-   mirror per language.
-2. **Application** — gates at write time + the oracle after the write.
-3. **Rumbo** — the typed witness of the request + a semantic judge fired by the measured triggers.
-4. **Learning** — corrections captured as data, proposed as rules, promoted through the owner's ladder.
-5. **Measurement** — three new numbers in the ledger, shown by `/learn`.
+Owner decisions needed, at most one per unit: U4 — approve the child-session rules of the hooks that
+speak too much; U10 — how a pure core is declared (from the survey) and the canon-adherence target.
 
-## 5. Phases
+## 8. The book v5
 
-Each phase is one or more sessions; each session is one logical unit: commit, push, and the ficha it
-teaches. Hooks follow the census law (every `.nu` has its test, `~/Scripts/tests/`).
+English, inside the brain's index, read as markdown on the Mac (owner decisions 26/11). v4 stays as the
+historical record — it is Spanish, so the door already keeps it out of the index.
 
-### P0 — Baseline and scaffolding (1 session) — DONE 26/11
+**`book-check`** (the didactic spec as a gate, molded on `kb-check.nu`): the eight stops · ≤ 150 lines ·
+no paragraph over 100 words · no term used before its home ficha · every cited path exists · English ·
+no clinical language. Two sizes per ficha: the full path (10–20 minutes) and the minimum path (~5:
+the aha, the signature, the checkpoint).
 
-- [x] The owner's cognitive profile in permanent memory + one line in `AGENTS.md`.
-- [x] Denial ledger: the three denying hooks append `ts, session, hook, rule, language, target` to
-      `~/.zcode/hooks/state/denials.tsv` — merged `0fe94d2`, the live-fire drill logged its first line.
-- [x] Baseline `scripts/brain-baseline.nu` + `lib/brain-baseline.nu` (pure core), tests, gate green;
-      first real run exit 0 in 65 s. Oracle definition measured: a failing run is `status=completed`
-      with the failure inside `state.output` (no exit codes are stored; `status=error` is the harness).
-- [x] Book folder and the hoja de ruta (`agent-brain` `cb632ca`).
-- [x] Found and fixed on the way: the typing hook's type-alias warn crashed on two prose parens
-      inside the interpolated message — exactly on the files the law targets (`6f58ad8`).
+**The eight stops:** The aha · What it denotes · In your languages (the difference and the trap) · Where
+it lives in your system · The paper sheet · The drill · Retrieval questions (answers live in part G) ·
+The close + checkpoint.
 
-### P1 — The Canon: Haskell as the source (3 sessions)
+**Concept fichas (B, H) are short:** what it denotes, the "in your languages" table with Kotlin and
+Nushell, where it lives in the owner's repos, the drill, the receipt that the brain learned it. The
+mathematics is not re-taught — the reading path is simplified, never the math.
 
-- [x] DONE 26/11 — repo `haskell-kb`, same shape as `nushell-kb`: `official/` (mirror) + `notes/concepts/<id>.md`.
-      Sources, all free to mirror: *Learn You a Haskell* (CC BY-NC-SA 3.0), *Real World Haskell*
-      (CC BY-SA), the *Typeclassopedia* (HaskellWiki, permissive), *What I Wish I Knew When Learning
-      Haskell* (source on GitHub). Paid books are cited, never copied.
-- [x] DONE 26/11 — one note per concept, English, with frontmatter: `id`, the one-sentence denotation, the Haskell
-      type and laws, the problem it solves, the source chapter. First 12 (daily use in his repos):
-      purity and referential transparency · immutable data · first-class functions · currying and
-      partial application · composition · sum and product types · `Maybe` and `Either` · pattern
-      matching and exhaustiveness · recursion and folds · type classes · `Functor`/`Applicative`/`Monad` ·
-      `Semigroup`/`Monoid`. Tier 2: `Foldable`/`Traversable`, laziness, `newtype`, higher-kinded types,
-      parametricity, `IO` and effects at the edge, total functions, property laws. Tier 3 (applied):
-      free monad / tagless final (`Kap`), streaming and backpressure (`KapStream`).
-- [x] DONE 26/11 — the Canon made executable: `laws/` holds 79 QuickCheck laws in ten modules and `cabal test`
-      is the oracle (79 of 79 on master; a law turned upside down goes red with a counterexample).
-- [x] DONE 26/11 — `kb-check` (`~/Scripts`), the mechanical check of the maintenance law: the template's shape,
-      every cited path on disk, every quotation on a block that names a mirror, the INDEX as contract. The
-      Canon reports 25 notes, 0 findings.
-- [x] DONE 26/11 — indexed in the brain, one source at a time with the evals after each: Canon notes
-      (53 chunks), the Typeclassopedia (71), LYAH (300), wiwinwlh (192). recall-core 33/33 with recall@1
-      29 of 33 (baseline 28), brain-eval 11/11. Live receipt, for the phrasings tried: Monad, `Either`
-      and free-monad queries answer from the Canon; Nushell and kap queries still answer from their own
-      KBs. Measured on the way: the `real-questions` suite is not deterministic — its ranks move a place
-      or two between identical runs, so a one-question change there is not a signal.
-- [ ] OPEN, measured 26/11 after the P1 report: the Canon is in the brain, but it is not reliably FIRST.
-      Fifteen live questions (`agent-brain query`, k = 10; the Spanish one again through MCP). Nine
-      English concept questions: the Canon note is in the top 3 for 8 (first for 4) — rank 2 for
-      "difference between applicative and monad", rank 5 for the bare word "monad", rank 9 for "what
-      does Monad denote in Haskell and which laws must it keep". Spanish, the way the owner asks: "qué
-      es una mónada y para qué sirve" returns `concepts/monad.md` tenth of ten through MCP (absent
-      from the ten through the CLI), with a similarity of 0.70 — the fourth highest of the ten. Two
-      causes, both read on that answer: (1) five of the nine slots above it are SPANISH documents
-      already in the store, at 0.556–0.578, the noise floor — `fp-kb/notes/README.md`,
-      `questionnaire-1-domain-types-errors.md`, the v4 book (`agent-brain/docs`, which the
-      `index-repos` leg indexes), `bot/.zcode/plans/plan-session_…md` and `docs/plan-brujula.md`; they
-      win the Spanish leg because they are Spanish. On disk, a stopword estimate finds at least 10 of
-      the 26 `fp-kb/notes` files and 5 of the 33 `nushell-kb/notes` files in Spanish. (2) Nothing ranks
-      a curated note before the fragments of the manuals it curates: a search of the `rag` package for
-      `boost|weight|curated|priorit` matches two comments only; so far the one lever used was removing
-      a source. This comes BEFORE P2 and P3: the design-guard of P3 injects the top 4 of `rag_query`,
-      and a map that ranks tenth teaches nothing. The fix is the owner's call (brain code and corpus):
-      the Spanish documents translated or out of the index, curated notes ranked first, and a retrieval
-      suite of concept questions in the ledger with the before and after.
-- [ ] `~/Projects/ECOSISTEMA.md` lists no KB today — decide whether it should.
-- [x] DONE 26/11 — the Theory (owner's order, 2026-11-26: "launch one more subagent for category theory… the
-      categories that then come down to Haskell and then pass to other languages… always the latest on
-      the web, in papers, in books"). New repo `theory-kb`: `official/` (text sources whose license
-      allows a mirror) + `notes/category-theory/<id>.md`, 20 concepts in learning order, fichas H01–H20:
-      category · functor · natural transformation · limit and colimit · adjunction · monoidal functor ·
-      monoid object · Kleisli category · F-algebra · free and forgetful · exponential and CCC · Yoneda ·
-      Kan extension · contravariant functor · profunctor · comonad · monoidal category · sheaf ·
-      optics · category theory and AI (a dated survey). Every note: the shape, the Haskell landing,
-      what Kotlin, TypeScript and Nushell make of it (seeds for P2), and where a cited source finds
-      it in architecture. A connection nobody published is an open thread, never a claim.
-      Receipt: 20 notes with 0 findings; 14 arXiv ids and one DOI checked against their sources; the notes
-      and Milewski's book indexed (334 chunks) with the evals green. Open: 18 threads in the INDEX — the
-      architecture connections and language rows no opened source supports; 25 of 60 language rows empty.
+**Paper:** four slots (`signature · law · drawing · own_words`), three retrieval questions, and a paper
+index page carrying the +1-day and +7-day re-asks (paper only; no Telegram cards).
 
-### P2 — The Maps: one per language (2 sessions)
+**Parts:** A 7 · B 25 · C 8 · D 10 · E 3 · F 2 · G answers · N 15 (one per nushell-fp module) ·
+H 20 — 90 fichas; the route sheet maps every ficha to its unit.
 
-- [ ] `kotlin-kb/notes/canon-map.md` — concept → Kotlin + `kap`, reusing the mapping table of the
-      `fp-denotational-design` skill and `kap/LAWS.md`. Add `kotlin-kb/official` (kotlinlang.org
-      publishes LLM-friendly mirrors of its docs).
-- [ ] `nushell-kb/notes/canon-map.md` — concept → `nushell-fp`, folding the Elixir/Ramda table already
-      in `fp-kb/notes/dynamic-fp-discipline.md`.
-- [ ] New repo `typescript-kb`: `official/` (the Handbook, Apache-2.0) + `notes/canon-map.md`.
-- [ ] Every map starts from the Theory: the language table of each `theory-kb` note says what a library
-      documents; the probe in this phase turns it into a verified row or a gap.
-- [ ] Every row carries a snippet that compiles in the drills repo. The owner's first example is the
-      model: `Maybe` → `T?` with `?.let {}` covers `bind`, but `T?` has no `map`/`pure`, so it does not
-      compose like the monad — that nuance is the teaching.
-- [ ] Open decision, taken here with a probe: which TypeScript FP library, if any.
+**Citations enter only verbatim-verified.** Verified 26/11: Minear et al., *"Is practice good enough?
+Retrieval benefits students with ADHD but does not compensate for poor encoding in unmedicated
+students"* (Frontiers in Psychology 14, 2023, doi 10.3389/fpsyg.2023.1186566); the worked-example
+effect (NSW Department of Education, *Cognitive load theory: Research that teachers really need to
+understand*, 2017: "novice learners who are given worked examples to study perform better on subsequent
+tests"); MemCoder, *"Your Code Agent Can Grow Alongside You with Structured Memory"* (arXiv:2603.13258,
+2026 — SOTA on SWE-bench Verified, "+9.4% improvement" over DeepSeek-V3.2 per the abstract; the older
+76.4/73.0/68.4 triple was not verifiable and is dropped). The remaining v1.2 quotes are verified in U1
+or removed.
 
-### P3 — Application: gates and oracles (2–3 sessions)
+## 9. The judge — design constraints
 
-- [ ] Fix `rag-guard.nu`'s `is-law` to include every `*-kb/notes`; make `prompt-laws.nu` language-aware.
-- [ ] `design-guard.nu`: from the static ladder to canon retrieval — on a file being born or a design
-      prompt, `rag_query` the concept notes and the language's map, top 4, and inject the hits.
-- [ ] Denying gates for Kotlin's mechanical laws, each with the 8-case selftest: manual wait loop
-      (`while(true)`, polling — the `ManualWaitLoop` rule at write time), `!!` and `var` inside a
-      pure-core module, `runCatching` around suspending code (cancellation laundering).
-- [ ] Compiler oracles — the first PostToolUse hooks in the fleet, advisory only, skipped when the
-      tool is absent or slower than a cap: `.nu` → parse check; `.kt` → detekt with the wired
-      `kap-rules.yml`; `.ts` → `tsc --noEmit --incremental` when a tsconfig exists; `.hs` → `ghc -fno-code`
-      (the owner's `haskell-flows-mcp` already wraps ghcide — reuse, do not rebuild).
+- Lives in the fork runtime (owner decision 26/11), modeled on the `/goal` completion verifier
+  (`target-contract` / `target-verifier`): a second model request over a typed pack.
+- Reuses the fork's existing surfaces: the question card (desktop and phone) for the one question, the
+  Stop-hook continuation for the seal (capped, message injected).
+- Runs in the main session; in subagents act the system-prompt law, the gates and the oracles.
+- Never traps a turn: model failure or timeout continues the turn, and the failure is counted in
+  `rumbo`.
+- Fork work goes live only after the owner's build; U5–U7 may be executed as one session.
 
-### P4 — Rumbo: the judge (3 sessions)
+## 10. The numbers
 
-- [ ] `El Pedido`: a typed witness `{ goal, constraints, nonGoals, acceptance }` written at turn start
-      to `~/.zcode/hooks/state/pedidos/<session>.json`.
-- [ ] Triggers, from the replay: two tool errors in the first 10 steps · a subagent in the first 10 ·
-      no edit in the first 8 · a request of 60 characters or fewer past step 50 · the first edit.
-- [ ] The judge: one stateless call over the pack (Pedido + the action ledger: files, tests, errors)
-      returning `alineado · desvío menor · desvío` with cited evidence; it may only ask, once per turn.
-- [ ] Seal: delivered versus Pedido, reusing the fork's completion-verifier prompt shape
-      (`ZCode/apps/zcode-cli/packages/contracts/src/tools/target.ts`).
-- [ ] It lives in the fork's hook layer, so desktop and phone share one mechanism.
+| Number | Today | Target | When |
+|---|---|---|---|
+| Canon first (`canon-recall`, 90) | EN 34/45 · ES 23/45 (boundary measured on the pre-cleanup store) | ≥ 43/45 both | U1 |
+| Tool steps under gates | 69 % (main sessions only) | 100 % | U4, after the owner's build |
+| First-try failure — Nushell | 4.8 % | ≤ 5 % sustained | weekly |
+| First-try failure — Kotlin | 16–26 % (re-baselined by the U9 oracle) | ≤ 5 % | end of week 6 |
+| First-try failure — Haskell | unmeasured | baseline U11; ≤ 5 % | two weeks later |
+| Law denials / 1,000 writes — Kotlin | 0 (no hook) | Nushell's order (30–37) | end of week 6 |
+| Canon adherence (20 edits/language/week) | unmeasured | baseline + target in U10, with the owner | U10 |
+| Cancels / 100 turns | 12.4 | falling | U22 |
+| Wasted-step share of cancelled turns | 74.3 % | falling | U22 |
 
-### P5 — Learning: corrections become rules (3 sessions)
+Cost: the judge ≈ $5–7/month, the canon eval $1–2, everything else $0 (v1.2 estimates, unchanged).
 
-- [ ] A `correction` kind in the brain's bus taxonomy (`BusEvent.kt`), published by the bot on steer,
-      stop-and-refire, cancel, and a hook denial the owner overrides, with the turn snapshot.
-- [ ] A `corrections` table and its extractor, beside `MemoryExtractor.kt`: problem, root cause, fix,
-      concept id; status `pending → approved → promoted`.
-- [ ] Corpus Doctor gains the cause `law_gap` and proposes a hook rule, a canon note or a drill —
-      never writes it. Approval is a Telegram card.
+## 11. Risks
 
-### P6 — The numbers (2 sessions; the baseline belongs to P0)
+- **Upstream merge cost** — fork changes small, generic, marked `[fork]`, with tests (measured 23/11:
+  a v4 merge took 29 conflict resolutions; do not grow that surface).
+- **All hooks in subagents** — turn-level hooks will fire per subagent; U4 ships a live survey of what
+  each hook did and the child-session rules are approved with the owner.
+- **Kotlin gate false positives** — gates deny only unambiguous patterns; every rule carries its
+  eight-case selftest; overriding a deny becomes a correction (U8).
+- **Approval fatigue** — one tap per turn (the Pedido, with expiry), at most one judge question, seal
+  tells the owner only when delivery was incomplete.
+- **Scope** — one active unit; the book is written inside the units.
+- **The other front** — the repo-migration plan is a separate front: this plan does not rewrite git
+  history and the two touch none of the same files.
 
-- [ ] `first-pass` — per language: law denials per 1,000 writes and oracle failure ratio, weekly.
-- [ ] `canon` — a weekly sample of 20 edits judged against the Canon: adherence and the most violated
-      concepts, which also says which ficha to read next.
-- [ ] `rumbo` — cancels per 100 turns and the wasted-step share (baselines 12.4% and 74.3%).
-- [ ] New `EvalKind`s and JSON suites in `agent-brain/evals/suites/`; `/learn` shows the three numbers.
+## 12. Repos, reuse, verification, order
 
-### P7 — The book v5 (starts at P0; every phase writes its fichas)
+**Repos touched:** `agent-brain`, `zcode-bot-kotlin`, `ZCode` (branch `damian`, worktree), `~/Scripts`,
+`kotlin-kb`, `nushell-kb`, `haskell-kb`, `theory-kb`, `fp-kb`, the new `canonical-drills`, `AGENTS.md`
+(edits authorized, shown in diffs), the skill `fp-denotational-design`. Read-only: `kap`,
+`haskell-rules-and-mcp`.
 
-**From the v4 audit (measured):** v4 has 149 dictionary entries in one part, zero exercises with
-answers, 21 exam questions with no answer key, zero recap boxes, and eleven ideas used before they are
-defined (LoRA, MRR, RRF, HNSW, harness, bus, ledger and gate among them). Its study plan assigns all
-149 entries to a single day and is not ordered by prerequisite. The v5 rules that follow: one home per
-idea (the fixture-blindness and LoRA stories are each retold four or more times in v4); no paragraph
-over 100 words; order by prerequisite, never by date; the exam gets an answer key and a
-question-to-ficha map.
+**Key files:** fork `core/src/runtime/methods/subagent.ts` (wire the hook runner),
+`core/src/context/builder.ts` (the append section), `methods/turn.ts` + `turn-stop.ts` (Pedido, seal),
+`packages/contracts/src/tools/target.ts` (the verifier shape, reused). Brain: `rag/RagStore.kt`,
+`memory/LegacyTranslation.kt`, `bus/BusEvent.kt`, `memory/MemoryExtractor.kt`, `eval/CorpusDoctor.kt`,
+`eval/Suite.kt`, `scripts/rag-nightly.nu`, `docs/adr/`. Bot: `channel/BotCommands.kt`,
+`channel/BrainGateway.kt`, `daemon/bus/BusProducer.kt`. Hooks: `rag-guard.nu` (`is-law`, L16–23),
+`design-guard.nu`, `english-law.nu`, the new Kotlin gate and oracles.
 
-**Shape.** `agent-brain/docs/book/`, Spanish, code and terms in English (the same deliberate exception
-as v4). `00-hoja-de-ruta.md` is one page with a checkbox per ficha, ordered by prerequisite. v4 stays as
-the historical record; the Desktop copy (still the old v2) is replaced by the hoja de ruta.
+**Reuse, do not rewrite:** `kb-check.nu` (the mold for `book-check`), `English.kt` + `translate-legacy`,
+`denials.tsv` with `tests/scripts/denial-ledger.nu`, `lib/brain-baseline.nu`, the 3 kap-detekt rules,
+`ghc_check` / `ghc_property` / `ghc_gate`, the Canon `_TEMPLATE.md`.
 
-**A ficha** is at most 150 lines and sized for the owner's measured reading time: 10–20 minutes on new
-material, chained so a hyperfocus session can continue. Fixed order:
+**Verification:** every unit — tests green in each repo touched, its receipt row, `fleet brain-eval`
+after every corpus change. Fork — its test suite before every push; live receipts after the owner's
+build. Book — `book-check` green and the ficha→unit matrix complete (90/90). The plan is done when every
+row of §10 has its measured baseline and its first ledger row.
 
-1. **El ajá** (five lines or fewer) — the Haskell idea in one sentence and its equivalent in his
-   languages, or a real bug from his repos that the idea explains. The reward comes first.
-2. **Qué denota · en Haskell · por qué existe** — the one-sentence denotation, the type and its laws.
-3. **En tus lenguajes** — the table: Kotlin, Nushell, TypeScript, with the gap and the trap.
-4. **📍 En tu sistema** — the real file where it lives (`kap/LAWS.md`, a `nushell-fp` module, a bot file).
-5. **✍️ Hoja de papel** — copy the signature; complete the law (`fmap id == ___`); draw the diagram.
-6. **Drill** — the test to make pass in the drills repo.
-7. **Preguntas de recuperación** — three, answered from memory; answers live in the answers part.
-8. **Cierre** — a three-line recap, then the checkpoint: if you can explain X in your own words, go
-   to ficha N.
-
-**Parts.** A El mapa (the five pillars, the history in two pages) · B Los conceptos (the Canon, one
-ficha each) · C Tu sistema por dentro (RAG, memoria, evals, MCP, harness — v4's architecture parts
-rewritten as fichas) · D El harness como capa de leyes (new: hooks, skills, the ladder, gates, the judge,
-promotion) · E Los números (recall, MRR, gates, and the three new ones) · F El método y las trampas ·
-G Respuestas · H La teoría (the 20 categorical concepts above the Canon, fichas H01–H20, written after
-B so that each one can point at its Canon note).
-
-**Drills repo** `~/Projects/canonical-drills`: one module per language, types-first (the test and the
-signature exist, the body is the exercise), one command per language, a CI gate.
-
-**Why this shape.** Retrieval practice helps learners with ADHD but does not compensate for weak
-encoding (Minear et al., *Frontiers in Psychology*, 2023) — so the meaningful connection comes before
-the questions. New material is taught one idea at a time with a worked example (cognitive load theory;
-NSW Department of Education, *Cognitive Load Theory in Practice*, 2017). Structured memory beats raw
-history (MemCoder: 76.4 vs 73.0 vs 68.4 on SWE-bench Verified) and retrieval dilutes past a small
-top-k — hence one note per concept and top 4 in the guard.
-
-## 6. Measurement and gates
-
-| Number | Today | Target |
-|---|---|---|
-| Law denials per 1,000 writes — Nushell | ≈ 30–37, flat | hold; kt/ts to Nushell's order within 6 weeks of P3 |
-| Law denials per 1,000 writes — Kotlin, TypeScript | unknown | Nushell's order within 6 weeks of P3 |
-| Oracle failure ratio, per language | unknown (baseline at P0) | falling week over week |
-| Canon adherence of written code | not measured | baseline, then rising |
-| Cancels per 100 turns | 12.4 | falling after P4 |
-| Wasted-step share of cancelled turns | 74.3% | falling after P4 |
-| RAG recall suites (`recall-core` 33/33) | green | stay green |
-
-A phase is done when its tests are green and there is one live receipt: a real turn where the hook
-fired, the judge spoke, or the eval row landed in the ledger.
-
-## 7. Cost
-
-- Runtime: the judge about $5–7 a month, the canon eval $1–2, everything else $0.
-- Build: about 15 sessions across P0–P7.
-
-## 8. Risks
-
-- **Approval fatigue** — catch rates collapse under prompt volume: at most one phone interruption per
-  turn, and an LLM never denies.
-- **Fake equivalences** — laziness and higher-kinded types have no counterpart in Kotlin; the map says so.
-- **Oracle latency** — advisory only, capped, skipped when slow; a gate must never stall the stream.
-- **Scope** — one active unit at a time; the book is written inside each phase, never as a separate marathon.
-- **Spanish in the RAG** — the corpus is English by law (2026-11-06; the owner restated it on
-  2026-11-26), and it is not. `corpus.txt` still lists the Spanish notes written before the law (at
-  least 10 files of `fp-kb/notes`, 5 of `nushell-kb/notes`), and the `index-repos` leg indexes
-  `agent-brain/docs` — so the Spanish v4 book IS in the store, which contradicts what this risk said
-  until 26/11 — and the plan files. They are what answers a Spanish question (the P1 open item).
-  Settle the Spanish already there before adding the book folder; probe against `recall-core`.
-- **Stale notes** — the earlier audit recorded `kap-detekt-rules` as wired nowhere; they are wired in all
-  three consumers. Verify before citing.
-- **Fabricated sources** — the Theory cites papers and the web, where an identifier remembered by a model
-  is often wrong: every arXiv id is checked against its abstract page, every cited path against the
-  disk, and the father re-runs both checks before a merge.
-
-## 9. Order
-
-P0 → P1 → P2 → P3 → P4 → P5, with P6's baseline inside P0 and P7 running through all of them. Parts A,
-C, D and F of the book document what already exists and can be written right after P0, so the v5 is
-readable early. Open decisions deferred to their phase: the TypeScript FP library (P2), and whether the
-`Pedido` is parsed deterministically or by a small model call (P4).
+**Order:** U1 → U2 → U3 → U4 → U5 → U6 → U7 → U8 → U9 → U10 → rungs → N → U22 → H → U25, four or more
+sessions per week (owner decision 26/11). **First session = U1:** merge `agent/rag-en` into
+agent-brain master (`--no-ff`), deploy (authorized), re-index if the merge changes the corpus, run
+`canon-recall` — if the Canon does not rank first, implement curated-source priority, re-measure, commit
+the before/after — close with its fichas and the single next step. Open leftover: whether
+`ECOSISTEMA.md` lists the KBs (decided with the owner when U2 touches docs).
