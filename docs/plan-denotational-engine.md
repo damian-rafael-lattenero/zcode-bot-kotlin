@@ -149,7 +149,7 @@ teaches. Hooks follow the census law (every `.nu` has its test, `~/Scripts/tests
       way: the `real-questions` suite is not deterministic — its ranks move a place or two between
       identical runs, so a one-question change there is not a signal.
 - [ ] `~/Projects/ECOSISTEMA.md` lists no KB today — decide whether it should.
-- [ ] The Theory (owner's order, 2026-11-26: "launch one more subagent for category theory… the
+- [x] DONE 26/11 — the Theory (owner's order, 2026-11-26: "launch one more subagent for category theory… the
       categories that then come down to Haskell and then pass to other languages… always the latest on
       the web, in papers, in books"). New repo `theory-kb`: `official/` (text sources whose license
       allows a mirror) + `notes/category-theory/<id>.md`, 20 concepts in learning order, fichas H01–H20:
@@ -159,6 +159,9 @@ teaches. Hooks follow the census law (every `.nu` has its test, `~/Scripts/tests
       optics · category theory and AI (a dated survey). Every note: the shape, the Haskell landing,
       what Kotlin, TypeScript and Nushell make of it (seeds for P2), and where a cited source finds
       it in architecture. A connection nobody published is an open thread, never a claim.
+      Receipt: 20 notes with 0 findings; 14 arXiv ids and one DOI checked against their sources; the notes
+      and Milewski's book indexed (334 chunks) with the evals green. Open: 18 threads in the INDEX — the
+      architecture connections and language rows no opened source supports; 25 of 60 language rows empty.
 
 ### P2 — The Maps: one per language (2 sessions)
 
