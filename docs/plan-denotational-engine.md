@@ -2,14 +2,14 @@
 
 > Created: 2026-11-26 · Status: **v2.0 — approved by the owner on 2026-11-26 with 24 recorded answers.**
 > Execution starts at U1, one unit per session; the book is written inside the units, never as a separate marathon.
-> Supersedes v1.2 (same day; git history keeps it). The book v5 is written by building the engine: every piece is also a ficha.
+> Supersedes v1.2 (same day; git history keeps it). The book v5 is written by building the engine: every piece is also a card.
 
 ## 1. Context
 
 The owner's goal, in his words: the brain learned Nushell to the point of almost never writing a broken
 `.nu`; he wants the same for Haskell, Kotlin and anything functional and denotational. The brain must be
 present whenever an LLM writes code — as **hook** (a gate that stops what breaks a law), **guide** (the
-right note injected at the moment of writing), **judge** (the *juez de rumbo*, watching the turn while it
+right note injected at the moment of writing), **judge** (the *course judge*, watching the turn while it
 runs) and **lighthouse** (the curated Canon ranks first, every time) — and every miss becomes a rule.
 
 **One sentence:** when an agent writes Haskell, Kotlin or Nushell, the brain is there at every moment, so
@@ -22,7 +22,7 @@ translated with a mechanical receipt, the store door + the English-input boundar
 `canon-recall` suite, all on branch `agent/rag-en` — merged and deployed in U1).
 
 Typed input and output apply to four things (owner decision 26/11): the code the agent writes, the
-agent's replies to the owner, the engine's own pieces (Pedido, verdict, correction, cards), and the book.
+agent's replies to the owner, the engine's own pieces (Request, verdict, correction, cards), and the book.
 
 ## 2. Vocabulary — form first
 
@@ -30,16 +30,16 @@ agent's replies to the owner, the engine's own pieces (Pedido, verdict, correcti
 |---|---|---|
 | `Canon` · `Theory` | The idea in Haskell; the categorical shape above it | `haskell-kb`, `theory-kb` (exist) |
 | `Mapping` | For one concept and one language: the equivalent, an example that compiles, the difference, the trap — or "gap" | `kotlin-kb/notes/canon-map.md`, `nushell-kb/notes/canon-map.md` (new) |
-| `Rung` | One concept learned end to end (map row → gate → drill → eval case → ficha) | the ladder loop, §6 |
+| `Rung` | One concept learned end to end (map row → gate → drill → eval case → card) | the ladder loop, §6 |
 | `Gate` | A deterministic predicate from an action to a verdict: `Allow · Guide · Ask · Deny` | `~/Scripts/scripts/hooks/` |
 | `Oracle` | The compiler or test runner of a language — the only ground truth for "it works" | `PostToolUse` hooks (new) |
-| `Pedido` | The typed witness of what was asked: `goal · constraints · nonGoals · acceptance` | fork runtime |
+| `Request` | The typed witness of what was asked: `goal · constraints · nonGoals · acceptance` | fork runtime |
 | `Verdict` | `aligned · minor_drift · drift`, with cited evidence | fork runtime |
-| `Seal` | Delivered versus Pedido, plus the reply's shape | fork runtime |
+| `Seal` | Delivered versus Request, plus the reply's shape | fork runtime |
 | `Reply` | The agent's answer to the owner: `result · evidence · next` | law text + seal |
 | `Correction` → `Proposal` | What the agent did, what the owner did instead, which concept it breaks → a candidate rule the owner approves | bus kind + table in the brain |
 | `Eval` | One number over time, in the ledger, with baseline and target | `agent-brain/evals/suites/` |
-| `Ficha` · `PaperSheet` | One book unit; what the owner writes by hand: `signature · law · drawing · own_words` | `agent-brain/docs/book/` |
+| `Card` · `PaperSheet` | One book unit; what the owner writes by hand: `signature · law · drawing · own_words` | `agent-brain/docs/book/` |
 | `LawText` | The denotational law every session carries in its system prompt | `agent-brain/docs/denotational-law.md` (new) |
 
 Engine laws (kept from v1.2): a Gate that denies is deterministic; an LLM may only Ask, at most once per
@@ -70,7 +70,7 @@ must fall is the first-try failure.
 | Lighthouse | on every query | Canon (curated) ranks above manual fragments; nothing non-English in the store | a concept question, EN and ES, returns the Canon note at rank 1 (`canon-recall`) |
 | Guide | at design time; when a file is born | `LawText` in the system prompt + `design-guard` querying the Canon live | a real turn where the injected hit changed the design |
 | Hook | at the write, and right after | a deterministic gate, then the oracle (compiler/tests) | a `denials.tsv` line; an oracle-failure ledger line — also from subagent sessions (U4) |
-| Judge | along the turn | the Pedido, measured triggers, one verdict with cited evidence | a real turn where the judge spoke and the turn was saved |
+| Judge | along the turn | the Request, measured triggers, one verdict with cited evidence | a real turn where the judge spoke and the turn was saved |
 | Memory | after the turn | correction → proposal → owner approval → promotion | a correction that became a rule |
 
 ## 5. The fleet — one row per piece
@@ -79,7 +79,7 @@ must fall is the first-try failure.
 |---|---|---|---|---|---|
 | RAG store | English-only by the door (unmerged); Canon first 34/45 EN · 23/45 ES | Canon rank 1 both languages (≥ 43/45) | merge + deploy; curated-source priority in `RagStore.kt` if the number demands it | U1 | `canon-recall` ledger row; the Spanish mónada question returns `monad.md` first |
 | Memories | 13 Spanish + 42 mixed rows | English-only | `translate-legacy` + review; inventory must show zero | U2 | `rag-language-inventory --short` clean |
-| Evals | recall-core 33 · real-questions 8 (non-deterministic) · `canon-recall` live 90 (branch) | canon-recall in the nightly; `first-pass` / `canon` / `rumbo` suites | suites + nightly step | U1, U22 | ledger rows; `/learn` shows the numbers |
+| Evals | recall-core 33 · real-questions 8 (non-deterministic) · `canon-recall` live 90 (branch) | canon-recall in the nightly; `first-pass` / `canon` / `course` suites | suites + nightly step | U1, U22 | ledger rows; `/learn` shows the numbers |
 | Hooks | 14, deny only for `.nu`; nothing compiles after a write; silent in subagents | Kotlin + Haskell gates; PostToolUse oracles; fire everywhere | `is-law` opens to `*-kb/notes`; new gates; oracle hooks; fork wiring | U4, U9, U11+ | `denials.tsv` rows incl. subagent sessions; an oracle catch |
 | Prompt layer | `prompt-laws.nu` static, no Kotlin/Canon; `design-guard` static ladder | the law in the fork's system prompt; live Canon retrieval | `systemPromptAppendFile`; `design-guard` queries the brain | U4, U9 | the law visible in a subagent's context |
 | MCP | 4 read-only tools | unchanged | — | — | — |
@@ -96,7 +96,7 @@ must fall is the first-try failure.
 3. Its drill in `canonical-drills` (new repo: Kotlin, Nushell, Haskell; the type and the test exist, the
    body is the exercise) and its QuickCheck law if missing (15 of 25 lack one).
 4. Its eval case per language.
-5. Its ficha B.
+5. Its card B.
 
 **Exit criterion:** the rung is learned when its eval case passes first-try, N of N (N = 3), in fresh
 sessions. **Order:** writing follows the measured violation (U10 judges a sample of real edits against
@@ -104,24 +104,24 @@ the Canon and names the five most violated); reading follows the book's prerequi
 
 ## 7. The units — U1…U25 (one per session)
 
-| # | Unit | Leaves done | Live receipt | Fichas |
+| # | Unit | Leaves done | Live receipt | Cards |
 |---|---|---|---|---|
 | U1 | Lighthouse | merge `agent/rag-en` (deploy authorized 26/11); measure; curated-first in `RagStore.kt` if needed | `canon-recall` row; "qué es una mónada y para qué sirve" → `monad.md` first | C5, C8, E1 |
 | U2 | The English check | memories to English; `rag-english-check` + `translation-check` promoted to `~/Scripts` with tests; nightly runs them; `~/Scripts/tests/` out of the index; ADR "The corpus is English"; AGENTS.md edits (`[verified <version>]`, the KB list) | the check green on the live store, red on a planted Spanish note | D1, C7 |
-| U3 | The book frame | English route sheet (`00-route-sheet.md`): 90 fichas, prerequisite order; `book-check` with tests; first 8 fichas | `book-check` green; A1 readable | A0.1–A0.4, A1–A3, C6 |
+| U3 | The book frame | English route sheet (`00-route-sheet.md`): 90 cards, prerequisite order; `book-check` with tests; first 8 cards | `book-check` green; A1 readable | A0.1–A0.4, A1–A3, C6 |
 | U4 | The fork carries the law | system-prompt append section reading a file (generic `systemPromptAppendFile`); replaces the skill's Spanish body, retires `prompt-laws.nu`; hooks wired into subagents (all of them, owner decision), with a live survey of what fires | (after the owner's build) a `denials.tsv` deny from a subagent session; the law in a subagent's context | C1, D2, D3, D4, D9 |
-| U5 | The Pedido | before the first step: drafted by model + schema → confirm/correct card → waits for the tap, 2-minute expiry → injected and stored; conversational prompts get no card | a real turn (desktop and phone) where the agent waited | D7 |
+| U5 | The Request | before the first step: drafted by model + schema → confirm/correct card → waits for the tap, 2-minute expiry → injected and stored; conversational prompts get no card | a real turn (desktop and phone) where the agent waited | D7 |
 | U6 | Triggers + verdict | the measured triggers off the fork's own event flow; one model call; minor drift = a note to the agent; big or repeated = one question to the owner; fails open, counted | a real turn where the judge spoke to the agent | D5 |
-| U7 | The seal | delivered vs Pedido + the `result · evidence · next` shape; one bounce, then the owner is told | a real turn the seal bounced | D10 |
+| U7 | The seal | delivered vs Request + the `result · evidence · next` shape; one bounce, then the owner is told | a real turn the seal bounced | D10 |
 | U8 | Corrections | `correction` bus kind; the bot publishes on steer/stop/cancel; `corrections` table + extractor beside `MemoryExtractor`; Corpus Doctor gains `law_gap` (proposes, never writes) | a correction that became a rule | C2, C3, C4, D8 |
 | U9 | Oracles + guide | PostToolUse for `.kt` (compile + detekt with the kap rules) and `.hs` (`ghc_check` reused), advisory, time-capped, with its ledger; `rag-guard` injects every `*-kb/notes`; `design-guard` queries the Canon live and covers `.hs` | a compile failure caught right after a write | D6 |
 | U10 | Kotlin baseline | `kotlin-kb/official`; a sample of real edits judged against the Canon → the 5 most violated; the `var`/`!!` survey by package | the list of 5, with numbers | E3 |
 | U11–U15 | Rungs 1–5 | the most violated, one per unit | per rung: its eval case passes first-try; a Kotlin deny in the ledger | B ×5 |
 | U16–U19 | Rungs 6–25 | five per unit | idem | B ×20 |
-| U20–U21 | Part N | one ficha per nushell-fp module (15) | — | N ×15 |
-| U22 | The numbers | `first-pass`, `canon`, `rumbo` as evals with suites; `/learn` shows them | the three rows in the ledger and `/learn` | E2 |
-| U23–U24 | Part H | the 20 short theory fichas, Kotlin and Nushell rows verified | — | H ×20 |
-| U25 | The method | laws with receipts, traps of the month, exam with answer key and question→ficha map; answers close | — | F1, F2 |
+| U20–U21 | Part N | one card per nushell-fp module (15) | — | N ×15 |
+| U22 | The numbers | `first-pass`, `canon`, `course` as evals with suites; `/learn` shows them | the three rows in the ledger and `/learn` | E2 |
+| U23–U24 | Part H | the 20 short theory cards, Kotlin and Nushell rows verified | — | H ×20 |
+| U25 | The method | laws with receipts, traps of the month, exam with answer key and question→card map; answers close | — | F1, F2 |
 
 Owner decisions needed, at most one per unit: U4 — approve the child-session rules of the hooks that
 speak too much; U10 — how a pure core is declared (from the survey) and the canon-adherence target.
@@ -132,15 +132,15 @@ English, inside the brain's index, read as markdown on the Mac (owner decisions 
 historical record — it is Spanish, so the door already keeps it out of the index.
 
 **`book-check`** (the didactic spec as a gate, molded on `kb-check.nu`): the eight stops · ≤ 150 lines ·
-no paragraph over 100 words · no term used before its home ficha · every cited path exists · English ·
-no clinical language. Two sizes per ficha: the full path (10–20 minutes) and the minimum path (~5:
+no paragraph over 100 words · no term used before its home card · every cited path exists · English ·
+no clinical language. Two sizes per card: the full path (10–20 minutes) and the minimum path (~5:
 the aha, the signature, the checkpoint).
 
 **The eight stops:** The aha · What it denotes · In your languages (the difference and the trap) · Where
 it lives in your system · The paper sheet · The drill · Retrieval questions (answers live in part G) ·
 The close + checkpoint.
 
-**Concept fichas (B, H) are short:** what it denotes, the "in your languages" table with Kotlin and
+**Concept cards (B, H) are short:** what it denotes, the "in your languages" table with Kotlin and
 Nushell, where it lives in the owner's repos, the drill, the receipt that the brain learned it. The
 mathematics is not re-taught — the reading path is simplified, never the math.
 
@@ -148,7 +148,7 @@ mathematics is not re-taught — the reading path is simplified, never the math.
 index page carrying the +1-day and +7-day re-asks (paper only; no Telegram cards).
 
 **Parts:** A 7 · B 25 · C 8 · D 10 · E 3 · F 2 · G answers · N 15 (one per nushell-fp module) ·
-H 20 — 90 fichas; the route sheet maps every ficha to its unit.
+H 20 — 90 cards; the route sheet maps every card to its unit.
 
 **Citations enter only verbatim-verified.** Verified 26/11: Minear et al., *"Is practice good enough?
 Retrieval benefits students with ADHD but does not compensate for poor encoding in unmedicated
@@ -168,7 +168,7 @@ or removed.
   Stop-hook continuation for the seal (capped, message injected).
 - Runs in the main session; in subagents act the system-prompt law, the gates and the oracles.
 - Never traps a turn: model failure or timeout continues the turn, and the failure is counted in
-  `rumbo`.
+  `course`.
 - Fork work goes live only after the owner's build; U5–U7 may be executed as one session.
 
 ## 10. The numbers
@@ -195,7 +195,7 @@ Cost: the judge ≈ $5–7/month, the canon eval $1–2, everything else $0 (v1.
   each hook did and the child-session rules are approved with the owner.
 - **Kotlin gate false positives** — gates deny only unambiguous patterns; every rule carries its
   eight-case selftest; overriding a deny becomes a correction (U8).
-- **Approval fatigue** — one tap per turn (the Pedido, with expiry), at most one judge question, seal
+- **Approval fatigue** — one tap per turn (the Request, with expiry), at most one judge question, seal
   tells the owner only when delivery was incomplete.
 - **Scope** — one active unit; the book is written inside the units.
 - **The other front** — the repo-migration plan is a separate front: this plan does not rewrite git
@@ -209,7 +209,7 @@ Cost: the judge ≈ $5–7/month, the canon eval $1–2, everything else $0 (v1.
 `haskell-rules-and-mcp`.
 
 **Key files:** fork `core/src/runtime/methods/subagent.ts` (wire the hook runner),
-`core/src/context/builder.ts` (the append section), `methods/turn.ts` + `turn-stop.ts` (Pedido, seal),
+`core/src/context/builder.ts` (the append section), `methods/turn.ts` + `turn-stop.ts` (Request, seal),
 `packages/contracts/src/tools/target.ts` (the verifier shape, reused). Brain: `rag/RagStore.kt`,
 `memory/LegacyTranslation.kt`, `bus/BusEvent.kt`, `memory/MemoryExtractor.kt`, `eval/CorpusDoctor.kt`,
 `eval/Suite.kt`, `scripts/rag-nightly.nu`, `docs/adr/`. Bot: `channel/BotCommands.kt`,
@@ -222,12 +222,12 @@ Cost: the judge ≈ $5–7/month, the canon eval $1–2, everything else $0 (v1.
 
 **Verification:** every unit — tests green in each repo touched, its receipt row, `fleet brain-eval`
 after every corpus change. Fork — its test suite before every push; live receipts after the owner's
-build. Book — `book-check` green and the ficha→unit matrix complete (90/90). The plan is done when every
+build. Book — `book-check` green and the card→unit matrix complete (90/90). The plan is done when every
 row of §10 has its measured baseline and its first ledger row.
 
 **Order:** U1 → U2 → U3 → U4 → U5 → U6 → U7 → U8 → U9 → U10 → rungs → N → U22 → H → U25, four or more
 sessions per week (owner decision 26/11). **First session = U1:** merge `agent/rag-en` into
 agent-brain master (`--no-ff`), deploy (authorized), re-index if the merge changes the corpus, run
 `canon-recall` — if the Canon does not rank first, implement curated-source priority, re-measure, commit
-the before/after — close with its fichas and the single next step. Open leftover: whether
+the before/after — close with its cards and the single next step. Open leftover: whether
 `ECOSISTEMA.md` lists the KBs (decided with the owner when U2 touches docs).
