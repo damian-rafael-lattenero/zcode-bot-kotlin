@@ -310,8 +310,8 @@ private fun reduceThought(state: RenderState, event: RenderEvent.Thought): Rende
             cotPending = pending,
             cotTail = LiveTurn.takeLastCodePoints(state.cotTail + fresh, LiveTurn.COT_TAIL_CP),
             // THE CoT'S FRESHNESS ANCHOR (v2 §2): only the main agent's real
-            // deltas mark the thinking fresh — the «generando CoT vs
-            // procesando…» split reads it, subagent lanes never touch it
+            // deltas mark the thinking fresh — the «generating CoT vs
+            // processing…» split reads it, subagent lanes never touch it
             lastThoughtAtMs = event.atMs.takeIf { it > 0 } ?: event.nowMs,
             phase = TurnPhase.Thinking(chars = chars, sinceMs = phaseSince(state.phase, state, event.nowMs)),
             // REAL progress clears the retry pill (the fork's own recovery rule)

@@ -224,9 +224,9 @@ object TurnDigest {
      */
     private fun labelOf(index: Int, total: Int, afterTool: String?): String? = when {
         total == 1 -> null
-        index == total - 1 -> "✅ Respuesta"
-        afterTool != null -> "Paso ${index + 1} · tras 🔧 $afterTool"
-        else -> "Paso ${index + 1}"
+        index == total - 1 -> "✅ Answer"
+        afterTool != null -> "Step ${index + 1} · after 🔧 $afterTool"
+        else -> "Step ${index + 1}"
     }
 
     /** One chunk of [RichVoice.BLOCK_CP], prose preferring its last line boundary under the cap. */

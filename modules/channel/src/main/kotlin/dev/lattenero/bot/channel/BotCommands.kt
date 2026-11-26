@@ -100,7 +100,7 @@ interface ChannelOps {
      * An ORDER direct to one session (the fork's inbound taskId — the ✍️
      * armed shot at an attached subagent), AWAITED: the answer is the
      * fork's own truth — [InboundAnswer.Failed] carries the v4 rejection
-     * verbatim (the 2/11 lie: fire-and-forget said «entregada» while the
+     * verbatim (the 2/11 lie: fire-and-forget said «delivered» while the
      * fork rejected 7ms later). The honest default for wiring that never
      * learned orders: UNAVAILABLE — an order must NEVER ride the ordinary
      * inbound and land in the wrong conversation.

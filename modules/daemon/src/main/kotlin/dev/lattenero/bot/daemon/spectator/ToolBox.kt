@@ -212,7 +212,7 @@ internal object ToolBox {
             ?.let { lines ->
                 val shown = lines.take(TODO_LINES_MAX)
                 val more = lines.size - shown.size
-                (shown + if (more > 0) listOf("… +$more más") else emptyList()).joinToString("\n")
+                (shown + if (more > 0) listOf("… +$more more") else emptyList()).joinToString("\n")
             }
 
     /** One todo's line: the status color + the priority mark + the content, ONE line (preview flattens the rest). */

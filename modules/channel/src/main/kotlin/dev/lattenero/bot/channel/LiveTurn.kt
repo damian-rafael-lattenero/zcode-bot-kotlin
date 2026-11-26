@@ -112,7 +112,7 @@ internal val SHELL_TOOLS = setOf("Bash", "Shell")
  */
 internal val WRITE_EDIT_TOOLS = setOf("Edit", "MultiEdit", "Replace", "Write", "Create", "New")
 
-/** A write/edit lane's file path — the [📄 archivo completo] door's key (the owner, 5/11). */
+/** A write/edit lane's file path — the [📄 full file] door's key (the owner, 5/11). */
 internal fun ToolLive.editFilePath(): String? =
     takeIf { name in WRITE_EDIT_TOOLS && input != null }?.let { lane ->
         listOf("file_path", "path").firstNotNullOfOrNull { k -> lane.input?.str(k)?.takeIf { it.isNotEmpty() } }
@@ -279,8 +279,8 @@ data class TurnLive(
     val failedTools: Int = 0,
     val interaction: InteractionPending? = null,
     /**
-     * The last MAIN-AGENT thought's real moment (v2 §2): the «generando CoT
-     * vs procesando…» split's anchor. Subagent lanes never touch it (their
+     * The last MAIN-AGENT thought's real moment (v2 §2): the «generating CoT
+     * vs processing…» split's anchor. Subagent lanes never touch it (their
      * narration is the 🤖 row, not the card's thinking state); a replayed
      * chunk never refreshes it (the replay guard returns state whole).
      */
@@ -617,8 +617,8 @@ object LiveTurn {
 
     /**
      * The CoT's freshness window (v2 §2): a main-agent thought younger than
-     * this means the CoT is ACTUALLY flowing — «generando CoT»; past it the
-     * honest word is «procesando…» (the model may be computing pure).
+     * this means the CoT is ACTUALLY flowing — «generating CoT»; past it the
+     * honest word is «processing…» (the model may be computing pure).
      */
     const val COT_QUIET_MS = 5_000L
 
@@ -704,14 +704,14 @@ object LiveTurn {
                 lines.add(workingHead(state.title, elapsed))
                 // v2 §2: the pure-computing state vs the CoT actually
                 // flowing. The freshness reads the REAL clock — a frozen
-                // card (silence, dead channel, error) is never «generando»;
-                // its honest word is «procesando…» plus the staleness line.
+                // card (silence, dead channel, error) is never «generating»;
+                // its honest word is «processing…» plus the staleness line.
                 val fresh = state.lastThoughtAtMs != null && nowMs - state.lastThoughtAtMs < COT_QUIET_MS
                 lines.add(
                     if (fresh) {
-                        "🧠 <b>generando CoT</b> · ${phase.chars} caracteres · ${fmtDur(clockNow - phase.sinceMs)}"
+                        "🧠 <b>generating CoT</b> · ${phase.chars} chars · ${fmtDur(clockNow - phase.sinceMs)}"
                     } else {
-                        "🧠 <b>procesando…</b>${stalenessWord(silence, channelAlive)}"
+                        "🧠 <b>processing…</b>${stalenessWord(silence, channelAlive)}"
                     },
                 )
             }
@@ -737,7 +737,7 @@ object LiveTurn {
                         )
                     }
                     lines.add(
-                        "✍️ <b>escribiendo la respuesta</b> · ${phase.rawChars} caracteres · " +
+                        "✍️ <b>writing the answer</b> · ${phase.rawChars} chars · " +
                             fmtDur(clockNow - phase.sinceMs),
                     )
                 } else {
@@ -754,7 +754,7 @@ object LiveTurn {
         }
         state.interaction?.let { lines.add("${it.emoji} waiting: ${PyText.esc(it.title ?: it.kind)}") }
         state.typedError?.let { pill ->
-            val quota = if (pill.isQuota) " · 💳 CUOTA" else ""
+            val quota = if (pill.isQuota) " · 💳 QUOTA" else ""
             lines.add("💀 <b>error:</b> ${pill.line()}$quota")
         }
         // THE OWNER'S PRIZE SECTION (3/11): while the turn runs, the card
@@ -1066,7 +1066,7 @@ object LiveTurn {
     fun sealText(state: TurnLive, nowMs: Long): String {
         val phase = state.phase as? TurnPhase.Done ?: return render(state, nowMs, true)
         val total = state.startedAtMs?.let { fmtDur(nowMs - it) } ?: "?"
-        val error = state.typedError?.let { "\n💀 ${it.line()}" + if (it.isQuota) " · 💳 CUOTA" else "" } ?: ""
+        val error = state.typedError?.let { "\n💀 ${it.line()}" + if (it.isQuota) " · 💳 QUOTA" else "" } ?: ""
         val blocks = when {
             state.cotBlocks.isEmpty() -> ""
             else -> {

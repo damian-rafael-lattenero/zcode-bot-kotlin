@@ -271,7 +271,7 @@ class LiveTurnTest {
         val text = LiveTurn.render(s!!, nowMs = s.lastEventAtMs!! + 2_000, channelAlive = true)
         assertTrue("<pre>" in text, "the live box carries the words in a pre block: $text")
         assertTrue("Voy a revisar &lt;el&gt; stream &amp; volver." in text, "escaped, verbatim: $text")
-        assertTrue("escribiendo la respuesta" in text, text)
+        assertTrue("writing the answer" in text, text)
     }
 
     @Test
@@ -388,34 +388,34 @@ class LiveTurnTest {
         // LIVE: fresh event (2s old) — the clocks tick
         val last = s!!.lastEventAtMs!!
         val text = LiveTurn.render(s, nowMs = last + 2_000, channelAlive = true)
-        // THE WORKING HEADER (the owner's 5/11 words: «Procesando... xS» —
-        // hace cuánto empezó la tarea) + the NOW line beneath it
-        assertTrue("⏳ <b>Procesando... 2s</b>" in text)
-        assertTrue("🧠 <b>generando CoT</b> · 40 caracteres" in text, "a fresh delta IS the CoT flowing: $text")
-        assertTrue("40 caracteres" in text) // the counter, with the total
+        // THE WORKING HEADER (the owner's 5/11 words: «Processing... xS» —
+        // how long the task has run) + the NOW line beneath it
+        assertTrue("⏳ <b>Processing... 2s</b>" in text)
+        assertTrue("🧠 <b>generating CoT</b> · 40 chars" in text, "a fresh delta IS the CoT flowing: $text")
+        assertTrue("40 chars" in text) // the counter, with the total
         assertTrue("💓" !in text) // THE HEART IS DEAD (the owner's 30/10 verdict)
         assertTrue("💭" !in text) // the blink died with the redraw law: only REAL change re-draws
-        assertTrue("en vivo · último evento hace 2s · 0 listos" in text) // the sober line
-        assertTrue("0 listos" in text)
+        assertTrue("live · last event 2s ago · 0 done" in text) // the sober line
+        assertTrue("0 done" in text)
         assertTrue("<blockquote>" !in text, "the tail is a ONE-LINE char count — it never spills")
 
         // the dead channel speaks frozen — the 📡 reconnect line AND the sober word
         val dead = LiveTurn.render(s, nowMs = last + 5_000, channelAlive = false)
         assertTrue("📡" in dead)
-        assertTrue("frozen · 5s sin eventos · 0 listos" in dead)
+        assertTrue("frozen · 5s without events · 0 done" in dead)
 
         // THE OWNER'S 5/11 RULE: 42s of silence with the channel ALIVE — the
         // clock KEEPS RUNNING (a silent model may be legitimately grinding;
-        // «Procesando... xS» ticks on) while the silence itself speaks
+        // «Processing... xS» ticks on) while the silence itself speaks
         val quiet = LiveTurn.render(s, nowMs = last + 42_000, channelAlive = true)
-        assertTrue("(42s sin eventos)" in quiet)
-        assertTrue("⏳ <b>Procesando... 42s</b>" in quiet, "the timer runs while the channel lives")
-        assertTrue("🧠 <b>procesando…</b> (42s sin eventos)" in quiet, "a quiet card never claims «generando»: $quiet")
-        // 42s of silence is still «en vivo» — the line carries the honest age,
+        assertTrue("(42s without events)" in quiet)
+        assertTrue("⏳ <b>Processing... 42s</b>" in quiet, "the timer runs while the channel lives")
+        assertTrue("🧠 <b>processing…</b> (42s without events)" in quiet, "a quiet card never claims «generating»: $quiet")
+        // 42s of silence is still «live» — the line carries the honest age,
         // «frozen» is reserved for the cut stream (the hard word lives at 90s)
-        assertTrue("en vivo · último evento hace 42s" in quiet)
+        assertTrue("live · last event 42s ago" in quiet)
         val cut = LiveTurn.render(s, nowMs = last + 120_000, channelAlive = true)
-        assertTrue("frozen · 2m00s sin eventos" in cut)
+        assertTrue("frozen · 2m00s without events" in cut)
     }
 
     @Test
@@ -438,7 +438,7 @@ class LiveTurnTest {
         )
         val text = LiveTurn.render(s!!, nowMs = s.lastEventAtMs!! + 10_000, channelAlive = true)
         // the retry pill holds the frozen clock — the NOW timer runs on it
-        assertTrue("🔧 <b>Write</b> · 0s · 4 líneas" in text, text) // the write family's line: timer + streamed lines
+        assertTrue("🔧 <b>Write</b> · 0s · 4 lines" in text, text) // the write family's line: timer + streamed lines
         assertTrue("⚠️ Rate limited — retrying 2/5" in text)
     }
 
@@ -452,11 +452,11 @@ class LiveTurnTest {
         s = reduce(s, thought("pensando"))
         val last = s!!.lastEventAtMs!!
         val fresh = LiveTurn.render(s, nowMs = last + 5_000, channelAlive = true)
-        assertTrue("sin eventos" !in fresh) // fresh = a plain honest thinking line
+        assertTrue("without events" !in fresh) // fresh = a plain honest thinking line
         val stale = LiveTurn.render(s, nowMs = last + 30_000, channelAlive = true)
-        assertTrue("(30s sin eventos)" in stale) // 20-30s of silence: the degrade
+        assertTrue("(30s without events)" in stale) // 20-30s of silence: the degrade
         val cut = LiveTurn.render(s, nowMs = last + 120_000, channelAlive = true)
-        assertTrue("(2m00s sin eventos — stream cortado?)" in cut) // the hard word
+        assertTrue("(2m00s without events — stream cut?)" in cut) // the hard word
     }
 
     @Test
@@ -464,7 +464,7 @@ class LiveTurnTest {
         var s: TurnLive? = null
         s = reduce(s, thought("pensando"))
         val text = LiveTurn.render(s!!, nowMs = s.lastEventAtMs!! + 8_000, channelAlive = false)
-        assertTrue("📡 canal caído — reconectando…" in text)
+        assertTrue("📡 channel down — reconnecting…" in text)
     }
 
     @Test
@@ -491,10 +491,10 @@ class LiveTurnTest {
         assertTrue("💀 <b>error:</b> usage cap exceeded" in text)
         assertTrue("fault.provider.quotaExhausted" in text)
         assertTrue("HTTP 429" in text)
-        assertTrue("💳 CUOTA" in text)
+        assertTrue("💳 QUOTA" in text)
         val seal = LiveTurn.sealText(s, nowMs = s.lastEventAtMs!! + 2_000)
         assertTrue("usage cap exceeded" in seal)
-        assertTrue("💳 CUOTA" in seal)
+        assertTrue("💳 QUOTA" in seal)
     }
 
     @Test
@@ -619,7 +619,7 @@ class LiveTurnTest {
         assertTrue("<blockquote>" !in text, "the tail never spills")
         assertTrue("cb:" !in text, "no block buttons on the card")
         assertTrue("0123456789" !in text, "no block text on the card")
-        assertTrue("📖 CoT: 1 bloque plegado" in text)
+        assertTrue("📖 CoT: 1 folded block" in text)
     }
 
     @Test
@@ -630,7 +630,7 @@ class LiveTurnTest {
         assertEquals(2, s!!.cotBlocks.size)
         assertEquals(500, s!!.cotPending.length)
         val text = LiveTurn.render(s!!, nowMs = 1L, channelAlive = true)
-        assertTrue("📖 CoT: 2 bloques plegados · 500 en camino" in text)
+        assertTrue("📖 CoT: 2 folded blocks · 500 on the way" in text)
         assertTrue("<blockquote>" !in text)
     }
 
@@ -657,7 +657,7 @@ class LiveTurnTest {
         repeat(300) { s = reduce(s, numberedThought("0123456789")) }
         s = reduce(s, ev("task_complete", "stopReason" to str("end_turn")))
         val seal = LiveTurn.sealText(s!!, nowMs = 61_000)
-        assertTrue("1 bloque CoT" in seal)
+        assertTrue("1 CoT block" in seal)
     }
 
     @Test
@@ -686,7 +686,7 @@ class LiveTurnTest {
         val text = LiveTurn.render(s!!, nowMs = 100_000, channelAlive = true)
         assertTrue(text.length < 4096) // the whole message fits Telegram
         assertTrue(s!!.cotTail.length == 2000) // the tail below the cap keeps everything (the replay guard)
-        assertTrue("2000 caracteres" in text) // the one-line count, chars only
+        assertTrue("2000 chars" in text) // the one-line count, chars only
     }
 
     @Test
@@ -694,7 +694,7 @@ class LiveTurnTest {
         val s = LiveTurn.reduce(null, ev("usage_update"), nowMs = 5L)
         assertEquals(TurnPhase.Idle, s.phase)
         val text = LiveTurn.render(s, nowMs = 6L, channelAlive = true)
-        assertTrue("nada corriendo" in text)
+        assertTrue("nothing running" in text)
     }
 
     // ---- the owner's 30/10 verdict on the corpse card («quedó fatal») ----
@@ -764,7 +764,7 @@ class LiveTurnTest {
         val text = LiveTurn.render(s!!, nowMs = s.lastEventAtMs!!, channelAlive = true, verbs = verbs)
         assertTrue("⚡ <b>Nushell</b> · 0s" in text, text)
         assertTrue("<pre><code class=\"language-nu\">npm test</code></pre>" in text, text)
-        assertTrue("0 líneas" !in text) // the invented zero is GONE
+        assertTrue("0 lines" !in text) // the invented zero is GONE
         // a >1800 cp command: the card shows the head and promises the feed —
         // the command itself is NEVER elided mid-way there (v2 §3)
         s = reduce(
@@ -777,7 +777,7 @@ class LiveTurnTest {
         val big = LiveTurn.render(s, nowMs = s.lastEventAtMs!!, channelAlive = true, verbs = verbs)
         assertTrue("y".repeat(1800) in big, "the first 1800 cp ride the card")
         assertTrue("y".repeat(1801) !in big, "…and not one more")
-        assertTrue("✂️ … el comando completo va en el feed" in big, big)
+        assertTrue("✂️ … the full command goes in the feed" in big, big)
     }
 
     @Test
@@ -792,7 +792,7 @@ class LiveTurnTest {
         )
         // while the tool runs: NO output claim — the fork streams none
         val open = LiveTurn.render(s!!, nowMs = s.lastEventAtMs!!, channelAlive = true)
-        assertTrue("líneas de salida" !in open)
+        assertTrue("output lines" !in open)
         // the close carries the result content — counted ONCE, at close
         s = reduce(
             s,
@@ -803,7 +803,7 @@ class LiveTurnTest {
         )
         assertEquals(3, s!!.tools.first().outputLines)
         val text = LiveTurn.render(s, nowMs = s.lastEventAtMs!!, channelAlive = true)
-        assertTrue("🔧 Nushell · 0s · 3 líneas de salida" in text, "the stamp carries the runtime (v2 §5): $text")
+        assertTrue("🔧 Nushell · 0s · 3 output lines" in text, "the stamp carries the runtime (v2 §5): $text")
         // a structured payload invents no count (the close boxes render it)
         s = reduce(
             s,
@@ -931,13 +931,13 @@ class LiveTurnTest {
     @Test
     fun thePrizeLineRidesTheWorkingCardOnly() {
         var s = reduce(null, thought("pienso"))
-        val prize = "🎁 <b>Premios</b> · 1 reset 5h — /quota"
+        val prize = "🎁 <b>Prizes</b> · 1 reset 5h — /quota"
         val thinking = LiveTurn.render(s!!, nowMs = now, channelAlive = true, giftsLine = prize)
-        assertTrue("Premios" in thinking)
+        assertTrue("Prizes" in thinking)
 
         s = reduce(s, ev("task_complete", "stopReason" to str("end_turn")))
         val done = LiveTurn.render(s!!, nowMs = now, channelAlive = true, giftsLine = prize)
-        assertTrue("Premios" !in done) // a Done card is a verdict, not a shelf
+        assertTrue("Prizes" !in done) // a Done card is a verdict, not a shelf
     }
 
     // ---- live card v2 §1: the header's clock is zcode's, mirrored ----
@@ -1009,7 +1009,7 @@ class LiveTurnTest {
         assertEquals("Bash", writing.tool)
     }
 
-    // ---- live card v2 §2: «procesando…» vs «generando CoT» ----
+    // ---- live card v2 §2: «processing…» vs «generating CoT» ----
 
     @Test
     fun theThinkingSplitsGeneratingCoTFromPureProcessing() {
@@ -1017,7 +1017,7 @@ class LiveTurnTest {
         s = reduce(s, thought("pensando el problema")) // the delta just landed — the CoT IS flowing
         val last = s!!.lastEventAtMs!!
         val fresh = LiveTurn.render(s, nowMs = last + 2_000, channelAlive = true)
-        assertTrue("🧠 <b>generando CoT</b> · 20 caracteres · 2s" in fresh, fresh)
+        assertTrue("🧠 <b>generating CoT</b> · 20 chars · 2s" in fresh, fresh)
         // 6s since the last delta: under the staleness window, past the CoT
         // one — the honest «procesando…» (the model may be computing pure)
         val quiet = LiveTurn.render(s, nowMs = last + 6_000, channelAlive = true)
@@ -1037,7 +1037,7 @@ class LiveTurnTest {
     @Test
     fun afterAToolClosesTheThinkingStartsProcesandoUntilNewDeltas() {
         // v2 §2: lastThoughtAtMs is old right after a close — «procesando…»
-        // immediately; the first new delta flips it to «generando CoT»
+        // immediately; the first new delta flips it to «generating CoT»
         var s: TurnLive? = null
         s = reduce(s, thought("antes de la acción"))
         val thoughtAt = s!!.lastEventAtMs!!
@@ -1060,7 +1060,7 @@ class LiveTurnTest {
         assertTrue("🧠 <b>procesando…</b>" in afterClose, afterClose)
         val again = reduce(closed, thought("el CoT sigue"))
         val freshAgain = LiveTurn.render(again, nowMs = again.lastEventAtMs!! + 1_000, channelAlive = true)
-        assertTrue("🧠 <b>generando CoT</b>" in freshAgain, freshAgain)
+        assertTrue("🧠 <b>generating CoT</b>" in freshAgain, freshAgain)
     }
 
     // ---- live card v2 §3/§6: the edit line and the filename law ----
@@ -1116,7 +1116,7 @@ class LiveTurnTest {
             ),
         )
         val text = LiveTurn.render(closed, nowMs = closed.lastEventAtMs!!, channelAlive = true)
-        assertTrue("🔧 Nushell · 12s · 2 líneas de salida" in text, "the measured runtime, frozen-clock-safe: $text")
+        assertTrue("🔧 Nushell · 12s · 2 output lines" in text, "the measured runtime, frozen-clock-safe: $text")
     }
 
     // ---- live card v2: the number law and the filename law, as tables ----

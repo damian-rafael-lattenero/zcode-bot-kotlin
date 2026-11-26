@@ -62,15 +62,15 @@ internal object FleetHealthcheckCommands {
     internal const val LOG_FILE_NAME = "fleet-healthcheck.log"
 
     internal const val USAGE =
-        "🩺 /fleet_healthcheck — la batería completa del ecosistema y sus fixes seguros (launchd-owned).\n" +
-            "🩺 /fleet_healthcheck check — solo lectura: la batería sin tocar nada."
+        "🩺 /fleet_healthcheck — the ecosystem's full battery and its safe fixes (launchd-owned).\n" +
+            "🩺 /fleet_healthcheck check — read only: the battery without touching anything."
 
-    internal const val NOT_OWNER = "🚫 Solo el dueño corre el fix."
+    internal const val NOT_OWNER = "🚫 Only the owner runs the fix."
 
     /** The fix's timeout words — the shared edge names the budget. */
     internal fun timeout(budgetSeconds: Long): String =
-        "⏱ la batería no terminó en $budgetSeconds s — la maté; reintentá en un momento."
+        "⏱ the battery did not finish in $budgetSeconds s — I killed it; retry in a moment."
 
     /** The fix's spawn-failure words. */
-    internal const val ERRORED = "⚠️ fleet-healthcheck no pudo correr — el daemon sigue vivo: "
+    internal const val ERRORED = "⚠️ fleet-healthcheck could not run — the daemon is still alive: "
 }

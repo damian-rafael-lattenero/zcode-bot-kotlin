@@ -40,7 +40,7 @@ data class QuestionAnswers(val byIndex: Map<QuestionIndex, List<AnswerValue>>) {
 /**
  * THE QUESTION, end to end (the owner's phone answers everything — 30/10):
  * the stream carries `permission_request` / `elicitation_request` events;
- * the card renders «🔐/❓ esperando» and the turn hangs forever. This file
+ * the card renders «🔐/❓ waiting» and the turn hangs forever. This file
  * closes the loop:
  *
  * 1. [parseQuestionEvent] reads the REAL event (the permission options ride
@@ -58,7 +58,7 @@ data class QuestionAnswers(val byIndex: Map<QuestionIndex, List<AnswerValue>>) {
  *    question fails with the fork's own error — never a silent tap). A
  *    MULTI-question form (the fork's `questions[]`, `questionCount > 1`)
  *    advances IN PLACE: the answer is recorded, the SAME Telegram message is
- *    edited with the next question («pregunta 2 de N»), and only after the
+ *    edited with the next question («question 2 of N»), and only after the
  *    LAST answer does ONE `respond` frame fly carrying every answer in the
  *    fork's exact shape ([elicitationContentAll]).
  *
@@ -306,8 +306,8 @@ private fun elicitationOptions(raw: JsonArray?): List<QuestionOption> = raw.orEm
  * The question message's TEXT — the dedicated message (never the card):
  * the head, WHICH conversation (the task title) and WHICH subagent (the
  * origin tag) asked, the body, the plan's verbatim clip. User-facing
- * Spanish. A multi-question form says WHICH question is on screen
- * («pregunta N de M»).
+ * English. A multi-question form says WHICH question is on screen
+ * («question N of M»).
  */
 internal fun questionText(q: PendingQuestion): String = buildString {
     append("<b>").append(PyText.esc(q.header)).append("</b>")
@@ -315,13 +315,13 @@ internal fun questionText(q: PendingQuestion): String = buildString {
         append("\n<i>📋 ").append(PyText.esc(PyText.take(title, QuestionBoard.QUESTION_TASK_CP))).append("</i>")
     }
     q.originLabel?.takeIf { it.isNotBlank() }?.let { label ->
-        append("\n<i>🤖 subagente: ")
+        append("\n<i>🤖 subagent: ")
             .append(PyText.esc(PyText.take(label, QuestionBoard.QUESTION_ORIGIN_CP)))
             .append("</i>")
     }
     append("\n").append(PyText.esc(q.title))
     if (q.questionCount > 1) {
-        append("\n<i>pregunta ").append(q.questionIndex + 1).append(" de ").append(q.questionCount).append("</i>")
+        append("\n<i>question ").append(q.questionIndex + 1).append(" of ").append(q.questionCount).append("</i>")
     }
     q.plan?.takeIf { it.isNotBlank() }?.let { plan ->
         append("\n\n<blockquote>").append(PyText.esc(PyText.take(plan, QuestionBoard.QUESTION_PLAN_CP)))

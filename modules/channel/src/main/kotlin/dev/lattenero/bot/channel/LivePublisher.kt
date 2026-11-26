@@ -529,7 +529,7 @@ class LivePublisher(
     /**
      * THE PRIZE SOURCE (the owner, 3/11): a CACHED read of the coding
      * plan's gifts (the daemon injects the channel query). Refreshed every
-     * [GIFTS_REFRESH_MS]; the card shows «Premios» while a turn runs and
+     * [GIFTS_REFRESH_MS]; the card shows «Prizes» while a turn runs and
      * the snapshot is younger than [GIFTS_STALE_MS]. Null/empty = silence.
      */
     private val gifts: suspend () -> GiftsMenu.Gifts? = { null },
@@ -762,7 +762,7 @@ class LivePublisher(
         telegram.editPlain(
             cfg,
             mid,
-            "⛓️ turno reemplazado — esta vista era de otra tarea; la nueva tiene su propio cartel.",
+            "⛓️ turn replaced — this view belonged to another task; the new one has its own card.",
         )
         logger.info { "live view REPLACED: old taskId=$statusTaskId message_id=$mid" }
         statusMessageId = null
@@ -787,8 +787,8 @@ class LivePublisher(
         telegram.editPlain(
             cfg,
             mid,
-            "🧊 turno en silencio hace $minutes min — sellado por inactividad. " +
-                "Si sigue corriendo en la app, /task lo re-ataca y la carta vuelve a nacer.",
+            "🧊 turn silent for $minutes min — sealed for inactivity. " +
+                "If it is still running in the app, /task re-attacks it and the card is born again.",
         )
         logger.info {
             "live view STALE-SEALED: taskId=${state.taskId} message_id=$mid — " +
@@ -969,7 +969,7 @@ class LivePublisher(
      * an honest miss.
      *
      * PNG DOORS ONLY (the owner, 26/11): the box wears the 📸 rows and nothing
-     * else — no «Ver salida», no pager. Its words stay registered for the image.
+     * else — no «View output», no pager. Its words stay registered for the image.
      */
     private suspend fun speakBox(
         state: TurnLive,
@@ -1009,7 +1009,7 @@ class LivePublisher(
     override suspend fun toggle(registryId: Int): String? = tickMutex.withLock {
         val cfg = config()
         if (!cfg.configured) {
-            "📡 Sin Telegram configurado — no hay mensaje que abrir."
+            "📡 No Telegram configured — there is no message to open."
         } else {
             cotBlocks.toggle(registryId)
         }
@@ -1017,7 +1017,7 @@ class LivePublisher(
 
     /**
      * THE RETIRED DOOR (the owner, 26/11: the outputs are images and nothing
-     * that is not an image is shown): a tap on an old «Ver salida» button
+     * that is not an image is shown): a tap on an old «View output» button
      * answers the honest words and edits NOTHING — the text pages are no
      * longer a door. An in-flight dispatch keeps the fold's own law.
      */
@@ -1030,7 +1030,7 @@ class LivePublisher(
     override suspend fun fold(registryId: Int): String? = tickMutex.withLock {
         val cfg = config()
         if (!cfg.configured) {
-            "📡 Sin Telegram configurado — no hay mensaje que abrir."
+            "📡 No Telegram configured — there is no message to open."
         } else {
             val box = hub.box(registryId) ?: return@withLock BoxTaps.MISS
             val ok = telegram.editPlain(cfg, box.messageId, box.header, null)
@@ -1311,7 +1311,7 @@ class LivePublisher(
                 if (editKey == pingLastEditKey) return // the counts did not change
                 pingCounter += 1
                 pingLastEditKey = editKey
-                val text = "✏️ Editando archivo $basename +${totals.first} −${totals.second}"
+                val text = "✏️ Editing file $basename +${totals.first} −${totals.second}"
                 speak(text, null)
                 logger.info { "progress ping #$pingCounter: $text (taskId=${state.taskId.takeLast(TASK_ID_TAIL)})" }
             }

@@ -39,8 +39,8 @@ import java.util.Properties
  * [NEWBORN_WINDOW_MS] rides until the index catches up — the anti-join
  * retires the merged row the moment the real one lands.
  *
- * THE EXECUTION-TIME LAW (the owner, 14/11: «ordenadas por hora de
- * ejecución... y luego las mas recientes»): the merged pool is ordered by
+ * THE EXECUTION-TIME LAW (the owner, 14/11: «ordered by execution
+ * time... and then the most recent ones» [translated]): the merged pool is ordered by
  * each row's EXECUTION stamp — the last model_usage line's started_at,
  * else the index's own updated_at, else the CLI session's time_updated
  * for newborns — never by birth order (the prepend used to hoist a 2h-old

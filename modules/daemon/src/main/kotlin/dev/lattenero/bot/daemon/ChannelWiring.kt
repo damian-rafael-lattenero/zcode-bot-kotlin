@@ -224,9 +224,9 @@ internal suspend fun feedAndResync(hub: LiveHub, floor: ConnSeqFloor, frame: Ser
 
 
 /**
- * /quota's DIRECT rung, wired — PROVIDER-AWARE (owner's 3/11: «estoy
- * usando la api de open code… me gustaría que me muestre los límites
- * disponibles de opencode go»). The active conversation's providerId
+ * /quota's DIRECT rung, wired — PROVIDER-AWARE (owner's 3/11: «I am
+ * using the open code api… I would like it to show me the available
+ * limits of opencode go» [translated]). The active conversation's providerId
  * decides the meter: an OpenCode provider gets its OWN `/usage` windows
  * ([OpencodeQuota] — the app's provider_config.json carries the key),
  * anything else keeps the z.ai monitor endpoint (Python's _quota_api_key
@@ -583,7 +583,7 @@ internal fun wireChannel(
 
                 "task_error" ->
                     streamEffects.offer(
-                        StreamEffect.ResolveTask(frame.taskId, "⌛ El turno terminó — la pregunta quedó sin responder."),
+                        StreamEffect.ResolveTask(frame.taskId, "⌛ The turn ended — the question was left unanswered."),
                     )
 
                 // THE DEFAULT-MODE ENFORCEMENT (4/11): a turn starting for a
@@ -599,7 +599,7 @@ internal fun wireChannel(
 
                 "permission_response", "elicitation_response" ->
                     (frame.event["requestId"] as? JsonPrimitive)?.content?.let {
-                        streamEffects.offer(StreamEffect.ResolveRequest(it, "✅ Respondido desde la app."))
+                        streamEffects.offer(StreamEffect.ResolveRequest(it, "✅ Answered from the app."))
                     }
 
                 // EL ESPEJO DE LOS MENUS (the fork's config_option_update,
@@ -782,11 +782,11 @@ internal fun wireChannel(
                 // hub: the watch connection exists FOR the questions.
                 when ((frame.event["type"] as? JsonPrimitive)?.content) {
                     "task_error" ->
-                        board.resolveTask(frame.taskId, "⌛ El turno terminó — la pregunta quedó sin responder.")
+                        board.resolveTask(frame.taskId, "⌛ The turn ended — the question was left unanswered.")
 
                     "permission_response", "elicitation_response" ->
                         (frame.event["requestId"] as? JsonPrimitive)?.content?.let {
-                            board.resolveByRequestId(it, "✅ Respondido desde la app.")
+                            board.resolveByRequestId(it, "✅ Answered from the app.")
                         }
 
                     else -> board.onStreamEvent(frame, taskTitles[frame.taskId])
@@ -899,8 +899,8 @@ internal fun wireChannel(
         // --quit (build-install is REAL by design; the old script's
         // --real/dryrun concern died with it). The build speaks its phases to
         // Telegram and the arc is FULLY automatic: build with the app alive,
-        // then the script closes ZCode itself (the owner: «un Ghostty aparte
-        // debería poder cerrar zcode sin necesidad de command q»), swaps and
+        // then the script closes ZCode itself (the owner: «a separate Ghostty
+        // should be able to close zcode without needing command q» [translated]), swaps and
         // reopens — seconds of channel down at the very end.
         args = listOf("--quit"),
         label = DeploySpawn.FORK_JOB_LABEL,
@@ -1050,7 +1050,7 @@ internal fun wireChannel(
 
 
     // THE FILE VIEWER (the owner, 5/11): one menu, two doors — the
-    // publisher attaches «📄 archivo completo» to write/edit closes, the
+    // publisher attaches «📄 full file» to write/edit closes, the
     // commands answer its taps. The read is FRESH AT TAP TIME (his
     // choice), capped honestly at 2 MB (a phone viewer's ceiling, the
     // cap SPEAKS inside the content — never a silent truncation).
@@ -1063,7 +1063,7 @@ internal fun wireChannel(
                     when {
                         !file.isFile -> null
                         file.length() > FILE_VIEWER_MAX_BYTES ->
-                            "(archivo de ${file.length() / 1_000_000} MB — truncado a los primeros 2 MB)\n" +
+                            "(file of ${file.length() / 1_000_000} MB — truncated to the first 2 MB)\n" +
                                 file.readText().take(FILE_VIEWER_MAX_BYTES.toInt())
 
                         else -> file.readText()
@@ -1115,7 +1115,7 @@ internal fun wireChannel(
         // THE BOARD'S OWN THROAT: the wired board SENT the cards — the taps
         // must consult THE SAME instance. This argument was lost in the
         // 10afea7/376e564 merge and every tap hit the default-EMPTY board:
-        // 100% of question taps answered «ya no está pendiente» (measured
+        // 100% of question taps answered «no longer pending» (measured
         // 4/11 all day — my AskUserQuestions and the plan approvals ride
         // these very cards)
         board = board,
@@ -1371,7 +1371,7 @@ private fun buildLiveView(
         // the transcript feed's level — the SAME store the commands write
         verbosity = verbosity,
         // THE PRIZE LINE (the owner, 3/11): one cached read of the coding
-        // plan's gifts; the publisher renders «Premios» while a turn runs,
+        // plan's gifts; the publisher renders «Prizes» while a turn runs,
         // /quota keeps the detail and the taps. Channel down → null.
         gifts = {
             when (val answer = client.query(ChannelQuery.CodingPlanGifts())) {
@@ -1410,8 +1410,8 @@ private fun buildPoller(
     // the /verbosity store (the commands WRITE it — the publisher reads it
     // per tick) and the questions' board — REQUIRED, no default: the lost
     // argument in the 10afea7/376e564 merge silently default-constructed an
-    // EMPTY board and 100% of the question taps answered «ya no está
-    // pendiente» (measured 4/11). A missing board must fail the COMPILE,
+    // EMPTY board and 100% of the question taps answered «no longer
+    // pending» (measured 4/11). A missing board must fail the COMPILE,
     // never the owner's tap.
     verbosity: VerbositySetting,
     board: QuestionBoard,
@@ -1484,7 +1484,7 @@ private fun buildPoller(
 
                 // the ✍️ armed order: direct to the named session (the fork's
                 // inbound taskId), AWAITED — the fork's rejection is the reply
-                // (fire-and-forget said «entregada» to a sessionNotFound, 2/11)
+                // (fire-and-forget said «delivered» to a sessionNotFound, 2/11)
                 override suspend fun sendOrder(
                     text: String,
                     messageId: String,
@@ -1501,7 +1501,7 @@ private fun buildPoller(
                 // STEER: the running turn's redirection (the fork's `steer` frame, awaited)
                 override suspend fun steer(taskId: String, text: String) = client.steer(taskId, text)
 
-                // LA RESPUESTA del dueño: the fork's respond frame, awaited —
+                // THE OWNER'S RESPONSE: the fork's respond frame, awaited —
                 // the host's own truth comes back as the tap's answer
                 override suspend fun respondQuestion(frame: ClientFrame.Respond) = client.respond(frame)
 
@@ -1518,9 +1518,9 @@ private fun buildPoller(
                     return answer
                 }
 
-                // EL BIND ATÓMICO (the fork's cap «bind», d8510c23): solo con
-                // el cap anunciado — un servidor viejo ignoraría el campo y el
-                // texto caería en la conversación equivocada
+                // THE ATOMIC BIND (the fork's cap «bind», d8510c23): only with
+                // the announced cap — an old server would ignore the field and the
+                // text would land in the wrong conversation
                 override fun supportsBind(): Boolean = client.speaks("bind")
 
                 // THE /plan ROWS' PER-PLAN QUOTA (the fork's cap
@@ -1576,8 +1576,8 @@ private fun buildPoller(
             val gate = File(pythonState, NUCLEAR_GATE)
             val ageMs = System.currentTimeMillis() - gate.lastModified()
             if (gate.exists() && ageMs in 0 until NUCLEAR_DEBOUNCE_MS) {
-                "REFUSED: otro nuclear arrancó hace ${ageMs / 1000}s — esperá su resumen " +
-                    "(single-flight; sobrevive al kickstart del propio nuclear)"
+                "REFUSED: another nuclear started ${ageMs / 1000}s ago — wait for its summary " +
+                    "(single-flight; survives the nuclear's own kickstart)"
             } else {
                 gate.writeText("started") // the write IS the mtime stamp
                 hub.clear()
@@ -1619,8 +1619,8 @@ private fun buildPoller(
         model = { ws, title -> commands.modelMenuRender(ws, title) },
         effort = { ws, title -> commands.effortMenuRender(ws, title) },
     )
-    // THE BOOT DEFAULT LADDER (the owner's 11/11: «cuando inicializa el
-    // bot, o cuando se recarga… se debe elegir en ese orden»): ONE run at
+    // THE BOOT DEFAULT LADDER (the owner's 11/11: «when the bot
+    // initializes, or when it reloads… it must pick in that order» [translated]): ONE run at
     // boot — the first plan WITH tokens applies itself, only changes and
     // failures speak. The channel waits bounded (a spaced poll, never a
     // busy wait); a channel that never comes up skips the ladder honestly.
@@ -2109,7 +2109,7 @@ private fun runVerb(row: FleetCommands.Verb, argv: List<String>, logsDir: File):
 @Suppress("TooGenericExceptionCaught") // the upload leg: any failure speaks honestly, never crashes the poller
 private suspend fun filesOut(api: TgApi, cfg: TgConfig, rest: String): String {
     val plan = FilesCommands.planFileSend(rest)
-    val file = plan.file ?: return plan.refusal ?: "🤷 /file: nada que mandar"
+    val file = plan.file ?: return plan.refusal ?: "🤷 /file: nothing to send"
     return try {
         api.upload(
             "sendDocument",
@@ -2118,7 +2118,7 @@ private suspend fun filesOut(api: TgApi, cfg: TgConfig, rest: String): String {
             file,
         )
         logger.info { "file OUT: ${file.absolutePath} (${file.length()} bytes) → sendDocument" }
-        "📎 <code>${file.name}</code> (${file.length() / BYTES_K}K) salió como documento."
+        "📎 <code>${file.name}</code> (${file.length() / BYTES_K}K) went out as a document."
     } catch (e: CancellationException) {
         throw e // cancellation is not a send failure — no «No pude mandar» lie on shutdown
     } catch (e: Exception) {
@@ -2232,7 +2232,7 @@ private suspend fun diffNow(client: ChannelClient, history: TasksHistory, rest: 
 
         is QueryAnswer.Unavailable -> DIFF_DOWN
 
-        is QueryAnswer.Failed -> "⚠️ /diff falló (${answer.code}): ${answer.message ?: "?"}"
+        is QueryAnswer.Failed -> "⚠️ /diff failed (${answer.code}): ${answer.message ?: "?"}"
     }
 }
 

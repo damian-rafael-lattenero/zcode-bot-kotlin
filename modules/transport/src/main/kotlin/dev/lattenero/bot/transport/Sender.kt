@@ -105,10 +105,10 @@ class Sender(
             retryAfterOf(e)?.let { cooldown.extend(it) }
             logger.warn { "sendMessage failed (final): ${e.message}" }
             park(aOutbox, text, notify)
-            // Rejected SOLO cuando Telegram entendió el request y rechazó el
-            // PAYLOAD (un 4xx — el HTML crudo de /steer): un 429 (throttle,
-            // el mensaje está bien), la red y los timeouts son PARKED — el
-            // cap de veneno del drain jamás quema attempts de una outage.
+            // Rejected ONLY when Telegram understood the request and rejected the
+            // PAYLOAD (a 4xx — /steer's raw HTML): a 429 (throttle,
+            // the message is fine), the network and timeouts are PARKED — the
+            // drain's poison cap never burns attempts on an outage.
             if (payloadRejection(e)) SendResult.Rejected else SendResult.Parked
         }
     }

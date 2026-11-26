@@ -32,8 +32,8 @@ import java.util.Properties
  */
 internal fun attachmentRefusal(sizeBytes: Long?): String? =
     if (sizeBytes != null && sizeBytes > MAX_ATTACHMENT_BYTES) {
-        "⚠️ «file is too big» — Telegram no deja bajar más de ${MAX_ATTACHMENT_BYTES / MB} MB " +
-            "con el token del bot (${sizeBytes / MB} MB los tuyos). Pasalo por la Mac de otro modo."
+        "⚠️ «file is too big» — Telegram does not allow downloads over ${MAX_ATTACHMENT_BYTES / MB} MB " +
+            "with the bot token (yours is ${sizeBytes / MB} MB). Pass it from the Mac another way."
     } else {
         null
     }
@@ -47,9 +47,9 @@ private val FILENAME_SAFE = ('a'..'z') + ('A'..'Z') + ('0'..'9') + listOf('.', '
  * remedy the owner actually has.
  */
 internal fun cursorLostText(skipped: Int): String =
-    "🕳️ Se perdió el cursor de Telegram (archivo ausente o ilegible): descarté $skipped update(s) " +
-        "viejos SIN re-ejecutarlos — un replay volvería a correr /nuclear o /deploy de antes. " +
-        "Si mandaste algo hace un rato y no hubo respuesta, mandalo de nuevo."
+    "🕳️ Telegram's cursor was lost (file absent or unreadable): I dropped $skipped old update(s) " +
+        "WITHOUT re-running them — a replay would run yesterday's /nuclear or /deploy again. " +
+        "If you sent something a while ago and nothing answered, send it again."
 
 /**
  * The wire's filename reduced to a safe on-disk name (no paths, no

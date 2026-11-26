@@ -146,12 +146,12 @@ data class NuclearReport(
     val helloOk: Boolean,
 ) {
     fun summary(): String = buildString {
-        append("💥 nuclear listo — ")
+        append("💥 nuclear done — ")
         append(outcomes.joinToString(" · ") { it.line() })
-        append("\n🔵 CLIs matados: $clisKilled · app ")
-        append(if (appBootedOut) "reiniciada" else "NO se pudo reiniciar")
+        append("\n🔵 CLIs killed: $clisKilled · app ")
+        append(if (appBootedOut) "restarted" else "could NOT restart")
         append(" · bot ")
-        append(if (helloOk) "conectado de cero ✅" else "SIN hello_ok 😵")
+        append(if (helloOk) "connected from scratch ✅" else "WITHOUT hello_ok 😵")
     }
 }
 
