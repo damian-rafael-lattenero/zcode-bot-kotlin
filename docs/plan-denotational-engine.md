@@ -125,11 +125,11 @@ teaches. Hooks follow the census law (every `.nu` has its test, `~/Scripts/tests
 
 ### P1 — The Canon: Haskell as the source (3 sessions)
 
-- [ ] New repo `haskell-kb`, same shape as `nushell-kb`: `official/` (mirror) + `notes/concepts/<id>.md`.
+- [x] DONE 26/11 — repo `haskell-kb`, same shape as `nushell-kb`: `official/` (mirror) + `notes/concepts/<id>.md`.
       Sources, all free to mirror: *Learn You a Haskell* (CC BY-NC-SA 3.0), *Real World Haskell*
       (CC BY-SA), the *Typeclassopedia* (HaskellWiki, permissive), *What I Wish I Knew When Learning
       Haskell* (source on GitHub). Paid books are cited, never copied.
-- [ ] One note per concept, English, with frontmatter: `id`, the one-sentence denotation, the Haskell
+- [x] DONE 26/11 — one note per concept, English, with frontmatter: `id`, the one-sentence denotation, the Haskell
       type and laws, the problem it solves, the source chapter. First 12 (daily use in his repos):
       purity and referential transparency · immutable data · first-class functions · currying and
       partial application · composition · sum and product types · `Maybe` and `Either` · pattern
@@ -137,7 +137,13 @@ teaches. Hooks follow the census law (every `.nu` has its test, `~/Scripts/tests
       `Semigroup`/`Monoid`. Tier 2: `Foldable`/`Traversable`, laziness, `newtype`, higher-kinded types,
       parametricity, `IO` and effects at the edge, total functions, property laws. Tier 3 (applied):
       free monad / tagless final (`Kap`), streaming and backpressure (`KapStream`).
-- [ ] `~/Projects/ECOSISTEMA.md` gets the repo; `~/.zcode/agent-brain/corpus.txt` indexes it; `agent-brain index`.
+- [x] DONE 26/11 — the Canon made executable: `laws/` holds 79 QuickCheck laws in ten modules and `cabal test`
+      is the oracle (79 of 79 on master; a law turned upside down goes red with a counterexample).
+- [x] DONE 26/11 — `kb-check` (`~/Scripts`), the mechanical check of the maintenance law: the template's shape,
+      every cited path on disk, every quotation on a block that names a mirror, the INDEX as contract. The
+      Canon reports 25 notes, 0 findings.
+- [ ] `~/.zcode/agent-brain/corpus.txt` indexes it, one source at a time with a recall run after each;
+      `agent-brain index`. `~/Projects/ECOSISTEMA.md` lists no KB today — decide whether it should.
 - [ ] The Theory (owner's order, 2026-11-26: "launch one more subagent for category theory… the
       categories that then come down to Haskell and then pass to other languages… always the latest on
       the web, in papers, in books"). New repo `theory-kb`: `official/` (text sources whose license
