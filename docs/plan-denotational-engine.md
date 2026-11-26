@@ -142,8 +142,13 @@ teaches. Hooks follow the census law (every `.nu` has its test, `~/Scripts/tests
 - [x] DONE 26/11 — `kb-check` (`~/Scripts`), the mechanical check of the maintenance law: the template's shape,
       every cited path on disk, every quotation on a block that names a mirror, the INDEX as contract. The
       Canon reports 25 notes, 0 findings.
-- [ ] `~/.zcode/agent-brain/corpus.txt` indexes it, one source at a time with a recall run after each;
-      `agent-brain index`. `~/Projects/ECOSISTEMA.md` lists no KB today — decide whether it should.
+- [x] DONE 26/11 — indexed in the brain, one source at a time with the evals after each: Canon notes
+      (53 chunks), the Typeclassopedia (71), LYAH (300), wiwinwlh (192). recall-core 33/33 with recall@1
+      29 of 33 (baseline 28), brain-eval 11/11. Live receipt: Monad, `Either` and free-monad queries
+      answer from the Canon; Nushell and kap queries still answer from their own KBs. Measured on the
+      way: the `real-questions` suite is not deterministic — its ranks move a place or two between
+      identical runs, so a one-question change there is not a signal.
+- [ ] `~/Projects/ECOSISTEMA.md` lists no KB today — decide whether it should.
 - [ ] The Theory (owner's order, 2026-11-26: "launch one more subagent for category theory… the
       categories that then come down to Haskell and then pass to other languages… always the latest on
       the web, in papers, in books"). New repo `theory-kb`: `official/` (text sources whose license
