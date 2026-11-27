@@ -67,20 +67,8 @@ private const val MB = 1024L * 1024L
 private const val MAX_ATTACHMENT_BYTES = 20L * MB
 private const val FILENAME_CAP = 120
 
-internal fun stoppedCountOf(resultJson: String): Int = runCatching {
-    ((Json.parseToJsonElement(resultJson) as? JsonObject)?.get("stopped") as? JsonArray)?.size ?: 0
-}.getOrDefault(0)
-
-/**
- * U8's cancel attribution: stopAll's answer → the sids the HOST says it
- * stopped (a string array, the same shape [stoppedCountOf] counts). Only
- * these names ride the bus — a hard stop that never landed records nothing.
- */
-internal fun stoppedSidsOf(resultJson: String): List<String> = runCatching {
-    ((Json.parseToJsonElement(resultJson) as? JsonObject)?.get("stopped") as? JsonArray)
-        ?.mapNotNull { element -> (element as? JsonPrimitive)?.takeIf { it.isString }?.content }
-        .orEmpty()
-}.getOrDefault(emptyList())
+// stoppedCountOf and stoppedSidsOf moved to StopResultParsers.kt — the file
+// was over detekt's per-file function cap (12 of 11 allowed).
 
 /**
  * The transcript feed's per-tool CLOSE box (the old finalBoxesOf, ONE tool
