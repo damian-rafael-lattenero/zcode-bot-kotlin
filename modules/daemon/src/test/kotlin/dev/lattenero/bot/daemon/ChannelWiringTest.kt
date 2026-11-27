@@ -155,6 +155,21 @@ class ChannelWiringTest {
         assertNull(snapshotVoiceOf("not json"))
     }
 
+    // ── U8's cancel attribution: stopAll's answer carries the stopped sids ──
+
+    /** Only the HOST's own stopped names ride the bus — never invented. */
+    @Test
+    fun stopAllAnswerYieldsExactlyTheHostsStoppedSids() {
+        assertEquals(
+            listOf("task-a", "task-b"),
+            stoppedSidsOf("""{"stopped":["task-a","task-b"]}"""),
+        )
+        assertEquals(emptyList(), stoppedSidsOf("""{"stopped":[]}"""))
+        assertEquals(listOf("x"), stoppedSidsOf("""{"stopped":[{"id":1},"x"]}""")) // malformed entries dropped, names kept
+        assertEquals(emptyList(), stoppedSidsOf("""{"meta":{}}""")) // no key: nothing
+        assertEquals(emptyList(), stoppedSidsOf("not json")) // a bad answer: nothing
+    }
+
     // ── THE DEFAULT-MODE ENFORCEMENT (4/11: «default siempre Full access») ──
 
     /** The fake query leg: canned snapshot answers, the SetMode recorder. */

@@ -38,6 +38,7 @@ import dev.lattenero.bot.channel.QuotaDirect
 import dev.lattenero.bot.channel.QueryAnswer
 import dev.lattenero.bot.channel.SealFacts
 import dev.lattenero.bot.channel.ServerFrame
+import dev.lattenero.bot.channel.SteerAnswer
 import dev.lattenero.bot.channel.isSubagentSession
 import dev.lattenero.bot.channel.subagentSessionId
 import dev.lattenero.bot.channel.TasksHistory
@@ -1124,6 +1125,9 @@ internal fun wireChannel(
         // THE 👍/👎 TAP (audit: the first preference data): the producer
         // resolves the turn it sealed on that sid and appends turn.feedback.
         onFeedback = { sid, signal -> busTaps?.feedback(sid, signal) },
+        // U8'S CORRECTION TAP: steer/stop/cancel name the owner's words and
+        // the live-or-sealed turn — the producer resolves the attribution.
+        onCorrection = { sid, kind, text -> busTaps?.correction(sid, kind, text) },
         brain = brain,
         metrics = metrics,
         attachClock = attachClock,
@@ -1427,6 +1431,8 @@ private fun buildPoller(
     promptTap: PromptTap = PromptTap(null),
     // the seal's 👍/👎 (fb: taps) — the bus producer appends turn.feedback
     onFeedback: (suspend (String, String) -> Unit)? = null,
+    // U8's corrections (steer/stop/cancel) — the bus producer appends `correction`
+    onCorrection: (suspend (String, String, String) -> Unit)? = null,
     // U2: /brain + /memory (the brain's HTTP door). Null = the honest unwired reply.
     brain: BrainCommands? = null,
     // E2: the metrics facade (the no-op when off) — the poller's cycles and
@@ -1468,7 +1474,18 @@ private fun buildPoller(
     )
         val commands = BotCommands(
             ops = object : ChannelOps {
-                override suspend fun query(query: ChannelQuery) = client.query(query)
+                // U8's stop/cancel taps (the bus observes, never alters): the
+                // owner's stop of one turn is named on the way through; the
+                // hard stop's cancel names ONLY the sids the HOST says it
+                // stopped — an unanswered StopAll records nothing.
+                override suspend fun query(query: ChannelQuery): QueryAnswer {
+                    if (query is ChannelQuery.Stop) onCorrection?.invoke(query.taskId, "stop", "")
+                    val answer = client.query(query)
+                    if (query is ChannelQuery.StopAll && answer is QueryAnswer.Ok) {
+                        stoppedSidsOf(answer.resultJson).forEach { sid -> onCorrection?.invoke(sid, "cancel", "") }
+                    }
+                    return answer
+                }
                 override suspend fun sendInbound(
                     text: String,
                     messageId: String,
@@ -1499,7 +1516,10 @@ private fun buildPoller(
                 }
 
                 // STEER: the running turn's redirection (the fork's `steer` frame, awaited)
-                override suspend fun steer(taskId: String, text: String) = client.steer(taskId, text)
+                override suspend fun steer(taskId: String, text: String): SteerAnswer {
+                    onCorrection?.invoke(taskId, "steer", text) // U8: the owner's correction, observed
+                    return client.steer(taskId, text)
+                }
 
                 // THE OWNER'S RESPONSE: the fork's respond frame, awaited —
                 // the host's own truth comes back as the tap's answer

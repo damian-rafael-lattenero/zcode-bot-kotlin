@@ -72,6 +72,17 @@ internal fun stoppedCountOf(resultJson: String): Int = runCatching {
 }.getOrDefault(0)
 
 /**
+ * U8's cancel attribution: stopAll's answer → the sids the HOST says it
+ * stopped (a string array, the same shape [stoppedCountOf] counts). Only
+ * these names ride the bus — a hard stop that never landed records nothing.
+ */
+internal fun stoppedSidsOf(resultJson: String): List<String> = runCatching {
+    ((Json.parseToJsonElement(resultJson) as? JsonObject)?.get("stopped") as? JsonArray)
+        ?.mapNotNull { element -> (element as? JsonPrimitive)?.takeIf { it.isString }?.content }
+        .orEmpty()
+}.getOrDefault(emptyList())
+
+/**
  * The transcript feed's per-tool CLOSE box (the old finalBoxesOf, ONE tool
  * at a time — the feed speaks each close as its own message): the
  * spectator's renderer with the status mark inside the head, plus the
