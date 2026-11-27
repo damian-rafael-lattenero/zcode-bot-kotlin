@@ -4,11 +4,15 @@ package dev.lattenero.bot.daemon
  * /fleet_healthcheck (22/11): the fleet-healthcheck skill's battery, run BY
  * the daemon — the phone asks, the whole ecosystem answers: colima, the pg
  * containers, the ports, the brain's /health, ollama, RAG end-to-end, the
- * bot heartbeats, stack-up, the launchd census, lora. The pure half lives
- * here (plan, gate, the command's words); the machinery is
- * [NuScriptRunner]'s. The owner's ruling: bare IS `--fix` — the battery
- * runs, the safe launchd-owned recoveries apply, and the battery re-runs
- * as the receipt. `check` = the explicit read-only word.
+ * bot family (27/11: the Telegram daemon, the WhatsApp daemon and its
+ * sidecar, and the three helpers — one leg each, judged by the bot's OWN
+ * beat, never launchd's opinion of "loaded"), stack-up, the launchd census,
+ * lora. The pure half lives here (plan, gate, the command's words); the
+ * machinery is [NuScriptRunner]'s — including the bot repairs, which ride
+ * the script's census and reach the phone with no daemon change.
+ * The owner's ruling: bare IS `--fix` — the battery runs, the safe
+ * launchd-owned recoveries apply, and the battery re-runs as the receipt.
+ * `check` = the explicit read-only word.
  */
 internal object FleetHealthcheckCommands {
 
