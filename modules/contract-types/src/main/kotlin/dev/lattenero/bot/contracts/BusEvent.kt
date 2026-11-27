@@ -31,7 +31,19 @@ data class BusEvent(
 }
 
 object BusEvents {
-    val KINDS = setOf("user.prompt", "turn.started", "tool.call", "tool.result", "turn.completed", "turn.failed")
+    // U8: the taps' audit kinds ride after the six base ones — the brain's
+    // decoder learns them in its own release (its parse stays total: an
+    // unknown kind is one Bad line, never a crash).
+    val KINDS = setOf(
+        "user.prompt",
+        "turn.started",
+        "tool.call",
+        "tool.result",
+        "turn.completed",
+        "turn.failed",
+        "turn.feedback",
+        "correction",
+    )
     val SOURCES = setOf("bot", "hook")
 
     private val json = Json { ignoreUnknownKeys = true }

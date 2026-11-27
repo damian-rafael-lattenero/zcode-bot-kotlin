@@ -1,6 +1,7 @@
 package dev.lattenero.bot.daemon.bus
 
 import dev.lattenero.bot.channel.ServerFrame
+import dev.lattenero.bot.contracts.BusWire
 import dev.lattenero.bot.channel.TurnProse
 import dev.lattenero.bot.channel.TurnVoice
 import kotlinx.coroutines.CoroutineScope
@@ -251,7 +252,10 @@ class BusProducerTest {
     }
 
     @Test
-    fun aWriteFailureNeverPropagatesIntoTheTurn() = runBlocking {
+    fun aWriteFailureNeverPropagatesIntoTheTurn(): Unit = runBlocking {
+        // the EXPLICIT Unit: the last statement below returns Unit? and a
+        // Unit?-typed @Test method is not void on the JVM — JUnit silently
+        // skips it (measured: this guard law never ran before the fix)
         val dir = Files.createTempDirectory("bus-producer-dir").toFile() // not appendable
         val producer = BusProducer(
             sink = BusSink(dir),
@@ -273,6 +277,7 @@ class BusProducerTest {
             producer.onFrame(
                 frame("t7", 1, nowMs, buildJsonObject { put("type", "task_error"); put("error", "boom") }),
             )
+            producer.correction("t6", "steer", "still fine") // U8: a throwing sink never reaches the caller
         } finally {
             producer.close()
         }
@@ -292,6 +297,74 @@ class BusProducerTest {
             assertEquals("turn.completed", completed["kind"]!!.jsonObjectPrimitive())
             assertEquals("", completed["payload"]!!.jsonObject["reply"]!!.jsonObjectPrimitive())
             assertEquals("0", completed["payload"]!!.jsonObject["reply_chars"]!!.jsonObjectPrimitive())
+        } finally {
+            producer.close()
+        }
+    }
+
+    // ── U8's CORRECTIONS: the owner correcting a running or just-finished turn ──
+
+    /**
+     * The turn attribution is live > sealed > "": a correction mid-flight
+     * names the LIVE turn, one after the seal names the last sealed turn,
+     * and one for a sid this producer never saw says "" — never invented.
+     */
+    @Test
+    fun aCorrectionNamesTheLiveTurnThenTheSealedThenNothing() = runBlocking {
+        val (producer, file) = harness()
+        try {
+            nowMs = 1_700_000_500_000L
+            producer.onFrame(frame("t9", 1, nowMs, started("t9", nowMs)))
+            nowMs = 1_700_000_501_000L
+            producer.correction("t9", "steer", "use bun instead") // mid-flight: the LIVE turn
+            nowMs = 1_700_000_502_000L
+            producer.onFrame(
+                frame("t9", 2, nowMs, buildJsonObject { put("type", "task_complete"); put("stopReason", "end_turn") }),
+            )
+            producer.correction("t9", "stop", "") // sealed: the last seal for the sid
+            producer.correction("t-unknown", "cancel", "") // neither: the honest ""
+            val lines = events(file)
+            val corrections = lines.filter { it["kind"]!!.jsonObjectPrimitive() == "correction" }
+            assertEquals(3, corrections.size)
+            assertEquals(listOf("t9", "t9", "t-unknown"), corrections.map { it["sid"]!!.jsonObjectPrimitive() })
+            assertEquals(
+                listOf("1700000500000", "1700000500000", ""),
+                corrections.map { it["turn"]!!.jsonObjectPrimitive() },
+            )
+            assertEquals("steer", corrections[0]["payload"]!!.jsonObject["kind"]!!.jsonObjectPrimitive())
+            assertEquals("use bun instead", corrections[0]["payload"]!!.jsonObject["text"]!!.jsonObjectPrimitive())
+            assertEquals("stop", corrections[1]["payload"]!!.jsonObject["kind"]!!.jsonObjectPrimitive())
+            assertEquals("", corrections[1]["payload"]!!.jsonObject["text"]!!.jsonObjectPrimitive())
+            assertEquals("cancel", corrections[2]["payload"]!!.jsonObject["kind"]!!.jsonObjectPrimitive())
+            // ids stay unique per event (the consumer deduplicates by id)
+            assertEquals(lines.size, lines.map { it["id"]!!.jsonObjectPrimitive() }.toSet().size)
+        } finally {
+            producer.close()
+        }
+    }
+
+    /** The guard: a blank sid or an off-vocabulary kind publishes nothing. */
+    @Test
+    fun anOffVocabularyOrBlankSidCorrectionEmitsNothing() = runBlocking {
+        val (producer, file) = harness()
+        try {
+            producer.correction("", "steer", "x") // blank sid: no event
+            producer.correction("t9", "pause", "x") // off vocabulary: no event
+            producer.correction("t9", "", "x")
+            assertEquals(0, events(file).size)
+        } finally {
+            producer.close()
+        }
+    }
+
+    /** The text rides clipped to the wire cap (code points, plus the ellipsis). */
+    @Test
+    fun aCorrectionTextIsClippedToTheWireCap() = runBlocking {
+        val (producer, file) = harness()
+        try {
+            producer.correction("t9", "explicit", "x".repeat(BusWire.TEXT_CAP + 50))
+            val payload = events(file).single()["payload"]!!.jsonObject
+            assertEquals("x".repeat(BusWire.TEXT_CAP) + "…", payload["text"]!!.jsonObjectPrimitive())
         } finally {
             producer.close()
         }

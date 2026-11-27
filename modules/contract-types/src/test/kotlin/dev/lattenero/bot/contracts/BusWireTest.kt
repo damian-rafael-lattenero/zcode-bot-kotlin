@@ -76,7 +76,11 @@ class BusWireTest {
             listOf("turn.started", "tool.call", "tool.result", "turn.completed", "user.prompt", "turn.failed"),
             kinds,
         )
-        assertEquals(BusEvents.KINDS, kinds.toSet())
+        // the fixture pins the six BASE kinds; KINDS grew past it when the
+        // taps' audit kinds joined (the seal's turn.feedback, U8's correction)
+        assertTrue(kinds.toSet().all { it in BusEvents.KINDS }, "every fixture kind stays emittable")
+        assertTrue("turn.feedback" in BusEvents.KINDS)
+        assertTrue("correction" in BusEvents.KINDS)
     }
 
     @Test

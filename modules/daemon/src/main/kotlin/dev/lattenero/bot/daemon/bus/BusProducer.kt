@@ -162,6 +162,29 @@ class BusProducer(
         )
     }
 
+    /**
+     * U8's CORRECTION tap: the owner correcting a running or just-finished
+     * turn — `steer` (the redirection mid-flight), `stop`/`cancel` (the
+     * owner cutting it), `explicit` (the named fix). Guarded exactly like
+     * [feedback]; the turn attribution is its rule with one widening: under
+     * the mutex, the LIVE turn for [sid] when the correction lands
+     * mid-flight, else the last sealed turn, else "" — the brain still
+     * records the row, honestly.
+     */
+    suspend fun correction(sid: String, kind: String, text: String) = guard("correction") {
+        if (sid.isBlank() || kind !in CORRECTION_KINDS) return@guard
+        val turnId = mutex.withLock { turns[sid]?.turnId ?: lastSeal[sid]?.turnId } ?: ""
+        emit(
+            kind = KIND_CORRECTION,
+            sid = sid,
+            turn = turnId,
+            payload = buildJsonObject {
+                put("kind", kind)
+                put("text", BusWire.clip(text))
+            },
+        )
+    }
+
     /** One stream frame — the six kinds' whole lifecycle. */
     suspend fun onFrame(frame: ServerFrame.StreamEvent) = guard("frame") {
         captureCounters(frame)
@@ -436,6 +459,12 @@ class BusProducer(
 
         /** The owner's 👍/👎 (audit: the first preference data). */
         const val KIND_TURN_FEEDBACK = "turn.feedback"
+
+        /** U8: the owner's correction of a running or just-finished turn. */
+        const val KIND_CORRECTION = "correction"
+
+        /** The correction kinds' fixed vocabulary — an off-vocabulary kind emits nothing. */
+        val CORRECTION_KINDS = setOf("steer", "stop", "cancel", "explicit")
 
         const val RUN_STARTED = "task_run_started"
         const val TOOL_CALL = "tool_call"
