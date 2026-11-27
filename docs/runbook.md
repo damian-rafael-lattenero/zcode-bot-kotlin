@@ -272,11 +272,16 @@ What it will **not** do: heal a daemon whose loop is alive but whose
 channel cannot connect (§1.2 — the beat keeps beating), heal the app, or
 heal the brain. Those have their own doors (§3, §4).
 
-### 2.5 Deploy the fork — the owner, ⌘Q, never the session
+### 2.5 Deploy the fork — force close, from the Mac or the phone
 
 The channel, the live view and every phone→turn path depend on the
 **fork's** host. Its deploy is the owner's decision and it is destructive
-by design (it quits the app, swaps `/Applications/ZCode.app`, reopens it):
+by design (it closes the app, swaps `/Applications/ZCode.app`, reopens
+it). Since 27/11 (`ZCode` `1ce55ca6`) the close is **force** — SIGTERM →
+≤6 s → SIGKILL — so the quit-confirmation dialog can never block the arc:
+a deploy launched from the bot finishes on its own, no ⌘Q, no popup (the
+12:12 incident: the graceful quit canceled with -128 and the swap sat
+armed for ~40 minutes with no notice):
 
 ```bash
 # [ACTION] OWNER ONLY, from a terminal outside ZCode.
@@ -304,8 +309,9 @@ tail -f /tmp/deploy-fork.log
 - never `kill`/`killall`/`launchctl bootout` the ZCode app or its
   `zcode-cli` children **from an agent session** — the session is a child
   of the app, so it dies with it, and the bot loses the channel;
-- never run the fork deploy from inside ZCode (the ⌘Q takes the script
-  with it);
+- never run the fork deploy from inside ZCode (the force close takes the
+  session that lives inside the app with it — launch deploys from a
+  terminal or the bot, never from a session you care about);
 - never flip the fork's own rules to "deploy on boot" again (that is the
   30/10 lesson encoded in the plist comment);
 - the sanctioned app restart is `/nuclear` **from the phone**, executed by
