@@ -401,7 +401,7 @@ object DeployScriptKnob {
     /**
      * The agent-brain deploy's script (the 🧠 target, 15/11): the brain
      * repo's own canonical deploy (installDist + detekt → its LaunchAgent
-     * restart → /ready verification), the same script `zcode-deploy-all`'s
+     * restart → /ready verification), the same script `deploy-all`'s
      * 2/4 leg runs. The knob `deploy_brain_script` still overrides.
      */
     val BRAIN_DEFAULT: File =

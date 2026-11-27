@@ -100,15 +100,16 @@ internal object FleetCommands {
     }
 
     /**
-     * The deploy legs ride [DeployFlow] (launchd one-shot): the alias verbs and
-     * the discovered `zcode-*-deploy` twins both answer the same leg.
+     * The deploy legs ride [DeployFlow] (launchd one-shot): one verb per leg,
+     * the same name the hub's file carries (27/11: the `zcode-*` alias twins
+     * died — one name per command, the hub discovered the rest).
      */
     internal fun deployTarget(text: String): String? = when (callOf(text).verb) {
-        "deploy-all", "zcode-deploy-all" -> "all"
-        "deploy-brain", "zcode-brain-deploy" -> "brain"
-        "deploy-bot", "zcode-bot-kotlin-deploy" -> "bot"
-        "deploy-fork", "zcode-fork-deploy" -> "fork"
-        "deploy-whatsapp", "zcode-whatsapp-kotlin-deploy" -> "whatsapp"
+        "deploy-all" -> "all"
+        "deploy-brain" -> "brain"
+        "deploy-bot" -> "bot"
+        "deploy-fork" -> "fork"
+        "deploy-whatsapp" -> "whatsapp"
         else -> null
     }
 

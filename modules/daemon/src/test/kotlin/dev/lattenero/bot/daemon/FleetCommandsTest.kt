@@ -102,9 +102,11 @@ class FleetCommandsTest {
     }
 
     @Test
-    fun theDiscoveredDeployTwinsAnswerTheSameLeg() {
-        assertEquals("bot", FleetCommands.deployTarget("/fleet_zcode_bot_kotlin_deploy"))
-        assertEquals("all", FleetCommands.deployTarget("/fleet zcode-deploy-all"))
+    fun theLegacyTwinsNoLongerRoute() {
+        // 27/11: one name per command — the hub renamed the wrappers, the
+        // old zcode-* spellings are unknown verbs (nothing routes them).
+        assertNull(FleetCommands.deployTarget("/fleet_zcode_bot_kotlin_deploy"))
+        assertNull(FleetCommands.deployTarget("/fleet zcode-deploy-all"))
     }
 
     @Test
@@ -120,7 +122,7 @@ class FleetCommandsTest {
         [
           {"name":"brain","kind":"script","script":"/hub/scripts/brain.nu",
            "arguments":"[question] <string> · --k <int>","description":"the brain at terminal speed"},
-          {"name":"deploy-bot","kind":"alias","script":"/hub/scripts/zcode-bot-kotlin-deploy.nu",
+          {"name":"deploy-bot","kind":"script","script":"/hub/scripts/deploy-bot.nu",
            "arguments":"-","description":"the mirror bot only"}
         ]
     """.trimIndent()
@@ -129,8 +131,8 @@ class FleetCommandsTest {
     fun theRowsComeBackInTheHubsOrder() {
         val verbs = FleetCommands.parse(json)
         assertEquals(listOf("brain", "deploy-bot"), verbs.map { it.name })
-        assertEquals("alias", verbs[1].kind)
-        assertEquals("/hub/scripts/zcode-bot-kotlin-deploy.nu", verbs[1].script)
+        assertEquals("script", verbs[1].kind)
+        assertEquals("/hub/scripts/deploy-bot.nu", verbs[1].script)
         assertTrue("[question] <string>" in verbs[0].arguments)
     }
 

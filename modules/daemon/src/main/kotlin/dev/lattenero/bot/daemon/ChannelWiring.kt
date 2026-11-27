@@ -919,7 +919,7 @@ internal fun wireChannel(
     )
     // THE BRAIN EDGE (15/11, the 🧠 target): agent-brain's own canonical
     // deploy (installDist + detekt → its LaunchAgent restart → /ready), the
-    // same script zcode-deploy-all's 2/4 leg runs. A sibling job of
+    // same script deploy-all's 2/4 leg runs. A sibling job of
     // everything: the brief memory/RAG outage degrades honestly, THIS daemon
     // is never at stake.
     val brainDeployLog = File(File(cfg.homeDir, "logs"), DeploySpawn.BRAIN_LOG_FILE_NAME)

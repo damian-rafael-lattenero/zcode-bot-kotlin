@@ -329,7 +329,7 @@ object Keyboards {
      * own words. The owner's rename, 10/11: with three targets the last
      * row is «All», not «Both» (dep:all; dep:both still answers —
      * stale cards). 15/11: 🧠 brain joins (the RAG/memory server's own
-     * deploy, the zcode-deploy-all wave's 2/4 leg).
+     * deploy, the deploy-all wave's 2/4 leg).
      */
     fun deployTargets(): JsonObject = buildJsonObject {
         putJsonArray("inline_keyboard") {

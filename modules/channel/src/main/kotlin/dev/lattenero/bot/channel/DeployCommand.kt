@@ -61,7 +61,7 @@ class DeployCommand(
          * ALL FOUR — fork FIRST, then brain, this daemon and WhatsApp (each
          * is its own launchd job, and siblings survive each other's
          * bootouts; the order is the survival law, not a style choice — the
-         * same wave `zcode-deploy-all` runs). The owner's rename, 10/11:
+         * same wave `deploy-all` runs). The owner's rename, 10/11:
          * «it should not say "both", but "all"» [translated].
          */
         ALL,
