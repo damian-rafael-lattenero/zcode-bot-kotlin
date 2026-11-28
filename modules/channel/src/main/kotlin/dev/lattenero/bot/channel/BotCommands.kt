@@ -496,7 +496,7 @@ class BotCommands(
 
         data.startsWith("gf:") -> giftResetConfirm(data.removePrefix("gf:"))
 
-        // LA EXPANSIÓN EN EL LUGAR (2/11): the collapsed CoT block's tap —
+        // EXPANSION IN PLACE (2/11): the collapsed CoT block's tap —
         // the tap toggles the block WHOLE on its OWN message (expand, then
         // fold). The registry lives in the publisher ([CoTTaps]); an
         // unwired cb: tap answers the honest note. The toast text (when
