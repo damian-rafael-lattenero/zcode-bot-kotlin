@@ -133,8 +133,37 @@ class BrainLearnTest {
     }
 
     @Test
-    fun learnWithArgsIsTheUsageLine() = runBlocking {
+    fun learnWithArgsIsTheUsageLine(): Unit = runBlocking {
         val text = BrainCommands(FakeBrain().gateway()) { pinnedNow }.learn("semana")
         assertTrue("/learn" in text)
+    }
+
+    /** U22's real rows (28/11): the plan's three numbers, one honest row each. */
+    private val u22Json = """
+        [{"suite":"first-pass-nu","model":"n/a","provider":"fleet-scripts","passed":315,"total":436,
+          "gate":0.95,"ok":false,"ts":"2026-11-28T05:30:00Z"},
+         {"suite":"first-pass-kt","model":"n/a","provider":"fleet-scripts","passed":164,"total":222,
+          "gate":0.95,"ok":false,"ts":"2026-11-28T05:30:00Z"},
+         {"suite":"canon-recall","model":"nomic-embed-text","provider":"ollama","passed":138,"total":140,
+          "gate":0.95,"ok":true,"ts":"2026-11-28T05:31:00Z"},
+         {"suite":"rumbo","model":"n/a","provider":"fleet-scripts","passed":408,"total":459,
+          "gate":0.0,"ok":true,"ts":"2026-11-28T05:30:00Z"}]
+    """.trimIndent()
+
+    @Test
+    fun learnShowsTheThreePlanNumbers(): Unit = runBlocking {
+        val fake = FakeBrain().apply {
+            recent = BrainReply.Response(200, "[]")
+            evals = BrainReply.Response(200, u22Json)
+            costs = BrainReply.Response(200, costsTodayJson)
+        }
+        val text = BrainCommands(fake.gateway()) { pinnedNow }.learn("")
+        // first-pass speaks the share of clean oracle runs (❌: the share is
+        // below the plan's 95% gate — honest); canon-recall and rumbo speak
+        // theirs. The suite names are the plan's numbers.
+        assertTrue("first-pass-nu 315/436 ❌" in text)
+        assertTrue("first-pass-kt 164/222 ❌" in text)
+        assertTrue("canon-recall 138/140 ✅" in text)
+        assertTrue("rumbo 408/459 ✅" in text)
     }
 }
